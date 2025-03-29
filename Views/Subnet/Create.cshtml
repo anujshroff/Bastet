@@ -1,0 +1,171 @@
+@model CreateSubnetViewModel
+
+@{
+    ViewData["Title"] = "Create Subnet";
+}
+
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>Create Subnet</h1>
+        <a asp-action="Index" class="btn btn-outline-secondary">Back to List</a>
+    </div>
+    <p class="lead">Add a new subnet to your network</p>
+</div>
+
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i> @TempData["ErrorMessage"]
+    </div>
+}
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form asp-action="Create" method="post">
+                    <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+                    
+                    <div class="mb-3">
+                        <label asp-for="Name" class="form-label"></label>
+                        <input asp-for="Name" class="form-control" />
+                        <span asp-validation-for="Name" class="text-danger"></span>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label asp-for="NetworkAddress" class="form-label"></label>
+                        <input asp-for="NetworkAddress" class="form-control" id="networkAddressInput" />
+                        <div class="form-text" id="networkAddressHelp">Enter the network address (e.g. 192.168.1.0)</div>
+                        <span asp-validation-for="NetworkAddress" class="text-danger"></span>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label asp-for="Cidr" class="form-label"></label>
+                        <input asp-for="Cidr" class="form-control" min="0" max="32" type="number" id="cidrInput" />
+                        <div class="form-text">
+                            <span id="cidrRangeText">CIDR values: 0-32</span>
+                            <span class="ms-3">Subnet mask: <span id="subnetMaskDisplay">@Model.CalculatedSubnetMask</span></span>
+                        </div>
+                        <span asp-validation-for="Cidr" class="text-danger"></span>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label asp-for="ParentSubnetId" class="form-label"></label>
+                        <select asp-for="ParentSubnetId" class="form-select">
+                            <option value="">-- None (Root Subnet) --</option>
+                            @foreach (var subnet in Model.ParentSubnetOptions)
+                            {
+                                <option value="@subnet.Id">@subnet.Name (@subnet.NetworkAddress/@subnet.Cidr)</option>
+                            }
+                        </select>
+                        <div class="form-text">Optional: Select a parent subnet for this network</div>
+                        <span asp-validation-for="ParentSubnetId" class="text-danger"></span>
+                    </div>
+                    
+                    
+                    <div class="mb-3">
+                        <label asp-for="Description" class="form-label"></label>
+                        <textarea asp-for="Description" class="form-control" rows="3"></textarea>
+                        <span asp-validation-for="Description" class="text-danger"></span>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label asp-for="Tags" class="form-label"></label>
+                        <input asp-for="Tags" class="form-control" placeholder="e.g. production, dmz, vpc-1" />
+                        <div class="form-text">Comma-separated list of tags</div>
+                        <span asp-validation-for="Tags" class="text-danger"></span>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary">Create Subnet</button>
+                        <a asp-action="Index" class="btn btn-outline-secondary ms-2">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Subnet Information</h5>
+            </div>
+            <div class="card-body">
+                <p>CIDR notation is a compact representation of an IP address and its associated routing prefix. The notation is constructed from:</p>
+                <ul>
+                    <li>An IP address</li>
+                    <li>A slash character ('/')</li>
+                    <li>A decimal number (the prefix length/CIDR)</li>
+                </ul>
+                <p>The prefix length indicates how many bits are in the network prefix. For example:</p>
+                <ul>
+                    <li><strong>/8</strong> = 255.0.0.0 (16,777,214 usable IPs)</li>
+                    <li><strong>/16</strong> = 255.255.0.0 (65,534 usable IPs)</li>
+                    <li><strong>/24</strong> = 255.255.255.0 (254 usable IPs)</li>
+                    <li><strong>/28</strong> = 255.255.255.240 (14 usable IPs)</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Function to update subnet mask display when CIDR changes
+        function updateSubnetMask() {
+            const cidrValue = parseInt($('#cidrInput').val(), 10);
+            
+            if (!isNaN(cidrValue) && cidrValue >= 0 && cidrValue <= 32) {
+                // Do AJAX call to get the subnet mask
+                $.get(`/api/subnets/calculate-mask?cidr=${cidrValue}`, function(data) {
+                    $('#subnetMaskDisplay').text(data.subnetMask);
+                }).fail(function() {
+                    // Fallback calculation for IPv4 CIDRs
+                    let mask = '';
+                    switch(cidrValue) {
+                        case 8: mask = '255.0.0.0'; break;
+                        case 16: mask = '255.255.0.0'; break;
+                        case 24: mask = '255.255.255.0'; break;
+                        case 28: mask = '255.255.255.240'; break;
+                        case 30: mask = '255.255.255.252'; break;
+                        case 32: mask = '255.255.255.255'; break;
+                        default: mask = 'calculating...'; break;
+                    }
+                    $('#subnetMaskDisplay').text(mask);
+                });
+            } else {
+                $('#subnetMaskDisplay').text('Invalid CIDR');
+            }
+        }
+        
+        // Initialize form settings
+        function initializeForm() {
+            const cidrInput = $('#cidrInput');
+            
+            // Set CIDR max value
+            cidrInput.attr('max', '32');
+            
+            // Set help text
+            $('#cidrRangeText').text('CIDR values: 0-32');
+            $('#networkAddressHelp').text('Enter the network address (e.g. 192.168.1.0)');
+            $('#networkAddressInput').attr('placeholder', '192.168.1.0');
+            
+            // Update subnet mask display if a value exists
+            if (cidrInput.val() !== '') {
+                updateSubnetMask();
+            } else {
+                $('#subnetMaskDisplay').text('');
+            }
+        }
+    
+        // Attach event handlers
+        $(document).ready(function() {
+            $('#cidrInput').on('input', updateSubnetMask);
+            
+            // Initialize form settings
+            initializeForm();
+        });
+    </script>
+    
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

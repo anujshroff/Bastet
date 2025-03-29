@@ -1,0 +1,102 @@
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 60px;
+}
+
+.footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  white-space: nowrap;
+  line-height: 60px;
+}
+
+/* Subnet Hierarchy Styling */
+.subnet-tree {
+  margin-top: 20px;
+}
+
+.subnet-item {
+  margin: 5px 0;
+  padding: 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.subnet-item:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.subnet-toggle {
+  cursor: pointer;
+  width: 20px;
+  display: inline-block;
+  text-align: center;
+  margin-right: 5px;
+}
+
+.subnet-content {
+  display: inline-block;
+  width: calc(100% - 30px);
+}
+
+.subnet-name {
+  font-weight: 500;
+}
+
+.subnet-address {
+  margin-left: 10px;
+  color: #666;
+  font-family: monospace;
+}
+
+.subnet-details {
+  margin-left: 5px;
+  font-size: 0.9em;
+  color: #666;
+}
+
+.subnet-children {
+  margin-left: 25px;
+  border-left: 1px dashed #ccc;
+  padding-left: 15px;
+}
+
+.status-active {
+  color: #198754;
+}
+
+.status-planned {
+  color: #0d6efd;
+}
+
+.status-decommissioned {
+  color: #dc3545;
+}
+
+/* Badge styles */
+.subnet-badge {
+  font-size: 0.8em;
+  padding: 0.25em 0.5em;
+  border-radius: 3px;
+  margin-left: 5px;
+}
+
+.badge-active {
+  background-color: #d1e7dd;
+  color: #0f5132;
+}
+
+.badge-planned {
+  background-color: #cfe2ff;
+  color: #084298;
+}
+
+.badge-decommissioned {
+  background-color: #f8d7da;
+  color: #842029;
+}
