@@ -1,0 +1,114 @@
+@model EditSubnetViewModel
+
+@{
+    ViewData["Title"] = "Edit Subnet";
+}
+
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>Edit Subnet</h1>
+        <a asp-action="Index" class="btn btn-outline-secondary">Back to List</a>
+    </div>
+    <p class="lead">Modify subnet metadata</p>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Network Information (read-only)</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-4">Network Address</dt>
+                    <dd class="col-sm-8"><strong>@Model.NetworkAddress</strong></dd>
+                    
+                    <dt class="col-sm-4">CIDR Notation</dt>
+                    <dd class="col-sm-8">/@Model.Cidr</dd>
+                    
+                    <dt class="col-sm-4">Subnet Mask</dt>
+                    <dd class="col-sm-8">@Model.SubnetMask</dd>
+                    
+                    @if (Model.ParentSubnetInfo != null)
+                    {
+                        <dt class="col-sm-4">Parent Subnet</dt>
+                        <dd class="col-sm-8">@Model.ParentSubnetInfo</dd>
+                    }
+                    
+                    <dt class="col-sm-4">Created</dt>
+                    <dd class="col-sm-8">@Model.CreatedAt.ToString("g")</dd>
+                    
+                    @if (Model.LastModifiedAt.HasValue)
+                    {
+                        <dt class="col-sm-4">Last Modified</dt>
+                        <dd class="col-sm-8">@Model.LastModifiedAt.Value.ToString("g")</dd>
+                    }
+                </dl>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Edit Subnet Details</h5>
+            </div>
+            <div class="card-body">
+                <form asp-action="Edit" method="post">
+                    <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+                    
+                    <input type="hidden" asp-for="Id" />
+                    <input type="hidden" asp-for="NetworkAddress" />
+                    <input type="hidden" asp-for="Cidr" />
+                    
+                    <div class="mb-3">
+                        <label asp-for="Name" class="form-label"></label>
+                        <input asp-for="Name" class="form-control" />
+                        <span asp-validation-for="Name" class="text-danger"></span>
+                    </div>
+                    
+                    
+                    <div class="mb-3">
+                        <label asp-for="Description" class="form-label"></label>
+                        <textarea asp-for="Description" class="form-control" rows="3"></textarea>
+                        <span asp-validation-for="Description" class="text-danger"></span>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label asp-for="Tags" class="form-label"></label>
+                        <input asp-for="Tags" class="form-control" placeholder="e.g. production, dmz, vpc-1" />
+                        <div class="form-text">Comma-separated list of tags</div>
+                        <span asp-validation-for="Tags" class="text-danger"></span>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <a asp-action="Details" asp-route-id="@Model.Id" class="btn btn-outline-secondary ms-2">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Information</h5>
+            </div>
+            <div class="card-body">
+                <p>You can modify the following properties:</p>
+                <ul>
+                    <li><strong>Name</strong> - A descriptive name for the subnet</li>
+                    <li><strong>Description</strong> - Additional details about the subnet's purpose</li>
+                    <li><strong>Tags</strong> - Comma-separated list for categorization</li>
+                </ul>
+                <p class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Network properties like address and CIDR cannot be changed.
+                    To modify network details, delete this subnet and create a new one.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

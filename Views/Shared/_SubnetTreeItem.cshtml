@@ -1,0 +1,41 @@
+@model SubnetTreeViewModel
+
+<div class="subnet-item">
+    <span class="subnet-toggle">
+        @if (Model.ChildSubnets.Any())
+        {
+            <i class="bi bi-plus-square"></i>
+        }
+        else
+        {
+            <i class="bi bi-dash"></i>
+        }
+    </span>
+    
+    <div class="subnet-content">
+        <a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.Id" class="text-decoration-none">
+            <span class="subnet-name">@Model.Name</span>
+            <span class="subnet-address">@Model.NetworkAddress/@Model.Cidr</span>
+            
+        </a>
+        
+        <div class="subnet-details">
+            <span>Mask: @Model.SubnetMask</span> |
+            <span>Usable IPs: @Model.UsableIpAddresses.ToString("N0")</span>
+            @if (!string.IsNullOrEmpty(Model.Description))
+            {
+                <span> | @Model.Description</span>
+            }
+        </div>
+    </div>
+    
+    @if (Model.ChildSubnets.Any())
+    {
+        <div class="subnet-children">
+            @foreach (var childSubnet in Model.ChildSubnets)
+            {
+                <partial name="_SubnetTreeItem" model="childSubnet" />
+            }
+        </div>
+    }
+</div>
