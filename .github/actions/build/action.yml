@@ -7,9 +7,6 @@ inputs:
   DOTNET_CORE_VERSION: 
     required: false
     default: '9.x'
-  GITHUB_REF:
-    required: false
-    default: ${{ github.ref }}
   GITHUB_TOKEN:
     required: true
   
