@@ -1,0 +1,46 @@
+name: 'CI'
+description: 'CI'
+inputs:
+  CONFIGURATION:
+    required: false
+    default: 'Release'
+  DOTNET_CORE_VERSION: 
+    required: false
+    default: '9.x'
+  CODEQL_LANGUAGES:
+    required: false
+    default: 'csharp'
+  FAIL_ON_HIGH:
+    required: false
+    default: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.DOTNET_CORE_VERSION }}
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ inputs.CODEQL_LANGUAGES }}
+        build-mode: manual
+        queries: +security-extended
+        packs: +codeql/csharp-queries
+
+    - name: Build
+      run: dotnet build --configuration ${{ inputs.CONFIGURATION }}
+      shell: bash
+
+    - name: Dependency Review
+      uses: ./.github/actions/vulnerable-nugets
+      with:
+        add_to_pr: true
+        fail_on_high: ${{ inputs.FAIL_ON_HIGH }}
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:csharp"

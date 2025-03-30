@@ -1,0 +1,36 @@
+name: CI
+on:
+  push:
+    branches:
+    - main
+    - release/*
+  pull_request:
+    branches:
+    - main
+    - release/*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  contents: read
+  security-events: write
+  packages: read
+  actions: read
+
+jobs:
+  build:
+    name: Build and Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - uses: actions/checkout@v4
+      name: Checkout
+      with:
+        fetch-depth: 0
+
+    - name: Build and Run Tests
+      uses: ./.github/actions/ci/
