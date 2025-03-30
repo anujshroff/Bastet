@@ -3,6 +3,8 @@ using Bastet.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
+
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -72,6 +74,13 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 WebApplication app = builder.Build();
 
 // Auto-run migrations if environment variable is set to true
@@ -88,6 +97,12 @@ if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
     app.MapOpenApi();
+}
+else
+{
+    // Use HSTS and HTTPS redirection in non-development environments
+    app.UseHsts();
+    app.UseHttpsRedirection();
 }
 
 // Enable static files
