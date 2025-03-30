@@ -1,0 +1,72 @@
+name: 'Versioning'
+description: 'Determine next version using release branch as a base'
+inputs:
+  GITHUB_REF:
+    required: false
+    default: ${{ github.ref }}
+outputs:
+  VERSION:
+    value: ${{ steps.increment-version.outputs.VERSION }}
+  ASSEMBLYSEMVER:
+    value: ${{ steps.increment-version.outputs.ASSEMBLYSEMVER }}
+  MAJOR:
+    value: ${{ steps.increment-version.outputs.MAJOR }}
+  MINOR:
+    value: ${{ steps.increment-version.outputs.MINOR }}
+
+runs:
+  using: 'composite'
+  steps:
+  - name: Verify Branch
+    id: verify-branch
+    shell: bash
+    env:
+      GH_REF: ${{ inputs.GITHUB_REF }}
+    run: |
+      if [[ ! "$GH_REF" =~ ^refs/heads/release/[0-9]+\.[0-9]+$ ]]; then
+        echo "Branch $GH_REF is not a release branch (release/#.#)"
+        exit 1
+      fi
+      
+  - name: Fetch All Tags
+    shell: bash
+    run: git fetch --tags
+
+  - name: Find Latest Version
+    id: find-version
+    shell: bash
+    env:
+      GH_REF: ${{ inputs.GITHUB_REF }}
+    run: |
+      latest_version=$(git tag -l "v${GH_REF##*/}.*" "${GH_REF##*/}.*" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+      if [ -z "$latest_version" ]; then
+        echo "latest_version=none" >> $GITHUB_OUTPUT
+      else
+        echo "latest_version=$latest_version" >> $GITHUB_OUTPUT
+      fi
+
+  - name: Set or Increment Patch Version
+    id: increment-version
+    shell: bash
+    env:
+      GH_REF: ${{ inputs.GITHUB_REF }}
+    run: |
+      latest_version=${{ steps.find-version.outputs.latest_version }}
+      if [ "$latest_version" == "none" ]; then
+        new_version="${GH_REF##*/}.0"
+        IFS='.' read -r major minor patch <<< "${new_version//[!0-9.]/}"
+      else
+        IFS='.' read -r major minor patch <<< "${latest_version//[!0-9.]/}"
+        new_patch=$((patch + 1))
+        new_version="${major}.${minor}.${new_patch}"
+      fi
+      echo "VERSION=$new_version" >> $GITHUB_OUTPUT
+      echo "ASSEMBLYSEMVER=${new_version}.0" >> $GITHUB_OUTPUT
+      echo "MAJOR=${major}" >> $GITHUB_OUTPUT
+      echo "MINOR=${minor}" >> $GITHUB_OUTPUT
+
+  - name: Show Versions
+    shell: bash
+    run: |
+      echo "VERSION=${{ steps.increment-version.outputs.VERSION }}"
+      echo "ASSEMBLYSEMVER=${{ steps.increment-version.outputs.ASSEMBLYSEMVER }}"

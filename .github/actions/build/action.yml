@@ -1,0 +1,47 @@
+name: 'Build'
+description: 'Build'
+inputs:
+  CONFIGURATION:
+    required: false
+    default: 'Release'
+  DOTNET_CORE_VERSION: 
+    required: false
+    default: '9.x'
+  GITHUB_TOKEN:
+    required: true
+  
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.DOTNET_CORE_VERSION }}
+
+    - name: Run Branch Release Versioning
+      id: nextversion
+      uses: ./.github/actions/versioning
+
+    - name: Build
+      run: dotnet build --configuration ${{ inputs.CONFIGURATION }} /p:Version=${{ steps.nextversion.outputs.VERSION }} /p:AssemblyVersion=${{ steps.nextversion.outputs.ASSEMBLYSEMVER }}
+      shell: bash
+
+    - name: Publish
+      run: |
+        dotnet publish . --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
+      shell: bash
+
+    - name: Docker Build
+      run: |
+          echo "${{ inputs.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker build ./publish --file Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.VERSION }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}
+          docker push -a ghcr.io/${{ github.repository_owner }}/bastet
+      shell: bash
+
+    - name: Push Git Tag
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "github-actions@users.noreply.github.com"
+        git tag v${{ steps.nextversion.outputs.VERSION }}
+        git push origin v${{ steps.nextversion.outputs.VERSION }}
+      shell: bash
