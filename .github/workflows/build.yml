@@ -9,6 +9,7 @@ concurrency: build
 
 permissions:
   packages: write
+  content: write
 
 jobs:
   build:
