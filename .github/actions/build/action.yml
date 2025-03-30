@@ -31,7 +31,7 @@ runs:
 
     - name: Publish
       run: |
-        dotnet publish . --configuration ${{ inputs.CONFIGURATION }} --output ./publish
+        dotnet publish . --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
       shell: bash
 
     - name: Docker Build
