@@ -93,6 +93,8 @@ if (autoMigrate)
 }
 
 // Configure the HTTP request pipeline.
+app.UseForwardedHeaders(); // Process forwarded headers early to ensure HTTPS scheme is preserved
+
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
