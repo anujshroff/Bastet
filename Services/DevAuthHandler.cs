@@ -13,8 +13,7 @@ public class DevAuthOptions : AuthenticationSchemeOptions
 public class DevAuthHandler(
     IOptionsMonitor<DevAuthOptions> options,
     ILoggerFactory logger,
-    UrlEncoder encoder,
-    ISystemClock clock) : AuthenticationHandler<DevAuthOptions>(options, logger, encoder, clock)
+    UrlEncoder encoder) : AuthenticationHandler<DevAuthOptions>(options, logger, encoder)
 {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
