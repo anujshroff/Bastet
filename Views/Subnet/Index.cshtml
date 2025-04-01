@@ -11,9 +11,13 @@
             <a asp-action="DeletedSubnets" class="btn btn-outline-secondary me-2">
                 <i class="bi bi-archive"></i> View Deleted Subnets
             </a>
-            <a asp-action="Create" class="btn btn-primary">
-                <i class="bi bi-plus-circle"></i> Create Subnet
-            </a>
+            @inject Bastet.Services.IUserContextService IndexUserContext
+            @if (IndexUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
+            {
+                <a asp-action="Create" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Create Subnet
+                </a>
+            }
         </div>
     </div>
     <p class="lead">View and manage your network subnets</p>

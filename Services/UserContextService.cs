@@ -6,13 +6,7 @@ public class UserContextService(IHttpContextAccessor httpContextAccessor) : IUse
 {
     public string? GetCurrentUsername()
     {
-        // Check if we're in development mode first
-        if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development")
-        {
-            return "development-user";
-        }
-
-        // For production, check authentication
+        // Check if the user is authenticated
         if (httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated != true)
         {
             return null;
@@ -34,5 +28,12 @@ public class UserContextService(IHttpContextAccessor httpContextAccessor) : IUse
         }
 
         return username;
+    }
+
+    public bool UserHasRole(string role)
+    {
+        // Simply check if the user is in the specified role
+        // DevAuthHandler will automatically add all roles in development
+        return httpContextAccessor.HttpContext?.User?.IsInRole(role) == true;
     }
 }

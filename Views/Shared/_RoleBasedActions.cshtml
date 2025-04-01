@@ -1,0 +1,23 @@
+@using Bastet.Models
+@inject Bastet.Services.IUserContextService UserContext
+
+@{
+    bool canEdit = UserContext.UserHasRole(ApplicationRoles.Edit);
+    bool canDelete = UserContext.UserHasRole(ApplicationRoles.Delete);
+
+    if (canEdit)
+    {
+        <a asp-action="Edit" asp-route-id="@ViewBag.EntityId" class="btn btn-primary">
+            <i class="bi bi-pencil"></i> Edit
+        </a>
+    }
+
+    if (canDelete)
+    {
+        <a asp-action="Delete" asp-route-id="@ViewBag.EntityId" class="btn btn-danger ms-2">
+            <i class="bi bi-trash"></i> Delete
+        </a>
+    }
+
+    <a asp-action="Index" class="btn btn-outline-secondary ms-2">Back to List</a>
+}

@@ -52,12 +52,25 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.Al
               .AllowAnyHeader()
               .AllowAnyMethod()));
 
-builder.Services.AddAuthentication(options =>
+// Configure authentication based on environment
+if (builder.Environment.IsDevelopment())
 {
-    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
-
-})
+    // Development authentication (always succeeds with all roles)
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultScheme = "DevAuthScheme";
+        options.DefaultChallengeScheme = "DevAuthScheme";
+    })
+    .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", options => { });
+}
+else
+{
+    // Production authentication with OIDC
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
+    })
     .AddCookie()
     .AddOpenIdConnect(options =>
      {
@@ -71,8 +84,20 @@ builder.Services.AddAuthentication(options =>
          options.Scope.Add("openid");
          options.Scope.Add("profile");
      });
+}
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Add role-based policies
+    options.AddPolicy("RequireViewRole", policy => 
+        policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete));
+    
+    options.AddPolicy("RequireEditRole", policy => 
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete));
+    
+    options.AddPolicy("RequireDeleteRole", policy => 
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Delete));
+});
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -114,18 +139,15 @@ app.UseCors();
 
 app.UseRouting();
 
-// Only use Authentication and Authorization if not in Development
-if (!app.Environment.IsDevelopment())
-{
-    app.UseAuthentication();
-    app.UseAuthorization();
-}
+// Always use Authentication and Authorization in all environments
+// In development, our DevAuthHandler will auto-authenticate
+app.UseAuthentication();
+app.UseAuthorization();
 
 var defaultRoute = new { name = "default", pattern = "{controller=Home}/{action=Index}/{id?}" };
 
-_ = app.Environment.IsDevelopment() ? app.MapControllers() : app.MapControllers().RequireAuthorization();
-_ = app.Environment.IsDevelopment()
-    ? app.MapControllerRoute(defaultRoute.name, defaultRoute.pattern)
-    : app.MapControllerRoute(defaultRoute.name, defaultRoute.pattern).RequireAuthorization();
+// No need for RequireAuthorization anymore since we're handling auth with policies
+app.MapControllers();
+app.MapControllerRoute(defaultRoute.name, defaultRoute.pattern);
 
 app.Run();
