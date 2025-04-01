@@ -30,10 +30,8 @@ public class UserContextService(IHttpContextAccessor httpContextAccessor) : IUse
         return username;
     }
 
-    public bool UserHasRole(string role)
-    {
+    public bool UserHasRole(string role) =>
         // Simply check if the user is in the specified role
         // DevAuthHandler will automatically add all roles in development
-        return httpContextAccessor.HttpContext?.User?.IsInRole(role) == true;
-    }
+        httpContextAccessor.HttpContext?.User?.IsInRole(role) == true;
 }
