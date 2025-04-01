@@ -10,32 +10,28 @@ public class DevAuthOptions : AuthenticationSchemeOptions
 {
 }
 
-public class DevAuthHandler : AuthenticationHandler<DevAuthOptions>
+public class DevAuthHandler(
+    IOptionsMonitor<DevAuthOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder,
+    ISystemClock clock) : AuthenticationHandler<DevAuthOptions>(options, logger, encoder, clock)
 {
-    public DevAuthHandler(
-        IOptionsMonitor<DevAuthOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder,
-        ISystemClock clock) : base(options, logger, encoder, clock)
-    {
-    }
-
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         // Create identity with development user
-        var claims = new[]
-        {
+        Claim[] claims =
+        [
             new Claim(ClaimTypes.Name, "development-user"),
             new Claim(ClaimTypes.Email, "dev@example.com"),
             // Add all defined roles
             new Claim(ClaimTypes.Role, ApplicationRoles.View),
             new Claim(ClaimTypes.Role, ApplicationRoles.Edit),
             new Claim(ClaimTypes.Role, ApplicationRoles.Delete)
-        };
+        ];
 
-        var identity = new ClaimsIdentity(claims, Scheme.Name);
-        var principal = new ClaimsPrincipal(identity);
-        var ticket = new AuthenticationTicket(principal, Scheme.Name);
+        ClaimsIdentity identity = new(claims, Scheme.Name);
+        ClaimsPrincipal principal = new(identity);
+        AuthenticationTicket ticket = new(principal, Scheme.Name);
 
         // Return success with the ticket
         return Task.FromResult(AuthenticateResult.Success(ticket));

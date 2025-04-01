@@ -86,18 +86,13 @@ else
      });
 }
 
-builder.Services.AddAuthorization(options =>
-{
-    // Add role-based policies
-    options.AddPolicy("RequireViewRole", policy => 
-        policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete));
-    
-    options.AddPolicy("RequireEditRole", policy => 
-        policy.RequireRole(Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete));
-    
-    options.AddPolicy("RequireDeleteRole", policy => 
+builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("RequireViewRole", policy => 
+        policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete))
+    .AddPolicy("RequireEditRole", policy => 
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete))
+    .AddPolicy("RequireDeleteRole", policy => 
         policy.RequireRole(Bastet.Models.ApplicationRoles.Delete));
-});
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
