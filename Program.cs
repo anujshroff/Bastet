@@ -61,7 +61,7 @@ if (builder.Environment.IsDevelopment())
         options.DefaultScheme = "DevAuthScheme";
         options.DefaultChallengeScheme = "DevAuthScheme";
     })
-    .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", options => { });
+    .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", options => options.AccessDeniedPath = "/Account/AccessDenied");
 }
 else
 {
@@ -71,7 +71,7 @@ else
         options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
         options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
     })
-    .AddCookie()
+    .AddCookie(options => options.AccessDeniedPath = "/Account/AccessDenied")
     .AddOpenIdConnect(options =>
      {
          options.ClientId = Environment.GetEnvironmentVariable("BASTET_OIDC_CLIENT_ID") ?? "mvc_client";

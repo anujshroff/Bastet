@@ -8,6 +8,7 @@ namespace Bastet.Services;
 
 public class DevAuthOptions : AuthenticationSchemeOptions
 {
+    public string AccessDeniedPath { get; set; } = "/Account/AccessDenied";
 }
 
 public class DevAuthHandler(
