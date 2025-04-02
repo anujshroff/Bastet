@@ -2,6 +2,7 @@ using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
@@ -10,6 +11,7 @@ namespace Bastet.Controllers;
 
 public class SubnetController(BastetDbContext context, IIpUtilityService ipUtilityService, IUserContextService userContextService) : Controller
 {
+    [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> Index()
     {
         // Get all subnets with their relationships
@@ -29,6 +31,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
         return View(hierarchicalSubnets);
     }
 
+    [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> Details(int id)
     {
         Subnet? subnet = await context.Subnets
@@ -93,6 +96,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     }
 
     // GET: Subnet/Create
+    [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Create(string? networkAddress = null, int? cidr = null, int? parentId = null)
     {
         // Load all potential parent subnets for dropdown
@@ -143,6 +147,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     // POST: Subnet/Create
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Create(CreateSubnetViewModel viewModel)
     {
         if (ModelState.IsValid)
@@ -317,6 +322,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             .ToListAsync();
 
     // GET: Subnet/Edit/5
+    [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Edit(int id)
     {
         Subnet? subnet = await context.Subnets
@@ -353,6 +359,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     // POST: Subnet/Edit/5
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Edit(int id, EditSubnetViewModel viewModel)
     {
         if (id != viewModel.Id)
@@ -424,6 +431,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     }
 
     // GET: Subnet/Delete/5
+    [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> Delete(int id)
     {
         Subnet? subnet = await context.Subnets
@@ -454,6 +462,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     // POST: Subnet/Delete/5
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
+    [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> DeleteConfirmed(int id, string confirmation)
     {
         // Verify the confirmation text
@@ -627,6 +636,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     }
 
     // GET: Subnet/DeletedSubnets
+    [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> DeletedSubnets()
     {
         // Get deleted subnets from the database

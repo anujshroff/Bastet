@@ -42,6 +42,37 @@ If you prefer to run migrations manually:
 1. Execute the SQL migration script found at `Database/GeneratedMigrationScript.sql`
 2. Set `BASTET_AUTO_MIGRATE=false` when running the application
 
+### Authentication Setup
+
+BASTET uses OpenID Connect (OIDC) for authentication in production environments. The identity provider must meet these requirements:
+
+- **OIDC Provider Requirements**:
+  - Support OpenID Connect protocol
+  - Issue ID tokens (application uses `ResponseType = "id_token"`)
+  - Support `openid` and `profile` scopes
+  - Issue tokens with one of these user identifier claims:
+    - `preferred_username` (preferred)
+    - `name` (ClaimTypes.Name)
+    - `email` (ClaimTypes.Email)
+
+- **Role-Based Authorization Requirements**:
+  - Issue role claims that map to ASP.NET Core `ClaimTypes.Role`
+  - Provide at least one of these roles for users to access the application:
+    - `View` - Basic read access to subnet information
+    - `Edit` - Permission to create and modify subnets
+    - `Delete` - Permission to remove subnets
+
+- **OIDC Configuration**:
+  - Register BASTET as a client in your identity provider
+  - Configure the following redirect URIs:
+    - Login callback: `/signin-oidc` (relative to application base URL)
+    - Logout callback: `/signout-callback-oidc` (relative to application base URL)
+  - Set the environment variables:
+    - `BASTET_OIDC_AUTHORITY`: URL of your OIDC provider
+    - `BASTET_OIDC_CLIENT_ID`: Client ID registered with your provider
+
+In development environments, authentication is automatically handled by `DevAuthHandler`, which provides a simulated user with all roles.
+
 ### Docker Deployment
 
 BASTET is available as a Docker image through GitHub Container Registry:
@@ -65,6 +96,8 @@ BASTET is available as a Docker image through GitHub Container Registry:
    ```
 
 3. **Access the application** at http://localhost:8080
+
+   > **Important Note**: The OpenID Connect authentication process requires the application to be served over HTTPS. For production deployments, you will need to set up HTTPS ingress (such as a reverse proxy, load balancer, or API gateway) in front of the Docker container. This is necessary because OIDC security features are designed to work with encrypted connections.
 
 ## Environment Variables
 
