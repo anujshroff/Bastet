@@ -97,6 +97,8 @@ BASTET is available as a Docker image through GitHub Container Registry:
 
 3. **Access the application** at http://localhost:8080
 
+   > **Important Note**: The OpenID Connect authentication process requires the application to be served over HTTPS. For production deployments, you will need to set up HTTPS ingress (such as a reverse proxy, load balancer, or API gateway) in front of the Docker container. This is necessary because OIDC security features are designed to work with encrypted connections.
+
 ## Environment Variables
 
 BASTET supports configuration through environment variables:
