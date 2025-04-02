@@ -5,10 +5,12 @@
       "commandName": "Project",
       "dotnetRunMessages": true,
       "launchBrowser": false,
-      "applicationUrl": "http://localhost:5139",
+      "applicationUrl": "https://localhost:5139",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-				"BASTET_AUTO_MIGRATE": "true"
+				"BASTET_AUTO_MIGRATE": "true",
+        "BASTET_OIDC_AUTHORITY": "https://localhost:7065",
+        "BASTET_OIDC_CLIENT_ID": "mvc_client",
+        "BASTET_CONNECTION_STRING": "Data Source=(LocalDB)\\MSSQLLocalDB;Initial Catalog=bastet;Integrated Security=True;"
       }
     }
   }
