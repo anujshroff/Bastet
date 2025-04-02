@@ -36,6 +36,6 @@ public class AccountController(IWebHostEnvironment environment) : Controller
         }
 
         // In development, just redirect to the specified URL or home
-        return Redirect(returnUrl);
+        return Redirect("/");
     }
 }
