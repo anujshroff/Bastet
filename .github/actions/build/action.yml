@@ -32,7 +32,7 @@ runs:
 
     - name: Publish
       run: |
-        dotnet publish ./src/Bastet/Bastet.csproj --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
+        dotnet publish ./src/Bastet/Bastet.csproj --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish /p:Version=${{ steps.nextversion.outputs.VERSION }} /p:AssemblyVersion=${{ steps.nextversion.outputs.ASSEMBLYSEMVER }}
       shell: bash
 
     - name: Docker Build
