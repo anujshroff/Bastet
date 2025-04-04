@@ -502,6 +502,8 @@ public class SubnetControllerCidrEditTests : IDisposable
 
         // Adjust our target subnet to be /23 so we can decrease its size to /24
         Subnet? targetSubnet = await _context.Subnets.FindAsync(4);
+        if (targetSubnet == null)
+            throw new Exception("Target subnet not found");
         targetSubnet.Cidr = 23;
         await _context.SaveChangesAsync();
 
