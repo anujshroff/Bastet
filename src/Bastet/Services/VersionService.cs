@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Diagnostics;
 
 namespace Bastet.Services
 {
@@ -26,11 +27,12 @@ namespace Bastet.Services
                 return "Development";
             }
 
-            // Get version set during build
-            Version? version = Assembly.GetExecutingAssembly().GetName().Version;
-            return version != null
-                ? $"{version.Major}.{version.Minor}.{version.Build}"
-                : "Development"; // Fallback version
+            // Get version set during build from the AssemblyInformationalVersion attribute
+            // This typically contains the semantic version that was set during build with /p:Version=
+            var versionAttribute = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+            
+            return versionAttribute?.InformationalVersion ?? "Development"; // Fallback version
         }
     }
 }
