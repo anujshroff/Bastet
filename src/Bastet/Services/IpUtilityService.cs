@@ -46,6 +46,12 @@ public class IpUtilityService : IIpUtilityService
             throw new ArgumentOutOfRangeException(nameof(cidr), "CIDR must be between 0 and 32");
         }
 
+        // Special case for CIDR 0 (entire internet)
+        if (cidr == 0)
+        {
+            return "255.255.255.255";
+        }
+
         // Parse the network address
         IPAddress network = IPAddress.Parse(networkAddress);
         byte[] networkBytes = network.GetAddressBytes();
@@ -121,6 +127,12 @@ public class IpUtilityService : IIpUtilityService
             return false;
         }
 
+        // Special case for CIDR 0 (entire internet)
+        if (cidr == 0 && networkAddress == "0.0.0.0")
+        {
+            return true;
+        }
+
         try
         {
             IPAddress ip = IPAddress.Parse(networkAddress);
@@ -186,11 +198,18 @@ public class IpUtilityService : IIpUtilityService
             uint childNet = BitConverter.ToUInt32([.. childBytes.Reverse()], 0);
             uint parentNet = BitConverter.ToUInt32([.. parentBytes.Reverse()], 0);
 
+            // For CIDR 0 (entire internet), any child subnet is contained within it
+            if (parentCidr == 0)
+            {
+                return true;
+            }
+
             // Apply the parent subnet mask to both addresses
             uint maskedChild = childNet & parentMask;
             uint maskedParent = parentNet & parentMask;
 
             // If they match, child is within parent
+            // Example: 10.0.0.0/16 contains 10.0.1.0/24 but not 10.1.0.0/24
             return maskedChild == maskedParent;
         }
         catch
