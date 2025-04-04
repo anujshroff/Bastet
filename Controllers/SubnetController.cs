@@ -192,6 +192,16 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                     }
                 }
 
+                // Explicitly validate network address and CIDR alignment
+                if (!ipUtilityService.IsValidSubnet(viewModel.NetworkAddress, viewModel.Cidr))
+                {
+                    ModelState.AddModelError("NetworkAddress",
+                        $"Network address {viewModel.NetworkAddress} is not valid for CIDR /{viewModel.Cidr}. " +
+                        $"The network address must align with the subnet boundary.");
+                    await LoadParentSubnets(viewModel);
+                    return View(viewModel);
+                }
+
                 // Check for subnet with same network/cidr
                 Subnet? existingSubnet = await context.Subnets
                     .FirstOrDefaultAsync(s => s.NetworkAddress == viewModel.NetworkAddress &&
@@ -380,18 +390,24 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                     // Retrieve existing subnet with relations for validation
                     Subnet? subnet = await context.Subnets
                         .Include(s => s.ParentSubnet)
-                        .Include(s => s.ChildSubnets)
                         .FirstOrDefaultAsync(s => s.Id == id);
 
                     if (subnet == null)
                     {
                         return NotFound();
                     }
+                    
+                    // Load child subnets directly to avoid navigation property issues
+                    List<Subnet> childSubnets = await context.Subnets
+                        .Where(s => s.ParentSubnetId == id)
+                        .ToListAsync();
 
                     // Check if CIDR has changed
                     bool cidrChanged = viewModel.Cidr != viewModel.OriginalCidr;
                     
-                    if (cidrChanged)
+                    // Always validate CIDR changes, regardless of whether this is a first or subsequent attempt
+                    // This ensures validation is never bypassed, even on multiple form submissions
+                    if (viewModel.Cidr != subnet.Cidr)
                     {
                         // Get siblings for validation if we have a parent
                         List<Subnet> siblings = [];
@@ -407,15 +423,16 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                             .Where(s => s.Id != subnet.Id)
                             .ToListAsync();
 
-                        // Validate CIDR change
+                        // Always use the actual database value for original CIDR, not the viewModel value
+                        // This prevents validation bypass on subsequent attempts
                         ValidationResult validationResult = subnetValidationService.ValidateSubnetCidrChange(
                             subnet.Id,
                             subnet.NetworkAddress,
-                            viewModel.OriginalCidr,
+                            subnet.Cidr, // Use actual DB value instead of viewModel.OriginalCidr
                             viewModel.Cidr,
                             subnet.ParentSubnet,
                             siblings,
-                            subnet.ChildSubnets,
+                            childSubnets,
                             allOtherSubnets);
 
                         if (!validationResult.IsValid)
@@ -496,9 +513,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
         // Repopulate the display-only properties
         viewModel.NetworkAddress = origSubnet.NetworkAddress;
         
-        // Don't override the CIDR with the original value if there was a validation error
-        // We want to keep the user's input so they can correct it
-        if (!ModelState.IsValid)
+                    // Always set original CIDR to the actual DB value to prevent validation bypass
+                    viewModel.OriginalCidr = origSubnet.Cidr;
+                    
+                    // Update the subnet mask based on user's input CIDR value
+                    if (!ModelState.IsValid || viewModel.Cidr != origSubnet.Cidr)
         {
             viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
         }

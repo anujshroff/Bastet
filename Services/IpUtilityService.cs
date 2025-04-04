@@ -160,7 +160,7 @@ public class IpUtilityService : IIpUtilityService
         }
 
         // Child CIDR must be larger than parent CIDR (smaller network)
-        if (childCidr < parentCidr)
+        if (childCidr <= parentCidr)
         {
             return false;
         }
