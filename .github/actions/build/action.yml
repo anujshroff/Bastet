@@ -28,7 +28,7 @@ runs:
 
     - name: Publish
       run: |
-        dotnet publish Bastet.csproj --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
+        dotnet publish /src/Bastet/Bastet.csproj --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
       shell: bash
 
     - name: Docker Build
