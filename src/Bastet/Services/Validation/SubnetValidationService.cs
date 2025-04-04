@@ -129,20 +129,19 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
     {
         ValidationResult result = new();
 
-        // Child CIDR must be larger than parent CIDR (smaller subnet)
-        if (childCidr <= parentCidr)
-        {
-            result.AddError(INVALID_CIDR_HIERARCHY,
-                "Child subnet CIDR must be larger than parent subnet CIDR (representing a smaller subnet)");
-            return result;
-        }
-
         // Child subnet must be contained within the parent subnet
         if (!ipUtilityService.IsSubnetContainedInParent(
             childNetwork, childCidr, parentNetwork, parentCidr))
         {
             result.AddError(NOT_IN_PARENT_RANGE,
                 "Child subnet must be contained within the parent subnet range");
+        }
+
+        // Child CIDR must be larger than parent CIDR (smaller subnet)
+        if (childCidr <= parentCidr)
+        {
+            result.AddError(INVALID_CIDR_HIERARCHY,
+                "Child subnet CIDR must be larger than parent subnet CIDR (representing a smaller subnet)");
         }
 
         return result;
@@ -187,6 +186,15 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
 
         foreach (Subnet sibling in siblings)
         {
+            // Check for identical subnets first (exact same network address and CIDR)
+            if (sibling.NetworkAddress == networkAddress && sibling.Cidr == cidr)
+            {
+                result.AddError(SUBNET_OVERLAP,
+                    $"Subnet is identical to existing subnet: {sibling.Name} ({sibling.NetworkAddress}/{sibling.Cidr})");
+                break; // One overlap error is enough
+            }
+
+            // Check for containment in either direction
             bool childContainsSibling = ipUtilityService.IsSubnetContainedInParent(
                 sibling.NetworkAddress, sibling.Cidr,
                 networkAddress, cidr);
