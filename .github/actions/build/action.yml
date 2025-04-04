@@ -27,18 +27,18 @@ runs:
       shell: bash
 
     - name: Test
-      run: dotnet test --configuration ${{ inputs.CONFIGURATION }}
+      run: dotnet test --configuration ${{ inputs.CONFIGURATION }} --no-build
       shell: bash
 
     - name: Publish
       run: |
-        dotnet publish ./src/Bastet/Bastet.csproj --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
+        dotnet publish ${{ github.workspace }}/src/Bastet --configuration ${{ inputs.CONFIGURATION }} --no-build --output ${{ github.workspace }}/publish
       shell: bash
 
     - name: Docker Build
       run: |
           echo "${{ inputs.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker build ./publish --file Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.VERSION }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}
+          docker build ${{ github.workspace }}/publish --file ${{ github.workspace }}/src/Bastet/Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.VERSION }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}
           docker push -a ghcr.io/${{ github.repository_owner }}/bastet
       shell: bash
 
