@@ -371,33 +371,7 @@ public class SubnetControllerCidrEditTests : IDisposable
 
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("Cidr", _controller.ModelState.Keys);
-        Assert.Contains("Child subnet", _controller.ModelState["Cidr"]?.Errors[0].ErrorMessage);
-    }
-
-    [Fact]
-    public async Task Edit_POST_DecreaseCidr_OverlapsWithSibling_ReturnsViewWithError()
-    {
-        // Arrange - Set ModelState error manually to simulate validation failure
-        _controller.ModelState.AddModelError("Cidr", "Subnet overlaps with existing subnet: Sibling 1 (10.0.0.0/24)");
-
-        EditSubnetViewModel viewModel = new()
-        {
-            Id = 4, // Target subnet (10.0.2.0/24)
-            Name = "Target Subnet",
-            NetworkAddress = "10.0.2.0",
-            Cidr = 22, // Decreasing from 24 to 22 would overlap with sibling subnets
-            OriginalCidr = 24
-        };
-
-        // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
-
-        // Assert
-        _ = Assert.IsType<ViewResult>(result);
-
-        Assert.False(_controller.ModelState.IsValid);
-        Assert.Contains("Cidr", _controller.ModelState.Keys);
-        Assert.Contains("overlap", _controller.ModelState["Cidr"]?.Errors[0].ErrorMessage);
+        Assert.Contains("Child subnet", _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty);
     }
 
     [Fact]
@@ -405,7 +379,7 @@ public class SubnetControllerCidrEditTests : IDisposable
     {
         // Arrange - Set ModelState error manually to simulate validation failure
         _controller.ModelState.AddModelError("Cidr", "Decreasing CIDR to /15 would make this subnet too large to fit within its parent subnet (10.0.0.0/16)");
-
+        
         EditSubnetViewModel viewModel = new()
         {
             Id = 4, // Target subnet (10.0.2.0/24)
@@ -423,6 +397,183 @@ public class SubnetControllerCidrEditTests : IDisposable
 
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("Cidr", _controller.ModelState.Keys);
-        Assert.Contains("parent subnet", _controller.ModelState["Cidr"]?.Errors[0].ErrorMessage.ToLower());
+        Assert.Contains("parent subnet", _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage?.ToLower() ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Edit_POST_MisalignedNetworkAddress_ReturnsViewWithError()
+    {
+        // Arrange - Set ModelState error manually to simulate validation failure
+        _controller.ModelState.AddModelError("NetworkAddress", "Network address is not valid for the given CIDR. The network address must align with the subnet boundary.");
+        
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 4,
+            Name = "Target Subnet",
+            NetworkAddress = "10.0.2.1", // Misaligned for /24 (should be 10.0.2.0)
+            Cidr = 24,
+            OriginalCidr = 24
+        };
+
+        // Act
+        IActionResult result = await _controller.Edit(4, viewModel);
+
+        // Assert
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.ModelState.IsValid);
+        Assert.Contains("NetworkAddress", _controller.ModelState.Keys);
+        Assert.Contains("subnet boundary", _controller.ModelState["NetworkAddress"]?.Errors.First().ErrorMessage?.ToLower() ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Edit_POST_DecreaseCidr_OverlapsWithUnrelatedSubnet_ReturnsViewWithError()
+    {
+        // First, create an unrelated subnet that would overlap with our target if expanded
+        Subnet unrelatedOverlapSubnet = new()
+        {
+            Id = 20,
+            Name = "Unrelated Subnet",
+            NetworkAddress = "10.0.3.0", // Would overlap if target is expanded from /24 to /22
+            Cidr = 24,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        };
+        _context.Subnets.Add(unrelatedOverlapSubnet);
+        await _context.SaveChangesAsync();
+        
+        // Arrange - Set ModelState error manually to simulate validation failure
+        _controller.ModelState.AddModelError("Cidr", "Expanding to 10.0.2.0/22 would conflict with existing subnet: Unrelated Subnet (10.0.3.0/24)");
+        
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 4,
+            Name = "Target Subnet",
+            NetworkAddress = "10.0.2.0",
+            Cidr = 22, // Decreasing from /24 to /22 would overlap with unrelated subnet
+            OriginalCidr = 24
+        };
+
+        // Act
+        IActionResult result = await _controller.Edit(4, viewModel);
+
+        // Assert
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.ModelState.IsValid);
+        Assert.Contains("Cidr", _controller.ModelState.Keys);
+        var errors = _controller.ModelState["Cidr"]?.Errors;
+        Assert.NotNull(errors);
+        Assert.NotEmpty(errors);
+        Assert.Contains("conflict with existing subnet", errors.First().ErrorMessage ?? string.Empty);
+    }
+
+    [Fact]
+    public async Task Edit_POST_IncreaseCidr_ExactlyFitsChildren_ReturnsRedirectToDetails()
+    {
+        // Arrange - First reconfigure our test data to create a boundary case scenario
+        
+        // First, remove existing children
+        _context.Subnets.Remove(await _context.Subnets.FindAsync(5) ?? throw new Exception("Child 1 not found"));
+        _context.Subnets.Remove(await _context.Subnets.FindAsync(6) ?? throw new Exception("Child 2 not found"));
+        await _context.SaveChangesAsync();
+        
+        // Then add children that would exactly fit in a /24 subnet
+        Subnet newChild1 = new()
+        {
+            Id = 15,
+            Name = "New Child 1",
+            NetworkAddress = "10.0.2.0",
+            Cidr = 25,
+            ParentSubnetId = 4,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        };
+        Subnet newChild2 = new()
+        {
+            Id = 16,
+            Name = "New Child 2",
+            NetworkAddress = "10.0.2.128",
+            Cidr = 25,
+            ParentSubnetId = 4,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        };
+        _context.Subnets.Add(newChild1);
+        _context.Subnets.Add(newChild2);
+
+        // Adjust our target subnet to be /23 so we can decrease its size to /24
+        Subnet? targetSubnet = await _context.Subnets.FindAsync(4);
+        targetSubnet.Cidr = 23;
+        await _context.SaveChangesAsync();
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 4,
+            Name = "Target Subnet",
+            NetworkAddress = "10.0.2.0",
+            Cidr = 24, // Increasing from /23 to /24, exactly fitting children
+            OriginalCidr = 23
+        };
+
+        // Act
+        IActionResult result = await _controller.Edit(4, viewModel);
+
+        // Assert
+        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirectResult.ActionName);
+        
+        // Verify the database was updated
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
+        Assert.NotNull(updatedSubnet);
+        Assert.Equal(24, updatedSubnet.Cidr);
+    }
+
+    [Fact]
+    public async Task Edit_POST_MultipleValidationErrors_ReturnsViewWithAllErrors()
+    {
+        // Arrange - Set multiple ModelState errors
+        _controller.ModelState.AddModelError("Name", "Name is required");
+        _controller.ModelState.AddModelError("Cidr", "CIDR must be between 0 and 32");
+        _controller.ModelState.AddModelError("Description", "Description cannot exceed 500 characters");
+        
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 4,
+            Name = "", // Missing name
+            NetworkAddress = "10.0.2.0",
+            Cidr = 24, // Using valid CIDR but ModelState is invalid from our manual error
+            OriginalCidr = 24,
+            Description = new string('x', 600) // Too long description
+        };
+
+        // Act
+        IActionResult result = await _controller.Edit(4, viewModel);
+
+        // Assert
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.ModelState.IsValid);
+        Assert.Equal(3, _controller.ModelState.ErrorCount);
+        Assert.Contains("Name", _controller.ModelState.Keys);
+        Assert.Contains("Cidr", _controller.ModelState.Keys);
+        Assert.Contains("Description", _controller.ModelState.Keys);
+    }
+
+    [Fact]
+    public async Task Edit_POST_NonExistentSubnet_ReturnsNotFound()
+    {
+        // Arrange
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 999, // Non-existent ID
+            Name = "Non-existent Subnet",
+            NetworkAddress = "10.1.1.0",
+            Cidr = 24,
+            OriginalCidr = 24
+        };
+
+        // Act
+        IActionResult result = await _controller.Edit(999, viewModel);
+
+        // Assert
+        Assert.IsType<NotFoundResult>(result);
     }
 }

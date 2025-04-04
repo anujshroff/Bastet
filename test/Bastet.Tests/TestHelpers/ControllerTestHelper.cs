@@ -15,9 +15,8 @@ public static class ControllerTestHelper
     /// Sets up a controller with HttpContext, TempData, and other common dependencies
     /// </summary>
     /// <param name="controller">The controller to set up</param>
-    /// <param name="userContextService">Optional mock user context service</param>
     /// <returns>The configured controller</returns>
-    public static T SetupController<T>(T controller, IUserContextService? userContextService = null) where T : Controller
+    public static T SetupController<T>(T controller) where T : Controller
     {
         // Set up HTTP context
         controller.ControllerContext = new ControllerContext
@@ -26,7 +25,7 @@ public static class ControllerTestHelper
         };
 
         // Set up TempData (needed for success/error messages)
-        var tempData = new TempDataDictionary(
+        TempDataDictionary tempData = new(
             controller.ControllerContext.HttpContext,
             Mock.Of<ITempDataProvider>());
         
@@ -42,7 +41,7 @@ public static class ControllerTestHelper
     /// <returns>A mock user context service</returns>
     public static IUserContextService CreateMockUserContextService(string username = "test-user")
     {
-        var mock = new Mock<IUserContextService>();
+        Mock<IUserContextService> mock = new();
         mock.Setup(m => m.GetCurrentUsername()).Returns(username);
         return mock.Object;
     }
