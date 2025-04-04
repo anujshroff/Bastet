@@ -16,15 +16,12 @@
     <div class="col-md-8">
         <div class="card mb-4">
             <div class="card-header">
-                <h5 class="mb-0">Network Information (read-only)</h5>
+                <h5 class="mb-0">Network Information</h5>
             </div>
             <div class="card-body">
                 <dl class="row">
                     <dt class="col-sm-4">Network Address</dt>
-                    <dd class="col-sm-8"><strong>@Model.NetworkAddress</strong></dd>
-                    
-                    <dt class="col-sm-4">CIDR Notation</dt>
-                    <dd class="col-sm-8">/@Model.Cidr</dd>
+                    <dd class="col-sm-8"><strong>@Model.NetworkAddress</strong> (read-only)</dd>
                     
                     <dt class="col-sm-4">Subnet Mask</dt>
                     <dd class="col-sm-8">@Model.SubnetMask</dd>
@@ -57,7 +54,19 @@
                     
                     <input type="hidden" asp-for="Id" />
                     <input type="hidden" asp-for="NetworkAddress" />
-                    <input type="hidden" asp-for="Cidr" />
+                    <input type="hidden" asp-for="OriginalCidr" value="@Model.Cidr" />
+                    
+                    <div class="mb-3">
+                        <label asp-for="Cidr" class="form-label">CIDR Notation</label>
+                        <div class="input-group">
+                            <span class="input-group-text">/</span>
+                            <input asp-for="Cidr" class="form-control" min="0" max="32" />
+                        </div>
+                        <div class="form-text">
+                            Changing this value affects the size of the subnet.
+                        </div>
+                        <span asp-validation-for="Cidr" class="text-danger"></span>
+                    </div>
                     
                     <div class="mb-3">
                         <label asp-for="Name" class="form-label"></label>
@@ -99,11 +108,28 @@
                     <li><strong>Name</strong> - A descriptive name for the subnet</li>
                     <li><strong>Description</strong> - Additional details about the subnet's purpose</li>
                     <li><strong>Tags</strong> - Comma-separated list for categorization</li>
+                    <li><strong>CIDR</strong> - The subnet mask size in CIDR notation</li>
                 </ul>
-                <p class="alert alert-info">
-                    <i class="bi bi-info-circle"></i> Network properties like address and CIDR cannot be changed.
-                    To modify network details, delete this subnet and create a new one.
+                <p class="alert alert-info mb-3">
+                    <i class="bi bi-info-circle"></i> Network address cannot be changed.
+                    Only the CIDR value can be modified.
                 </p>
+                <div class="alert alert-warning">
+                    <h6><i class="bi bi-exclamation-triangle"></i> CIDR Modification Rules:</h6>
+                    <ul class="mb-0 ps-3">
+                        <li>Decreasing CIDR (making subnet larger) requires:
+                            <ul>
+                                <li>No conflicts with sibling subnets</li>
+                                <li>Still fits under parent subnet (if any)</li>
+                            </ul>
+                        </li>
+                        <li>Increasing CIDR (making subnet smaller) requires:
+                            <ul>
+                                <li>All child subnets still fit within new boundaries</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
