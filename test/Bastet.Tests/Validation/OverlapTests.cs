@@ -7,7 +7,7 @@ namespace Bastet.Tests.Validation;
 public class OverlapTests
 {
     private readonly IIpUtilityService _ipUtilityService;
-    private readonly ISubnetValidationService _validationService;
+    private readonly SubnetValidationService _validationService;
 
     public OverlapTests()
     {

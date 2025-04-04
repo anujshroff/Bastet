@@ -460,7 +460,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         _ = Assert.IsType<ViewResult>(result);
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("Cidr", _controller.ModelState.Keys);
-        var errors = _controller.ModelState["Cidr"]?.Errors;
+        Microsoft.AspNetCore.Mvc.ModelBinding.ModelErrorCollection? errors = _controller.ModelState["Cidr"]?.Errors;
         Assert.NotNull(errors);
         Assert.NotEmpty(errors);
         Assert.Contains("conflict with existing subnet", errors.First().ErrorMessage ?? string.Empty);
@@ -501,9 +501,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         _context.Subnets.Add(newChild2);
 
         // Adjust our target subnet to be /23 so we can decrease its size to /24
-        Subnet? targetSubnet = await _context.Subnets.FindAsync(4);
-        if (targetSubnet == null)
-            throw new Exception("Target subnet not found");
+        Subnet? targetSubnet = await _context.Subnets.FindAsync(4) ?? throw new Exception("Target subnet not found");
         targetSubnet.Cidr = 23;
         await _context.SaveChangesAsync();
 

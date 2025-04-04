@@ -9,12 +9,9 @@ namespace Bastet.Tests.Validation;
 /// </summary>
 public class SubnetPropertyCalculationTests
 {
-    private readonly IIpUtilityService _ipUtilityService;
+    private readonly IpUtilityService _ipUtilityService;
 
-    public SubnetPropertyCalculationTests()
-    {
-        _ipUtilityService = new IpUtilityService();
-    }
+    public SubnetPropertyCalculationTests() => _ipUtilityService = new IpUtilityService();
 
     #region Subnet Mask Tests
 
@@ -39,12 +36,10 @@ public class SubnetPropertyCalculationTests
     [Theory]
     [InlineData(-1)]
     [InlineData(33)]
-    public void CalculateSubnetMask_InvalidCidr_ThrowsException(int invalidCidr)
-    {
+    public void CalculateSubnetMask_InvalidCidr_ThrowsException(int invalidCidr) =>
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             _ipUtilityService.CalculateSubnetMask(invalidCidr));
-    }
 
     #endregion
 
@@ -83,22 +78,18 @@ public class SubnetPropertyCalculationTests
     [InlineData("", 24)]
     [InlineData("invalid-ip", 24)]
     [InlineData("999.999.999.999", 24)]
-    public void CalculateBroadcastAddress_InvalidNetworkAddress_ThrowsException(string invalidAddress, int cidr)
-    {
+    public void CalculateBroadcastAddress_InvalidNetworkAddress_ThrowsException(string invalidAddress, int cidr) =>
         // Act & Assert
-        Assert.ThrowsAny<Exception>(() => 
+        Assert.ThrowsAny<Exception>(() =>
             _ipUtilityService.CalculateBroadcastAddress(invalidAddress, cidr));
-    }
 
     [Theory]
     [InlineData("10.0.0.0", -1)]
     [InlineData("10.0.0.0", 33)]
-    public void CalculateBroadcastAddress_InvalidCidr_ThrowsException(string networkAddress, int invalidCidr)
-    {
+    public void CalculateBroadcastAddress_InvalidCidr_ThrowsException(string networkAddress, int invalidCidr) =>
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             _ipUtilityService.CalculateBroadcastAddress(networkAddress, invalidCidr));
-    }
 
     #endregion
 
@@ -209,9 +200,9 @@ public class SubnetPropertyCalculationTests
         string networkAddress = "10.0.0.0";
         int cidr = 24;
         List<Subnet> childSubnets = [];
-        
+
         // Act
-        var result = _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets).ToList();
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
         
         // Assert
         Assert.Single(result);
@@ -230,9 +221,9 @@ public class SubnetPropertyCalculationTests
         List<Subnet> childSubnets = [
             new() { NetworkAddress = "10.0.0.0", Cidr = 25 }  // 10.0.0.0 - 10.0.0.127
         ];
-        
+
         // Act
-        var result = _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets).ToList();
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
         
         // Assert
         Assert.Single(result);
@@ -254,9 +245,9 @@ public class SubnetPropertyCalculationTests
             new() { NetworkAddress = "10.0.0.0", Cidr = 26 },   // 10.0.0.0 - 10.0.0.63
             new() { NetworkAddress = "10.0.0.128", Cidr = 26 }  // 10.0.0.128 - 10.0.0.191
         ];
-        
+
         // Act
-        var result = _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets).ToList();
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
         
         // Assert
         Assert.Equal(2, result.Count);
@@ -279,9 +270,9 @@ public class SubnetPropertyCalculationTests
         string networkAddress = "10.0.0.0";
         int cidr = 31;
         List<Subnet> childSubnets = [];
-        
+
         // Act
-        var result = _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets).ToList();
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
         
         // Assert
         Assert.Single(result);
@@ -297,9 +288,9 @@ public class SubnetPropertyCalculationTests
         string networkAddress = "10.0.0.1";
         int cidr = 32;
         List<Subnet> childSubnets = [];
-        
+
         // Act
-        var result = _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets).ToList();
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
         
         // Assert
         Assert.Single(result);
@@ -320,9 +311,9 @@ public class SubnetPropertyCalculationTests
         List<Subnet> childSubnets = [
             new() { NetworkAddress = "10.0.0.0", Cidr = 24 }
         ];
-        
+
         // Act
-        var result = _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets).ToList();
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
         
         // Assert - The implementation returns the entire range when a child exactly matches the parent
         Assert.Single(result);
