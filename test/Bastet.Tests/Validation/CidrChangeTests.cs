@@ -7,7 +7,7 @@ namespace Bastet.Tests.Validation;
 public class CidrChangeTests
 {
     private readonly IIpUtilityService _ipUtilityService;
-    private readonly ISubnetValidationService _validationService;
+    private readonly SubnetValidationService _validationService;
 
     public CidrChangeTests()
     {
@@ -25,7 +25,7 @@ public class CidrChangeTests
         int newCidr = 24; // Same CIDR, no change
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr);
 
         // Assert
@@ -44,7 +44,7 @@ public class CidrChangeTests
         int originalCidr = 24;
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, invalidCidr);
 
         // Assert
@@ -62,7 +62,7 @@ public class CidrChangeTests
         int newCidr = 24;     // Try to change to subnet
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr);
 
         // Assert
@@ -81,15 +81,15 @@ public class CidrChangeTests
         int originalCidr = 24;
         int newCidr = 22; // Decreasing CIDR (larger subnet)
 
-        var parentSubnet = new Subnet { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
-        var siblings = new List<Subnet>
-        {
+        Subnet parentSubnet = new() { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
+        List<Subnet> siblings =
+        [
             new() { Id = 3, Name = "Sibling 1", NetworkAddress = "10.0.4.0", Cidr = 24 },
             new() { Id = 4, Name = "Sibling 2", NetworkAddress = "10.0.8.0", Cidr = 24 }
-        };
+        ];
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr, parentSubnet, siblings);
 
         // Assert
@@ -106,10 +106,10 @@ public class CidrChangeTests
         int originalCidr = 24;
         int newCidr = 15; // Decreasing CIDR beyond parent bounds
 
-        var parentSubnet = new Subnet { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
+        Subnet parentSubnet = new() { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr, parentSubnet);
 
         // Assert
@@ -126,14 +126,14 @@ public class CidrChangeTests
         int originalCidr = 24;
         int newCidr = 23; // Decreasing CIDR will overlap with sibling at 10.0.1.0/24
 
-        var parentSubnet = new Subnet { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
-        var siblings = new List<Subnet>
-        {
+        Subnet parentSubnet = new() { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
+        List<Subnet> siblings =
+        [
             new() { Id = 3, Name = "Sibling 1", NetworkAddress = "10.0.1.0", Cidr = 24 }
-        };
+        ];
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr, parentSubnet, siblings);
 
         // Assert
@@ -151,14 +151,14 @@ public class CidrChangeTests
         int newCidr = 16; // Decreasing CIDR (larger subnet)
 
         // Other subnet in different branch of hierarchy that would overlap
-        var otherSubnets = new List<Subnet>
-        {
+        List<Subnet> otherSubnets =
+        [
             new() { Id = 5, Name = "Different subnet", NetworkAddress = "10.0.128.0", Cidr = 24 }
-        };
+        ];
 
         // Act - note we're passing null for parent and siblings, but providing allOtherSubnets
-        var result = _validationService.ValidateSubnetCidrChange(
-            subnetId, networkAddress, originalCidr, newCidr, 
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
+            subnetId, networkAddress, originalCidr, newCidr,
             allOtherSubnets: otherSubnets);
 
         // Assert
@@ -178,7 +178,7 @@ public class CidrChangeTests
         int newCidr = 25; // Increasing CIDR (smaller subnet)
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr);
 
         // Assert
@@ -195,14 +195,14 @@ public class CidrChangeTests
         int originalCidr = 22;
         int newCidr = 23; // Increasing CIDR but children still fit
 
-        var children = new List<Subnet>
-        {
+        List<Subnet> children =
+        [
             new() { Id = 3, Name = "Child 1", NetworkAddress = "10.0.0.0", Cidr = 24 },
             new() { Id = 4, Name = "Child 2", NetworkAddress = "10.0.0.128", Cidr = 25 }
-        };
+        ];
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr, children: children);
 
         // Assert
@@ -219,14 +219,14 @@ public class CidrChangeTests
         int originalCidr = 23;
         int newCidr = 24; // Increasing CIDR will orphan child at 10.0.1.0/24
 
-        var children = new List<Subnet>
-        {
+        List<Subnet> children =
+        [
             new() { Id = 3, Name = "Child 1", NetworkAddress = "10.0.0.0", Cidr = 25 },
             new() { Id = 4, Name = "Child 2", NetworkAddress = "10.0.1.0", Cidr = 24 }
-        };
+        ];
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr, children: children);
 
         // Assert
@@ -243,14 +243,14 @@ public class CidrChangeTests
         int originalCidr = 23;
         int newCidr = 24; // Increasing CIDR to exact size needed for children
 
-        var children = new List<Subnet>
-        {
+        List<Subnet> children =
+        [
             new() { Id = 3, Name = "Child 1", NetworkAddress = "10.0.0.0", Cidr = 25 },
             new() { Id = 4, Name = "Child 2", NetworkAddress = "10.0.0.128", Cidr = 25 }
-        };
+        ];
 
         // Act
-        var result = _validationService.ValidateSubnetCidrChange(
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
             subnetId, networkAddress, originalCidr, newCidr, children: children);
 
         // Assert

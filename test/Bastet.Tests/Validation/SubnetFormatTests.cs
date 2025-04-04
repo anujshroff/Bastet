@@ -6,7 +6,7 @@ namespace Bastet.Tests.Validation;
 public class SubnetFormatTests
 {
     private readonly IIpUtilityService _ipUtilityService;
-    private readonly ISubnetValidationService _validationService;
+    private readonly SubnetValidationService _validationService;
 
     public SubnetFormatTests()
     {
@@ -18,7 +18,7 @@ public class SubnetFormatTests
     public void ValidateSubnetFormat_ValidInput_ReturnsValid()
     {
         // Arrange & Act
-        var result = _validationService.ValidateSubnetFormat("192.168.1.0", 24);
+        ValidationResult result = _validationService.ValidateSubnetFormat("192.168.1.0", 24);
 
         // Assert
         Assert.True(result.IsValid);
@@ -29,7 +29,7 @@ public class SubnetFormatTests
     public void ValidateSubnetFormat_InvalidIPAddress_ReturnsInvalid()
     {
         // Arrange & Act
-        var result = _validationService.ValidateSubnetFormat("not-an-ip", 24);
+        ValidationResult result = _validationService.ValidateSubnetFormat("not-an-ip", 24);
 
         // Assert
         Assert.False(result.IsValid);
@@ -42,7 +42,7 @@ public class SubnetFormatTests
     public void ValidateSubnetFormat_InvalidCIDR_ReturnsInvalid(int cidr)
     {
         // Arrange & Act
-        var result = _validationService.ValidateSubnetFormat("192.168.1.0", cidr);
+        ValidationResult result = _validationService.ValidateSubnetFormat("192.168.1.0", cidr);
 
         // Assert
         Assert.False(result.IsValid);
@@ -55,7 +55,7 @@ public class SubnetFormatTests
     public void ValidateSubnetFormat_EdgeCaseCIDR_ReturnsValid(int cidr, string ip)
     {
         // Arrange & Act
-        var result = _validationService.ValidateSubnetFormat(ip, cidr);
+        ValidationResult result = _validationService.ValidateSubnetFormat(ip, cidr);
 
         // Assert
         Assert.True(result.IsValid);
@@ -68,7 +68,7 @@ public class SubnetFormatTests
     public void ValidateSubnetFormat_MisalignedNetwork_ReturnsInvalid(string ip, int cidr)
     {
         // Arrange & Act
-        var result = _validationService.ValidateSubnetFormat(ip, cidr);
+        ValidationResult result = _validationService.ValidateSubnetFormat(ip, cidr);
 
         // Assert
         Assert.False(result.IsValid);
@@ -83,7 +83,7 @@ public class SubnetFormatTests
     public void ValidateSubnetFormat_CorrectlyAligned_ReturnsValid(string ip, int cidr)
     {
         // Arrange & Act
-        var result = _validationService.ValidateSubnetFormat(ip, cidr);
+        ValidationResult result = _validationService.ValidateSubnetFormat(ip, cidr);
 
         // Assert
         Assert.True(result.IsValid);

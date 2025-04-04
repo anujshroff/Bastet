@@ -66,8 +66,8 @@ public interface ISubnetValidationService
     /// <param name="allOtherSubnets">All other subnets in the system, for comprehensive overlap validation</param>
     ValidationResult ValidateSubnetCidrChange(
         int subnetId,
-        string networkAddress, 
-        int originalCidr, 
+        string networkAddress,
+        int originalCidr,
         int newCidr,
         Subnet? parentSubnet = null,
         IEnumerable<Subnet>? siblings = null,

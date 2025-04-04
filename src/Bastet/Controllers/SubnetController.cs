@@ -396,7 +396,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                     {
                         return NotFound();
                     }
-                    
+
                     // Load child subnets directly to avoid navigation property issues
                     List<Subnet> childSubnets = await context.Subnets
                         .Where(s => s.ParentSubnetId == id)
@@ -404,7 +404,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
                     // Check if CIDR has changed
                     bool cidrChanged = viewModel.Cidr != viewModel.OriginalCidr;
-                    
+
                     // Always validate CIDR changes, regardless of whether this is a first or subsequent attempt
                     // This ensures validation is never bypassed, even on multiple form submissions
                     if (viewModel.Cidr != subnet.Cidr)
@@ -417,7 +417,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                                 .Where(s => s.ParentSubnetId == subnet.ParentSubnetId && s.Id != subnet.Id)
                                 .ToListAsync();
                         }
-                        
+
                         // Get all other subnets for comprehensive overlap validation
                         List<Subnet> allOtherSubnets = await context.Subnets
                             .Where(s => s.Id != subnet.Id)
@@ -441,21 +441,21 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                             {
                                 ModelState.AddModelError("Cidr", error.Message);
                             }
-                            
+
                             // Early return with validation errors
                             // Populate info for the view
                             viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
                             viewModel.CreatedAt = subnet.CreatedAt;
                             viewModel.LastModifiedAt = subnet.LastModifiedAt;
-                            
+
                             if (subnet.ParentSubnet != null)
                             {
                                 viewModel.ParentSubnetInfo = $"{subnet.ParentSubnet.Name} ({subnet.ParentSubnet.NetworkAddress}/{subnet.ParentSubnet.Cidr})";
                             }
-                            
+
                             return View(viewModel);
                         }
-                        
+
                         // Update subnet mask for display after validation
                         viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
                     }
@@ -466,7 +466,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                     subnet.Tags = viewModel.Tags;
                     subnet.LastModifiedAt = DateTime.UtcNow;
                     subnet.ModifiedBy = userContextService.GetCurrentUsername();
-                    
+
                     if (cidrChanged)
                     {
                         subnet.Cidr = viewModel.Cidr;
@@ -474,7 +474,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
                     context.Subnets.Update(subnet);
                     await context.SaveChangesAsync();
-                    
+
                     // Commit the transaction
                     await transaction.CommitAsync();
 
@@ -494,7 +494,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                 {
                     return NotFound();
                 }
-                
+
                 // Handle concurrency conflict
                 ModelState.AddModelError("", "The subnet was modified by another user. Please reload and try again.");
             }
@@ -512,12 +512,12 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         // Repopulate the display-only properties
         viewModel.NetworkAddress = origSubnet.NetworkAddress;
-        
-                    // Always set original CIDR to the actual DB value to prevent validation bypass
-                    viewModel.OriginalCidr = origSubnet.Cidr;
-                    
-                    // Update the subnet mask based on user's input CIDR value
-                    if (!ModelState.IsValid || viewModel.Cidr != origSubnet.Cidr)
+
+        // Always set original CIDR to the actual DB value to prevent validation bypass
+        viewModel.OriginalCidr = origSubnet.Cidr;
+
+        // Update the subnet mask based on user's input CIDR value
+        if (!ModelState.IsValid || viewModel.Cidr != origSubnet.Cidr)
         {
             viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
         }
@@ -527,7 +527,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             viewModel.OriginalCidr = origSubnet.Cidr;
             viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(origSubnet.Cidr);
         }
-        
+
         viewModel.CreatedAt = origSubnet.CreatedAt;
         viewModel.LastModifiedAt = origSubnet.LastModifiedAt;
 

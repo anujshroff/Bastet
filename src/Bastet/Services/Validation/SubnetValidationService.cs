@@ -205,12 +205,12 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
 
         return result;
     }
-    
+
     /// <inheritdoc />
     public ValidationResult ValidateSubnetCidrChange(
         int subnetId,
-        string networkAddress, 
-        int originalCidr, 
+        string networkAddress,
+        int originalCidr,
         int newCidr,
         Subnet? parentSubnet = null,
         IEnumerable<Subnet>? siblings = null,
@@ -218,14 +218,14 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
         IEnumerable<Subnet>? allOtherSubnets = null)
     {
         ValidationResult result = new();
-        
+
         // Basic validation - check if CIDR value is valid
         if (newCidr is < 0 or > 32)
         {
             result.AddError(INVALID_CIDR_VALUE, "CIDR must be between 0 and 32");
             return result;
         }
-        
+
         // Validate that new CIDR creates a valid subnet with the network address
         ValidationResult formatResult = ValidateSubnetFormat(networkAddress, newCidr);
         if (!formatResult.IsValid)
@@ -234,15 +234,16 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
             {
                 result.AddError(error.Code, error.Message);
             }
+
             return result;
         }
-        
+
         // If CIDR is not changing, no further validation needed
         if (originalCidr == newCidr)
         {
             return result;
         }
-        
+
         // Different validation paths based on whether we're making subnet larger or smaller
         if (newCidr < originalCidr) // Making subnet larger (decreasing CIDR)
         {
@@ -253,40 +254,40 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
                 ValidationResult containmentResult = ValidateSubnetContainment(
                     networkAddress, newCidr,
                     parentSubnet.NetworkAddress, parentSubnet.Cidr);
-                
+
                 if (!containmentResult.IsValid)
                 {
                     foreach (ValidationError error in containmentResult.Errors)
                     {
                         result.AddError(error.Code, error.Message);
                     }
-                    
+
                     // Add a more specific error message for the CIDR change context
-                    result.AddError(INVALID_CIDR_CHANGE, 
+                    result.AddError(INVALID_CIDR_CHANGE,
                         $"Decreasing CIDR to /{newCidr} would make this subnet too large to fit within its parent subnet " +
                         $"({parentSubnet.NetworkAddress}/{parentSubnet.Cidr})");
                 }
             }
-            
+
             // Validate no overlap with siblings
             if (siblings != null && siblings.Any())
             {
                 ValidationResult overlapResult = ValidateSiblingOverlap(
                     networkAddress, newCidr, siblings);
-                
+
                 if (!overlapResult.IsValid)
                 {
                     foreach (ValidationError error in overlapResult.Errors)
                     {
                         result.AddError(error.Code, error.Message);
                     }
-                    
+
                     // Add a more specific error message
-                    result.AddError(INVALID_CIDR_CHANGE, 
+                    result.AddError(INVALID_CIDR_CHANGE,
                         $"Decreasing CIDR to /{newCidr} would cause overlap with sibling subnet(s)");
                 }
             }
-            
+
             // Check for overlaps with any other subnets in the system
             if (allOtherSubnets != null && allOtherSubnets.Any())
             {
@@ -297,32 +298,32 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
                     {
                         continue;
                     }
-                    
+
                     // Skip children since they should be contained within this subnet
                     if (children != null && children.Contains(otherSubnet))
                     {
                         continue;
                     }
-                    
+
                     // Skip parent since we already checked it above
                     if (parentSubnet != null && otherSubnet.Id == parentSubnet.Id)
                     {
                         continue;
                     }
-                    
+
                     // Check if the expanded subnet would overlap with this other subnet
                     bool otherSubnetContainsThis = ipUtilityService.IsSubnetContainedInParent(
                         networkAddress, newCidr,
                         otherSubnet.NetworkAddress, otherSubnet.Cidr);
-                        
+
                     bool thisContainsOtherSubnet = ipUtilityService.IsSubnetContainedInParent(
                         otherSubnet.NetworkAddress, otherSubnet.Cidr,
                         networkAddress, newCidr);
-                        
+
                     // If there's any overlap, the subnets would conflict
                     if (otherSubnetContainsThis || thisContainsOtherSubnet)
                     {
-                        result.AddError(SUBNET_OVERLAP, 
+                        result.AddError(SUBNET_OVERLAP,
                             $"Expanding to {networkAddress}/{newCidr} would conflict with existing subnet: " +
                             $"{otherSubnet.Name} ({otherSubnet.NetworkAddress}/{otherSubnet.Cidr})");
                     }
@@ -341,14 +342,14 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
                         child.NetworkAddress, child.Cidr,
                         networkAddress, newCidr))
                     {
-                        result.AddError(CHILD_SUBNET_OUTSIDE_RANGE, 
+                        result.AddError(CHILD_SUBNET_OUTSIDE_RANGE,
                             $"Child subnet {child.Name} ({child.NetworkAddress}/{child.Cidr}) would no longer " +
                             $"fit within this subnet if CIDR is increased to /{newCidr}");
                     }
                 }
             }
         }
-        
+
         return result;
     }
 }

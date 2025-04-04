@@ -8,7 +8,7 @@ namespace Bastet.Tests.Validation;
 public class SubnetOperationTests
 {
     private readonly IIpUtilityService _ipUtilityService;
-    private readonly ISubnetValidationService _validationService;
+    private readonly SubnetValidationService _validationService;
 
     public SubnetOperationTests()
     {
@@ -22,7 +22,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_ValidData_ReturnsValid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "Test Subnet",
             NetworkAddress = "192.168.1.0",
@@ -31,7 +31,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto);
 
         // Assert
         Assert.True(result.IsValid);
@@ -42,7 +42,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_MissingName_ReturnsInvalid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "", // Missing name
             NetworkAddress = "192.168.1.0",
@@ -50,7 +50,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto);
 
         // Assert
         Assert.False(result.IsValid);
@@ -61,7 +61,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_MissingNetworkAddress_ReturnsInvalid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "Test Subnet",
             NetworkAddress = "", // Missing network address
@@ -69,7 +69,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto);
 
         // Assert
         Assert.False(result.IsValid);
@@ -80,7 +80,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_InvalidNetworkFormat_ReturnsInvalid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "Test Subnet",
             NetworkAddress = "invalid-ip",
@@ -88,7 +88,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto);
 
         // Assert
         Assert.False(result.IsValid);
@@ -99,7 +99,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_ValidChildInParent_ReturnsValid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "Child Subnet",
             NetworkAddress = "10.0.0.0",
@@ -107,7 +107,7 @@ public class SubnetOperationTests
             ParentSubnetId = 1
         };
 
-        var parentSubnet = new Subnet
+        Subnet parentSubnet = new()
         {
             Id = 1,
             Name = "Parent Subnet",
@@ -116,7 +116,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet);
 
         // Assert
         Assert.True(result.IsValid);
@@ -127,7 +127,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_ChildOutsideParent_ReturnsInvalid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "Child Subnet",
             NetworkAddress = "192.168.1.0",
@@ -135,7 +135,7 @@ public class SubnetOperationTests
             ParentSubnetId = 1
         };
 
-        var parentSubnet = new Subnet
+        Subnet parentSubnet = new()
         {
             Id = 1,
             Name = "Parent Subnet",
@@ -144,7 +144,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet);
 
         // Assert
         Assert.False(result.IsValid);
@@ -155,7 +155,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_ChildCidrSmallerThanParent_ReturnsInvalid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "Child Subnet",
             NetworkAddress = "10.0.0.0",
@@ -163,7 +163,7 @@ public class SubnetOperationTests
             ParentSubnetId = 1
         };
 
-        var parentSubnet = new Subnet
+        Subnet parentSubnet = new()
         {
             Id = 1,
             Name = "Parent Subnet",
@@ -172,7 +172,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet);
 
         // Assert
         Assert.False(result.IsValid);
@@ -183,7 +183,7 @@ public class SubnetOperationTests
     public void ValidateNewSubnet_OverlapsWithSibling_ReturnsInvalid()
     {
         // Arrange
-        var subnetDto = new CreateSubnetDto
+        CreateSubnetDto subnetDto = new()
         {
             Name = "New Subnet",
             NetworkAddress = "10.0.0.0",
@@ -191,7 +191,7 @@ public class SubnetOperationTests
             ParentSubnetId = 1
         };
 
-        var parentSubnet = new Subnet
+        Subnet parentSubnet = new()
         {
             Id = 1,
             Name = "Parent Subnet",
@@ -199,13 +199,13 @@ public class SubnetOperationTests
             Cidr = 16
         };
 
-        var siblings = new List<Subnet>
-        {
+        List<Subnet> siblings =
+        [
             new() { Id = 2, Name = "Existing Sibling", NetworkAddress = "10.0.0.0", Cidr = 24 }
-        };
+        ];
 
         // Act
-        var result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet, siblings);
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet, siblings);
 
         // Assert
         Assert.False(result.IsValid);
@@ -218,17 +218,17 @@ public class SubnetOperationTests
     public void ValidateSubnetDeletion_NoChildren_ReturnsValid()
     {
         // Arrange
-        var subnet = new Subnet
+        Subnet subnet = new()
         {
             Id = 1,
             Name = "Test Subnet",
             NetworkAddress = "192.168.1.0",
             Cidr = 24,
-            ChildSubnets = new List<Subnet>() // Empty list, no children
+            ChildSubnets = [] // Empty list, no children
         };
 
         // Act
-        var result = _validationService.ValidateSubnetDeletion(subnet);
+        ValidationResult result = _validationService.ValidateSubnetDeletion(subnet);
 
         // Assert
         Assert.True(result.IsValid);
@@ -239,7 +239,7 @@ public class SubnetOperationTests
     public void ValidateSubnetDeletion_WithChildren_ReturnsInvalid()
     {
         // Arrange
-        var childSubnet = new Subnet
+        Subnet childSubnet = new()
         {
             Id = 2,
             Name = "Child Subnet",
@@ -248,17 +248,17 @@ public class SubnetOperationTests
             ParentSubnetId = 1
         };
 
-        var subnet = new Subnet
+        Subnet subnet = new()
         {
             Id = 1,
             Name = "Parent Subnet",
             NetworkAddress = "192.168.1.0",
             Cidr = 24,
-            ChildSubnets = new List<Subnet> { childSubnet }
+            ChildSubnets = [childSubnet]
         };
 
         // Act
-        var result = _validationService.ValidateSubnetDeletion(subnet);
+        ValidationResult result = _validationService.ValidateSubnetDeletion(subnet);
 
         // Assert
         Assert.False(result.IsValid);
@@ -271,7 +271,7 @@ public class SubnetOperationTests
     public void ValidateSubnetUpdate_ValidData_ReturnsValid()
     {
         // Arrange
-        var subnet = new Subnet
+        Subnet subnet = new()
         {
             Id = 1,
             Name = "Original Name",
@@ -280,7 +280,7 @@ public class SubnetOperationTests
             Description = "Original description"
         };
 
-        var updateDto = new UpdateSubnetDto
+        UpdateSubnetDto updateDto = new()
         {
             Name = "Updated Name",
             Tags = "new-tag",
@@ -288,7 +288,7 @@ public class SubnetOperationTests
         };
 
         // Act
-        var result = _validationService.ValidateSubnetUpdate(subnet, updateDto);
+        ValidationResult result = _validationService.ValidateSubnetUpdate(subnet, updateDto);
 
         // Assert
         Assert.True(result.IsValid);
@@ -299,7 +299,7 @@ public class SubnetOperationTests
     public void ValidateSubnetUpdate_MissingName_ReturnsInvalid()
     {
         // Arrange
-        var subnet = new Subnet
+        Subnet subnet = new()
         {
             Id = 1,
             Name = "Original Name",
@@ -307,14 +307,14 @@ public class SubnetOperationTests
             Cidr = 24
         };
 
-        var updateDto = new UpdateSubnetDto
+        UpdateSubnetDto updateDto = new()
         {
             Name = "", // Missing name
             Description = "Updated description"
         };
 
         // Act
-        var result = _validationService.ValidateSubnetUpdate(subnet, updateDto);
+        ValidationResult result = _validationService.ValidateSubnetUpdate(subnet, updateDto);
 
         // Assert
         Assert.False(result.IsValid);

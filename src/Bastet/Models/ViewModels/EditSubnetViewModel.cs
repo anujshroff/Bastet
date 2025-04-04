@@ -25,7 +25,7 @@ public class EditSubnetViewModel
     [Range(0, 32, ErrorMessage = "CIDR must be between 0 and 32")]
     [Display(Name = "CIDR")]
     public int Cidr { get; set; }
-    
+
     /// <summary>
     /// The original CIDR value (for validation purposes)
     /// </summary>
