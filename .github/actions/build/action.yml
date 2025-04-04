@@ -38,7 +38,7 @@ runs:
     - name: Docker Build
       run: |
           echo "${{ inputs.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker build ./publish --file Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.VERSION }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}
+          docker build ./publish --file ./src/Bastet/Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.VERSION }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}
           docker push -a ghcr.io/${{ github.repository_owner }}/bastet
       shell: bash
 

@@ -18,10 +18,4 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.3" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Update="Dockerfile">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
 </Project>
