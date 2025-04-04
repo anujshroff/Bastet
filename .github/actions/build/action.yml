@@ -26,9 +26,13 @@ runs:
       run: dotnet build --configuration ${{ inputs.CONFIGURATION }} /p:Version=${{ steps.nextversion.outputs.VERSION }} /p:AssemblyVersion=${{ steps.nextversion.outputs.ASSEMBLYSEMVER }}
       shell: bash
 
+    - name: Test
+      run: dotnet test --configuration ${{ inputs.CONFIGURATION }}
+      shell: bash
+
     - name: Publish
       run: |
-        dotnet publish Bastet.csproj --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
+        dotnet publish /src/Bastet/Bastet.csproj --configuration ${{ inputs.CONFIGURATION }} --no-build --output ./publish
       shell: bash
 
     - name: Docker Build

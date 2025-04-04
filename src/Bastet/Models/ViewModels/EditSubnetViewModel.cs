@@ -19,10 +19,17 @@ public class EditSubnetViewModel
     public string NetworkAddress { get; set; } = string.Empty;
 
     /// <summary>
-    /// The CIDR notation (display only)
+    /// The CIDR notation (editable)
     /// </summary>
+    [Required(ErrorMessage = "CIDR is required")]
+    [Range(0, 32, ErrorMessage = "CIDR must be between 0 and 32")]
     [Display(Name = "CIDR")]
     public int Cidr { get; set; }
+
+    /// <summary>
+    /// The original CIDR value (for validation purposes)
+    /// </summary>
+    public int OriginalCidr { get; set; }
 
     // Editable properties
 

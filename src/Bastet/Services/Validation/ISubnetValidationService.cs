@@ -52,4 +52,25 @@ public interface ISubnetValidationService
     /// <param name="cidr">The CIDR value</param>
     /// <param name="siblings">The sibling subnets</param>
     ValidationResult ValidateSiblingOverlap(string networkAddress, int cidr, IEnumerable<Subnet> siblings);
+
+    /// <summary>
+    /// Validates a change in subnet CIDR
+    /// </summary>
+    /// <param name="subnetId">The ID of the subnet being modified</param>
+    /// <param name="networkAddress">The subnet's network address</param>
+    /// <param name="originalCidr">The original CIDR value</param>
+    /// <param name="newCidr">The new CIDR value</param>
+    /// <param name="parentSubnet">The parent subnet, if any</param>
+    /// <param name="siblings">Sibling subnets, if any</param>
+    /// <param name="children">Child subnets, if any</param>
+    /// <param name="allOtherSubnets">All other subnets in the system, for comprehensive overlap validation</param>
+    ValidationResult ValidateSubnetCidrChange(
+        int subnetId,
+        string networkAddress,
+        int originalCidr,
+        int newCidr,
+        Subnet? parentSubnet = null,
+        IEnumerable<Subnet>? siblings = null,
+        IEnumerable<Subnet>? children = null,
+        IEnumerable<Subnet>? allOtherSubnets = null);
 }
