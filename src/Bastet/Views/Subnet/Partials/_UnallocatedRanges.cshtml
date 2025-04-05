@@ -1,0 +1,48 @@
+@model SubnetDetailsViewModel
+
+@* Unallocated IP Ranges partial view *@
+@if (Model.UnallocatedRanges.Any())
+{
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Unallocated IP Ranges</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Start Address</th>
+                            <th>End Address</th>
+                            <th>Size</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var range in Model.UnallocatedRanges)
+                        {
+                            <tr>
+                                <td><code>@range.StartIp</code></td>
+                                <td><code>@range.EndIp</code></td>
+                                <td>@range.AddressCount.ToString("N0") IP addresses</td>
+                                <td>
+                                    @inject Bastet.Services.IUserContextService SubnetUserContext
+                                    @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
+                                    {
+                                        <button type="button" class="btn btn-sm btn-success create-subnet-btn" 
+                                                data-network="@range.StartIp" 
+                                                data-parent-id="@Model.Id"
+                                                data-ip-version="4"
+                                                data-parent-cidr="@Model.Cidr">
+                                            <i class="bi bi-plus-circle"></i> Create Subnet
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}

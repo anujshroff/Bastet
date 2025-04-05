@@ -1,0 +1,38 @@
+@model SubnetDetailsViewModel
+
+@* Child Subnets partial view *@
+@if (Model.ChildSubnets.Any())
+{
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Child Subnets</h5>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Network Address</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var child in Model.ChildSubnets)
+                        {
+                            <tr>
+                                <td>@child.Name</td>
+                                <td><code>@child.NetworkAddress/@child.Cidr</code></td>
+                                <td>
+                                    <a asp-action="Details" asp-route-id="@child.Id" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-info-circle"></i> Details
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
