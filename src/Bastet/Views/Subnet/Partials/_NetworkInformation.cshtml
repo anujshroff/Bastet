@@ -1,0 +1,28 @@
+@model SubnetDetailsViewModel
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Network Information</h5>
+    </div>
+    <div class="card-body">
+        <dl class="row">
+            <dt class="col-sm-4">Network Address</dt>
+            <dd class="col-sm-8">@Model.NetworkAddress</dd>
+            
+            <dt class="col-sm-4">CIDR Notation</dt>
+            <dd class="col-sm-8">/@Model.Cidr</dd>
+            
+            <dt class="col-sm-4">Subnet Mask</dt>
+            <dd class="col-sm-8">@Model.SubnetMask</dd>
+            
+            <dt class="col-sm-4">Broadcast Address</dt>
+            <dd class="col-sm-8">@Model.BroadcastAddress</dd>
+            
+            <dt class="col-sm-4">Total IP Addresses</dt>
+            <dd class="col-sm-8">@Model.TotalIpAddresses.ToString("N0")</dd>
+            
+            <dt class="col-sm-4">Usable IP Addresses</dt>
+            <dd class="col-sm-8">@Model.UsableIpAddresses.ToString("N0")</dd>
+        </dl>
+    </div>
+</div>

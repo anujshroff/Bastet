@@ -1,0 +1,16 @@
+@model SubnetDetailsViewModel
+
+@* Parent Subnet partial view *@
+@if (Model.ParentSubnetId.HasValue)
+{
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Parent Subnet</h5>
+        </div>
+        <div class="card-body">
+            <a asp-action="Details" asp-route-id="@Model.ParentSubnetId" class="d-block mb-2">
+                <strong>@Model.ParentSubnetName</strong> (@Model.ParentNetworkAddress)
+            </a>
+        </div>
+    </div>
+}
