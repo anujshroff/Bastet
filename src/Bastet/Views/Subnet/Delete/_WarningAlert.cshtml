@@ -1,0 +1,13 @@
+@model DeleteSubnetViewModel
+
+<div class="alert alert-danger">
+    <h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill me-2"></i>Warning!</h4>
+    <p>
+        You are about to delete subnet <strong>@Model.Name (@Model.NetworkAddress/@Model.Cidr)</strong>.
+        @if (Model.ChildSubnetCount > 0)
+        {
+            <span class="fw-bold">This will also delete @Model.ChildSubnetCount child subnet(s)!</span>
+        }
+    </p>
+    <p>This action cannot be undone. All deleted subnets will be moved to an archive table.</p>
+</div>

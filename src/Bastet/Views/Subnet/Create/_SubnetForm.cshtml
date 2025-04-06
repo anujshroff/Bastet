@@ -1,0 +1,64 @@
+@model CreateSubnetViewModel
+
+<div class="card">
+    <div class="card-body">
+        <form asp-action="Create" method="post">
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+            
+            <div class="mb-3">
+                <label asp-for="Name" class="form-label"></label>
+                <input asp-for="Name" class="form-control" />
+                <span asp-validation-for="Name" class="text-danger"></span>
+            </div>
+            
+            <div class="mb-3">
+                <label asp-for="NetworkAddress" class="form-label"></label>
+                <input asp-for="NetworkAddress" class="form-control" id="networkAddressInput" />
+                <div class="form-text" id="networkAddressHelp">Enter the network address (e.g. 192.168.1.0)</div>
+                <span asp-validation-for="NetworkAddress" class="text-danger"></span>
+            </div>
+            
+            <div class="mb-3">
+                <label asp-for="Cidr" class="form-label"></label>
+                <input asp-for="Cidr" class="form-control" min="0" max="32" type="number" id="cidrInput" />
+                <div class="form-text">
+                    <span id="cidrRangeText">CIDR values: 0-32</span>
+                    <span class="ms-3">Subnet mask: <span id="subnetMaskDisplay">@Model.CalculatedSubnetMask</span></span>
+                </div>
+                <span asp-validation-for="Cidr" class="text-danger"></span>
+            </div>
+            
+            <div class="mb-3">
+                <label asp-for="ParentSubnetId" class="form-label"></label>
+                <select asp-for="ParentSubnetId" class="form-select">
+                    <option value="">-- None (Root Subnet) --</option>
+                    @foreach (var subnet in Model.ParentSubnetOptions)
+                    {
+                        <option value="@subnet.Id">@subnet.Name (@subnet.NetworkAddress/@subnet.Cidr)</option>
+                    }
+                </select>
+                <div class="form-text">Optional: Select a parent subnet for this network</div>
+                <span asp-validation-for="ParentSubnetId" class="text-danger"></span>
+            </div>
+            
+            
+            <div class="mb-3">
+                <label asp-for="Description" class="form-label"></label>
+                <textarea asp-for="Description" class="form-control" rows="3"></textarea>
+                <span asp-validation-for="Description" class="text-danger"></span>
+            </div>
+            
+            <div class="mb-3">
+                <label asp-for="Tags" class="form-label"></label>
+                <input asp-for="Tags" class="form-control" placeholder="e.g. production, dmz, vpc-1" />
+                <div class="form-text">Comma-separated list of tags</div>
+                <span asp-validation-for="Tags" class="text-danger"></span>
+            </div>
+            
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">Create Subnet</button>
+                <a asp-action="Index" class="btn btn-outline-secondary ms-2">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>

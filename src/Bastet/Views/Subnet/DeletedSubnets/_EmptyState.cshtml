@@ -1,0 +1,8 @@
+@model DeletedSubnetListViewModel
+
+@if (Model.TotalCount == 0)
+{
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> No deleted subnets found in the archive.
+    </div>
+}

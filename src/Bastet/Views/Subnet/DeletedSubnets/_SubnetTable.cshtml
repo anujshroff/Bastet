@@ -1,0 +1,47 @@
+@model DeletedSubnetListViewModel
+
+@if (Model.TotalCount > 0)
+{
+    <div class="card">
+        <div class="card-header bg-secondary text-white">
+            <h5 class="mb-0">Deleted Subnet Records</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover mb-0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>Name</th>
+                            <th>Network Address</th>
+                            <th>Description</th>
+                            <th>Deleted</th>
+                            <th>Deleted By</th>
+                            <th>Created</th>
+                            <th>Created By</th>
+                            <th>Last Modified</th>
+                            <th>Modified By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var subnet in Model.DeletedSubnets)
+                        {
+                            <tr>
+                                <td>@subnet.Name</td>
+                                <td><code>@subnet.NetworkAddress/@subnet.Cidr</code></td>
+                                <td>@(string.IsNullOrEmpty(subnet.Description) ? "-" : subnet.Description)</td>
+                                <td title="@subnet.DeletedAt.ToString("F")">@subnet.DeletedAt.ToString("g")</td>
+                                <td>@(string.IsNullOrEmpty(subnet.DeletedBy) ? "Unknown" : subnet.DeletedBy)</td>
+                                <td title="@subnet.CreatedAt.ToString("F")">@subnet.CreatedAt.ToString("g")</td>
+                                <td>@(string.IsNullOrEmpty(subnet.CreatedBy) ? "Unknown" : subnet.CreatedBy)</td>
+                                <td title="@(subnet.LastModifiedAt?.ToString("F") ?? "Never")">
+                                    @(subnet.LastModifiedAt?.ToString("g") ?? "Never")
+                                </td>
+                                <td>@(string.IsNullOrEmpty(subnet.ModifiedBy) ? "N/A" : subnet.ModifiedBy)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}

@@ -1,0 +1,56 @@
+<script>
+    // Function to update subnet mask display when CIDR changes
+    function updateSubnetMask() {
+        const cidrValue = parseInt($('#cidrInput').val(), 10);
+        
+        if (!isNaN(cidrValue) && cidrValue >= 0 && cidrValue <= 32) {
+            // Do AJAX call to get the subnet mask
+            $.get(`/api/subnets/calculate-mask?cidr=${cidrValue}`, function(data) {
+                $('#subnetMaskDisplay').text(data.subnetMask);
+            }).fail(function() {
+                // Fallback calculation for IPv4 CIDRs
+                let mask = '';
+                switch(cidrValue) {
+                    case 8: mask = '255.0.0.0'; break;
+                    case 16: mask = '255.255.0.0'; break;
+                    case 24: mask = '255.255.255.0'; break;
+                    case 28: mask = '255.255.255.240'; break;
+                    case 30: mask = '255.255.255.252'; break;
+                    case 32: mask = '255.255.255.255'; break;
+                    default: mask = 'calculating...'; break;
+                }
+                $('#subnetMaskDisplay').text(mask);
+            });
+        } else {
+            $('#subnetMaskDisplay').text('Invalid CIDR');
+        }
+    }
+    
+    // Initialize form settings
+    function initializeForm() {
+        const cidrInput = $('#cidrInput');
+        
+        // Set CIDR max value
+        cidrInput.attr('max', '32');
+        
+        // Set help text
+        $('#cidrRangeText').text('CIDR values: 0-32');
+        $('#networkAddressHelp').text('Enter the network address (e.g. 192.168.1.0)');
+        $('#networkAddressInput').attr('placeholder', '192.168.1.0');
+        
+        // Update subnet mask display if a value exists
+        if (cidrInput.val() !== '') {
+            updateSubnetMask();
+        } else {
+            $('#subnetMaskDisplay').text('');
+        }
+    }
+
+    // Attach event handlers
+    $(document).ready(function() {
+        $('#cidrInput').on('input', updateSubnetMask);
+        
+        // Initialize form settings
+        initializeForm();
+    });
+</script>

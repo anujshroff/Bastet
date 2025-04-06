@@ -1,0 +1,26 @@
+@model DeleteSubnetViewModel
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0">Subnet to Delete</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-4">Name</dt>
+                    <dd class="col-sm-8">@Model.Name</dd>
+                    
+                    <dt class="col-sm-4">Network Address</dt>
+                    <dd class="col-sm-8">@Model.NetworkAddress/@Model.Cidr</dd>
+                    
+                    <dt class="col-sm-4">Description</dt>
+                    <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.Description) ? "N/A" : Model.Description)</dd>
+                    
+                    <dt class="col-sm-4">Child Subnets</dt>
+                    <dd class="col-sm-8">@Model.ChildSubnetCount</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>

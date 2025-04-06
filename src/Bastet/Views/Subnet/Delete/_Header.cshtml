@@ -1,0 +1,11 @@
+@model DeleteSubnetViewModel
+
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>Delete Subnet</h1>
+        <div>
+            <a asp-action="Details" asp-route-id="@Model.Id" class="btn btn-outline-secondary">Back to Details</a>
+        </div>
+    </div>
+    <h3 class="text-danger">Are you sure you want to delete this subnet?</h3>
+</div>
