@@ -1,0 +1,33 @@
+@model EditHostIpViewModel
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Subnet Information</h5>
+    </div>
+    <div class="card-body">
+        <dl class="row">
+            <dt class="col-sm-4">Subnet</dt>
+            <dd class="col-sm-8">@Model.SubnetInfo</dd>
+            
+            <dt class="col-sm-4">Created</dt>
+            <dd class="col-sm-8">@Model.CreatedAt.ToString("g")</dd>
+            
+            <dt class="col-sm-4">Last Modified</dt>
+            <dd class="col-sm-8">@(Model.LastModifiedAt.HasValue ? Model.LastModifiedAt.Value.ToString("g") : "Never")</dd>
+        </dl>
+        
+        <div class="alert alert-info mt-3">
+            <small>
+                <i class="bi bi-info-circle me-1"></i>
+                Host IP addresses cannot be changed. If you need a different IP, delete this one and create a new host IP assignment.
+            </small>
+        </div>
+        
+        <div class="alert alert-warning mt-3">
+            <small>
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                Concurrent edits to this host IP by other users will be detected. If another user has modified this record, you'll need to reload and try again.
+            </small>
+        </div>
+    </div>
+</div>

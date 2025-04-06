@@ -107,7 +107,7 @@
                         </button>
                     </form>
                 }
-                else if (Model.CanAddChildSubnet && Model.HostIpAssignments.Count == 0)
+                else if (Model.CanAddChildSubnet && Model.HostIpAssignments.Count == 0 && Model.ChildSubnets.Count == 0)
                 {
                     <form asp-controller="HostIp" asp-action="SetAllocationStatus" method="post">
                         <input type="hidden" name="SubnetId" value="@Model.Id" />

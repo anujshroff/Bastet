@@ -1,0 +1,25 @@
+@model DeleteHostIpViewModel
+
+<div class="card mb-4">
+    <div class="card-header bg-danger text-white">
+        <h5 class="mb-0">Host IP to Delete</h5>
+    </div>
+    <div class="card-body">
+        <dl class="row">
+            <dt class="col-sm-4">IP Address</dt>
+            <dd class="col-sm-8"><code>@Model.IP</code></dd>
+            
+            <dt class="col-sm-4">Name</dt>
+            <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.Name) ? "N/A" : Model.Name)</dd>
+            
+            <dt class="col-sm-4">Subnet</dt>
+            <dd class="col-sm-8">@Model.SubnetInfo</dd>
+            
+            <dt class="col-sm-4">Created</dt>
+            <dd class="col-sm-8">@Model.CreatedAt.ToString("g")</dd>
+            
+            <dt class="col-sm-4">Created By</dt>
+            <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.CreatedBy) ? "Unknown" : Model.CreatedBy)</dd>
+        </dl>
+    </div>
+</div>
