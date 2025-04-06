@@ -1,0 +1,20 @@
+@model DeleteHostIpViewModel
+
+@{
+    ViewData["Title"] = "Delete Host IP";
+}
+
+<partial name="Delete/_Header" model="Model" />
+<partial name="Delete/_WarningAlert" model="Model" />
+
+<div class="row">
+    <div class="col-md-6">
+        <partial name="Delete/_HostIpToDelete" model="Model" />
+    </div>
+</div>
+
+<partial name="Delete/_DeleteConfirmationForm" model="Model" />
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

@@ -289,7 +289,13 @@ public class IpUtilityService : IIpUtilityService
     /// <summary>
     /// Calculates unallocated IP ranges within a subnet, taking into account child subnets
     /// </summary>
-    public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets)
+    public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets) =>
+        CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, []);
+
+    /// <summary>
+    /// Calculates unallocated IP ranges within a subnet, taking into account child subnets and host IP assignments
+    /// </summary>
+    public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets, IEnumerable<HostIpAssignment> hostIpAssignments)
     {
         if (string.IsNullOrEmpty(networkAddress))
         {
@@ -325,12 +331,30 @@ public class IpUtilityService : IIpUtilityService
             .ThenBy(s => IPAddress.Parse(s.NetworkAddress).GetAddressBytes()[2])
             .ThenBy(s => IPAddress.Parse(s.NetworkAddress).GetAddressBytes()[3])];
 
-        if (validChildren.Count == 0)
+        // Get all Host IP assignments that are within this subnet
+        List<(uint IpAddress, string IpString)> validHostIps = [];
+
+        if (hostIpAssignments != null && hostIpAssignments.Any())
         {
-            // No children, entire subnet is unallocated
-            // For /31 or /32, the entire range is usable according to RFC 3021
+            foreach (HostIpAssignment hostIp in hostIpAssignments)
+            {
+                if (IsIpInSubnet(hostIp.IP, networkAddress, cidr))
+                {
+                    IPAddress ipAddress = IPAddress.Parse(hostIp.IP);
+                    byte[] ipBytes = ipAddress.GetAddressBytes();
+                    uint ipInt = BitConverter.ToUInt32([.. ipBytes.Reverse()], 0);
+                    validHostIps.Add((ipInt, hostIp.IP));
+                }
+            }
+        }
+
+        // If no child subnets and no host IPs
+        if (validChildren.Count == 0 && validHostIps.Count == 0)
+        {
+            // No allocations, entire subnet is unallocated
             if (cidr >= 31)
             {
+                // For /31 or /32, the entire range is usable according to RFC 3021
                 unallocatedRanges.Add(new IPRange
                 {
                     StartIp = UIntToIpString(startIp),
@@ -353,9 +377,10 @@ public class IpUtilityService : IIpUtilityService
             return unallocatedRanges;
         }
 
-        // Sort child subnets by start address
+        // Build a list of all allocated ranges - both child subnets and individual host IPs
         List<(uint Start, uint End)> allocatedRanges = [];
 
+        // Add child subnets to allocated ranges
         foreach (Subnet? child in validChildren)
         {
             byte[] childBytes = IPAddress.Parse(child.NetworkAddress).GetAddressBytes();
@@ -366,16 +391,44 @@ public class IpUtilityService : IIpUtilityService
             allocatedRanges.Add((childStart, childEnd));
         }
 
-        // Sort by start address
+        // Add host IPs to allocated ranges (each as a single-address range)
+        foreach ((uint IpAddress, _) in validHostIps)
+        {
+            allocatedRanges.Add((IpAddress, IpAddress));
+        }
+
+        // Sort all allocated ranges by start address
         allocatedRanges = [.. allocatedRanges.OrderBy(r => r.Start)];
+
+        // Merge overlapping or adjacent allocated ranges
+        List<(uint Start, uint End)> mergedRanges = [];
+        if (allocatedRanges.Count > 0)
+        {
+            (uint Start, uint End) current = allocatedRanges[0];
+            for (int i = 1 ; i < allocatedRanges.Count ; i++)
+            {
+                (uint Start, uint End) next = allocatedRanges[i];
+
+                // If ranges overlap or are adjacent, merge them
+                if (next.Start <= current.End + 1)
+                {
+                    current.End = Math.Max(current.End, next.End);
+                }
+                else
+                {
+                    // No overlap, add current to list and move to next
+                    mergedRanges.Add(current);
+                    current = next;
+                }
+            }
+            // Add the last range
+            mergedRanges.Add(current);
+        }
 
         // Find gaps between allocated ranges
         uint currentPosition = startIp;
 
-        // Don't skip network address to allow proper subnet creation
-        // This ensures the network address is included in the range
-
-        foreach ((uint Start, uint End) in allocatedRanges)
+        foreach ((uint Start, uint End) in mergedRanges)
         {
             if (Start > currentPosition)
             {
@@ -441,6 +494,52 @@ public class IpUtilityService : IIpUtilityService
         }
 
         return unallocatedRanges;
+    }
+
+    /// <summary>
+    /// Checks if an IP address is within a subnet's range
+    /// </summary>
+    public bool IsIpInSubnet(string ip, string networkAddress, int cidr)
+    {
+        if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(networkAddress))
+        {
+            return false;
+        }
+
+        if (cidr is < 0 or > 32)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Parse IP addresses
+            IPAddress ipAddress = IPAddress.Parse(ip);
+            IPAddress networkIpAddress = IPAddress.Parse(networkAddress);
+
+            byte[] ipBytes = ipAddress.GetAddressBytes();
+            byte[] networkBytes = networkIpAddress.GetAddressBytes();
+
+            // Verify both are IPv4
+            if (ipBytes.Length != 4 || networkBytes.Length != 4)
+            {
+                return false;
+            }
+
+            // Convert to UInt32 for bitwise operations
+            uint ipValue = BitConverter.ToUInt32([.. ipBytes.Reverse()], 0);
+            uint networkValue = BitConverter.ToUInt32([.. networkBytes.Reverse()], 0);
+
+            // Create subnet mask
+            uint mask = (cidr == 0) ? 0 : ~((1u << (32 - cidr)) - 1);
+
+            // Check if IP is in subnet (they have the same network portion)
+            return (ipValue & mask) == (networkValue & mask);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     #region Helper Methods

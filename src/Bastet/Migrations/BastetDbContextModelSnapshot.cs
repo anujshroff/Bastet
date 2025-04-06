@@ -22,6 +22,51 @@ namespace Bastet.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Bastet.Models.DeletedHostIpAssignment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("LastModifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ModifiedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("OriginalIP")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("nvarchar(15)");
+
+                    b.Property<int>("OriginalSubnetId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OriginalSubnetId");
+
+                    b.ToTable("DeletedHostIpAssignments");
+                });
+
             modelBuilder.Entity("Bastet.Models.DeletedSubnet", b =>
                 {
                     b.Property<int>("Id")
@@ -80,6 +125,46 @@ namespace Bastet.Migrations
                     b.ToTable("DeletedSubnets");
                 });
 
+            modelBuilder.Entity("Bastet.Models.HostIpAssignment", b =>
+                {
+                    b.Property<string>("IP")
+                        .HasMaxLength(15)
+                        .HasColumnType("nvarchar(15)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("LastModifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ModifiedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SubnetId")
+                        .HasColumnType("int");
+
+                    b.HasKey("IP");
+
+                    b.HasIndex("IP")
+                        .IsUnique();
+
+                    b.HasIndex("SubnetId");
+
+                    b.ToTable("HostIpAssignments");
+                });
+
             modelBuilder.Entity("Bastet.Models.Subnet", b =>
                 {
                     b.Property<int>("Id")
@@ -100,6 +185,9 @@ namespace Bastet.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsFullyAllocated")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime?>("LastModifiedAt")
                         .HasColumnType("datetime2");
@@ -144,6 +232,17 @@ namespace Bastet.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Bastet.Models.HostIpAssignment", b =>
+                {
+                    b.HasOne("Bastet.Models.Subnet", "Subnet")
+                        .WithMany("HostIpAssignments")
+                        .HasForeignKey("SubnetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Subnet");
+                });
+
             modelBuilder.Entity("Bastet.Models.Subnet", b =>
                 {
                     b.HasOne("Bastet.Models.Subnet", "ParentSubnet")
@@ -157,6 +256,8 @@ namespace Bastet.Migrations
             modelBuilder.Entity("Bastet.Models.Subnet", b =>
                 {
                     b.Navigation("ChildSubnets");
+
+                    b.Navigation("HostIpAssignments");
                 });
 #pragma warning restore 612, 618
         }

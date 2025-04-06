@@ -1,0 +1,27 @@
+name: Alpha
+on:
+  push:
+    branches:
+    - main
+  workflow_dispatch:
+
+concurrency: alpha
+
+permissions:
+  packages: write
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/alpha/
+        name: Alpha
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -37,8 +37,36 @@ runs:
 
     - name: Docker Build
       run: |
+          # Login to Docker registry
           echo "${{ inputs.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker build ${{ github.workspace }}/publish --file ${{ github.workspace }}/src/Bastet/Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.VERSION }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}
+          
+          # Get current branch version
+          CURRENT_VERSION="${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }}"
+          echo "Current branch version: $CURRENT_VERSION"
+          
+          # Get all release branches matching the numeric pattern
+          git fetch origin
+          # This grep pattern ensures we only get branches that match release/digits.digits
+          ALL_BRANCHES=$(git branch -r | grep -E "origin/release/[0-9]+\.[0-9]+$" | sed 's/.*release\///' | sort -V)
+          echo "All release branches: $ALL_BRANCHES"
+          
+          # Find highest version
+          HIGHEST_VERSION=$(echo "$ALL_BRANCHES" | tail -n 1)
+          echo "Highest branch version: $HIGHEST_VERSION"
+          
+          # Set up Docker tags
+          DOCKER_TAGS="--tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.VERSION }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}.${{ steps.nextversion.outputs.MINOR }} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${{ steps.nextversion.outputs.MAJOR }}"
+          
+          # Add latest tag if current branch is highest version or greater
+          if [ "$(echo "$CURRENT_VERSION $HIGHEST_VERSION" | tr ' ' '\n' | sort -V | tail -n 1)" = "$CURRENT_VERSION" ]; then
+            echo "This version ($CURRENT_VERSION) is greater than or equal to the highest branch version ($HIGHEST_VERSION). Adding 'latest' tag."
+            DOCKER_TAGS="$DOCKER_TAGS --tag=ghcr.io/${{ github.repository_owner }}/bastet:latest"
+          else
+            echo "Not the highest version release branch. Skipping 'latest' tag."
+          fi
+          
+          # Build and push Docker image
+          docker build ${{ github.workspace }}/publish --file ${{ github.workspace }}/src/Bastet/Dockerfile $DOCKER_TAGS
           docker push -a ghcr.io/${{ github.repository_owner }}/bastet
       shell: bash
 

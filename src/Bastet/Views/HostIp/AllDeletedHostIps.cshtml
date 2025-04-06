@@ -1,0 +1,120 @@
+@model AllDeletedHostIpsViewModel
+
+@{
+    ViewData["Title"] = "All Deleted Host IP Assignments";
+}
+
+<div class="mb-4">
+    <h1>All Deleted Host IP Assignments</h1>
+    <p class="lead">View all deleted host IP assignments across all subnets</p>
+</div>
+
+@if (Model.TotalCount == 0)
+{
+    <div class="alert alert-info">
+        <p class="mb-0">No deleted host IP assignments found in any subnet.</p>
+    </div>
+}
+else
+{
+    <div class="alert alert-secondary mb-4">
+        <p class="mb-0">
+            <i class="bi bi-info-circle me-2"></i>
+            Showing <strong>@(((Model.CurrentPage - 1) * Model.PageSize) + 1)-@Math.Min(Model.CurrentPage * Model.PageSize, Model.TotalCount)</strong> 
+            of <strong>@Model.TotalCount</strong> deleted host IP assignment(s).
+        </p>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-secondary text-white">
+            <h5 class="mb-0">Deleted Host IP Assignments</h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>IP Address</th>
+                            <th>Name</th>
+                            <th>Original Subnet</th>
+                            <th>Deleted</th>
+                            <th>Deleted By</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var hostIp in Model.DeletedHostIps)
+                        {
+                            <tr>
+                                <td><code>@hostIp.OriginalIP</code></td>
+                                <td>@(string.IsNullOrEmpty(hostIp.Name) ? "-" : hostIp.Name)</td>
+                                <td>
+                                    @if (hostIp.SubnetName != "Unknown")
+                                    {
+                                        <text>@hostIp.SubnetName (@hostIp.NetworkAddress/@hostIp.Cidr)</text>
+                                    }
+                                    else
+                                    {
+                                        <text>Unknown (Original Subnet ID: @hostIp.OriginalSubnetId)</text>
+                                    }
+                                </td>
+                                <td>@hostIp.DeletedAt.ToString("g")</td>
+                                <td>@(string.IsNullOrEmpty(hostIp.DeletedBy) ? "-" : hostIp.DeletedBy)</td>
+                                <td>@hostIp.CreatedAt.ToString("g")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer">
+            <nav aria-label="Pagination">
+                <ul class="pagination justify-content-center mb-0">
+                    @if (Model.CurrentPage > 1)
+                    {
+                        <li class="page-item">
+                            <a class="page-link" asp-action="AllDeletedHostIps" asp-route-page="1">First</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" asp-action="AllDeletedHostIps" asp-route-page="@(Model.CurrentPage - 1)">Previous</a>
+                        </li>
+                    }
+                    else
+                    {
+                        <li class="page-item disabled">
+                            <span class="page-link">First</span>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link">Previous</span>
+                        </li>
+                    }
+
+                    @if (Model.CurrentPage < Model.TotalPages)
+                    {
+                        <li class="page-item">
+                            <a class="page-link" asp-action="AllDeletedHostIps" asp-route-page="@(Model.CurrentPage + 1)">Next</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" asp-action="AllDeletedHostIps" asp-route-page="@Model.TotalPages">Last</a>
+                        </li>
+                    }
+                    else
+                    {
+                        <li class="page-item disabled">
+                            <span class="page-link">Next</span>
+                        </li>
+                        <li class="page-item disabled">
+                            <span class="page-link">Last</span>
+                        </li>
+                    }
+                </ul>
+            </nav>
+        </div>
+    </div>
+}
+
+<div class="mt-4">
+    <a asp-controller="Subnet" asp-action="Index" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Subnet Hierarchy
+    </a>
+</div>

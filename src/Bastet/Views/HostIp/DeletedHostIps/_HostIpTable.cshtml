@@ -1,0 +1,34 @@
+@model DeletedHostIpListViewModel
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Deleted Host IPs</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Name</th>
+                        <th>Created</th>
+                        <th>Deleted</th>
+                        <th>Deleted By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var hostIp in Model.DeletedHostIps)
+                    {
+                        <tr>
+                            <td><code>@hostIp.OriginalIP</code></td>
+                            <td>@(string.IsNullOrEmpty(hostIp.Name) ? "-" : hostIp.Name)</td>
+                            <td>@hostIp.CreatedAt.ToString("g")</td>
+                            <td>@hostIp.DeletedAt.ToString("g")</td>
+                            <td>@(string.IsNullOrEmpty(hostIp.DeletedBy) ? "Unknown" : hostIp.DeletedBy)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

@@ -30,8 +30,11 @@ public class SubnetControllerCidrEditTests : IDisposable
         _ipUtilityService = new IpUtilityService();
         _validationService = new SubnetValidationService(_ipUtilityService);
 
+        // Need HostIpValidationService for the updated controller signature
+        HostIpValidationService hostIpValidationService = new(_ipUtilityService, _context);
+
         // Create and configure the controller
-        _controller = new SubnetController(_context, _ipUtilityService, _validationService, _userContextService);
+        _controller = new SubnetController(_context, _ipUtilityService, _validationService, hostIpValidationService, _userContextService);
         ControllerTestHelper.SetupController(_controller);
 
         // Set up test data
@@ -379,7 +382,7 @@ public class SubnetControllerCidrEditTests : IDisposable
     {
         // Arrange - Set ModelState error manually to simulate validation failure
         _controller.ModelState.AddModelError("Cidr", "Decreasing CIDR to /15 would make this subnet too large to fit within its parent subnet (10.0.0.0/16)");
-        
+
         EditSubnetViewModel viewModel = new()
         {
             Id = 4, // Target subnet (10.0.2.0/24)
@@ -405,7 +408,7 @@ public class SubnetControllerCidrEditTests : IDisposable
     {
         // Arrange - Set ModelState error manually to simulate validation failure
         _controller.ModelState.AddModelError("NetworkAddress", "Network address is not valid for the given CIDR. The network address must align with the subnet boundary.");
-        
+
         EditSubnetViewModel viewModel = new()
         {
             Id = 4,
@@ -440,10 +443,10 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
         _context.Subnets.Add(unrelatedOverlapSubnet);
         await _context.SaveChangesAsync();
-        
+
         // Arrange - Set ModelState error manually to simulate validation failure
         _controller.ModelState.AddModelError("Cidr", "Expanding to 10.0.2.0/22 would conflict with existing subnet: Unrelated Subnet (10.0.3.0/24)");
-        
+
         EditSubnetViewModel viewModel = new()
         {
             Id = 4,
@@ -470,12 +473,12 @@ public class SubnetControllerCidrEditTests : IDisposable
     public async Task Edit_POST_IncreaseCidr_ExactlyFitsChildren_ReturnsRedirectToDetails()
     {
         // Arrange - First reconfigure our test data to create a boundary case scenario
-        
+
         // First, remove existing children
         _context.Subnets.Remove(await _context.Subnets.FindAsync(5) ?? throw new Exception("Child 1 not found"));
         _context.Subnets.Remove(await _context.Subnets.FindAsync(6) ?? throw new Exception("Child 2 not found"));
         await _context.SaveChangesAsync();
-        
+
         // Then add children that would exactly fit in a /24 subnet
         Subnet newChild1 = new()
         {
@@ -520,7 +523,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
-        
+
         // Verify the database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
         Assert.NotNull(updatedSubnet);
@@ -534,7 +537,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         _controller.ModelState.AddModelError("Name", "Name is required");
         _controller.ModelState.AddModelError("Cidr", "CIDR must be between 0 and 32");
         _controller.ModelState.AddModelError("Description", "Description cannot exceed 500 characters");
-        
+
         EditSubnetViewModel viewModel = new()
         {
             Id = 4,

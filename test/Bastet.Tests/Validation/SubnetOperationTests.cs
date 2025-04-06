@@ -179,58 +179,58 @@ public class SubnetOperationTests
         Assert.Contains(result.Errors, e => e.Code == "INVALID_CIDR_HIERARCHY");
     }
 
-        [Fact]
-        public void ValidateNewSubnet_OverlapsWithSibling_ReturnsInvalid()
+    [Fact]
+    public void ValidateNewSubnet_OverlapsWithSibling_ReturnsInvalid()
+    {
+        // Arrange
+        CreateSubnetDto subnetDto = new()
         {
-            // Arrange
-            CreateSubnetDto subnetDto = new()
-            {
-                Name = "New Subnet",
-                NetworkAddress = "10.0.0.0",
-                Cidr = 24,
-                ParentSubnetId = 1
-            };
+            Name = "New Subnet",
+            NetworkAddress = "10.0.0.0",
+            Cidr = 24,
+            ParentSubnetId = 1
+        };
 
-            Subnet parentSubnet = new()
-            {
-                Id = 1,
-                Name = "Parent Subnet",
-                NetworkAddress = "10.0.0.0",
-                Cidr = 16
-            };
-
-            List<Subnet> siblings =
-            [
-                new() { Id = 2, Name = "Existing Sibling", NetworkAddress = "10.0.0.0", Cidr = 24 }
-            ];
-
-            // Act
-            ValidationResult result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet, siblings);
-
-            // Assert
-            Assert.False(result.IsValid);
-            Assert.Contains(result.Errors, e => e.Code == "SUBNET_OVERLAP");
-        }
-
-        [Fact]
-        public void ValidateSiblingOverlap_IdenticalSubnet_ReturnsInvalid()
+        Subnet parentSubnet = new()
         {
-            // Arrange
-            string networkAddress = "10.0.0.0";
-            int cidr = 24;
-            
-            List<Subnet> siblings =
-            [
-                new() { Id = 1, Name = "Existing Sibling", NetworkAddress = "10.0.0.0", Cidr = 24 }
-            ];
+            Id = 1,
+            Name = "Parent Subnet",
+            NetworkAddress = "10.0.0.0",
+            Cidr = 16
+        };
 
-            // Act
-            ValidationResult result = _validationService.ValidateSiblingOverlap(networkAddress, cidr, siblings);
+        List<Subnet> siblings =
+        [
+            new() { Id = 2, Name = "Existing Sibling", NetworkAddress = "10.0.0.0", Cidr = 24 }
+        ];
 
-            // Assert
-            Assert.False(result.IsValid);
-            Assert.Contains(result.Errors, e => e.Code == "SUBNET_OVERLAP");
-        }
+        // Act
+        ValidationResult result = _validationService.ValidateNewSubnet(subnetDto, parentSubnet, siblings);
+
+        // Assert
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Code == "SUBNET_OVERLAP");
+    }
+
+    [Fact]
+    public void ValidateSiblingOverlap_IdenticalSubnet_ReturnsInvalid()
+    {
+        // Arrange
+        string networkAddress = "10.0.0.0";
+        int cidr = 24;
+
+        List<Subnet> siblings =
+        [
+            new() { Id = 1, Name = "Existing Sibling", NetworkAddress = "10.0.0.0", Cidr = 24 }
+        ];
+
+        // Act
+        ValidationResult result = _validationService.ValidateSiblingOverlap(networkAddress, cidr, siblings);
+
+        // Assert
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Code == "SUBNET_OVERLAP");
+    }
 
     // Deletion tests
 

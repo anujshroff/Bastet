@@ -1,0 +1,31 @@
+@model dynamic
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Subnet Information</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <tbody>
+                    <tr>
+                        <th style="width: 30%">Name</th>
+                        <td>@Model.SubnetName</td>
+                    </tr>
+                    <tr>
+                        <th>Network Address</th>
+                        <td><code>@Model.NetworkAddress/@Model.Cidr</code></td>
+                    </tr>
+                    <tr>
+                        <th>Actions</th>
+                        <td>
+                            <a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-info-circle"></i> View Subnet Details
+                            </a>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

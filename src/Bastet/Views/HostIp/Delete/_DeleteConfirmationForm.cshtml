@@ -1,0 +1,32 @@
+@model DeleteHostIpViewModel
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Confirm Deletion</h5>
+    </div>
+    <div class="card-body">
+        <form asp-action="Delete" method="post">
+            <input type="hidden" name="ip" value="@Model.IP" />
+            
+            <div class="mb-3">
+                <div class="form-text mb-2">This action cannot be undone. Type <strong>delete</strong> to confirm.</div>
+                <input type="text" name="confirmation" class="form-control" placeholder="Type 'delete' here" 
+                       required autocomplete="off" />
+            </div>
+            
+            <div class="d-flex justify-content-between mt-4">
+                <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId" 
+                   class="btn btn-secondary">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </a>
+                @inject Bastet.Services.IUserContextService DeleteFormUserContext
+                @if (DeleteFormUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Delete))
+                {
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash"></i> Delete Host IP
+                    </button>
+                }
+            </div>
+        </form>
+    </div>
+</div>

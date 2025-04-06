@@ -50,6 +50,7 @@ public class SubnetTreeViewModel : SubnetViewModel
     public long TotalIpAddresses { get; set; }
     public long UsableIpAddresses { get; set; }
     public int? ParentSubnetId { get; set; }
+    public bool IsFullyAllocated { get; set; }
     public List<SubnetTreeViewModel> ChildSubnets { get; set; } = [];
 }
 
@@ -75,6 +76,15 @@ public class SubnetDetailsViewModel
 
     // Child subnets
     public List<SubnetViewModel> ChildSubnets { get; set; } = [];
+
+    // Host IP assignments
+    public List<HostIpViewModel> HostIpAssignments { get; set; } = [];
+    public bool IsFullyAllocated { get; set; }
+
+    // Helper properties for UI logic
+    public int HostIpCount => HostIpAssignments.Count;
+    public bool CanAddHostIp => ChildSubnets.Count == 0 && !IsFullyAllocated;
+    public bool CanAddChildSubnet => HostIpAssignments.Count == 0 && !IsFullyAllocated;
 
     // Unallocated ranges
     public List<IPRange> UnallocatedRanges { get; set; } = [];

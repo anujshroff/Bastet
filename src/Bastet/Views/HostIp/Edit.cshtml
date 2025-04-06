@@ -1,0 +1,21 @@
+@model EditHostIpViewModel
+
+@{
+    ViewData["Title"] = "Edit Host IP";
+}
+
+<partial name="Edit/_Header" model="Model" />
+
+<div class="row">
+    <div class="col-md-8">
+        <partial name="Edit/_EditForm" model="Model" />
+    </div>
+    
+    <div class="col-md-4">
+        <partial name="Edit/_SubnetInfo" model="Model" />
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

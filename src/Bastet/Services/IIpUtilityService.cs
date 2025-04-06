@@ -38,6 +38,11 @@ public interface IIpUtilityService
     bool IsSubnetContainedInParent(string childNetwork, int childCidr, string parentNetwork, int parentCidr);
 
     /// <summary>
+    /// Checks if an IP address is within a subnet's range
+    /// </summary>
+    bool IsIpInSubnet(string ip, string networkAddress, int cidr);
+
+    /// <summary>
     /// Calculates possible subnets when dividing a network with a specific CIDR into smaller subnets
     /// </summary>
     IEnumerable<SubnetCalculation> CalculatePossibleSubnets(string networkAddress, int currentCidr, int targetCidr);
@@ -46,4 +51,9 @@ public interface IIpUtilityService
     /// Calculates unallocated IP ranges within a subnet, taking into account child subnets
     /// </summary>
     IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets);
+
+    /// <summary>
+    /// Calculates unallocated IP ranges within a subnet, taking into account child subnets and host IP assignments
+    /// </summary>
+    IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets, IEnumerable<HostIpAssignment> hostIpAssignments);
 }

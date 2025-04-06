@@ -1,0 +1,14 @@
+@model EditHostIpViewModel
+
+<div class="mb-4">
+    <h1>Edit Host IP</h1>
+    <p class="lead">Update information for host IP <code>@Model.IP</code></p>
+</div>
+
+@if (!ViewData.ModelState.IsValid && ViewData.ModelState.ErrorCount > 0)
+{
+    <div class="alert alert-danger mb-4">
+        <h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill me-2"></i>Error</h4>
+        <div asp-validation-summary="ModelOnly" class="mb-0"></div>
+    </div>
+}

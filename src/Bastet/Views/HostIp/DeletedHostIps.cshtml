@@ -1,0 +1,33 @@
+@model DeletedHostIpListViewModel
+
+@{
+    ViewData["Title"] = "Deleted Host IPs";
+}
+
+<partial name="DeletedHostIps/_Header" model="Model" />
+
+@if (Model.TotalCount == 0)
+{
+    <partial name="DeletedHostIps/_EmptyState" model="Model" />
+}
+else
+{
+    <partial name="DeletedHostIps/_CountInfo" model="Model" />
+    <partial name="DeletedHostIps/_HostIpTable" model="Model" />
+}
+
+<div class="mt-4">
+    @inject Bastet.Services.IUserContextService DeletedHostIpsUserContext
+    @if (DeletedHostIpsUserContext.UserHasRole(Bastet.Models.ApplicationRoles.View))
+    {
+        <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Host IPs
+        </a>
+    }
+    else
+    {
+        <a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Subnet
+        </a>
+    }
+</div>

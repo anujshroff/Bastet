@@ -28,7 +28,7 @@ public static class ControllerTestHelper
         TempDataDictionary tempData = new(
             controller.ControllerContext.HttpContext,
             Mock.Of<ITempDataProvider>());
-        
+
         controller.TempData = tempData;
 
         return controller;

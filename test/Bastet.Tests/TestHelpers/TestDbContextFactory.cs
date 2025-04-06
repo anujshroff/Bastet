@@ -18,19 +18,19 @@ public static class TestDbContextFactory
     {
         // Create a unique name for the in-memory database
         string dbName = $"BastetTestDb_{Guid.NewGuid()}";
-        
+
         // Set up the service collection
         ServiceCollection services = new();
-        
+
         // Add an in-memory database with transaction warnings suppressed
-        services.AddDbContext<BastetDbContext>(options => 
+        services.AddDbContext<BastetDbContext>(options =>
             options.UseInMemoryDatabase(dbName)
-                   .ConfigureWarnings(warnings => 
+                   .ConfigureWarnings(warnings =>
                        warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning)));
-        
+
         // Build the service provider
         ServiceProvider serviceProvider = services.BuildServiceProvider();
-        
+
         // Get the context from the service provider
         return serviceProvider.GetRequiredService<BastetDbContext>();
     }

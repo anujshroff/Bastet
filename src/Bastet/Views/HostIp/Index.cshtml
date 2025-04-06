@@ -1,0 +1,53 @@
+@model List<HostIpViewModel>
+@{
+    ViewData["Title"] = "Host IP Assignments";
+    var subnetId = ViewBag.SubnetId;
+    var subnetName = ViewBag.SubnetName;
+    var networkAddress = ViewBag.NetworkAddress;
+    var cidr = ViewBag.Cidr;
+}
+
+<partial name="Index/_Header" model="new { SubnetId = subnetId, SubnetName = subnetName, NetworkAddress = networkAddress, Cidr = cidr }" />
+
+@if (TempData["SuccessMessage"] != null)
+{
+    <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+        @TempData["SuccessMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        @TempData["ErrorMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Host IPs</h5>
+        <partial name="Index/_ActionBar" model="subnetId" />
+    </div>
+    <div class="card-body">
+        @if (Model.Any())
+        {
+            <partial name="Index/_HostIpTable" model="Model" />
+        }
+        else
+        {
+            <partial name="Index/_EmptyState" model="subnetId" />
+        }
+    </div>
+    <div class="card-footer">
+        <div class="d-flex justify-content-between align-items-center">
+            <span>Total: @Model.Count IP @(Model.Count == 1 ? "Address" : "Addresses")</span>
+            <a asp-controller="Subnet" asp-action="Details" asp-route-id="@subnetId" class="btn btn-outline-primary">
+                <i class="bi bi-arrow-left"></i> Back to Subnet
+            </a>
+        </div>
+    </div>
+</div>
+
+<partial name="Index/_SubnetInfo" model="new { SubnetId = subnetId, SubnetName = subnetName, NetworkAddress = networkAddress, Cidr = cidr }" />

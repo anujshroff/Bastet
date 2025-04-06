@@ -1,6 +1,5 @@
 using Bastet.Models;
 using Bastet.Services;
-using System.Net;
 
 namespace Bastet.Tests.Validation;
 
@@ -28,7 +27,7 @@ public class SubnetPropertyCalculationTests
     {
         // Act
         string result = _ipUtilityService.CalculateSubnetMask(cidr);
-        
+
         // Assert
         Assert.Equal(expectedMask, result);
     }
@@ -58,7 +57,7 @@ public class SubnetPropertyCalculationTests
     {
         // Act
         string result = _ipUtilityService.CalculateBroadcastAddress(networkAddress, cidr);
-        
+
         // Assert
         Assert.Equal(expectedBroadcast, result);
     }
@@ -68,9 +67,9 @@ public class SubnetPropertyCalculationTests
     {
         // Arrange
         string? nullAddress = null;
-        
+
         // Act & Assert - Using null-forgiving operator to suppress CS8604 warning
-        Assert.Throws<ArgumentNullException>(() => 
+        Assert.Throws<ArgumentNullException>(() =>
             _ipUtilityService.CalculateBroadcastAddress(nullAddress!, 24));
     }
 
@@ -107,7 +106,7 @@ public class SubnetPropertyCalculationTests
     {
         // Act
         long totalAddresses = _ipUtilityService.CalculateTotalIpAddresses(cidr);
-        
+
         // Assert
         Assert.Equal(expectedTotal, totalAddresses);
     }
@@ -124,7 +123,7 @@ public class SubnetPropertyCalculationTests
     {
         // Act
         long usableAddresses = _ipUtilityService.CalculateUsableIpAddresses(cidr);
-        
+
         // Assert
         Assert.Equal(expectedUsable, usableAddresses);
     }
@@ -135,9 +134,9 @@ public class SubnetPropertyCalculationTests
     public void CalculateIpAddresses_InvalidCidr_ThrowsException(int invalidCidr)
     {
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             _ipUtilityService.CalculateTotalIpAddresses(invalidCidr));
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             _ipUtilityService.CalculateUsableIpAddresses(invalidCidr));
     }
 
@@ -156,7 +155,7 @@ public class SubnetPropertyCalculationTests
     {
         // Act
         bool result = _ipUtilityService.IsValidSubnet(networkAddress, cidr);
-        
+
         // Assert
         Assert.True(result);
     }
@@ -170,7 +169,7 @@ public class SubnetPropertyCalculationTests
     {
         // Act
         bool result = _ipUtilityService.IsValidSubnet(networkAddress, cidr);
-        
+
         // Assert
         Assert.False(result);
     }
@@ -184,7 +183,7 @@ public class SubnetPropertyCalculationTests
     {
         // Act
         bool result = _ipUtilityService.IsValidSubnet(networkAddress, cidr);
-        
+
         // Assert
         Assert.False(result);
     }
@@ -203,7 +202,7 @@ public class SubnetPropertyCalculationTests
 
         // Act
         List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
-        
+
         // Assert
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
@@ -217,17 +216,17 @@ public class SubnetPropertyCalculationTests
         // Arrange
         string networkAddress = "10.0.0.0";
         int cidr = 24;
-        
+
         List<Subnet> childSubnets = [
             new() { NetworkAddress = "10.0.0.0", Cidr = 25 }  // 10.0.0.0 - 10.0.0.127
         ];
 
         // Act
         List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
-        
+
         // Assert
         Assert.Single(result);
-        
+
         // Gap from 10.0.0.128 to 10.0.0.254 (Excluding broadcast address)
         Assert.Equal("10.0.0.128", result[0].StartIp);
         Assert.Equal("10.0.0.254", result[0].EndIp);
@@ -240,7 +239,7 @@ public class SubnetPropertyCalculationTests
         // Arrange
         string networkAddress = "10.0.0.0";
         int cidr = 24;
-        
+
         List<Subnet> childSubnets = [
             new() { NetworkAddress = "10.0.0.0", Cidr = 26 },   // 10.0.0.0 - 10.0.0.63
             new() { NetworkAddress = "10.0.0.128", Cidr = 26 }  // 10.0.0.128 - 10.0.0.191
@@ -248,15 +247,15 @@ public class SubnetPropertyCalculationTests
 
         // Act
         List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
-        
+
         // Assert
         Assert.Equal(2, result.Count);
-        
+
         // First gap: 10.0.0.64 - 10.0.0.127
         Assert.Equal("10.0.0.64", result[0].StartIp);
         Assert.Equal("10.0.0.127", result[0].EndIp);
         Assert.Equal(64, result[0].AddressCount);
-        
+
         // Second gap: 10.0.0.192 - 10.0.0.254 (Excluding broadcast address)
         Assert.Equal("10.0.0.192", result[1].StartIp);
         Assert.Equal("10.0.0.254", result[1].EndIp);
@@ -273,7 +272,7 @@ public class SubnetPropertyCalculationTests
 
         // Act
         List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
-        
+
         // Assert
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
@@ -291,7 +290,7 @@ public class SubnetPropertyCalculationTests
 
         // Act
         List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
-        
+
         // Assert
         Assert.Single(result);
         Assert.Equal("10.0.0.1", result[0].StartIp);
@@ -305,7 +304,7 @@ public class SubnetPropertyCalculationTests
         // Arrange
         string networkAddress = "10.0.0.0";
         int cidr = 24;
-        
+
         // Child subnet that exactly matches the parent
         // Note: The current implementation does not filter out child subnets that exactly match the parent
         List<Subnet> childSubnets = [
@@ -314,7 +313,7 @@ public class SubnetPropertyCalculationTests
 
         // Act
         List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
-        
+
         // Assert - The implementation returns the entire range when a child exactly matches the parent
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
@@ -328,34 +327,34 @@ public class SubnetPropertyCalculationTests
         // Arrange
         string? nullNetwork = null;
         List<Subnet> childSubnets = [];
-        
+
         // Act & Assert - Need to use 'as' to avoid warning CS8604
-        Assert.Throws<ArgumentNullException>(() => 
+        Assert.Throws<ArgumentNullException>(() =>
             _ipUtilityService.CalculateUnallocatedRanges(nullNetwork!, 24, childSubnets));
     }
-    
+
     [Fact]
     public void CalculateUnallocatedRanges_InvalidCidr_ThrowsException()
     {
         // Arrange
         List<Subnet> childSubnets = [];
-        
+
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", -1, childSubnets));
-            
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 33, childSubnets));
     }
-    
+
     [Fact]
     public void CalculateUnallocatedRanges_InvalidIpFormat_ThrowsException()
     {
         // Arrange
         List<Subnet> childSubnets = [];
-        
+
         // Act & Assert
-        Assert.ThrowsAny<Exception>(() => 
+        Assert.ThrowsAny<Exception>(() =>
             _ipUtilityService.CalculateUnallocatedRanges("invalid-ip", 24, childSubnets));
     }
 
@@ -379,7 +378,7 @@ public class SubnetPropertyCalculationTests
         // Act
         bool result = _ipUtilityService.IsSubnetContainedInParent(
             childNetwork, childCidr, parentNetwork, parentCidr);
-        
+
         // Assert
         Assert.Equal(expectedResult, result);
     }
@@ -395,7 +394,7 @@ public class SubnetPropertyCalculationTests
         // Act
         bool result = _ipUtilityService.IsSubnetContainedInParent(
             childNetwork, childCidr, parentNetwork, parentCidr);
-        
+
         // Assert
         Assert.False(result);
     }

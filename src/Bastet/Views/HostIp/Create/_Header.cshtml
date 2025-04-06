@@ -1,0 +1,19 @@
+@model CreateHostIpViewModel
+
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a asp-controller="Subnet" asp-action="Index">Subnets</a></li>
+            <li class="breadcrumb-item"><a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId">@Model.SubnetInfo.Split('(')[0].Trim()</a></li>
+            <li class="breadcrumb-item"><a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId">Host IP Assignments</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Add Host IP</li>
+        </ol>
+    </nav>
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>Add Host IP Assignment</h1>
+        <a asp-action="Index" asp-route-subnetId="@Model.SubnetId" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to List
+        </a>
+    </div>
+    <p class="lead">Add a new host IP assignment to subnet: @Model.SubnetInfo</p>
+</div>

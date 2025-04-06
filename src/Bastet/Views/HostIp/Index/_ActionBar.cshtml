@@ -1,0 +1,11 @@
+@model int
+@inject Bastet.Services.IUserContextService ActionBarUserContext
+
+<div>
+    @if (ActionBarUserContext.UserHasRole(Bastet.Models.ApplicationRoles.View))
+    {
+        <a asp-action="DeletedHostIps" asp-route-subnetId="@Model" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-trash"></i> View Deleted IPs
+        </a>
+    }
+</div>

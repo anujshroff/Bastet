@@ -1,0 +1,47 @@
+@model CreateHostIpViewModel
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Host IP Details</h5>
+    </div>
+    <div class="card-body">
+        <form asp-action="Create" method="post">
+            <input type="hidden" asp-for="SubnetId" />
+            <input type="hidden" asp-for="NetworkAddress" />
+            <input type="hidden" asp-for="Cidr" />
+            <input type="hidden" asp-for="SubnetInfo" />
+            <input type="hidden" asp-for="SubnetRange" />
+
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+
+            <div class="mb-3">
+                <label asp-for="IP" class="form-label"></label>
+                <input asp-for="IP" class="form-control" id="ipAddressInput" />
+                <div class="form-text" id="ipAddressHelp">
+                    Enter a valid IPv4 address within the subnet range: @Model.SubnetRange
+                </div>
+                <span asp-validation-for="IP" class="text-danger"></span>
+            </div>
+
+            <div class="mb-3">
+                <label asp-for="Name" class="form-label"></label>
+                <input asp-for="Name" class="form-control" />
+                <div class="form-text">Optional description or hostname for this IP address</div>
+                <span asp-validation-for="Name" class="text-danger"></span>
+            </div>
+
+            <div class="mt-4">
+                @inject Bastet.Services.IUserContextService CreateFormUserContext
+                @if (CreateFormUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
+                {
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Add Host IP
+                    </button>
+                }
+                <a asp-action="Index" asp-route-subnetId="@Model.SubnetId" class="btn btn-outline-secondary ms-2">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </a>
+            </div>
+        </form>
+    </div>
+</div>

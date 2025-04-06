@@ -1,0 +1,23 @@
+@model CreateHostIpViewModel
+
+@{
+    ViewData["Title"] = "Add Host IP";
+}
+
+<partial name="Create/_Header" model="Model" />
+<partial name="Create/_ErrorAlert" />
+
+<div class="row">
+    <div class="col-md-8">
+        <partial name="Create/_HostIpForm" model="Model" />
+    </div>
+    
+    <div class="col-md-4">
+        <partial name="Create/_SubnetInfo" model="Model" />
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="Create/_FormScripts" />
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}
