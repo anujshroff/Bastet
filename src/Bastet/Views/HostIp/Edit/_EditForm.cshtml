@@ -23,8 +23,8 @@
             <input type="hidden" asp-for="RowVersion" />
             
             <div class="d-flex justify-content-between mt-4">
-                <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId" class="btn btn-secondary">
-                    <i class="bi bi-arrow-left"></i> Back to List
+                <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId" class="btn btn-outline-secondary">
+                    <i class="bi bi-x-circle"></i> Cancel
                 </a>
                 @inject Bastet.Services.IUserContextService EditFormUserContext
                 @if (EditFormUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
