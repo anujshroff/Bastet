@@ -368,6 +368,161 @@ public class HostIpController : Controller
         }
     }
 
+    // GET: HostIp/AllHostIps
+    [Authorize(Policy = "RequireViewRole")]
+    public async Task<IActionResult> AllHostIps(int page = 1)
+    {
+        // Validate page
+        page = Math.Max(1, page);
+        int pageSize = 50;
+        
+        // Get all subnets with host IP assignments
+        var allSubnetsWithHostIps = await _context.Subnets
+            .Include(s => s.HostIpAssignments)
+            .Where(s => s.HostIpAssignments.Count > 0)
+            .ToListAsync();
+            
+        // Flatten all host IPs into a single list
+        var allHostIps = new List<(HostIpAssignment HostIp, Subnet Subnet)>();
+        foreach (var subnet in allSubnetsWithHostIps)
+        {
+            foreach (var hostIp in subnet.HostIpAssignments)
+            {
+                allHostIps.Add((hostIp, subnet));
+            }
+        }
+        
+        // Order by subnet name then IP address
+        var orderedHostIps = allHostIps
+            .OrderBy(h => h.Subnet.Name)
+            .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[0])
+            .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[1])
+            .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[2])
+            .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[3])
+            .ToList();
+            
+        // Get total count
+        int totalCount = orderedHostIps.Count;
+        
+        // Apply pagination
+        var pagedHostIps = orderedHostIps
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(h => new AllHostIpItemViewModel
+            {
+                IP = h.HostIp.IP,
+                Name = h.HostIp.Name,
+                SubnetId = h.Subnet.Id,
+                SubnetName = h.Subnet.Name,
+                NetworkAddress = h.Subnet.NetworkAddress,
+                Cidr = h.Subnet.Cidr,
+                CreatedAt = h.HostIp.CreatedAt,
+                CreatedBy = h.HostIp.CreatedBy,
+                LastModifiedAt = h.HostIp.LastModifiedAt,
+                ModifiedBy = h.HostIp.ModifiedBy
+            })
+            .ToList();
+            
+        // Create the view model
+        var viewModel = new AllHostIpsViewModel
+        {
+            HostIps = pagedHostIps,
+            TotalCount = totalCount,
+            CurrentPage = page,
+            PageSize = pageSize
+        };
+        
+        return View(viewModel);
+    }
+    
+    // GET: HostIp/AllDeletedHostIps
+    [Authorize(Policy = "RequireViewRole")]
+    public async Task<IActionResult> AllDeletedHostIps(int page = 1)
+    {
+        // Validate page
+        page = Math.Max(1, page);
+        int pageSize = 50;
+        
+        // Get all deleted host IPs
+        var deletedHostIps = await _context.DeletedHostIpAssignments
+            .OrderByDescending(h => h.DeletedAt)
+            .ToListAsync();
+            
+        // Get total count
+        int totalCount = deletedHostIps.Count;
+        
+        // Get all subnet information (including deleted subnets)
+        var allSubnets = await _context.Subnets.ToListAsync();
+        var allDeletedSubnets = await _context.DeletedSubnets.ToListAsync();
+        
+        // Apply pagination
+        var pagedDeletedHostIps = deletedHostIps
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+            
+        // Build view models with subnet information where available
+        var viewModels = new List<AllDeletedHostIpItemViewModel>();
+        
+        foreach (var deletedHostIp in pagedDeletedHostIps)
+        {
+            var viewModel = new AllDeletedHostIpItemViewModel
+            {
+                Id = deletedHostIp.Id,
+                OriginalIP = deletedHostIp.OriginalIP,
+                Name = deletedHostIp.Name,
+                OriginalSubnetId = deletedHostIp.OriginalSubnetId,
+                CreatedAt = deletedHostIp.CreatedAt,
+                CreatedBy = deletedHostIp.CreatedBy,
+                LastModifiedAt = deletedHostIp.LastModifiedAt,
+                ModifiedBy = deletedHostIp.ModifiedBy,
+                DeletedAt = deletedHostIp.DeletedAt,
+                DeletedBy = deletedHostIp.DeletedBy
+            };
+            
+            // Try to find subnet information
+            var subnet = allSubnets.FirstOrDefault(s => s.Id == deletedHostIp.OriginalSubnetId);
+            if (subnet != null)
+            {
+                // Subnet still exists
+                viewModel.SubnetName = subnet.Name;
+                viewModel.NetworkAddress = subnet.NetworkAddress;
+                viewModel.Cidr = subnet.Cidr;
+            }
+            else
+            {
+                // Check if it's in deleted subnets
+                var deletedSubnet = allDeletedSubnets.FirstOrDefault(s => s.OriginalId == deletedHostIp.OriginalSubnetId);
+                if (deletedSubnet != null)
+                {
+                    viewModel.SubnetName = $"{deletedSubnet.Name} (deleted)";
+                    viewModel.NetworkAddress = deletedSubnet.NetworkAddress;
+                    viewModel.Cidr = deletedSubnet.Cidr;
+                }
+                else
+                {
+                    // No information available
+                    viewModel.SubnetName = "Unknown";
+                    viewModel.NetworkAddress = "Unknown";
+                    viewModel.Cidr = 0;
+                }
+            }
+            
+            viewModels.Add(viewModel);
+        }
+        
+        // Create the view model
+        var allDeletedHostIpsViewModel = new AllDeletedHostIpsViewModel
+        {
+            DeletedHostIps = viewModels,
+            TotalCount = totalCount,
+            CurrentPage = page,
+            PageSize = pageSize
+        };
+        
+        return View(allDeletedHostIpsViewModel);
+    }
+
     // GET: HostIp/DeletedHostIps/{subnetId}
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> DeletedHostIps(int subnetId)

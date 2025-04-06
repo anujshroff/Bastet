@@ -651,7 +651,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
         return hostIpCount;
     }
 
-    // POST: Subnet/Delete/5
+        // POST: Subnet/Delete/5
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
@@ -664,6 +664,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             return RedirectToAction(nameof(Delete), new { id });
         }
 
+        // Load the main subnet with its child relationships and host IPs
         Subnet? subnet = await context.Subnets
             .Include(s => s.ChildSubnets)
             .Include(s => s.HostIpAssignments)
@@ -679,13 +680,54 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         try
         {
-            // Get all descendants to delete
+            // Get all descendants to delete (ordered for proper deletion - deepest first)
             List<Subnet> allDescendants = await GetAllDescendantsOrdered(id);
 
-            // Add the subnet itself to be deleted (will be last)
+            // Add the subnet itself to be deleted (will be processed last)
             allDescendants.Add(subnet);
 
-            // Process each subnet (children first, then parent)
+            // Get all host IPs for all subnets to be deleted
+            List<HostIpAssignment> allHostIps = new();
+            
+            // First, load all host IPs for each subnet to be deleted
+            foreach (Subnet subnetToProcess in allDescendants)
+            {
+                // We need to load host IPs for each subnet since they're not included in GetAllDescendantsOrdered
+                Subnet? subnetWithHostIps = await context.Subnets
+                    .Include(s => s.HostIpAssignments)
+                    .FirstOrDefaultAsync(s => s.Id == subnetToProcess.Id);
+                
+                if (subnetWithHostIps != null && subnetWithHostIps.HostIpAssignments.Count > 0)
+                {
+                    allHostIps.AddRange(subnetWithHostIps.HostIpAssignments);
+                }
+            }
+            
+            // First handle all host IPs (archive them in DeletedHostIpAssignments)
+            foreach (HostIpAssignment hostIp in allHostIps)
+            {
+                // Create a deletion record
+                DeletedHostIpAssignment deletedHostIp = new()
+                {
+                    OriginalIP = hostIp.IP,
+                    Name = hostIp.Name,
+                    OriginalSubnetId = hostIp.SubnetId,
+                    CreatedAt = hostIp.CreatedAt,
+                    LastModifiedAt = hostIp.LastModifiedAt,
+                    CreatedBy = hostIp.CreatedBy,
+                    ModifiedBy = hostIp.ModifiedBy,
+                    DeletedAt = DateTime.UtcNow,
+                    DeletedBy = userContextService.GetCurrentUsername()
+                };
+                
+                // Add to DeletedHostIpAssignments table
+                context.DeletedHostIpAssignments.Add(deletedHostIp);
+                
+                // Remove from HostIpAssignments table
+                context.HostIpAssignments.Remove(hostIp);
+            }
+
+            // Now process each subnet
             foreach (Subnet subnetToDelete in allDescendants)
             {
                 // Add to DeletedSubnets table
@@ -718,7 +760,10 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             // Commit the transaction
             await transaction.CommitAsync();
 
-            TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' and {allDescendants.Count - 1} child subnet(s) were deleted successfully.";
+            int totalHostIpsDeleted = allHostIps.Count;
+            TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' and {allDescendants.Count - 1} child subnet(s) were deleted successfully. " +
+                                       $"{totalHostIpsDeleted} host IP assignment(s) were archived.";
+            
             return RedirectToAction(nameof(Index));
         }
         catch (Exception ex)

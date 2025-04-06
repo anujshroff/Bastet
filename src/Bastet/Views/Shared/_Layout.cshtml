@@ -24,6 +24,15 @@
                         <li class="nav-item">
                             <a class="nav-link" asp-controller="Subnet" asp-action="Index">Subnets</a>
                         </li>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                Host IPs
+                            </a>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" asp-controller="HostIp" asp-action="AllHostIps">All Host IPs</a></li>
+                                <li><a class="dropdown-item" asp-controller="HostIp" asp-action="AllDeletedHostIps">All Deleted Host IPs</a></li>
+                            </ul>
+                        </li>
                     </ul>
                     
                     @if (User.Identity?.IsAuthenticated == true)
