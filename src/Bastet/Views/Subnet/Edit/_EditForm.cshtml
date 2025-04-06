@@ -1,0 +1,53 @@
+@model EditSubnetViewModel
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Edit Subnet Details</h5>
+    </div>
+    <div class="card-body">
+        <form asp-action="Edit" method="post">
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+            
+            <input type="hidden" asp-for="Id" />
+            <input type="hidden" asp-for="NetworkAddress" />
+            <input type="hidden" asp-for="OriginalCidr" value="@Model.Cidr" />
+            
+            <div class="mb-3">
+                <label asp-for="Cidr" class="form-label">CIDR Notation</label>
+                <div class="input-group">
+                    <span class="input-group-text">/</span>
+                    <input asp-for="Cidr" class="form-control" min="0" max="32" />
+                </div>
+                <div class="form-text">
+                    Changing this value affects the size of the subnet.
+                </div>
+                <span asp-validation-for="Cidr" class="text-danger"></span>
+            </div>
+            
+            <div class="mb-3">
+                <label asp-for="Name" class="form-label"></label>
+                <input asp-for="Name" class="form-control" />
+                <span asp-validation-for="Name" class="text-danger"></span>
+            </div>
+            
+            
+            <div class="mb-3">
+                <label asp-for="Description" class="form-label"></label>
+                <textarea asp-for="Description" class="form-control" rows="3"></textarea>
+                <span asp-validation-for="Description" class="text-danger"></span>
+            </div>
+            
+            <div class="mb-3">
+                <label asp-for="Tags" class="form-label"></label>
+                <input asp-for="Tags" class="form-control" placeholder="e.g. production, dmz, vpc-1" />
+                <div class="form-text">Comma-separated list of tags</div>
+                <span asp-validation-for="Tags" class="text-danger"></span>
+            </div>
+            
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <a asp-action="Details" asp-route-id="@Model.Id" class="btn btn-outline-secondary ms-2">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
