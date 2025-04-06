@@ -294,6 +294,7 @@ public class HostIpController : Controller
             IP = hostIp.IP,
             Name = hostIp.Name,
             SubnetInfo = $"{hostIp.Subnet.Name} ({hostIp.Subnet.NetworkAddress}/{hostIp.Subnet.Cidr})",
+            SubnetId = hostIp.SubnetId,
             CreatedAt = hostIp.CreatedAt,
             CreatedBy = hostIp.CreatedBy
         };

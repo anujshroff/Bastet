@@ -73,6 +73,7 @@ public class DeleteHostIpViewModel
     public string IP { get; set; } = string.Empty;
     public string? Name { get; set; }
     public string SubnetInfo { get; set; } = string.Empty;
+    public int SubnetId { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
 }
