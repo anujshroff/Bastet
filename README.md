@@ -79,7 +79,7 @@ BASTET is available as a Docker image through GitHub Container Registry:
 
 1. **Pull the latest image**:
    ```bash
-   docker pull ghcr.io/anujshroff/bastet:1
+   docker pull ghcr.io/anujshroff/bastet:latest
    ```
 
 2. **Run the container** with the required environment variables:
@@ -92,7 +92,7 @@ BASTET is available as a Docker image through GitHub Container Registry:
      -e ASPNETCORE_URLS="http://+:80" \
      -e BASTET_OIDC_CLIENT_ID="your-client-id" \
      -e BASTET_OIDC_AUTHORITY="https://your-identity-provider" \
-     ghcr.io/anujshroff/bastet:1
+     ghcr.io/anujshroff/bastet:latest
    ```
 
 3. **Access the application** at http://localhost:8080
