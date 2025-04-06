@@ -27,7 +27,7 @@
                                 <td>@range.AddressCount.ToString("N0") IP addresses</td>
                                 <td>
                                     @inject Bastet.Services.IUserContextService SubnetUserContext
-                                    @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
+                                    @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.HostIpAssignments.Count == 0)
                                     {
                                         <button type="button" class="btn btn-sm btn-success create-subnet-btn" 
                                                 data-network="@range.StartIp" 
@@ -36,6 +36,10 @@
                                                 data-parent-cidr="@Model.Cidr">
                                             <i class="bi bi-plus-circle"></i> Create Subnet
                                         </button>
+                                    }
+                                    else if (Model.HostIpAssignments.Count > 0)
+                                    {
+                                        <span class="badge bg-info text-dark">Has Host IPs</span>
                                     }
                                 </td>
                             </tr>

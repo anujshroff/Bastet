@@ -51,4 +51,9 @@ public interface IIpUtilityService
     /// Calculates unallocated IP ranges within a subnet, taking into account child subnets
     /// </summary>
     IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets);
+    
+    /// <summary>
+    /// Calculates unallocated IP ranges within a subnet, taking into account child subnets and host IP assignments
+    /// </summary>
+    IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets, IEnumerable<HostIpAssignment> hostIpAssignments);
 }

@@ -92,11 +92,12 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                     LastModifiedAt = h.LastModifiedAt,
                     ModifiedBy = h.ModifiedBy
                 })],
-            // Get unallocated IP ranges
+            // Get unallocated IP ranges, factoring in both child subnets and host IPs
             UnallocatedRanges = [.. ipUtilityService.CalculateUnallocatedRanges(
                 subnet.NetworkAddress,
                 subnet.Cidr,
-                subnet.ChildSubnets)]
+                subnet.ChildSubnets,
+                subnet.HostIpAssignments)]
         };
 
         // Try to get parent subnet if exists
@@ -186,6 +187,21 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                         return View(viewModel);
                     }
 
+                    // Validate that parent doesn't have host IPs
+                    ValidationResult hostIpValidation = subnetValidationService.ValidateParentCanHaveChildSubnets(
+                        parentSubnet.Id, 
+                        parentSubnet.HostIpAssignments);
+                        
+                    if (!hostIpValidation.IsValid)
+                    {
+                        foreach (ValidationError error in hostIpValidation.Errors)
+                        {
+                            ModelState.AddModelError("ParentSubnetId", error.Message);
+                        }
+                        await LoadParentSubnets(viewModel);
+                        return View(viewModel);
+                    }
+                    
                     // Validate that child subnet is within parent subnet range
                     if (!ipUtilityService.IsSubnetContainedInParent(
                         viewModel.NetworkAddress, viewModel.Cidr,

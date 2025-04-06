@@ -21,6 +21,7 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
     private const string REQUIRED_FIELD_MISSING = "REQUIRED_FIELD_MISSING";
     private const string CHILD_SUBNET_OUTSIDE_RANGE = "CHILD_SUBNET_OUTSIDE_RANGE";
     private const string INVALID_CIDR_CHANGE = "INVALID_CIDR_CHANGE";
+    private const string PARENT_HAS_HOST_IPS = "PARENT_HAS_HOST_IPS";
 
     /// <inheritdoc />
     public ValidationResult ValidateNewSubnet(CreateSubnetDto subnetDto, Subnet? parentSubnet = null, IEnumerable<Subnet>? siblings = null)
@@ -358,6 +359,21 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
             }
         }
 
+        return result;
+    }
+    
+    /// <inheritdoc />
+    public ValidationResult ValidateParentCanHaveChildSubnets(int parentId, IEnumerable<HostIpAssignment>? hostIps = null)
+    {
+        ValidationResult result = new();
+        
+        // Check if the parent subnet has host IP assignments
+        if (hostIps != null && hostIps.Any())
+        {
+            result.AddError(PARENT_HAS_HOST_IPS,
+                "Cannot create child subnets in a subnet that has host IP assignments. A subnet can have either child subnets or host IPs, but not both.");
+        }
+        
         return result;
     }
 }
