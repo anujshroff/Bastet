@@ -443,6 +443,52 @@ public class IpUtilityService : IIpUtilityService
         return unallocatedRanges;
     }
 
+    /// <summary>
+    /// Checks if an IP address is within a subnet's range
+    /// </summary>
+    public bool IsIpInSubnet(string ip, string networkAddress, int cidr)
+    {
+        if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(networkAddress))
+        {
+            return false;
+        }
+
+        if (cidr is < 0 or > 32)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Parse IP addresses
+            IPAddress ipAddress = IPAddress.Parse(ip);
+            IPAddress networkIpAddress = IPAddress.Parse(networkAddress);
+            
+            byte[] ipBytes = ipAddress.GetAddressBytes();
+            byte[] networkBytes = networkIpAddress.GetAddressBytes();
+            
+            // Verify both are IPv4
+            if (ipBytes.Length != 4 || networkBytes.Length != 4)
+            {
+                return false;
+            }
+            
+            // Convert to UInt32 for bitwise operations
+            uint ipValue = BitConverter.ToUInt32([.. ipBytes.Reverse()], 0);
+            uint networkValue = BitConverter.ToUInt32([.. networkBytes.Reverse()], 0);
+            
+            // Create subnet mask
+            uint mask = (cidr == 0) ? 0 : ~((1u << (32 - cidr)) - 1);
+            
+            // Check if IP is in subnet (they have the same network portion)
+            return (ipValue & mask) == (networkValue & mask);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     #region Helper Methods
 
     /// <summary>

@@ -36,6 +36,11 @@ public interface IIpUtilityService
     /// Checks if a subnet is contained within a parent subnet
     /// </summary>
     bool IsSubnetContainedInParent(string childNetwork, int childCidr, string parentNetwork, int parentCidr);
+    
+    /// <summary>
+    /// Checks if an IP address is within a subnet's range
+    /// </summary>
+    bool IsIpInSubnet(string ip, string networkAddress, int cidr);
 
     /// <summary>
     /// Calculates possible subnets when dividing a network with a specific CIDR into smaller subnets

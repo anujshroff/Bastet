@@ -38,6 +38,7 @@ builder.Services.AddDbContext<BastetDbContext>(options =>
 // Register services
 builder.Services.AddScoped<IIpUtilityService, IpUtilityService>();
 builder.Services.AddScoped<Bastet.Services.Validation.ISubnetValidationService, Bastet.Services.Validation.SubnetValidationService>();
+builder.Services.AddScoped<Bastet.Services.Validation.IHostIpValidationService, Bastet.Services.Validation.HostIpValidationService>();
 builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bastet.Services.Division.SubnetDivisionService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
 
