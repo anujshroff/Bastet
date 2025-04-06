@@ -1,0 +1,18 @@
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle"></i> @TempData["ErrorMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+@if (ViewData.ModelState.ErrorCount > 0 && ViewData.ModelState[""] != null && ViewData.ModelState[""]!.Errors.Count > 0)
+{
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        @foreach (var error in ViewData.ModelState[""]!.Errors)
+        {
+            <div><i class="bi bi-exclamation-triangle"></i> @error.ErrorMessage</div>
+        }
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}

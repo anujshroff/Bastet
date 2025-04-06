@@ -1,0 +1,32 @@
+@model CreateHostIpViewModel
+
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Subnet Information</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-bordered">
+                <tbody>
+                    <tr>
+                        <th style="width: 40%">Network Address</th>
+                        <td><code>@Model.NetworkAddress/@Model.Cidr</code></td>
+                    </tr>
+                    <tr>
+                        <th>IP Range</th>
+                        <td><code>@Model.SubnetRange</code></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="alert alert-info mt-3">
+            <h6 class="alert-heading">Important Notes:</h6>
+            <ul class="mb-0">
+                <li>The IP address must be within the subnet range.</li>
+                <li>Network and broadcast addresses are typically not used for host assignments (except in /31 and /32 networks).</li>
+                <li>Each IP address must be unique within the subnet.</li>
+            </ul>
+        </div>
+    </div>
+</div>

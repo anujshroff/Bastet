@@ -22,13 +22,20 @@
                     <td>@(string.IsNullOrEmpty(hostIp.CreatedBy) ? "-" : hostIp.CreatedBy)</td>
                     <td>@(hostIp.LastModifiedAt.HasValue ? hostIp.LastModifiedAt.Value.ToString("g") : "-")</td>
                     <td>
+                        @inject Bastet.Services.IUserContextService UserContextService
                         <div class="btn-group">
-                            <a asp-action="Edit" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-pencil"></i> Edit
-                            </a>
-                            <a asp-action="Delete" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-danger">
-                                <i class="bi bi-trash"></i> Delete
-                            </a>
+                            @if (UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
+                            {
+                                <a asp-action="Edit" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-pencil"></i> Edit
+                                </a>
+                            }
+                            @if (UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Delete))
+                            {
+                                <a asp-action="Delete" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash"></i> Delete
+                                </a>
+                            }
                         </div>
                     </td>
                 </tr>

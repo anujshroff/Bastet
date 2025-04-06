@@ -5,11 +5,15 @@
         <h5 class="mb-0">Host IP Assignments</h5>
         @if (Model.CanAddHostIp)
         {
-            <div>
-                <a asp-controller="HostIp" asp-action="Create" asp-route-subnetId="@Model.Id" class="btn btn-sm btn-primary">
-                    <i class="bi bi-plus-circle"></i> Add Host IP
-                </a>
-            </div>
+            @inject Bastet.Services.IUserContextService HostIpUserContext
+            @if (HostIpUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
+            {
+                <div>
+                    <a asp-controller="HostIp" asp-action="Create" asp-route-subnetId="@Model.Id" class="btn btn-sm btn-primary">
+                        <i class="bi bi-plus-circle"></i> Add Host IP
+                    </a>
+                </div>
+            }
         }
         else if (Model.IsFullyAllocated)
         {
@@ -41,8 +45,14 @@
                                 <td>@(string.IsNullOrEmpty(hostIp.Name) ? "-" : hostIp.Name)</td>
                                 <td>@hostIp.CreatedAt.ToString("g")</td>
                                 <td>
-                                    <a asp-controller="HostIp" asp-action="Edit" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-primary">Edit</a>
-                                    <a asp-controller="HostIp" asp-action="Delete" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-danger">Delete</a>
+                                    @if (HostIpUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
+                                    {
+                                        <a asp-controller="HostIp" asp-action="Edit" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-primary">Edit</a>
+                                    }
+                                    @if (HostIpUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Delete))
+                                    {
+                                        <a asp-controller="HostIp" asp-action="Delete" asp-route-ip="@hostIp.IP" class="btn btn-sm btn-outline-danger">Delete</a>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -85,25 +95,28 @@
                 </a>
             </div>
             
-            @if (Model.IsFullyAllocated)
+            @if (HostIpUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
             {
-                <form asp-controller="HostIp" asp-action="SetAllocationStatus" method="post">
-                    <input type="hidden" name="SubnetId" value="@Model.Id" />
-                    <input type="hidden" name="IsFullyAllocated" value="false" />
-                    <button type="submit" class="btn btn-sm btn-outline-warning">
-                        <i class="bi bi-unlock-fill"></i> Mark as Not Fully Allocated
-                    </button>
-                </form>
-            }
-            else if (Model.CanAddChildSubnet && Model.HostIpAssignments.Count == 0)
-            {
-                <form asp-controller="HostIp" asp-action="SetAllocationStatus" method="post">
-                    <input type="hidden" name="SubnetId" value="@Model.Id" />
-                    <input type="hidden" name="IsFullyAllocated" value="true" />
-                    <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('Are you sure you want to mark this subnet as fully allocated? This will prevent adding any host IPs in the future.')">
-                        <i class="bi bi-lock-fill"></i> Mark as Fully Allocated
-                    </button>
-                </form>
+                @if (Model.IsFullyAllocated)
+                {
+                    <form asp-controller="HostIp" asp-action="SetAllocationStatus" method="post">
+                        <input type="hidden" name="SubnetId" value="@Model.Id" />
+                        <input type="hidden" name="IsFullyAllocated" value="false" />
+                        <button type="submit" class="btn btn-sm btn-outline-warning">
+                            <i class="bi bi-unlock-fill"></i> Mark as Not Fully Allocated
+                        </button>
+                    </form>
+                }
+                else if (Model.CanAddChildSubnet && Model.HostIpAssignments.Count == 0)
+                {
+                    <form asp-controller="HostIp" asp-action="SetAllocationStatus" method="post">
+                        <input type="hidden" name="SubnetId" value="@Model.Id" />
+                        <input type="hidden" name="IsFullyAllocated" value="true" />
+                        <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('Are you sure you want to mark this subnet as fully allocated? This will prevent adding any host IPs in the future.')">
+                            <i class="bi bi-lock-fill"></i> Mark as Fully Allocated
+                        </button>
+                    </form>
+                }
             }
         </div>
     </div>
