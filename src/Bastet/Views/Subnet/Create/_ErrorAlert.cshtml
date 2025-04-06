@@ -1,0 +1,6 @@
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-triangle"></i> @TempData["ErrorMessage"]
+    </div>
+}
