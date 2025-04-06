@@ -1,75 +1,10 @@
-@model Bastet.Models.ViewModels.DeletedSubnetListViewModel
+@model DeletedSubnetListViewModel
 
 @{
     ViewData["Title"] = "Deleted Subnets";
 }
 
-<div class="mb-4">
-    <div class="d-flex justify-content-between align-items-center">
-        <h1>Deleted Subnets</h1>
-        <a asp-action="Index" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left"></i> Back to Subnet Hierarchy
-        </a>
-    </div>
-    <p class="lead">View previously deleted subnet records</p>
-    
-    @if (Model.TotalCount > 0)
-    {
-        <div class="alert alert-info">
-            <i class="bi bi-info-circle"></i> 
-            Showing @Model.TotalCount deleted subnet@(Model.TotalCount != 1 ? "s" : "").
-        </div>
-    }
-</div>
-
-@if (Model.TotalCount == 0)
-{
-    <div class="alert alert-info">
-        <i class="bi bi-info-circle"></i> No deleted subnets found in the archive.
-    </div>
-}
-else
-{
-    <div class="card">
-        <div class="card-header bg-secondary text-white">
-            <h5 class="mb-0">Deleted Subnet Records</h5>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover mb-0">
-                    <thead class="thead-light">
-                        <tr>
-                            <th>Name</th>
-                            <th>Network Address</th>
-                            <th>Description</th>
-                            <th>Deleted</th>
-                            <th>Deleted By</th>
-                            <th>Created</th>
-                            <th>Created By</th>
-                            <th>Last Modified</th>
-                            <th>Modified By</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var subnet in Model.DeletedSubnets)
-                        {
-                            <tr>
-                                <td>@subnet.Name</td>
-                                <td><code>@subnet.NetworkAddress/@subnet.Cidr</code></td>
-                                <td>@(string.IsNullOrEmpty(subnet.Description) ? "-" : subnet.Description)</td>
-                                <td title="@subnet.DeletedAt.ToString("F")">@subnet.DeletedAt.ToString("g")</td>
-                                <td>@(string.IsNullOrEmpty(subnet.DeletedBy) ? "Unknown" : subnet.DeletedBy)</td>
-                                <td title="@subnet.CreatedAt.ToString("F")">@subnet.CreatedAt.ToString("g")</td>
-                                <td>@(string.IsNullOrEmpty(subnet.CreatedBy) ? "Unknown" : subnet.CreatedBy)</td>
-                                <td title="@(subnet.LastModifiedAt?.ToString("F") ?? "Never")">
-                                    @(subnet.LastModifiedAt?.ToString("g") ?? "Never")
-                                </td>
-                                <td>@(string.IsNullOrEmpty(subnet.ModifiedBy) ? "N/A" : subnet.ModifiedBy)</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-}
+@await Html.PartialAsync("DeletedSubnets/_Header")
+@await Html.PartialAsync("DeletedSubnets/_CountInfo", Model)
+@await Html.PartialAsync("DeletedSubnets/_EmptyState", Model)
+@await Html.PartialAsync("DeletedSubnets/_SubnetTable", Model)
