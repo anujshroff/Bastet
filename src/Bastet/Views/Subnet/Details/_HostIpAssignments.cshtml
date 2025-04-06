@@ -59,11 +59,11 @@
                     </tbody>
                 </table>
             </div>
-            @if (Model.HostIpAssignments.Count > 5)
+            @if (Model.HostIpAssignments.Count > 0)
             {
                 <div class="text-center mt-3">
                     <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.Id" class="btn btn-outline-primary">
-                        View All @Model.HostIpAssignments.Count Host IPs
+                        View All Host IPs
                     </a>
                 </div>
             }
