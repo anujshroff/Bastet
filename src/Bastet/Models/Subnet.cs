@@ -38,6 +38,12 @@ public class Subnet : BaseEntity
 
     public ICollection<Subnet> ChildSubnets { get; set; } = [];
 
+    // Host IP Assignment Relationship
+    public ICollection<HostIpAssignment> HostIpAssignments { get; set; } = [];
+
+    // Flag to indicate if subnet is fully allocated (no IPs available)
+    public bool IsFullyAllocated { get; set; } = false;
+
     // Concurrency control
     [Timestamp]
     public byte[]? RowVersion { get; set; }
@@ -140,10 +146,42 @@ public class Subnet : BaseEntity
         CanContainSubnet(otherSubnet) || otherSubnet.CanContainSubnet(this);
 
     /// <summary>
+    /// Determines if this subnet can have host IP assignments added
+    /// </summary>
+    /// <returns>True if host IP assignments can be added</returns>
+    public bool CanAddHostIpAssignment()
+    {
+        // Cannot add host IP if subnet has child subnets or is fully allocated
+        return ChildSubnets.Count == 0 && !IsFullyAllocated;
+    }
+
+    /// <summary>
+    /// Determines if this subnet can have child subnets added
+    /// </summary>
+    /// <returns>True if child subnets can be added</returns>
+    public bool CanAddChildSubnet()
+    {
+        // Cannot add child subnet if parent has host IPs or is fully allocated
+        return HostIpAssignments.Count == 0 && !IsFullyAllocated;
+    }
+
+    /// <summary>
+    /// Determines if this subnet can be marked as fully allocated
+    /// </summary>
+    /// <returns>True if the subnet can be fully allocated</returns>
+    public bool CanBeFullyAllocated()
+    {
+        // Can only be fully allocated if it has no child subnets and no host IPs
+        return ChildSubnets.Count == 0 && HostIpAssignments.Count == 0;
+    }
+
+    /// <summary>
     /// Determines if this subnet can be deleted
     /// </summary>
     /// <returns>True if the subnet can be deleted</returns>
-    public bool CanBeDeleted() =>
-        // Can only delete if there are no child subnets
-        ChildSubnets.Count == 0;
+    public bool CanBeDeleted()
+    {
+        // Can only delete if there are no child subnets and no host IP assignments
+        return ChildSubnets.Count == 0 && HostIpAssignments.Count == 0;
+    }
 }

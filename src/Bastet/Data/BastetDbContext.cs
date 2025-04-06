@@ -11,6 +11,8 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
 {
     public DbSet<Subnet> Subnets { get; set; } = null!;
     public DbSet<DeletedSubnet> DeletedSubnets { get; set; } = null!;
+    public DbSet<HostIpAssignment> HostIpAssignments { get; set; } = null!;
+    public DbSet<DeletedHostIpAssignment> DeletedHostIpAssignments { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -53,6 +55,41 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
 
             // Add check constraints using the new API
             entity.ToTable(t => t.HasCheckConstraint("CK_Subnet_ValidCidr", "Cidr >= 0 AND Cidr <= 32"));
+        });
+
+        // Configure HostIpAssignment entity
+        modelBuilder.Entity<HostIpAssignment>(entity =>
+        {
+            // Configure the relationship with Subnet
+            entity.HasOne(h => h.Subnet)
+                .WithMany(s => s.HostIpAssignments)
+                .HasForeignKey(h => h.SubnetId)
+                .OnDelete(DeleteBehavior.Cascade); // When subnet is deleted, cascade to host IPs
+
+            // Configure properties
+            entity.Property(h => h.IP)
+                .IsRequired()
+                .HasMaxLength(15);
+
+            entity.Property(h => h.Name)
+                .HasMaxLength(100);
+
+            // Create indexes
+            entity.HasIndex(h => h.IP).IsUnique();
+            entity.HasIndex(h => h.SubnetId);
+        });
+        
+        // Configure DeletedHostIpAssignment entity
+        modelBuilder.Entity<DeletedHostIpAssignment>(entity =>
+        {
+            entity.Property(h => h.OriginalIP)
+                .IsRequired()
+                .HasMaxLength(15);
+
+            entity.Property(h => h.Name)
+                .HasMaxLength(100);
+                
+            entity.HasIndex(h => h.OriginalSubnetId);
         });
     }
 
