@@ -8,6 +8,10 @@
         {
             <span class="fw-bold">This will also delete @Model.ChildSubnetCount child subnet(s)!</span>
         }
+        @if (Model.HostIpCount > 0)
+        {
+            <span class="fw-bold">This will also delete @Model.HostIpCount host IP assignment(s)!</span>
+        }
     </p>
     <p>This action cannot be undone. All deleted subnets will be moved to an archive table.</p>
 </div>

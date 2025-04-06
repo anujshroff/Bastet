@@ -578,6 +578,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     {
         Subnet? subnet = await context.Subnets
             .Include(s => s.ChildSubnets)
+            .Include(s => s.HostIpAssignments)
             .FirstOrDefaultAsync(s => s.Id == id);
 
         if (subnet == null)
@@ -587,6 +588,12 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         // Count all descendants (not just direct children)
         int descendantCount = await CountAllDescendants(id);
+        
+        // Count all host IPs in this subnet
+        int hostIpCount = subnet.HostIpAssignments.Count;
+        
+        // Count host IPs in all descendant subnets
+        hostIpCount += await CountAllDescendantHostIps(id);
 
         DeleteSubnetViewModel viewModel = new()
         {
@@ -595,10 +602,53 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             NetworkAddress = subnet.NetworkAddress,
             Cidr = subnet.Cidr,
             Description = subnet.Description,
-            ChildSubnetCount = descendantCount
+            ChildSubnetCount = descendantCount,
+            HostIpCount = hostIpCount,
+            IsFullyAllocated = subnet.IsFullyAllocated
         };
 
         return View(viewModel);
+    }
+    
+    // Helper method to count all host IPs in descendant subnets
+    private async Task<int> CountAllDescendantHostIps(int subnetId)
+    {
+        // Get all subnets with their host IP assignments
+        List<Subnet> allSubnets = await context.Subnets
+            .Include(s => s.HostIpAssignments)
+            .ToListAsync();
+            
+        int hostIpCount = 0;
+        
+        // Set to keep track of processed IDs to avoid circular references
+        HashSet<int> processedIds = [];
+
+        // Queue for breadth-first traversal
+        Queue<int> queue = new();
+        queue.Enqueue(subnetId);
+        processedIds.Add(subnetId);
+
+        while (queue.Count > 0)
+        {
+            int currentId = queue.Dequeue();
+
+            // Find all direct children of the current subnet
+            List<Subnet> childSubnets = [.. allSubnets.Where(s => s.ParentSubnetId == currentId)];
+
+            foreach (Subnet? child in childSubnets)
+            {
+                if (!processedIds.Contains(child.Id))
+                {
+                    // Count host IPs in this child subnet
+                    hostIpCount += child.HostIpAssignments.Count;
+                    
+                    queue.Enqueue(child.Id);
+                    processedIds.Add(child.Id);
+                }
+            }
+        }
+
+        return hostIpCount;
     }
 
     // POST: Subnet/Delete/5
@@ -616,6 +666,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         Subnet? subnet = await context.Subnets
             .Include(s => s.ChildSubnets)
+            .Include(s => s.HostIpAssignments)
             .FirstOrDefaultAsync(s => s.Id == id);
 
         if (subnet == null)
