@@ -1,7 +1,7 @@
 @model SubnetDetailsViewModel
 
 @* Unallocated IP Ranges partial view *@
-@if (Model.UnallocatedRanges.Any())
+@if (!Model.IsFullyAllocated && Model.UnallocatedRanges.Any())
 {
     <div class="card mb-4">
         <div class="card-header">
