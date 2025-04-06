@@ -1,0 +1,17 @@
+@model DeleteSubnetViewModel
+
+<form asp-action="Delete" method="post">
+    <input type="hidden" asp-for="Id" />
+    
+    <div class="mb-4">
+        <label for="confirmation" class="form-label fw-bold">Type "approved" to confirm deletion:</label>
+        <input type="text" class="form-control form-control-lg" id="confirmation" name="confirmation" required autocomplete="off" />
+    </div>
+    
+    <div class="mb-4">
+        <button type="submit" class="btn btn-danger btn-lg">
+            <i class="bi bi-trash"></i> Delete Subnet
+        </button>
+        <a asp-action="Details" asp-route-id="@Model.Id" class="btn btn-outline-secondary btn-lg ms-2">Cancel</a>
+    </div>
+</form>
