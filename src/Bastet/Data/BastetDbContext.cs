@@ -78,7 +78,7 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
             entity.HasIndex(h => h.IP).IsUnique();
             entity.HasIndex(h => h.SubnetId);
         });
-        
+
         // Configure DeletedHostIpAssignment entity
         modelBuilder.Entity<DeletedHostIpAssignment>(entity =>
         {
@@ -88,7 +88,7 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
 
             entity.Property(h => h.Name)
                 .HasMaxLength(100);
-                
+
             entity.HasIndex(h => h.OriginalSubnetId);
         });
     }

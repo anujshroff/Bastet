@@ -8,7 +8,7 @@ namespace Bastet.Models.DTOs;
 public class CreateHostIpDto
 {
     [Required(ErrorMessage = "IP address is required")]
-    [RegularExpression(@"^(\d{1,3}\.){3}\d{1,3}$", 
+    [RegularExpression(@"^(\d{1,3}\.){3}\d{1,3}$",
         ErrorMessage = "Invalid IPv4 address format")]
     public string IP { get; set; } = string.Empty;
 

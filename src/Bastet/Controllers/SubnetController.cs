@@ -189,19 +189,20 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
                     // Validate that parent doesn't have host IPs
                     ValidationResult hostIpValidation = subnetValidationService.ValidateParentCanHaveChildSubnets(
-                        parentSubnet.Id, 
+                        parentSubnet.Id,
                         parentSubnet.HostIpAssignments);
-                        
+
                     if (!hostIpValidation.IsValid)
                     {
                         foreach (ValidationError error in hostIpValidation.Errors)
                         {
                             ModelState.AddModelError("ParentSubnetId", error.Message);
                         }
+
                         await LoadParentSubnets(viewModel);
                         return View(viewModel);
                     }
-                    
+
                     // Validate that child subnet is within parent subnet range
                     if (!ipUtilityService.IsSubnetContainedInParent(
                         viewModel.NetworkAddress, viewModel.Cidr,
@@ -588,10 +589,10 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         // Count all descendants (not just direct children)
         int descendantCount = await CountAllDescendants(id);
-        
+
         // Count all host IPs in this subnet
         int hostIpCount = subnet.HostIpAssignments.Count;
-        
+
         // Count host IPs in all descendant subnets
         hostIpCount += await CountAllDescendantHostIps(id);
 
@@ -609,7 +610,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         return View(viewModel);
     }
-    
+
     // Helper method to count all host IPs in descendant subnets
     private async Task<int> CountAllDescendantHostIps(int subnetId)
     {
@@ -617,9 +618,9 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
         List<Subnet> allSubnets = await context.Subnets
             .Include(s => s.HostIpAssignments)
             .ToListAsync();
-            
+
         int hostIpCount = 0;
-        
+
         // Set to keep track of processed IDs to avoid circular references
         HashSet<int> processedIds = [];
 
@@ -641,7 +642,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                 {
                     // Count host IPs in this child subnet
                     hostIpCount += child.HostIpAssignments.Count;
-                    
+
                     queue.Enqueue(child.Id);
                     processedIds.Add(child.Id);
                 }
@@ -651,7 +652,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
         return hostIpCount;
     }
 
-        // POST: Subnet/Delete/5
+    // POST: Subnet/Delete/5
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
@@ -687,8 +688,8 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             allDescendants.Add(subnet);
 
             // Get all host IPs for all subnets to be deleted
-            List<HostIpAssignment> allHostIps = new();
-            
+            List<HostIpAssignment> allHostIps = [];
+
             // First, load all host IPs for each subnet to be deleted
             foreach (Subnet subnetToProcess in allDescendants)
             {
@@ -696,13 +697,13 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                 Subnet? subnetWithHostIps = await context.Subnets
                     .Include(s => s.HostIpAssignments)
                     .FirstOrDefaultAsync(s => s.Id == subnetToProcess.Id);
-                
+
                 if (subnetWithHostIps != null && subnetWithHostIps.HostIpAssignments.Count > 0)
                 {
                     allHostIps.AddRange(subnetWithHostIps.HostIpAssignments);
                 }
             }
-            
+
             // First handle all host IPs (archive them in DeletedHostIpAssignments)
             foreach (HostIpAssignment hostIp in allHostIps)
             {
@@ -719,10 +720,10 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                     DeletedAt = DateTime.UtcNow,
                     DeletedBy = userContextService.GetCurrentUsername()
                 };
-                
+
                 // Add to DeletedHostIpAssignments table
                 context.DeletedHostIpAssignments.Add(deletedHostIp);
-                
+
                 // Remove from HostIpAssignments table
                 context.HostIpAssignments.Remove(hostIp);
             }
@@ -763,7 +764,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             int totalHostIpsDeleted = allHostIps.Count;
             TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' and {allDescendants.Count - 1} child subnet(s) were deleted successfully. " +
                                        $"{totalHostIpsDeleted} host IP assignment(s) were archived.";
-            
+
             return RedirectToAction(nameof(Index));
         }
         catch (Exception ex)

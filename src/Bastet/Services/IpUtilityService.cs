@@ -289,8 +289,8 @@ public class IpUtilityService : IIpUtilityService
     /// <summary>
     /// Calculates unallocated IP ranges within a subnet, taking into account child subnets
     /// </summary>
-    public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets) => 
-        CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, Enumerable.Empty<HostIpAssignment>());
+    public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets) =>
+        CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, []);
 
     /// <summary>
     /// Calculates unallocated IP ranges within a subnet, taking into account child subnets and host IP assignments
@@ -333,7 +333,7 @@ public class IpUtilityService : IIpUtilityService
 
         // Get all Host IP assignments that are within this subnet
         List<(uint IpAddress, string IpString)> validHostIps = [];
-        
+
         if (hostIpAssignments != null && hostIpAssignments.Any())
         {
             foreach (HostIpAssignment hostIp in hostIpAssignments)
@@ -404,11 +404,11 @@ public class IpUtilityService : IIpUtilityService
         List<(uint Start, uint End)> mergedRanges = [];
         if (allocatedRanges.Count > 0)
         {
-            var current = allocatedRanges[0];
-            for (int i = 1; i < allocatedRanges.Count; i++)
+            (uint Start, uint End) current = allocatedRanges[0];
+            for (int i = 1 ; i < allocatedRanges.Count ; i++)
             {
-                var next = allocatedRanges[i];
-                
+                (uint Start, uint End) next = allocatedRanges[i];
+
                 // If ranges overlap or are adjacent, merge them
                 if (next.Start <= current.End + 1)
                 {
@@ -427,7 +427,7 @@ public class IpUtilityService : IIpUtilityService
 
         // Find gaps between allocated ranges
         uint currentPosition = startIp;
-        
+
         foreach ((uint Start, uint End) in mergedRanges)
         {
             if (Start > currentPosition)
@@ -516,23 +516,23 @@ public class IpUtilityService : IIpUtilityService
             // Parse IP addresses
             IPAddress ipAddress = IPAddress.Parse(ip);
             IPAddress networkIpAddress = IPAddress.Parse(networkAddress);
-            
+
             byte[] ipBytes = ipAddress.GetAddressBytes();
             byte[] networkBytes = networkIpAddress.GetAddressBytes();
-            
+
             // Verify both are IPv4
             if (ipBytes.Length != 4 || networkBytes.Length != 4)
             {
                 return false;
             }
-            
+
             // Convert to UInt32 for bitwise operations
             uint ipValue = BitConverter.ToUInt32([.. ipBytes.Reverse()], 0);
             uint networkValue = BitConverter.ToUInt32([.. networkBytes.Reverse()], 0);
-            
+
             // Create subnet mask
             uint mask = (cidr == 0) ? 0 : ~((1u << (32 - cidr)) - 1);
-            
+
             // Check if IP is in subnet (they have the same network portion)
             return (ipValue & mask) == (networkValue & mask);
         }

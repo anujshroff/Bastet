@@ -34,10 +34,7 @@ namespace Bastet.Migrations
                     CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     ModifiedBy = table.Column<string>(type: "nvarchar(max)", nullable: true)
                 },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_DeletedHostIpAssignments", x => x.Id);
-                });
+                constraints: table => table.PrimaryKey("PK_DeletedHostIpAssignments", x => x.Id));
 
             migrationBuilder.CreateTable(
                 name: "HostIpAssignments",

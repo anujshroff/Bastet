@@ -73,7 +73,7 @@ public interface ISubnetValidationService
         IEnumerable<Subnet>? siblings = null,
         IEnumerable<Subnet>? children = null,
         IEnumerable<Subnet>? allOtherSubnets = null);
-        
+
     /// <summary>
     /// Validates that a parent subnet can have child subnets added (doesn't have host IPs)
     /// </summary>

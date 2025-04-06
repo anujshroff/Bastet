@@ -1,7 +1,7 @@
 using Bastet.Data;
 using Bastet.Models;
-using Bastet.Models.ViewModels;
 using Bastet.Models.DTOs;
+using Bastet.Models.ViewModels;
 using Bastet.Services;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
@@ -11,30 +11,18 @@ using System.Net;
 
 namespace Bastet.Controllers;
 
-public class HostIpController : Controller
+public class HostIpController(
+    BastetDbContext context,
+    IHostIpValidationService hostIpValidationService,
+    IIpUtilityService ipUtilityService,
+    IUserContextService userContextService) : Controller
 {
-    private readonly BastetDbContext _context;
-    private readonly IHostIpValidationService _hostIpValidationService;
-    private readonly IIpUtilityService _ipUtilityService;
-    private readonly IUserContextService _userContextService;
-
-    public HostIpController(
-        BastetDbContext context,
-        IHostIpValidationService hostIpValidationService,
-        IIpUtilityService ipUtilityService,
-        IUserContextService userContextService)
-    {
-        _context = context;
-        _hostIpValidationService = hostIpValidationService;
-        _ipUtilityService = ipUtilityService;
-        _userContextService = userContextService;
-    }
 
     // GET: HostIp/Index/5 (5 is the subnetId)
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> Index(int subnetId)
     {
-        Subnet? subnet = await _context.Subnets
+        Subnet? subnet = await context.Subnets
             .Include(s => s.HostIpAssignments)
             .FirstOrDefaultAsync(s => s.Id == subnetId);
 
@@ -51,7 +39,7 @@ public class HostIpController : Controller
         }
 
         // Order host IPs by address
-        List<HostIpViewModel> hostIps = subnet.HostIpAssignments
+        List<HostIpViewModel> hostIps = [.. subnet.HostIpAssignments
             .OrderBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[0])
             .ThenBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[1])
             .ThenBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[2])
@@ -64,8 +52,7 @@ public class HostIpController : Controller
                 CreatedBy = h.CreatedBy,
                 LastModifiedAt = h.LastModifiedAt,
                 ModifiedBy = h.ModifiedBy
-            })
-            .ToList();
+            })];
 
         ViewBag.SubnetId = subnetId;
         ViewBag.SubnetName = subnet.Name;
@@ -79,20 +66,21 @@ public class HostIpController : Controller
     [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Create(int subnetId)
     {
-        Subnet? subnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? subnet = await context.Subnets.FindAsync(subnetId);
         if (subnet == null)
         {
             return NotFound();
         }
 
         // Check if subnet can have host IPs
-        ValidationResult validationResult = _hostIpValidationService.ValidateSubnetCanContainHostIp(subnetId);
+        ValidationResult validationResult = hostIpValidationService.ValidateSubnetCanContainHostIp(subnetId);
         if (!validationResult.IsValid)
         {
             foreach (ValidationError error in validationResult.Errors)
             {
                 ModelState.AddModelError("", error.Message);
             }
+
             return RedirectToAction("Details", "Subnet", new { id = subnetId });
         }
 
@@ -103,7 +91,7 @@ public class HostIpController : Controller
             SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})",
             NetworkAddress = subnet.NetworkAddress,
             Cidr = subnet.Cidr,
-            SubnetRange = $"{subnet.NetworkAddress} - {_ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}"
+            SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}"
         };
 
         return View(viewModel);
@@ -120,7 +108,7 @@ public class HostIpController : Controller
             try
             {
                 // Validate host IP assignment
-                ValidationResult validationResult = _hostIpValidationService.ValidateNewHostIp(viewModel.IP, viewModel.SubnetId);
+                ValidationResult validationResult = hostIpValidationService.ValidateNewHostIp(viewModel.IP, viewModel.SubnetId);
                 if (!validationResult.IsValid)
                 {
                     foreach (ValidationError error in validationResult.Errors)
@@ -129,13 +117,13 @@ public class HostIpController : Controller
                     }
 
                     // Refresh subnet info for display
-                    Subnet? subnet = await _context.Subnets.FindAsync(viewModel.SubnetId);
+                    Subnet? subnet = await context.Subnets.FindAsync(viewModel.SubnetId);
                     if (subnet != null)
                     {
                         viewModel.SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})";
                         viewModel.NetworkAddress = subnet.NetworkAddress;
                         viewModel.Cidr = subnet.Cidr;
-                        viewModel.SubnetRange = $"{subnet.NetworkAddress} - {_ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}";
+                        viewModel.SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}";
                     }
 
                     return View(viewModel);
@@ -148,11 +136,11 @@ public class HostIpController : Controller
                     Name = viewModel.Name,
                     SubnetId = viewModel.SubnetId,
                     CreatedAt = DateTime.UtcNow,
-                    CreatedBy = _userContextService.GetCurrentUsername()
+                    CreatedBy = userContextService.GetCurrentUsername()
                 };
 
-                _context.HostIpAssignments.Add(hostIp);
-                await _context.SaveChangesAsync();
+                context.HostIpAssignments.Add(hostIp);
+                await context.SaveChangesAsync();
 
                 TempData["SuccessMessage"] = $"Host IP {hostIp.IP} was created successfully.";
                 return RedirectToAction(nameof(Index), new { subnetId = viewModel.SubnetId });
@@ -165,13 +153,13 @@ public class HostIpController : Controller
 
         // If we get here, something went wrong
         // Refresh subnet info for display
-        Subnet? subnetForError = await _context.Subnets.FindAsync(viewModel.SubnetId);
+        Subnet? subnetForError = await context.Subnets.FindAsync(viewModel.SubnetId);
         if (subnetForError != null)
         {
             viewModel.SubnetInfo = $"{subnetForError.Name} ({subnetForError.NetworkAddress}/{subnetForError.Cidr})";
             viewModel.NetworkAddress = subnetForError.NetworkAddress;
             viewModel.Cidr = subnetForError.Cidr;
-            viewModel.SubnetRange = $"{subnetForError.NetworkAddress} - {_ipUtilityService.CalculateBroadcastAddress(subnetForError.NetworkAddress, subnetForError.Cidr)}";
+            viewModel.SubnetRange = $"{subnetForError.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnetForError.NetworkAddress, subnetForError.Cidr)}";
         }
 
         return View(viewModel);
@@ -181,7 +169,7 @@ public class HostIpController : Controller
     [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Edit(string ip)
     {
-        HostIpAssignment? hostIp = await _context.HostIpAssignments
+        HostIpAssignment? hostIp = await context.HostIpAssignments
             .Include(h => h.Subnet)
             .FirstOrDefaultAsync(h => h.IP == ip);
 
@@ -198,7 +186,7 @@ public class HostIpController : Controller
             SubnetInfo = $"{hostIp.Subnet.Name} ({hostIp.Subnet.NetworkAddress}/{hostIp.Subnet.Cidr})",
             CreatedAt = hostIp.CreatedAt,
             LastModifiedAt = hostIp.LastModifiedAt,
-            RowVersion = hostIp.RowVersion ?? Array.Empty<byte>()
+            RowVersion = hostIp.RowVersion ?? []
         };
 
         return View(viewModel);
@@ -220,14 +208,14 @@ public class HostIpController : Controller
             try
             {
                 // Validate host IP update
-                ValidationResult validationResult = _hostIpValidationService.ValidateHostIpUpdate(
-                    ip, 
-                    new UpdateHostIpDto 
-                    { 
-                        IP = viewModel.IP, 
-                        Name = viewModel.Name, 
-                        RowVersion = viewModel.RowVersion 
-                    }, 
+                ValidationResult validationResult = hostIpValidationService.ValidateHostIpUpdate(
+                    ip,
+                    new UpdateHostIpDto
+                    {
+                        IP = viewModel.IP,
+                        Name = viewModel.Name,
+                        RowVersion = viewModel.RowVersion
+                    },
                     viewModel.RowVersion);
 
                 if (!validationResult.IsValid)
@@ -236,11 +224,12 @@ public class HostIpController : Controller
                     {
                         ModelState.AddModelError("", error.Message);
                     }
+
                     return View(viewModel);
                 }
 
                 // Find and update the host IP
-                HostIpAssignment? hostIp = await _context.HostIpAssignments.FindAsync(ip);
+                HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
                 if (hostIp == null)
                 {
                     return NotFound();
@@ -248,10 +237,10 @@ public class HostIpController : Controller
 
                 hostIp.Name = viewModel.Name;
                 hostIp.LastModifiedAt = DateTime.UtcNow;
-                hostIp.ModifiedBy = _userContextService.GetCurrentUsername();
+                hostIp.ModifiedBy = userContextService.GetCurrentUsername();
 
-                _context.Update(hostIp);
-                await _context.SaveChangesAsync();
+                context.Update(hostIp);
+                await context.SaveChangesAsync();
 
                 TempData["SuccessMessage"] = $"Host IP {hostIp.IP} was updated successfully.";
                 return RedirectToAction(nameof(Index), new { subnetId = hostIp.SubnetId });
@@ -280,7 +269,7 @@ public class HostIpController : Controller
     [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> Delete(string ip)
     {
-        HostIpAssignment? hostIp = await _context.HostIpAssignments
+        HostIpAssignment? hostIp = await context.HostIpAssignments
             .Include(h => h.Subnet)
             .FirstOrDefaultAsync(h => h.IP == ip);
 
@@ -309,23 +298,24 @@ public class HostIpController : Controller
     public async Task<IActionResult> DeleteConfirmed(string ip)
     {
         // Validate host IP deletion
-        ValidationResult validationResult = _hostIpValidationService.ValidateHostIpDeletion(ip);
+        ValidationResult validationResult = hostIpValidationService.ValidateHostIpDeletion(ip);
         if (!validationResult.IsValid)
         {
             foreach (ValidationError error in validationResult.Errors)
             {
                 TempData["ErrorMessage"] = error.Message;
             }
+
             return RedirectToAction(nameof(Delete), new { ip });
         }
 
         // Begin a transaction to ensure data consistency
-        using var transaction = await _context.Database.BeginTransactionAsync();
+        using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
         try
         {
             // Get the host IP assignment
-            HostIpAssignment? hostIp = await _context.HostIpAssignments.FindAsync(ip);
+            HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
             if (hostIp == null)
             {
                 return NotFound();
@@ -344,14 +334,14 @@ public class HostIpController : Controller
                 CreatedBy = hostIp.CreatedBy,
                 ModifiedBy = hostIp.ModifiedBy,
                 DeletedAt = DateTime.UtcNow,
-                DeletedBy = _userContextService.GetCurrentUsername()
+                DeletedBy = userContextService.GetCurrentUsername()
             };
 
-            _context.DeletedHostIpAssignments.Add(deletedHostIp);
+            context.DeletedHostIpAssignments.Add(deletedHostIp);
 
             // Remove the host IP assignment
-            _context.HostIpAssignments.Remove(hostIp);
-            await _context.SaveChangesAsync();
+            context.HostIpAssignments.Remove(hostIp);
+            await context.SaveChangesAsync();
 
             // Commit the transaction
             await transaction.CommitAsync();
@@ -375,37 +365,36 @@ public class HostIpController : Controller
         // Validate page
         page = Math.Max(1, page);
         int pageSize = 50;
-        
+
         // Get all subnets with host IP assignments
-        var allSubnetsWithHostIps = await _context.Subnets
+        List<Subnet> allSubnetsWithHostIps = await context.Subnets
             .Include(s => s.HostIpAssignments)
             .Where(s => s.HostIpAssignments.Count > 0)
             .ToListAsync();
-            
+
         // Flatten all host IPs into a single list
-        var allHostIps = new List<(HostIpAssignment HostIp, Subnet Subnet)>();
-        foreach (var subnet in allSubnetsWithHostIps)
+        List<(HostIpAssignment HostIp, Subnet Subnet)> allHostIps = [];
+        foreach (Subnet? subnet in allSubnetsWithHostIps)
         {
-            foreach (var hostIp in subnet.HostIpAssignments)
+            foreach (HostIpAssignment hostIp in subnet.HostIpAssignments)
             {
                 allHostIps.Add((hostIp, subnet));
             }
         }
-        
+
         // Order by subnet name then IP address
-        var orderedHostIps = allHostIps
+        List<(HostIpAssignment HostIp, Subnet Subnet)> orderedHostIps = [.. allHostIps
             .OrderBy(h => h.Subnet.Name)
             .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[0])
             .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[1])
             .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[2])
-            .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[3])
-            .ToList();
-            
+            .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[3])];
+
         // Get total count
         int totalCount = orderedHostIps.Count;
-        
+
         // Apply pagination
-        var pagedHostIps = orderedHostIps
+        List<AllHostIpItemViewModel> pagedHostIps = [.. orderedHostIps
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(h => new AllHostIpItemViewModel
@@ -420,21 +409,20 @@ public class HostIpController : Controller
                 CreatedBy = h.HostIp.CreatedBy,
                 LastModifiedAt = h.HostIp.LastModifiedAt,
                 ModifiedBy = h.HostIp.ModifiedBy
-            })
-            .ToList();
-            
+            })];
+
         // Create the view model
-        var viewModel = new AllHostIpsViewModel
+        AllHostIpsViewModel viewModel = new()
         {
             HostIps = pagedHostIps,
             TotalCount = totalCount,
             CurrentPage = page,
             PageSize = pageSize
         };
-        
+
         return View(viewModel);
     }
-    
+
     // GET: HostIp/AllDeletedHostIps
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> AllDeletedHostIps(int page = 1)
@@ -442,31 +430,30 @@ public class HostIpController : Controller
         // Validate page
         page = Math.Max(1, page);
         int pageSize = 50;
-        
+
         // Get all deleted host IPs
-        var deletedHostIps = await _context.DeletedHostIpAssignments
+        List<DeletedHostIpAssignment> deletedHostIps = await context.DeletedHostIpAssignments
             .OrderByDescending(h => h.DeletedAt)
             .ToListAsync();
-            
+
         // Get total count
         int totalCount = deletedHostIps.Count;
-        
+
         // Get all subnet information (including deleted subnets)
-        var allSubnets = await _context.Subnets.ToListAsync();
-        var allDeletedSubnets = await _context.DeletedSubnets.ToListAsync();
-        
+        List<Subnet> allSubnets = await context.Subnets.ToListAsync();
+        List<DeletedSubnet> allDeletedSubnets = await context.DeletedSubnets.ToListAsync();
+
         // Apply pagination
-        var pagedDeletedHostIps = deletedHostIps
+        List<DeletedHostIpAssignment> pagedDeletedHostIps = [.. deletedHostIps
             .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToList();
-            
+            .Take(pageSize)];
+
         // Build view models with subnet information where available
-        var viewModels = new List<AllDeletedHostIpItemViewModel>();
-        
-        foreach (var deletedHostIp in pagedDeletedHostIps)
+        List<AllDeletedHostIpItemViewModel> viewModels = [];
+
+        foreach (DeletedHostIpAssignment? deletedHostIp in pagedDeletedHostIps)
         {
-            var viewModel = new AllDeletedHostIpItemViewModel
+            AllDeletedHostIpItemViewModel viewModel = new()
             {
                 Id = deletedHostIp.Id,
                 OriginalIP = deletedHostIp.OriginalIP,
@@ -479,9 +466,9 @@ public class HostIpController : Controller
                 DeletedAt = deletedHostIp.DeletedAt,
                 DeletedBy = deletedHostIp.DeletedBy
             };
-            
+
             // Try to find subnet information
-            var subnet = allSubnets.FirstOrDefault(s => s.Id == deletedHostIp.OriginalSubnetId);
+            Subnet? subnet = allSubnets.FirstOrDefault(s => s.Id == deletedHostIp.OriginalSubnetId);
             if (subnet != null)
             {
                 // Subnet still exists
@@ -492,7 +479,7 @@ public class HostIpController : Controller
             else
             {
                 // Check if it's in deleted subnets
-                var deletedSubnet = allDeletedSubnets.FirstOrDefault(s => s.OriginalId == deletedHostIp.OriginalSubnetId);
+                DeletedSubnet? deletedSubnet = allDeletedSubnets.FirstOrDefault(s => s.OriginalId == deletedHostIp.OriginalSubnetId);
                 if (deletedSubnet != null)
                 {
                     viewModel.SubnetName = $"{deletedSubnet.Name} (deleted)";
@@ -507,19 +494,19 @@ public class HostIpController : Controller
                     viewModel.Cidr = 0;
                 }
             }
-            
+
             viewModels.Add(viewModel);
         }
-        
+
         // Create the view model
-        var allDeletedHostIpsViewModel = new AllDeletedHostIpsViewModel
+        AllDeletedHostIpsViewModel allDeletedHostIpsViewModel = new()
         {
             DeletedHostIps = viewModels,
             TotalCount = totalCount,
             CurrentPage = page,
             PageSize = pageSize
         };
-        
+
         return View(allDeletedHostIpsViewModel);
     }
 
@@ -527,20 +514,20 @@ public class HostIpController : Controller
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> DeletedHostIps(int subnetId)
     {
-        Subnet? subnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? subnet = await context.Subnets.FindAsync(subnetId);
         if (subnet == null)
         {
             return NotFound();
         }
 
         // Get deleted host IPs for this subnet
-        List<DeletedHostIpAssignment> deletedHostIps = await _context.DeletedHostIpAssignments
+        List<DeletedHostIpAssignment> deletedHostIps = await context.DeletedHostIpAssignments
             .Where(h => h.OriginalSubnetId == subnetId)
             .OrderByDescending(h => h.DeletedAt)
             .ToListAsync();
 
         // Map to view models
-        List<DeletedHostIpViewModel> viewModels = deletedHostIps.Select(d => new DeletedHostIpViewModel
+        List<DeletedHostIpViewModel> viewModels = [.. deletedHostIps.Select(d => new DeletedHostIpViewModel
         {
             Id = d.Id,
             OriginalIP = d.OriginalIP,
@@ -552,7 +539,7 @@ public class HostIpController : Controller
             CreatedBy = d.CreatedBy,
             LastModifiedAt = d.LastModifiedAt,
             ModifiedBy = d.ModifiedBy
-        }).ToList();
+        })];
 
         // Create the list view model
         DeletedHostIpListViewModel model = new()
@@ -580,7 +567,7 @@ public class HostIpController : Controller
         }
 
         // Find the subnet
-        Subnet? subnet = await _context.Subnets
+        Subnet? subnet = await context.Subnets
             .Include(s => s.ChildSubnets)
             .Include(s => s.HostIpAssignments)
             .FirstOrDefaultAsync(s => s.Id == dto.SubnetId);
@@ -593,13 +580,14 @@ public class HostIpController : Controller
         // If we're trying to mark as fully allocated, validate
         if (dto.IsFullyAllocated)
         {
-            ValidationResult validationResult = _hostIpValidationService.ValidateSubnetCanBeFullyAllocated(dto.SubnetId);
+            ValidationResult validationResult = hostIpValidationService.ValidateSubnetCanBeFullyAllocated(dto.SubnetId);
             if (!validationResult.IsValid)
             {
                 foreach (ValidationError error in validationResult.Errors)
                 {
                     TempData["ErrorMessage"] = error.Message;
                 }
+
                 return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
             }
         }
@@ -607,10 +595,10 @@ public class HostIpController : Controller
         // Update the subnet
         subnet.IsFullyAllocated = dto.IsFullyAllocated;
         subnet.LastModifiedAt = DateTime.UtcNow;
-        subnet.ModifiedBy = _userContextService.GetCurrentUsername();
+        subnet.ModifiedBy = userContextService.GetCurrentUsername();
 
-        _context.Update(subnet);
-        await _context.SaveChangesAsync();
+        context.Update(subnet);
+        await context.SaveChangesAsync();
 
         string statusMessage = dto.IsFullyAllocated
             ? $"Subnet '{subnet.Name}' was marked as fully allocated."
@@ -620,6 +608,6 @@ public class HostIpController : Controller
         return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
     }
 
-    private bool HostIpExists(string ip) => 
-        _context.HostIpAssignments.Any(e => e.IP == ip);
+    private bool HostIpExists(string ip) =>
+        context.HostIpAssignments.Any(e => e.IP == ip);
 }

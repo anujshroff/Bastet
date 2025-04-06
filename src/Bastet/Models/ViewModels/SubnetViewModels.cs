@@ -80,7 +80,7 @@ public class SubnetDetailsViewModel
     // Host IP assignments
     public List<HostIpViewModel> HostIpAssignments { get; set; } = [];
     public bool IsFullyAllocated { get; set; }
-    
+
     // Helper properties for UI logic
     public int HostIpCount => HostIpAssignments.Count;
     public bool CanAddHostIp => ChildSubnets.Count == 0 && !IsFullyAllocated;

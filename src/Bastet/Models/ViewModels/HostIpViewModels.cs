@@ -21,7 +21,7 @@ public class HostIpViewModel
 public class CreateHostIpViewModel
 {
     [Required(ErrorMessage = "IP address is required")]
-    [RegularExpression(@"^(\d{1,3}\.){3}\d{1,3}$", 
+    [RegularExpression(@"^(\d{1,3}\.){3}\d{1,3}$",
         ErrorMessage = "Invalid IPv4 address format")]
     [Display(Name = "IP Address")]
     public string IP { get; set; } = string.Empty;

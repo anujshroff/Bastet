@@ -45,7 +45,7 @@ public class EditSubnetViewModel
     [Display(Name = "Tags")]
     [StringLength(255, ErrorMessage = "Tags cannot be longer than 255 characters")]
     public string? Tags { get; set; }
-    
+
     /// <summary>
     /// Indicates if the subnet is fully allocated (no IPs available)
     /// </summary>
@@ -64,7 +64,7 @@ public class EditSubnetViewModel
 
     [Display(Name = "Last Modified")]
     public DateTime? LastModifiedAt { get; set; }
-    
+
     /// <summary>
     /// For concurrency control
     /// </summary>

@@ -34,12 +34,12 @@ public class DeleteSubnetViewModel
     /// Number of child subnets that will be deleted
     /// </summary>
     public int ChildSubnetCount { get; set; }
-    
+
     /// <summary>
     /// Number of host IP assignments that will be deleted
     /// </summary>
     public int HostIpCount { get; set; }
-    
+
     /// <summary>
     /// Indicates if the subnet is fully allocated
     /// </summary>

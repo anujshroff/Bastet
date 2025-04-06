@@ -20,13 +20,13 @@ public class AllHostIpItemViewModel
     // IP information
     public string IP { get; set; } = string.Empty;
     public string? Name { get; set; }
-    
+
     // Subnet information
     public int SubnetId { get; set; }
     public string SubnetName { get; set; } = string.Empty;
     public string NetworkAddress { get; set; } = string.Empty;
     public int Cidr { get; set; }
-    
+
     // Metadata
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }

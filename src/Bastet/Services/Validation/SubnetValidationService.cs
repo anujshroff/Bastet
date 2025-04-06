@@ -361,19 +361,19 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
 
         return result;
     }
-    
+
     /// <inheritdoc />
     public ValidationResult ValidateParentCanHaveChildSubnets(int parentId, IEnumerable<HostIpAssignment>? hostIps = null)
     {
         ValidationResult result = new();
-        
+
         // Check if the parent subnet has host IP assignments
         if (hostIps != null && hostIps.Any())
         {
             result.AddError(PARENT_HAS_HOST_IPS,
                 "Cannot create child subnets in a subnet that has host IP assignments. A subnet can have either child subnets or host IPs, but not both.");
         }
-        
+
         return result;
     }
 }

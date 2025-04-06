@@ -35,7 +35,7 @@ public class HostIpAssignment : BaseEntity
         try
         {
             // Parse IP addresses
-            if (!IPAddress.TryParse(IP, out IPAddress? ipAddress) || 
+            if (!IPAddress.TryParse(IP, out IPAddress? ipAddress) ||
                 !IPAddress.TryParse(Subnet.NetworkAddress, out IPAddress? networkAddress))
             {
                 return false;
