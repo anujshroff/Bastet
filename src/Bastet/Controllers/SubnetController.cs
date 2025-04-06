@@ -37,6 +37,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     {
         Subnet? subnet = await context.Subnets
             .Include(s => s.ChildSubnets)
+            .Include(s => s.HostIpAssignments)
             .FirstOrDefaultAsync(s => s.Id == id);
 
         if (subnet == null)
@@ -57,6 +58,7 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             LastModifiedAt = subnet.LastModifiedAt,
             CreatedBy = subnet.CreatedBy,
             ModifiedBy = subnet.ModifiedBy,
+            IsFullyAllocated = subnet.IsFullyAllocated,
             // Calculate subnet properties
             SubnetMask = ipUtilityService.CalculateSubnetMask(subnet.Cidr),
             BroadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr),
@@ -74,6 +76,21 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
                     Name = c.Name,
                     NetworkAddress = c.NetworkAddress,
                     Cidr = c.Cidr
+                })],
+            // Include host IP assignments if any
+            HostIpAssignments = [.. subnet.HostIpAssignments
+                .OrderBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[0])
+                .ThenBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[1])
+                .ThenBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[2])
+                .ThenBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[3])
+                .Select(h => new HostIpViewModel
+                {
+                    IP = h.IP,
+                    Name = h.Name,
+                    CreatedAt = h.CreatedAt,
+                    CreatedBy = h.CreatedBy,
+                    LastModifiedAt = h.LastModifiedAt,
+                    ModifiedBy = h.ModifiedBy
                 })],
             // Get unallocated IP ranges
             UnallocatedRanges = [.. ipUtilityService.CalculateUnallocatedRanges(
