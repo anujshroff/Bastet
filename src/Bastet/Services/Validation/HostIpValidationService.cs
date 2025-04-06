@@ -23,6 +23,8 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
     private const string HOST_IP_NOT_FOUND = "HOST_IP_NOT_FOUND";
     private const string CONCURRENCY_CONFLICT = "CONCURRENCY_CONFLICT";
     private const string CIDR_CHANGE_INVALID = "CIDR_CHANGE_INVALID";
+    private const string NETWORK_ADDRESS_RESERVED = "NETWORK_ADDRESS_RESERVED";
+    private const string BROADCAST_ADDRESS_RESERVED = "BROADCAST_ADDRESS_RESERVED";
 
     /// <inheritdoc />
     public ValidationResult ValidateNewHostIp(string ip, int subnetId)
@@ -57,6 +59,21 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
                 result.AddError(error.Code, error.Message);
             }
 
+            return result;
+        }
+
+        // Check if IP is the network address
+        if (ip == subnet.NetworkAddress)
+        {
+            result.AddError(NETWORK_ADDRESS_RESERVED, "Cannot assign the network address as a host IP");
+            return result;
+        }
+
+        // Check if IP is the broadcast address
+        string broadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr);
+        if (ip == broadcastAddress)
+        {
+            result.AddError(BROADCAST_ADDRESS_RESERVED, "Cannot assign the broadcast address as a host IP");
             return result;
         }
 
@@ -125,6 +142,21 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             Subnet? subnet = context.Subnets.Find(hostIp.SubnetId);
             if (subnet != null)
             {
+                // Check if IP is the network address
+                if (dto.IP == subnet.NetworkAddress)
+                {
+                    result.AddError(NETWORK_ADDRESS_RESERVED, "Cannot assign the network address as a host IP");
+                    return result;
+                }
+
+                // Check if IP is the broadcast address
+                string broadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr);
+                if (dto.IP == broadcastAddress)
+                {
+                    result.AddError(BROADCAST_ADDRESS_RESERVED, "Cannot assign the broadcast address as a host IP");
+                    return result;
+                }
+
                 ValidationResult ipRangeValidation = ValidateIpIsWithinSubnet(dto.IP, subnet.NetworkAddress, subnet.Cidr);
                 if (!ipRangeValidation.IsValid)
                 {
