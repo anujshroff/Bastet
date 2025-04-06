@@ -4,10 +4,10 @@
     ViewData["Title"] = "Subnet Details";
 }
 
-@await Html.PartialAsync("Partials/_CidrInputModal", Model)
+@await Html.PartialAsync("Details/_CidrInputModal", Model)
 
 @section Scripts {
-    @await Html.PartialAsync("Partials/_SubnetCalculationScripts", Model)
+    @await Html.PartialAsync("Details/_SubnetCalculationScripts", Model)
 }
 
 <div class="mb-4">
@@ -25,14 +25,14 @@
 
 <div class="row">
     <div class="col-md-6">
-        @await Html.PartialAsync("Partials/_NetworkInformation", Model)
+        @await Html.PartialAsync("Details/_NetworkInformation", Model)
     </div>
     
     <div class="col-md-6">
-        @await Html.PartialAsync("Partials/_SubnetDetails", Model)
+        @await Html.PartialAsync("Details/_SubnetDetails", Model)
     </div>
 </div>
 
-@await Html.PartialAsync("Partials/_ParentSubnet", Model)
-@await Html.PartialAsync("Partials/_ChildSubnets", Model)
-@await Html.PartialAsync("Partials/_UnallocatedRanges", Model)
+@await Html.PartialAsync("Details/_ParentSubnet", Model)
+@await Html.PartialAsync("Details/_ChildSubnets", Model)
+@await Html.PartialAsync("Details/_UnallocatedRanges", Model)
