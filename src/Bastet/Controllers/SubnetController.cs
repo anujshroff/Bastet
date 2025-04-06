@@ -10,7 +10,7 @@ using System.Net;
 
 namespace Bastet.Controllers;
 
-public class SubnetController(BastetDbContext context, IIpUtilityService ipUtilityService, ISubnetValidationService subnetValidationService, IUserContextService userContextService) : Controller
+public class SubnetController(BastetDbContext context, IIpUtilityService ipUtilityService, ISubnetValidationService subnetValidationService, IHostIpValidationService hostIpValidationService, IUserContextService userContextService) : Controller
 {
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> Index()
@@ -492,6 +492,38 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
                         // Update subnet mask for display after validation
                         viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
+
+                        // Only validate host IPs when CIDR is increasing (making subnet smaller)
+                        if (viewModel.Cidr > subnet.Cidr)
+                        {
+                            // Validate that all host IPs are still within the subnet range after CIDR change
+                            ValidationResult hostIpValidationResult = hostIpValidationService.ValidateSubnetCidrChangeWithHostIps(
+                                subnet.Id,
+                                subnet.NetworkAddress,
+                                subnet.Cidr,
+                                viewModel.Cidr);
+
+                            if (!hostIpValidationResult.IsValid)
+                            {
+                                foreach (ValidationError error in hostIpValidationResult.Errors)
+                                {
+                                    ModelState.AddModelError("Cidr", error.Message);
+                                }
+
+                                // Early return with validation errors
+                                viewModel.CreatedAt = subnet.CreatedAt;
+                                viewModel.LastModifiedAt = subnet.LastModifiedAt;
+
+                                if (subnet.ParentSubnet != null)
+                                {
+                                    viewModel.ParentSubnetInfo = $"{subnet.ParentSubnet.Name} ({subnet.ParentSubnet.NetworkAddress}/{subnet.ParentSubnet.Cidr})";
+                                }
+
+                                return View(viewModel);
+                            }
+                        }
+                        // For CIDR decreases (subnet expansion), no host IP validation is needed
+                        // since making a subnet larger cannot cause host IPs to fall outside its range
                     }
 
                     // Update all editable properties including CIDR now

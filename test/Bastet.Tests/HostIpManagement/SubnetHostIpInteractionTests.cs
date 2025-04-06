@@ -38,7 +38,7 @@ public class SubnetHostIpInteractionTests : IDisposable
 
         // Create controllers
         _subnetController = new SubnetController(_context, _ipUtilityService,
-            _subnetValidationService, _userContextService);
+            _subnetValidationService, _hostIpValidationService, _userContextService);
         ControllerTestHelper.SetupController(_subnetController);
 
         _hostIpController = new HostIpController(_context, _hostIpValidationService,
@@ -60,12 +60,12 @@ public class SubnetHostIpInteractionTests : IDisposable
     {
         // Create subnets for various scenarios
 
-        // Subnet that can be expanded (192.168.1.0/24)
+        // Subnet that can be expanded (192.168.0.0/24)
         Subnet expandableSubnet = new()
         {
             Id = 1,
             Name = "Expandable Subnet",
-            NetworkAddress = "192.168.1.0",
+            NetworkAddress = "192.168.0.0",
             Cidr = 24,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "test-user"
@@ -75,7 +75,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         // Add host IPs to the expandable subnet
         HostIpAssignment hostIp1 = new()
         {
-            IP = "192.168.1.10",
+            IP = "192.168.0.10",
             Name = "Host 1",
             SubnetId = 1,
             CreatedAt = DateTime.UtcNow,
@@ -85,7 +85,7 @@ public class SubnetHostIpInteractionTests : IDisposable
 
         HostIpAssignment hostIp2 = new()
         {
-            IP = "192.168.1.20",
+            IP = "192.168.0.20",
             Name = "Host 2",
             SubnetId = 1,
             CreatedAt = DateTime.UtcNow,
@@ -226,13 +226,14 @@ public class SubnetHostIpInteractionTests : IDisposable
     [Fact]
     public async Task EditSubnet_DecreaseCidr_WithHostIps_Succeeds()
     {
-        // Arrange - Expand 192.168.1.0/24 to 192.168.1.0/23
+        // Arrange - Expand 192.168.0.0/24 to 192.168.0.0/23
+        // Note: 192.168.0.0 works for both /24 and /23 subnets
         int subnetId = 1;
         EditSubnetViewModel viewModel = new()
         {
             Id = subnetId,
             Name = "Expandable Subnet",
-            NetworkAddress = "192.168.1.0",
+            NetworkAddress = "192.168.0.0", // Correct network address for a /23
             Cidr = 23, // Decrease from 24 to 23 (expand)
             OriginalCidr = 24,
             Description = "Expanded subnet"
@@ -241,7 +242,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         // Act
         IActionResult result = await _subnetController.Edit(subnetId, viewModel);
 
-        // Assert
+        // Assert - This should be a successful operation
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
@@ -249,7 +250,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         // Verify database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync(subnetId);
         Assert.NotNull(updatedSubnet);
-        Assert.Equal(23, updatedSubnet.Cidr);
+        Assert.Equal(23, updatedSubnet.Cidr); // CIDR was decreased from 24 to 23
     }
 
     [Fact]

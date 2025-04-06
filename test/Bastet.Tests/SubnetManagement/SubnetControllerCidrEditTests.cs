@@ -30,8 +30,11 @@ public class SubnetControllerCidrEditTests : IDisposable
         _ipUtilityService = new IpUtilityService();
         _validationService = new SubnetValidationService(_ipUtilityService);
 
+        // Need HostIpValidationService for the updated controller signature
+        HostIpValidationService hostIpValidationService = new(_ipUtilityService, _context);
+
         // Create and configure the controller
-        _controller = new SubnetController(_context, _ipUtilityService, _validationService, _userContextService);
+        _controller = new SubnetController(_context, _ipUtilityService, _validationService, hostIpValidationService, _userContextService);
         ControllerTestHelper.SetupController(_controller);
 
         // Set up test data
