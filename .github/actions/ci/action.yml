@@ -9,7 +9,7 @@ inputs:
     default: '9.x'
   CODEQL_LANGUAGES:
     required: false
-    default: 'csharp'
+    default: 'csharp,javascript'
   FAIL_ON_HIGH:
     required: false
     default: false
@@ -26,9 +26,7 @@ runs:
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ inputs.CODEQL_LANGUAGES }}
-        build-mode: manual
         queries: +security-extended
-        packs: +codeql/csharp-queries
 
     - name: Build
       run: dotnet build --configuration ${{ inputs.CONFIGURATION }}
