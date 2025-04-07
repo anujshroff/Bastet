@@ -145,3 +145,7 @@ BASTET supports configuration through environment variables:
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## AI Notice
+
+This project was almost entirely generated using AI, leveraging the power of **Cline** with **Claude 3.7**. It serves as a testament to the capabilities of modern AI in automating complex development tasks and streamlining the software creation process.
