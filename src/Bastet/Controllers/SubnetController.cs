@@ -42,7 +42,12 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         if (subnet == null)
         {
-            return NotFound();
+            // Use our custom 404 page with helpful context
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new
+            {
+                statusCode = 404,
+                errorMessage = $"Subnet with ID {id} could not be found."
+            });
         }
 
         SubnetDetailsViewModel viewModel = new()
@@ -376,7 +381,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         if (subnet == null)
         {
-            return NotFound();
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new
+            {
+                statusCode = 404,
+                errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
+            });
         }
 
         EditSubnetViewModel viewModel = new()
@@ -410,7 +419,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
     {
         if (id != viewModel.Id)
         {
-            return NotFound();
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new
+            {
+                statusCode = 404,
+                errorMessage = "The ID in the URL doesn't match the ID in the form data."
+            });
         }
 
         if (ModelState.IsValid)
@@ -428,7 +441,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
                     if (subnet == null)
                     {
-                        return NotFound();
+                        return RedirectToAction("HttpStatusCodeHandler", "Error", new
+                        {
+                            statusCode = 404,
+                            errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
+                        });
                     }
 
                     // Load child subnets directly to avoid navigation property issues
@@ -558,7 +575,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
             {
                 if (!SubnetExists(id))
                 {
-                    return NotFound();
+                    return RedirectToAction("HttpStatusCodeHandler", "Error", new
+                    {
+                        statusCode = 404,
+                        errorMessage = "The subnet no longer exists. It may have been deleted by another user."
+                    });
                 }
 
                 // Handle concurrency conflict
@@ -573,7 +594,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         if (origSubnet == null)
         {
-            return NotFound();
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new
+            {
+                statusCode = 404,
+                errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
+            });
         }
 
         // Repopulate the display-only properties
@@ -616,7 +641,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         if (subnet == null)
         {
-            return NotFound();
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new
+            {
+                statusCode = 404,
+                errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
+            });
         }
 
         // Count all descendants (not just direct children)
@@ -705,7 +734,11 @@ public class SubnetController(BastetDbContext context, IIpUtilityService ipUtili
 
         if (subnet == null)
         {
-            return NotFound();
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new
+            {
+                statusCode = 404,
+                errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
+            });
         }
 
         // Begin a transaction to ensure data consistency

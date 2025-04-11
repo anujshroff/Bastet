@@ -1,0 +1,7 @@
+@model Bastet.Models.ViewModels.ErrorViewModel
+@{
+    ViewData["Title"] = "Error";
+    Model.Title = Model.Title ?? "Error";
+}
+
+@await Html.PartialAsync("_ErrorLayout", Model)

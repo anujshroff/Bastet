@@ -1,0 +1,8 @@
+@model Bastet.Models.ViewModels.ErrorViewModel
+@{
+    ViewData["Title"] = "Not Found";
+    Model.Title = Model.Title ?? "Page Not Found";
+    ViewData["RenderErrorGuidance"] = "_NotFoundGuidance";
+}
+
+@await Html.PartialAsync("_ErrorLayout", Model)
