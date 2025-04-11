@@ -1,0 +1,39 @@
+@model ErrorViewModel
+
+<div class="text-center error-container">
+    <h1 class="text-danger">@Model.Title</h1>
+    <p class="lead">Status Code: @Model.StatusCode</p>
+    
+    @if (!string.IsNullOrEmpty(Model.ErrorCode))
+    {
+        <div class="alert alert-warning">
+            <strong>Error Type:</strong> @Model.ErrorCode
+        </div>
+    }
+    
+    <p>@Model.ErrorMessage</p>
+    
+    @* Render specific error guidance if provided *@
+    @if (ViewData["RenderErrorGuidance"] != null)
+    {
+        @await Html.PartialAsync((string?)ViewData["RenderErrorGuidance"] ?? "", Model)
+    }
+    
+    @if (Model.ShowRequestId)
+    {
+        <p class="text-muted">
+            <small>Request ID: @Model.RequestId</small>
+        </p>
+    }
+    
+    <div class="mt-4">
+        <a href="/" class="btn btn-primary">Return to Home</a>
+        <a href="javascript:history.back()" class="btn btn-secondary ms-2">Go Back</a>
+        
+        @* Additional action buttons can be rendered here *@
+        @if (ViewData["AdditionalActions"] != null)
+        {
+            @await Html.PartialAsync((string?)ViewData["AdditionalActions"] ?? "", Model)
+        }
+    </div>
+</div>

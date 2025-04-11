@@ -162,12 +162,15 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Equal("10.0.2.0", model.NetworkAddress);
         Assert.Equal(24, model.Cidr);
         Assert.Equal(24, model.OriginalCidr);
-        Assert.NotNull(model.ParentSubnetInfo);
-        Assert.Contains("10.0.0.0/16", model.ParentSubnetInfo);
+
+        // Safely check parent subnet info
+        string? parentInfo = model.ParentSubnetInfo;
+        Assert.NotNull(parentInfo);
+        Assert.Contains("10.0.0.0/16", parentInfo);
     }
 
     [Fact]
-    public async Task Edit_GET_NonExistentSubnet_ReturnsNotFound()
+    public async Task Edit_GET_NonExistentSubnet_RedirectsToNotFoundError()
     {
         // Arrange
         int nonExistentId = 999;
@@ -176,7 +179,22 @@ public class SubnetControllerCidrEditTests : IDisposable
         IActionResult result = await _controller.Edit(nonExistentId);
 
         // Assert
-        Assert.IsType<NotFoundResult>(result);
+        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("HttpStatusCodeHandler", redirectResult.ActionName);
+        Assert.Equal("Error", redirectResult.ControllerName);
+
+        // Safe access to route values dictionary
+        object? statusCode = redirectResult.RouteValues?["statusCode"];
+        Assert.NotNull(statusCode);
+        Assert.Equal(404, statusCode);
+
+        // Safe handling of potentially null errorMessage
+        object? errorMessage = redirectResult.RouteValues?["errorMessage"];
+        Assert.NotNull(errorMessage);
+
+        // Safe string comparison after null check
+        string errorMessageStr = errorMessage.ToString() ?? string.Empty;
+        Assert.Contains($"{nonExistentId}", errorMessageStr);
     }
 
     // POST Edit Tests - Successful Scenarios
@@ -200,8 +218,16 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
-        Assert.Equal(4, redirectResult.RouteValues?["id"]);
-        Assert.Contains("was updated successfully", _controller.TempData["SuccessMessage"]?.ToString() ?? "");
+
+        // Safe handling of route values
+        object? idValue = redirectResult.RouteValues?["id"];
+        Assert.NotNull(idValue);
+        Assert.Equal(4, idValue);
+
+        // Safe handling of TempData
+        string? successMessage = _controller.TempData["SuccessMessage"]?.ToString();
+        Assert.NotNull(successMessage);
+        Assert.Contains("was updated successfully", successMessage);
     }
 
     [Fact]
@@ -228,8 +254,14 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Verify the database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
         Assert.NotNull(updatedSubnet);
-        Assert.Equal("Updated Name", updatedSubnet.Name);
-        Assert.Equal("Updated description", updatedSubnet.Description);
+
+        // Use null-safe accessors for properties
+        string? name = updatedSubnet.Name;
+        string? description = updatedSubnet.Description;
+        Assert.NotNull(name);
+        Assert.NotNull(description);
+        Assert.Equal("Updated Name", name);
+        Assert.Equal("Updated description", description);
     }
 
     [Fact]
@@ -259,7 +291,8 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Verify the database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
         Assert.NotNull(updatedSubnet);
-        Assert.Equal(25, updatedSubnet.Cidr);
+        int cidr = updatedSubnet.Cidr; // Safely access cidr value
+        Assert.Equal(25, cidr);
     }
 
     [Fact]
@@ -297,7 +330,8 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Verify the database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync(10);
         Assert.NotNull(updatedSubnet);
-        Assert.Equal(23, updatedSubnet.Cidr);
+        int cidr = updatedSubnet.Cidr; // Safely access cidr value
+        Assert.Equal(23, cidr);
     }
 
     // POST Edit Tests - Failure Scenarios
@@ -374,7 +408,11 @@ public class SubnetControllerCidrEditTests : IDisposable
 
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("Cidr", _controller.ModelState.Keys);
-        Assert.Contains("Child subnet", _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty);
+        // Safer access to errors collection with null checks
+        Microsoft.AspNetCore.Mvc.ModelBinding.ModelErrorCollection? cidrErrors = _controller.ModelState["Cidr"]?.Errors;
+        Assert.NotNull(cidrErrors);
+        Assert.NotEmpty(cidrErrors);
+        Assert.Contains("Child subnet", cidrErrors.First().ErrorMessage ?? string.Empty);
     }
 
     [Fact]
@@ -400,7 +438,11 @@ public class SubnetControllerCidrEditTests : IDisposable
 
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("Cidr", _controller.ModelState.Keys);
-        Assert.Contains("parent subnet", _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage?.ToLower() ?? string.Empty);
+        // Safer access to errors collection with null checks
+        Microsoft.AspNetCore.Mvc.ModelBinding.ModelErrorCollection? cidrErrors = _controller.ModelState["Cidr"]?.Errors;
+        Assert.NotNull(cidrErrors);
+        Assert.NotEmpty(cidrErrors);
+        Assert.Contains("parent subnet", cidrErrors.First().ErrorMessage?.ToLower() ?? string.Empty);
     }
 
     [Fact]
@@ -425,7 +467,11 @@ public class SubnetControllerCidrEditTests : IDisposable
         _ = Assert.IsType<ViewResult>(result);
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("NetworkAddress", _controller.ModelState.Keys);
-        Assert.Contains("subnet boundary", _controller.ModelState["NetworkAddress"]?.Errors.First().ErrorMessage?.ToLower() ?? string.Empty);
+        // Safer access to errors collection with null checks
+        Microsoft.AspNetCore.Mvc.ModelBinding.ModelErrorCollection? networkAddressErrors = _controller.ModelState["NetworkAddress"]?.Errors;
+        Assert.NotNull(networkAddressErrors);
+        Assert.NotEmpty(networkAddressErrors);
+        Assert.Contains("subnet boundary", networkAddressErrors.First().ErrorMessage?.ToLower() ?? string.Empty);
     }
 
     [Fact]
@@ -527,7 +573,8 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Verify the database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
         Assert.NotNull(updatedSubnet);
-        Assert.Equal(24, updatedSubnet.Cidr);
+        int cidr = updatedSubnet.Cidr; // Safely access cidr value
+        Assert.Equal(24, cidr);
     }
 
     [Fact]
@@ -561,12 +608,13 @@ public class SubnetControllerCidrEditTests : IDisposable
     }
 
     [Fact]
-    public async Task Edit_POST_NonExistentSubnet_ReturnsNotFound()
+    public async Task Edit_POST_NonExistentSubnet_RedirectsToNotFoundError()
     {
         // Arrange
+        int nonExistentId = 999;
         EditSubnetViewModel viewModel = new()
         {
-            Id = 999, // Non-existent ID
+            Id = nonExistentId,
             Name = "Non-existent Subnet",
             NetworkAddress = "10.1.1.0",
             Cidr = 24,
@@ -574,9 +622,24 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(999, viewModel);
+        IActionResult result = await _controller.Edit(nonExistentId, viewModel);
 
         // Assert
-        Assert.IsType<NotFoundResult>(result);
+        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("HttpStatusCodeHandler", redirectResult.ActionName);
+        Assert.Equal("Error", redirectResult.ControllerName);
+
+        // Safe access to route values dictionary
+        object? statusCode = redirectResult.RouteValues?["statusCode"];
+        Assert.NotNull(statusCode);
+        Assert.Equal(404, statusCode);
+
+        // Safe handling of potentially null errorMessage
+        object? errorMessage = redirectResult.RouteValues?["errorMessage"];
+        Assert.NotNull(errorMessage);
+
+        // Safe string comparison after null check
+        string errorMessageStr = errorMessage.ToString() ?? string.Empty;
+        Assert.Contains($"{nonExistentId}", errorMessageStr);
     }
 }
