@@ -1,4 +1,3 @@
-using Bastet.Models;
 using Bastet.Models.DTOs;
 
 namespace Bastet.Services.Validation;

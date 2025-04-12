@@ -1,0 +1,18 @@
+@model Bastet.Models.ViewModels.ErrorViewModel
+@{
+    ViewData["Title"] = "Conflict Error";
+    Model.Title = Model.Title ?? "Resource Conflict";
+    
+    // Determine which guidance partial to use based on error code
+    if (Model.ErrorCode == "SUBNET_OVERLAP") 
+    {
+        ViewData["RenderErrorGuidance"] = "_SubnetOverlapGuidance";
+    }
+    else
+    {
+        // Default guidance for conflict errors
+        ViewData["RenderErrorGuidance"] = null;
+    }
+}
+
+@await Html.PartialAsync("_ErrorLayout", Model)

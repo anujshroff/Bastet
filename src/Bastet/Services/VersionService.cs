@@ -29,8 +29,8 @@ namespace Bastet.Services
             // Get version set during build
             Version? version = Assembly.GetExecutingAssembly().GetName().Version;
             return version != null
-                ? (version.Major == 0 && version.Minor == 0 && version.Build == 0 
-                    ? "Alpha" 
+                ? (version.Major == 0 && version.Minor == 0 && version.Build == 0
+                    ? "Alpha"
                     : $"{version.Major}.{version.Minor}.{version.Build}")
                 : "Development"; // Fallback version
         }

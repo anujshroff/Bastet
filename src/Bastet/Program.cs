@@ -120,9 +120,19 @@ if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
     app.MapOpenApi();
+
+    // In development, also use status code pages but with direct re-execution
+    // This allows us to see the custom error pages while still getting detailed error info
+    app.UseStatusCodePagesWithReExecute("/Error/{0}");
 }
 else
 {
+    // Configure status code pages with re-execution
+    app.UseStatusCodePagesWithReExecute("/Error/{0}");
+
+    // Configure global exception handler
+    app.UseExceptionHandler("/Error");
+
     // Use HSTS and HTTPS redirection in non-development environments
     app.UseHsts();
     app.UseHttpsRedirection();
