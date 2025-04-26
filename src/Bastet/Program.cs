@@ -91,13 +91,13 @@ else
          {
              OnTokenValidated = context =>
              {
-                 // Log the ID token to the console
-                 if (context.SecurityToken is System.IdentityModel.Tokens.Jwt.JwtSecurityToken jwtToken)
-                 {
-                     Console.WriteLine($"ID Token: {jwtToken.RawData}");
-                 }
-
-                 return Task.CompletedTask;
+                // Log the ID token to the console
+                if (context.SecurityToken is System.IdentityModel.Tokens.Jwt.JwtSecurityToken jwtToken)
+                {
+                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                    logger.LogInformation("ID Token: {Token}", jwtToken.RawData);
+                }
+                return Task.CompletedTask;
              }
          };
      });
