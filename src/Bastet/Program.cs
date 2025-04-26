@@ -86,20 +86,6 @@ else
          options.Scope.Add("profile");
          options.Scope.Add("email");
          options.Scope.Add("roles");
-
-         options.Events = new OpenIdConnectEvents
-         {
-             OnTokenValidated = context =>
-             {
-                // Log the ID token to the console
-                if (context.SecurityToken is System.IdentityModel.Tokens.Jwt.JwtSecurityToken jwtToken)
-                {
-                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                    logger.LogInformation("ID Token: {Token}", jwtToken.RawData);
-                }
-                return Task.CompletedTask;
-             }
-         };
      });
 }
 
