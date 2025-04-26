@@ -1,7 +1,17 @@
 ﻿{
   "$schema": "https://json.schemastore.org/launchsettings.json",
   "profiles": {
-    "http": {
+    "http-dev": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "https://localhost:5139",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+				"BASTET_AUTO_MIGRATE": "true"
+      }
+    },
+    "http-auth0": {
       "commandName": "Project",
       "dotnetRunMessages": true,
       "launchBrowser": false,
@@ -11,7 +21,7 @@
 				"BASTET_AUTO_MIGRATE": "true",
         "BASTET_CONNECTION_STRING": "Data Source=(LocalDB)\\MSSQLLocalDB;Initial Catalog=bastet;Integrated Security=True;",
         "BASTET_OIDC_CLIENT_ID": "hNCmG6cwZlWpkXhqtXvzPp4VoYJ5iEuv",
-        "BASTET_OIDC_AUTHORITY": "https://anujshroff-bastet-dev.us.auth0.com"
+        "BASTET_OIDC_AUTHORITY": "https://anujshroff-bastet-dev.us.auth0.com",
       }
     }
   }
