@@ -15,16 +15,16 @@ public class UserContextService(IHttpContextAccessor httpContextAccessor) : IUse
         // Try to get preferred_username claim (common in OIDC)
         string? username = httpContextAccessor.HttpContext.User.FindFirst("preferred_username")?.Value;
 
-        // Fall back to name claim if preferred_username is not available
-        if (string.IsNullOrEmpty(username))
-        {
-            username = httpContextAccessor.HttpContext.User.FindFirst(ClaimTypes.Name)?.Value;
-        }
-
         // Fall back to email if name is not available
         if (string.IsNullOrEmpty(username))
         {
             username = httpContextAccessor.HttpContext.User.FindFirst(ClaimTypes.Email)?.Value;
+        }
+
+        // Fall back to name claim if preferred_username is not available
+        if (string.IsNullOrEmpty(username))
+        {
+            username = httpContextAccessor.HttpContext.User.FindFirst(ClaimTypes.Name)?.Value;
         }
 
         return username;

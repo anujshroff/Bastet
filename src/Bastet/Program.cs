@@ -84,6 +84,22 @@ else
          options.UseTokenLifetime = true;
          options.Scope.Add("openid");
          options.Scope.Add("profile");
+         options.Scope.Add("email");
+         options.Scope.Add("roles");
+
+         options.Events = new OpenIdConnectEvents
+         {
+             OnTokenValidated = context =>
+             {
+                 // Log the ID token to the console
+                 if (context.SecurityToken is System.IdentityModel.Tokens.Jwt.JwtSecurityToken jwtToken)
+                 {
+                     Console.WriteLine($"ID Token: {jwtToken.RawData}");
+                 }
+
+                 return Task.CompletedTask;
+             }
+         };
      });
 }
 
