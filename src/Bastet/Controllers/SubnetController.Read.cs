@@ -113,6 +113,16 @@ public partial class SubnetController : Controller
             }
         }
 
+        // Check if this subnet can be imported from Azure
+        bool azureImportEnabled = bool.TryParse(
+            Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool result) && result;
+
+        ViewBag.CanImportFromAzure =
+            userContextService.UserHasRole(ApplicationRoles.Admin) &&
+            azureImportEnabled &&
+            subnet.ChildSubnets.Count == 0 &&
+            subnet.HostIpAssignments.Count == 0;
+
         return View(viewModel);
     }
 }
