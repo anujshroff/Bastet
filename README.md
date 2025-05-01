@@ -10,6 +10,7 @@ BASTET is a modern, web-based subnet management system that helps network admini
 - **IP Address Allocation**: Track and manage allocated/unallocated IP spaces
 - **Deleted Subnet Archive**: Recover information from deleted subnets
 - **IP Validation**: Built-in validation ensures IP/CIDR configurations are valid
+- **Azure Integration**: Import subnets directly from Azure Virtual Networks
 
 ## Technologies
 
@@ -115,6 +116,37 @@ BASTET supports configuration through environment variables:
 | Logging Configuration | **BASTET_LOG_LEVEL_DEFAULT** | Default logging level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ASPNETCORE** | Logging level for ASP.NET Core components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ENTITYFRAMEWORK** | Logging level for Entity Framework components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
+| Feature Configuration | **BASTET_AZURE_IMPORT** | Enables Azure VNet subnet import functionality | `true` or `false` | `false` | Admin users can import subnets from Azure VNets when enabled |
+
+## Azure Integration
+
+BASTET includes a feature to import subnets directly from Azure Virtual Networks, allowing network administrators to easily synchronize their cloud and on-premises network configurations.
+
+### Prerequisites
+
+- **Azure Authentication**: The application uses DefaultAzureCredential for authentication to Azure, which supports various authentication methods:
+  - Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)
+  - Managed Identity
+  - Visual Studio Code authentication
+  - Azure CLI authentication
+  - Interactive browser authentication
+
+### Enabling Azure Import
+
+1. Set the environment variable `BASTET_AZURE_IMPORT=true`
+2. Ensure proper Azure authentication is configured
+3. Restart the application
+
+### Importing Subnets from Azure
+
+1. Navigate to a subnet's details page
+2. If the subnet has no child subnets or host IP assignments, an "Azure Import" button will appear (admin role required)
+3. Click "Azure Import" to start the import wizard
+4. Follow the multi-step process:
+   - Select an Azure Subscription
+   - Choose a compatible Virtual Network
+   - Select specific subnets to import
+5. The selected Azure subnets will be imported as child subnets
 
 ## Usage
 
