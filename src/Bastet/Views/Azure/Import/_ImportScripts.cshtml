@@ -275,5 +275,31 @@
             let anyChecked = $(".subnet-checkbox:checked").length > 0;
             $("#import-subnets-btn").prop("disabled", !anyChecked);
         }
+        
+        // Add form submit handler to ensure VNet name is passed correctly
+        $("#import-form").submit(function(e) {
+            // Make sure we have at least one subnet selected
+            if ($(".subnet-checkbox:checked").length === 0) {
+                alert("Please select at least one subnet to import");
+                e.preventDefault();
+                return false;
+            }
+            
+            // Ensure the hidden vnetName field is populated
+            if (!$("#vnet-name").val()) {
+                $("#vnet-name").val(selectedVNetName);
+            }
+            
+            // Enable all fields for selected subnets
+            $(".subnet-checkbox:checked").each(function() {
+                $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", false);
+            });
+            
+            // Log for debugging
+            console.log("Submitting form with VNet name: " + $("#vnet-name").val());
+            
+            // Allow form submission to continue
+            return true;
+        });
     });
 </script>

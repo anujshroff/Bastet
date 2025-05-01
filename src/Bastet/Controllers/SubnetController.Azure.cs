@@ -11,7 +11,7 @@ public partial class SubnetController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> BatchCreate(int parentId, List<CreateSubnetViewModel> subnets)
+    public async Task<IActionResult> BatchCreate(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null)
     {
         if (!ModelState.IsValid)
         {
@@ -40,6 +40,21 @@ public partial class SubnetController : Controller
                 }
             }
 
+            // Update parent subnet name if this is an Azure import
+            if (!string.IsNullOrEmpty(vnetName) && Request.Headers.Referer.ToString().Contains("/Azure/Import/"))
+            {
+                // Get the parent subnet
+                Subnet? parentSubnet = await context.Subnets.FindAsync(parentId);
+                if (parentSubnet != null)
+                {
+                    // Update the name to match the Azure VNet name
+                    parentSubnet.Name = vnetName;
+                    parentSubnet.LastModifiedAt = DateTime.UtcNow;
+                    parentSubnet.ModifiedBy = userContextService.GetCurrentUsername();
+                    await context.SaveChangesAsync();
+                }
+            }
+
             // All subnets are valid, create them
             foreach (CreateSubnetViewModel subnet in subnets)
             {
@@ -65,7 +80,9 @@ public partial class SubnetController : Controller
             await transaction.CommitAsync();
 
             // Add success message and redirect
-            TempData["SuccessMessage"] = $"Successfully imported {subnets.Count} subnets.";
+            TempData["SuccessMessage"] = !string.IsNullOrEmpty(vnetName) && Request.Headers.Referer.ToString().Contains("/Azure/Import/")
+                ? $"Successfully renamed parent subnet to '{vnetName}' and imported {subnets.Count} child subnets."
+                : (object)$"Successfully imported {subnets.Count} subnets.";
 
             // If this was called from the Azure import flow, redirect to details
             if (Request.Headers.Referer.ToString().Contains("/Azure/Import/"))
