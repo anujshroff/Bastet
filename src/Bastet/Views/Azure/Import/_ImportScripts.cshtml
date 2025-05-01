@@ -218,12 +218,20 @@
                                 let multiSchemeBadge = subnet.hasMultipleAddressSchemes ? 
                                     '<span class="badge bg-info ms-2">IPv4/IPv6</span>' : '';
                                     
+                                // Create subnet HTML using the format expected by SubnetController.BatchCreate
+                                let addressParts = subnet.addressPrefix.split('/');
+                                let networkAddress = addressParts[0];
+                                let cidr = addressParts[1];
+                                
                                 let subnetHtml = `
                                     <div class="form-check mb-2 border p-2 rounded">
                                         <input class="form-check-input subnet-checkbox" type="checkbox" 
-                                               id="${subnetId}" name="selectedSubnetIds" value="${subnet.name}">
-                                        <input type="hidden" name="selectedSubnetNames" value="${subnet.name}" disabled>
-                                        <input type="hidden" name="selectedSubnetPrefixes" value="${subnet.addressPrefix}" disabled>
+                                               id="${subnetId}">
+                                        <input type="hidden" name="subnets[${index}].Name" value="${subnet.name}" disabled>
+                                        <input type="hidden" name="subnets[${index}].NetworkAddress" value="${networkAddress}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Cidr" value="${cidr}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Description" value="Imported from Azure VNet: ${selectedVNetName}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Tags" value="Azure" disabled>
                                         <label class="form-check-label" for="${subnetId}">
                                             <strong>${subnet.name}</strong> ${multiSchemeBadge}<br>
                                             <span class="text-muted">${subnet.addressPrefix}</span>

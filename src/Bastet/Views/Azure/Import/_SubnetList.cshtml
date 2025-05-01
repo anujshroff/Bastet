@@ -17,9 +17,9 @@
     <span id="subnet-error-message"></span>
 </div>
 
-<form id="import-form" action="@Url.Action("ImportSubnets", "Azure")" method="post">
+<form id="import-form" action="@Url.Action("BatchCreate", "Subnet")" method="post">
     @Html.AntiForgeryToken()
-    <input type="hidden" name="subnetId" value="@Model.SubnetId" />
+    <input type="hidden" name="parentId" value="@Model.SubnetId" />
     <input type="hidden" id="vnet-name" name="vnetName" value="" />
     
     <div id="subnet-selection" class="d-none">

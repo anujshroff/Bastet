@@ -64,7 +64,16 @@ public partial class SubnetController : Controller
 
             await transaction.CommitAsync();
 
-            // Return success with IDs of created subnets
+            // Add success message and redirect
+            TempData["SuccessMessage"] = $"Successfully imported {subnets.Count} subnets.";
+
+            // If this was called from the Azure import flow, redirect to details
+            if (Request.Headers.Referer.ToString().Contains("/Azure/Import/"))
+            {
+                return RedirectToAction("Details", new { id = parentId });
+            }
+
+            // Otherwise return JSON (for API usage)
             return Ok(new { success = true, subnetIds = createdSubnetIds });
         }
         catch (Exception ex)
