@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = "RequireAdminRole")]
     public class AzureController(
         BastetDbContext context,
         IAzureService azureService) : Controller
