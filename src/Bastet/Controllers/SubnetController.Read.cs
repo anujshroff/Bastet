@@ -121,7 +121,8 @@ public partial class SubnetController : Controller
             userContextService.UserHasRole(ApplicationRoles.Admin) &&
             azureImportEnabled &&
             subnet.ChildSubnets.Count == 0 &&
-            subnet.HostIpAssignments.Count == 0;
+            subnet.HostIpAssignments.Count == 0 &&
+            !subnet.IsFullyAllocated;
 
         return View(viewModel);
     }

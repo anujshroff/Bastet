@@ -41,10 +41,12 @@ namespace Bastet.Controllers
                 });
             }
 
-            // Check if subnet has no children or host IPs
-            if (subnet.ChildSubnets.Count != 0 || subnet.HostIpAssignments.Count != 0)
+            // Check if subnet has no children or host IPs and is not fully allocated
+            if (subnet.ChildSubnets.Count != 0 || subnet.HostIpAssignments.Count != 0 || subnet.IsFullyAllocated)
             {
-                TempData["ErrorMessage"] = "Subnet must not have any child subnets or host IP assignments";
+                TempData["ErrorMessage"] = subnet.IsFullyAllocated
+                    ? "Subnet must not be marked as fully allocated"
+                    : "Subnet must not have any child subnets or host IP assignments";
                 return RedirectToAction("Details", "Subnet", new { id });
             }
 
