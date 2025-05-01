@@ -91,11 +91,13 @@ else
 
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy("RequireViewRole", policy =>
-        policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete))
+        policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
     .AddPolicy("RequireEditRole", policy =>
-        policy.RequireRole(Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete))
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
     .AddPolicy("RequireDeleteRole", policy =>
-        policy.RequireRole(Bastet.Models.ApplicationRoles.Delete));
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
+    .AddPolicy("RequireAdminRole", policy =>
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Admin));
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
