@@ -25,7 +25,7 @@ public partial class SubnetController : Controller
         {
             List<int> createdSubnetIds = [];
 
-            // Validate all subnets first before creating any
+            // Initial validation to ensure all subnets are individually valid
             foreach (CreateSubnetViewModel subnet in subnets)
             {
                 // Ensure parent ID is set correctly
@@ -55,10 +55,18 @@ public partial class SubnetController : Controller
                 }
             }
 
-            // All subnets are valid, create them
+            // Create each subnet - with validation right before adding to catch overlaps
             foreach (CreateSubnetViewModel subnet in subnets)
             {
-                // Create the subnet entity (same as in Create action)
+                // Validate again before adding to catch conflicts with previously added subnets in this batch
+                if (!await ValidateSubnetCreation(subnet))
+                {
+                    // Validation failed, rollback and return errors
+                    await transaction.RollbackAsync();
+                    return BadRequest(ModelState);
+                }
+
+                // Create the subnet entity
                 Subnet newSubnet = new()
                 {
                     Name = subnet.Name,
