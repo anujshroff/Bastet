@@ -174,9 +174,34 @@ namespace Bastet.Services.Azure
                             networkAddress,
                             cidr);
                     }
-                    // Case 2: Has both IP schemes (IPv4 and IPv6)
+                    // Case 2: Has address prefixes (could be IPv4 only or both IPv4 and IPv6)
                     else if (subnet.Data.AddressPrefixes?.Any() == true)
                     {
+                        // Check if the subnet actually has both IPv4 and IPv6 prefixes
+                        bool hasIpv4 = false;
+                        bool hasIpv6 = false;
+
+                        foreach (string? prefix in subnet.Data.AddressPrefixes)
+                        {
+                            if (IsIpv4AddressPrefix(prefix))
+                            {
+                                hasIpv4 = true;
+                            }
+
+                            else
+                            {
+                                hasIpv6 = true;
+                            }
+
+                            // If we found both types, we can stop checking
+                            if (hasIpv4 && hasIpv6)
+                            {
+                                break;
+                            }
+                        }
+
+                        bool hasMultipleAddressSchemes = hasIpv4 && hasIpv6;
+
                         // Per requirements: "If an Azure subnet in an Azure vnet is assigned to both 
                         // IPv4 and IPv6, we ignore IPv6 for that subnet here and in subsequent steps."
                         foreach (string? addressPrefix in subnet.Data.AddressPrefixes)
@@ -187,7 +212,7 @@ namespace Bastet.Services.Azure
                                     result,
                                     subnet.Data.Name,
                                     addressPrefix,
-                                    true,
+                                    hasMultipleAddressSchemes,
                                     networkAddress,
                                     cidr);
                                 break; // Take only the first valid IPv4 address
