@@ -1,0 +1,57 @@
+@model Bastet.Models.ViewModels.AzureImportViewModel
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 
+    Select subnets to import from Azure. Only compatible subnets are shown.
+</div>
+
+<div id="subnet-loading" class="text-center py-3">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading Subnets...</span>
+    </div>
+    <p class="mt-2">Loading Subnets...</p>
+</div>
+
+<div id="subnet-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="subnet-error-message"></span>
+</div>
+
+<form id="import-form" action="@Url.Action("BatchCreateChildSubnets", "Subnet")" method="post">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="parentId" value="@Model.SubnetId" />
+    <input type="hidden" id="vnet-name" name="vnetName" value="" />
+    
+    <div id="subnet-selection" class="d-none">
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="select-all-subnets">
+            <label class="form-check-label" for="select-all-subnets">
+                <strong>Select All Subnets</strong>
+            </label>
+        </div>
+        <hr>
+        
+        <div id="subnet-list" class="mb-3">
+            <!-- Subnets will be added here dynamically -->
+        </div>
+        
+        <div class="d-grid gap-2">
+            <button type="submit" id="import-subnets-btn" class="btn btn-success" disabled>
+                <i class="bi bi-cloud-download"></i> Import Selected Subnets
+            </button>
+            <button type="button" id="back-to-vnet-btn" class="btn btn-secondary">
+                <i class="bi bi-arrow-left"></i> Back to VNets
+            </button>
+        </div>
+    </div>
+</form>
+
+<div id="no-subnets" class="alert alert-warning d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    No compatible subnets found in this Virtual Network.
+    <div class="mt-2">
+        <button id="back-from-no-subnets-btn" class="btn btn-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Back to VNets
+        </button>
+    </div>
+</div>

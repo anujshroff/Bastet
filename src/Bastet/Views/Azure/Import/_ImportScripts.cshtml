@@ -1,0 +1,306 @@
+@model Bastet.Models.ViewModels.AzureImportViewModel
+
+<script>
+    $(document).ready(function() {
+        // Variables to store Azure resource information
+        let selectedSubscriptionId = "";
+        let selectedVNetId = "";
+        let selectedVNetName = "";
+        
+        // Step 1: Load Azure subscriptions
+        loadAzureSubscriptions();
+        
+        // Step navigation
+        $("#select-subscription-btn").click(function() {
+            selectedSubscriptionId = $("#subscription-select").val();
+            if (selectedSubscriptionId) {
+                // Move to Step 2
+                $("#step1-tab").removeClass("active");
+                $("#step2-tab").removeClass("disabled").addClass("active");
+                $("#step1").removeClass("show active");
+                $("#step2").addClass("show active");
+                
+                // Load VNets for the selected subscription
+                loadVNets(selectedSubscriptionId);
+            }
+        });
+        
+        $("#back-to-subscription-btn, #back-from-no-vnets-btn").click(function() {
+            // Move back to Step 1
+            $("#step2-tab").removeClass("active");
+            $("#step1-tab").addClass("active");
+            $("#step2").removeClass("show active");
+            $("#step1").addClass("show active");
+        });
+        
+        $("#select-vnet-btn").click(function() {
+            selectedVNetId = $("#vnet-select").val();
+            selectedVNetName = $("#vnet-select option:selected").text();
+            
+            if (selectedVNetId) {
+                // Move to Step 3
+                $("#step2-tab").removeClass("active");
+                $("#step3-tab").removeClass("disabled").addClass("active");
+                $("#step2").removeClass("show active");
+                $("#step3").addClass("show active");
+                
+                // Load subnets for the selected VNet
+                $("#vnet-name").val(selectedVNetName);
+                loadSubnets(selectedVNetId);
+            }
+        });
+        
+        $("#back-to-vnet-btn, #back-from-no-subnets-btn").click(function() {
+            // Move back to Step 2
+            $("#step3-tab").removeClass("active");
+            $("#step2-tab").addClass("active");
+            $("#step3").removeClass("show active");
+            $("#step2").addClass("show active");
+        });
+        
+        // Subscription dropdown change handler
+        $("#subscription-select").change(function() {
+            if ($(this).val()) {
+                $("#select-subscription-btn").prop("disabled", false);
+            } else {
+                $("#select-subscription-btn").prop("disabled", true);
+            }
+        });
+        
+        // VNet dropdown change handler
+        $("#vnet-select").change(function() {
+            if ($(this).val()) {
+                $("#select-vnet-btn").prop("disabled", false);
+            } else {
+                $("#select-vnet-btn").prop("disabled", true);
+            }
+        });
+        
+        // Select all subnets checkbox
+        $("#select-all-subnets").change(function() {
+            let isChecked = $(this).is(":checked");
+            $(".subnet-checkbox").prop("checked", isChecked);
+            updateImportButton();
+        });
+        
+        // Update import button state when subnet checkboxes change
+        $(document).on("change", ".subnet-checkbox", function() {
+            updateImportButton();
+        });
+        
+        // AJAX Functions
+        
+        // Load Azure Subscriptions
+        function loadAzureSubscriptions() {
+            $.ajax({
+                url: '@Url.Action("GetSubscriptions", "Azure")',
+                type: "GET",
+                dataType: "json",
+                beforeSend: function() {
+                    $("#subscription-loading").show();
+                    $("#subscription-selection").addClass("d-none");
+                    $("#subscription-error").addClass("d-none");
+                    $("#no-subscriptions").addClass("d-none");
+                },
+                success: function(result) {
+                    if (result.success) {
+                        if (result.subscriptions && result.subscriptions.length > 0) {
+                            // Clear and populate subscription dropdown
+                            let $dropdown = $("#subscription-select");
+                            $dropdown.empty();
+                            $dropdown.append('<option value="" disabled selected>-- Select a subscription --</option>');
+                            
+                            $.each(result.subscriptions, function(index, subscription) {
+                                $dropdown.append($('<option></option>')
+                                    .attr('value', subscription.subscriptionId)
+                                    .text(subscription.displayName + ' (' + subscription.subscriptionId + ')'));
+                            });
+                            
+                            // Show subscription selection UI
+                            $("#subscription-selection").removeClass("d-none");
+                        } else {
+                            // No subscriptions found
+                            $("#no-subscriptions").removeClass("d-none");
+                        }
+                    } else {
+                        // Error loading subscriptions
+                        $("#subscription-error-message").text(result.error || "Failed to load subscriptions");
+                        $("#subscription-error").removeClass("d-none");
+                    }
+                },
+                error: function(xhr, status, error) {
+                    $("#subscription-error-message").text("Error connecting to server: " + error);
+                    $("#subscription-error").removeClass("d-none");
+                },
+                complete: function() {
+                    $("#subscription-loading").hide();
+                }
+            });
+        }
+        
+        // Load VNets for selected subscription
+        function loadVNets(subscriptionId) {
+            $.ajax({
+                url: '@Url.Action("GetVNets", "Azure")',
+                type: "GET",
+                data: { 
+                    subscriptionId: subscriptionId,
+                    subnetId: @Model.SubnetId
+                },
+                dataType: "json",
+                beforeSend: function() {
+                    $("#vnet-loading").show();
+                    $("#vnet-selection").addClass("d-none");
+                    $("#vnet-error").addClass("d-none");
+                    $("#no-vnets").addClass("d-none");
+                },
+                success: function(result) {
+                    if (result.success) {
+                        if (result.vnets && result.vnets.length > 0) {
+                            // Clear and populate VNet dropdown
+                            let $dropdown = $("#vnet-select");
+                            $dropdown.empty();
+                            $dropdown.append('<option value="" disabled selected>-- Select a Virtual Network --</option>');
+                            
+                            $.each(result.vnets, function(index, vnet) {
+                                $dropdown.append($('<option></option>')
+                                    .attr('value', vnet.resourceId)
+                                    .text(vnet.name));
+                            });
+                            
+                            // Show VNet selection UI
+                            $("#vnet-selection").removeClass("d-none");
+                        } else {
+                            // No compatible VNets found
+                            $("#no-vnets").removeClass("d-none");
+                        }
+                    } else {
+                        // Error loading VNets
+                        $("#vnet-error-message").text(result.error || "Failed to load Virtual Networks");
+                        $("#vnet-error").removeClass("d-none");
+                    }
+                },
+                error: function(xhr, status, error) {
+                    $("#vnet-error-message").text("Error connecting to server: " + error);
+                    $("#vnet-error").removeClass("d-none");
+                },
+                complete: function() {
+                    $("#vnet-loading").hide();
+                }
+            });
+        }
+        
+        // Load Subnets for selected VNet
+        function loadSubnets(vnetResourceId) {
+            $.ajax({
+                url: '@Url.Action("GetSubnets", "Azure")',
+                type: "GET",
+                data: { 
+                    vnetResourceId: vnetResourceId,
+                    subnetId: @Model.SubnetId
+                },
+                dataType: "json",
+                beforeSend: function() {
+                    $("#subnet-loading").show();
+                    $("#subnet-selection").addClass("d-none");
+                    $("#subnet-error").addClass("d-none");
+                    $("#no-subnets").addClass("d-none");
+                },
+                success: function(result) {
+                    if (result.success) {
+                        if (result.subnets && result.subnets.length > 0) {
+                            // Clear and populate subnet list
+                            let $list = $("#subnet-list");
+                            $list.empty();
+                            
+                            $.each(result.subnets, function(index, subnet) {
+                                let subnetId = "subnet-" + index;
+                                let multiSchemeBadge = subnet.hasMultipleAddressSchemes ? 
+                                    '<span class="badge bg-info ms-2">IPv4/IPv6</span>' : '';
+                                    
+                                // Create subnet HTML using the format expected by SubnetController.BatchCreate
+                                let addressParts = subnet.addressPrefix.split('/');
+                                let networkAddress = addressParts[0];
+                                let cidr = addressParts[1];
+                                
+                                let subnetHtml = `
+                                    <div class="form-check mb-2 border p-2 rounded">
+                                        <input class="form-check-input subnet-checkbox" type="checkbox" 
+                                               id="${subnetId}">
+                                        <input type="hidden" name="subnets[${index}].Name" value="${subnet.name}" disabled>
+                                        <input type="hidden" name="subnets[${index}].NetworkAddress" value="${networkAddress}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Cidr" value="${cidr}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Description" value="Imported from Azure VNet: ${selectedVNetName}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Tags" value="Azure" disabled>
+                                        <input type="hidden" name="subnets[${index}].FullyEncompassesVNetPrefix" value="${subnet.fullyEncompassesVNetPrefix || false}" disabled>
+                                        <label class="form-check-label" for="${subnetId}">
+                                            <strong>${subnet.name}</strong> ${multiSchemeBadge}<br>
+                                            <span class="text-muted">${subnet.addressPrefix}</span>
+                                        </label>
+                                    </div>
+                                `;
+                                
+                                $list.append(subnetHtml);
+                            });
+                            
+                            // Enable/disable associated hidden fields when checkbox changes
+                            $(".subnet-checkbox").change(function() {
+                                let isChecked = $(this).is(":checked");
+                                $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", !isChecked);
+                            });
+                            
+                            // Show subnet selection UI
+                            $("#subnet-selection").removeClass("d-none");
+                        } else {
+                            // No compatible subnets found
+                            $("#no-subnets").removeClass("d-none");
+                        }
+                    } else {
+                        // Error loading subnets
+                        $("#subnet-error-message").text(result.error || "Failed to load subnets");
+                        $("#subnet-error").removeClass("d-none");
+                    }
+                },
+                error: function(xhr, status, error) {
+                    $("#subnet-error-message").text("Error connecting to server: " + error);
+                    $("#subnet-error").removeClass("d-none");
+                },
+                complete: function() {
+                    $("#subnet-loading").hide();
+                }
+            });
+        }
+        
+        // Enable/disable import button based on subnet selection
+        function updateImportButton() {
+            let anyChecked = $(".subnet-checkbox:checked").length > 0;
+            $("#import-subnets-btn").prop("disabled", !anyChecked);
+        }
+        
+        // Add form submit handler to ensure VNet name is passed correctly
+        $("#import-form").submit(function(e) {
+            // Make sure we have at least one subnet selected
+            if ($(".subnet-checkbox:checked").length === 0) {
+                alert("Please select at least one subnet to import");
+                e.preventDefault();
+                return false;
+            }
+            
+            // Ensure the hidden vnetName field is populated
+            if (!$("#vnet-name").val()) {
+                $("#vnet-name").val(selectedVNetName);
+            }
+            
+            // Enable all fields for selected subnets
+            $(".subnet-checkbox:checked").each(function() {
+                $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", false);
+            });
+            
+            // Log for debugging
+            console.log("Submitting form with VNet name: " + $("#vnet-name").val());
+            
+            // Allow form submission to continue
+            return true;
+        });
+    });
+</script>

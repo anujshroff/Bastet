@@ -40,6 +40,7 @@ builder.Services.AddScoped<IIpUtilityService, IpUtilityService>();
 builder.Services.AddScoped<Bastet.Services.Validation.ISubnetValidationService, Bastet.Services.Validation.SubnetValidationService>();
 builder.Services.AddScoped<Bastet.Services.Validation.IHostIpValidationService, Bastet.Services.Validation.HostIpValidationService>();
 builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bastet.Services.Division.SubnetDivisionService>();
+builder.Services.AddScoped<Bastet.Services.Azure.IAzureService, Bastet.Services.Azure.AzureService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
 
 // Add HttpContextAccessor for accessing the current user
@@ -91,11 +92,13 @@ else
 
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy("RequireViewRole", policy =>
-        policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete))
+        policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
     .AddPolicy("RequireEditRole", policy =>
-        policy.RequireRole(Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete))
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
     .AddPolicy("RequireDeleteRole", policy =>
-        policy.RequireRole(Bastet.Models.ApplicationRoles.Delete));
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
+    .AddPolicy("RequireAdminRole", policy =>
+        policy.RequireRole(Bastet.Models.ApplicationRoles.Admin));
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {

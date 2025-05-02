@@ -1,0 +1,7 @@
+@model Bastet.Models.ViewModels.AzureImportViewModel
+
+<div class="mb-4">
+    <h4>Target Subnet: @Model.SubnetName</h4>
+    <p class="lead">@Model.NetworkAddress/@Model.Cidr</p>
+    <p class="text-muted">Azure subnets will be imported as children of this subnet.</p>
+</div>

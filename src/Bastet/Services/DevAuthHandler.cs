@@ -26,7 +26,8 @@ public class DevAuthHandler(
             // Add all defined roles
             new Claim(ClaimTypes.Role, ApplicationRoles.View),
             new Claim(ClaimTypes.Role, ApplicationRoles.Edit),
-            new Claim(ClaimTypes.Role, ApplicationRoles.Delete)
+            new Claim(ClaimTypes.Role, ApplicationRoles.Delete),
+            new Claim(ClaimTypes.Role, ApplicationRoles.Admin)
         ];
 
         ClaimsIdentity identity = new(claims, Scheme.Name);

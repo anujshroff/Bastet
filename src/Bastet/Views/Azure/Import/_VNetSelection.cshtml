@@ -1,0 +1,46 @@
+@model Bastet.Models.ViewModels.AzureImportViewModel
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 
+    Select a Virtual Network that matches the address space of the Bastet subnet.
+</div>
+
+<div id="vnet-loading" class="text-center py-3">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading VNets...</span>
+    </div>
+    <p class="mt-2">Loading Virtual Networks...</p>
+</div>
+
+<div id="vnet-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="vnet-error-message"></span>
+</div>
+
+<div id="vnet-selection" class="d-none">
+    <div class="form-group mb-3">
+        <label for="vnet-select" class="form-label">Virtual Network</label>
+        <select id="vnet-select" class="form-select">
+            <option value="" disabled selected>-- Select a Virtual Network --</option>
+        </select>
+    </div>
+    
+    <div class="d-grid gap-2">
+        <button id="select-vnet-btn" class="btn btn-primary" disabled>
+            Next: Select Subnets <i class="bi bi-arrow-right"></i>
+        </button>
+        <button id="back-to-subscription-btn" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Subscriptions
+        </button>
+    </div>
+</div>
+
+<div id="no-vnets" class="alert alert-warning d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    No compatible Virtual Networks found in this subscription.
+    <div class="mt-2">
+        <button id="back-from-no-vnets-btn" class="btn btn-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Back to Subscriptions
+        </button>
+    </div>
+</div>

@@ -33,6 +33,11 @@ public class CreateSubnetViewModel
 
     // Helper property for display
     public string CalculatedSubnetMask { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Indicates whether this subnet fully encompasses a VNet address prefix (for Azure imports)
+    /// </summary>
+    public bool FullyEncompassesVNetPrefix { get; set; }
 }
 
 public class SubnetViewModel
