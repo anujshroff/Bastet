@@ -160,6 +160,7 @@ namespace Bastet.Services.Azure
             {
                 // Get the VNet resource and its address prefixes for comparison
                 VirtualNetworkResource vnetResource = _armClient.GetVirtualNetworkResource(new ResourceIdentifier(vnetResourceId));
+                vnetResource = vnetResource.Get();
                 List<string> vnetAddressPrefixes = vnetResource.Data.AddressSpace.AddressPrefixes?.ToList() ?? [];
 
                 await foreach (SubnetResource? subnet in vnetResource.GetSubnets())
