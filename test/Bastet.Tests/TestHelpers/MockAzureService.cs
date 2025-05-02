@@ -88,8 +88,54 @@ public class MockAzureService : IAzureService
         string networkAddress,
         int cidr)
     {
-        // Filter subnets based on proper containment logic
-        List<AzureSubnetViewModel> filteredSubnets = [.. _subnets.Where(s => IsSubnetWithinParent(s.AddressPrefix, networkAddress, cidr))];
+        // Get the VNet to check if any subnets fully encompass its address prefixes
+        AzureVNetViewModel? vnet = _vnets.FirstOrDefault(v => v.ResourceId == vnetResourceId);
+        List<string> vnetAddressPrefixes = vnet?.AddressPrefixes ?? [];
+
+        List<AzureSubnetViewModel> filteredSubnets = [];
+
+        foreach (AzureSubnetViewModel subnet in _subnets)
+        {
+            // Check if this subnet fully encompasses a VNet address prefix
+            bool fullyEncompassesVNetPrefix = vnetAddressPrefixes.Any(prefix =>
+                string.Equals(prefix, subnet.AddressPrefix, StringComparison.OrdinalIgnoreCase));
+
+            // Extract network address and CIDR from subnet address prefix
+            string[] subnetParts = subnet.AddressPrefix.Split('/');
+            string subnetNetworkAddress = subnetParts.Length > 0 ? subnetParts[0] : string.Empty;
+            int subnetCidr = subnetParts.Length > 1 && int.TryParse(subnetParts[1], out int cidrValue) ? cidrValue : 0;
+
+            // If subnet fully encompasses a VNet prefix AND matches the parent subnet's network and CIDR,
+            // add it to results regardless of containment validation
+            if (fullyEncompassesVNetPrefix &&
+                string.Equals(subnetNetworkAddress, networkAddress, StringComparison.OrdinalIgnoreCase) &&
+                subnetCidr == cidr)
+            {
+                // Create a copy of the subnet with the FullyEncompassesVNetPrefix flag set
+                filteredSubnets.Add(new AzureSubnetViewModel
+                {
+                    Name = subnet.Name,
+                    AddressPrefix = subnet.AddressPrefix,
+                    HasMultipleAddressSchemes = subnet.HasMultipleAddressSchemes,
+                    FullyEncompassesVNetPrefix = true
+                });
+            }
+            else
+            {
+                // Check if this is a valid child subnet
+                if (IsSubnetWithinParent(subnet.AddressPrefix, networkAddress, cidr))
+                {
+                    // Regular subnet that is contained within the parent subnet
+                    filteredSubnets.Add(new AzureSubnetViewModel
+                    {
+                        Name = subnet.Name,
+                        AddressPrefix = subnet.AddressPrefix,
+                        HasMultipleAddressSchemes = subnet.HasMultipleAddressSchemes,
+                        FullyEncompassesVNetPrefix = false
+                    });
+                }
+            }
+        }
 
         return Task.FromResult(filteredSubnets);
     }

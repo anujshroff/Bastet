@@ -57,6 +57,11 @@ namespace Bastet.Models.ViewModels
         /// Indicates whether this subnet had multiple address schemes (IPv4 and IPv6)
         /// </summary>
         public bool HasMultipleAddressSchemes { get; set; }
+
+        /// <summary>
+        /// Indicates whether this subnet fully encompasses one of the VNet's address prefixes
+        /// </summary>
+        public bool FullyEncompassesVNetPrefix { get; set; }
     }
 
     /// <summary>

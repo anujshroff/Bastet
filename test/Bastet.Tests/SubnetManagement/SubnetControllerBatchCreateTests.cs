@@ -130,7 +130,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchCreate_ValidSubnets_CreatesSubnets()
+    public async Task BatchCreateChildSubnets_ValidSubnets_CreatesSubnets()
     {
         // Arrange
         int parentId = 2; // Parent Subnet
@@ -157,7 +157,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreate(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
 
         // Assert - the controller returns a redirect when called from the Referer we set up
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -175,7 +175,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchCreate_WithVNetName_RenamesParentSubnet()
+    public async Task BatchCreateChildSubnets_WithVNetName_RenamesParentSubnet()
     {
         // Arrange
         int parentId = 2; // Parent Subnet
@@ -194,7 +194,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreate(parentId, subnets, vnetName);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName);
 
         // Assert - the controller returns a redirect when called from the Referer we set up
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -213,7 +213,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchCreate_FromNonAzureImport_DoesNotRenameParent()
+    public async Task BatchCreateChildSubnets_FromNonAzureImport_DoesNotRenameParent()
     {
         // Arrange
         int parentId = 2; // Parent Subnet
@@ -235,7 +235,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreate(parentId, subnets, vnetName);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName);
 
         // Assert
         _ = Assert.IsType<OkObjectResult>(result);
@@ -247,7 +247,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchCreate_OverlappingSubnets_ReturnsValidationError()
+    public async Task BatchCreateChildSubnets_OverlappingSubnets_ReturnsValidationError()
     {
         // Arrange
         int parentId = 2; // Parent Subnet
@@ -281,7 +281,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreate(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
 
         // Assert - when overlapping subnets are provided, controller returns BadRequest
         BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -297,7 +297,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchCreate_SubnetsOutsideParent_ReturnsValidationError()
+    public async Task BatchCreateChildSubnets_SubnetsOutsideParent_ReturnsValidationError()
     {
         // Arrange
         int parentId = 2; // Parent Subnet - 10.0.0.0/16
@@ -313,7 +313,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreate(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
 
         // Assert - when subnets outside parent range are passed in, controller returns BadRequest
         BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -327,7 +327,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
-    public async Task BatchCreate_EmptyList_ReturnsValidationError()
+    public async Task BatchCreateChildSubnets_EmptyList_ReturnsValidationError()
     {
         // Arrange
         int parentId = 2;
@@ -336,14 +336,14 @@ public class SubnetControllerBatchCreateTests : IDisposable
         // Act
         // Set referer to a non-Azure URL to get a BadRequest result instead of a redirect
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
-        IActionResult result = await _controller.BatchCreate(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
 
         // Assert - when an empty list is passed, the controller returns OkObjectResult
         _ = Assert.IsType<OkObjectResult>(result);
     }
 
     [Fact]
-    public async Task BatchCreate_ParentNotFound_ReturnsNotFound()
+    public async Task BatchCreateChildSubnets_ParentNotFound_ReturnsNotFound()
     {
         // Arrange
         int nonExistentParentId = 999;
@@ -359,14 +359,14 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreate(nonExistentParentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(nonExistentParentId, subnets);
 
         // Assert - The controller returns BadRequestObjectResult for invalid parent
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        _ = Assert.IsType<NotFoundObjectResult>(result);
     }
 
     [Fact]
-    public async Task BatchCreate_FromAzureImport_ReturnsRedirect()
+    public async Task BatchCreateChildSubnets_FromAzureImport_ReturnsRedirect()
     {
         // Arrange
         int parentId = 2;
@@ -387,7 +387,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/Azure/Import/2";
 
         // Act
-        IActionResult result = await _controller.BatchCreate(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);

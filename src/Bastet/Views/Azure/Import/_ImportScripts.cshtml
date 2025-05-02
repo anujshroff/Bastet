@@ -232,6 +232,7 @@
                                         <input type="hidden" name="subnets[${index}].Cidr" value="${cidr}" disabled>
                                         <input type="hidden" name="subnets[${index}].Description" value="Imported from Azure VNet: ${selectedVNetName}" disabled>
                                         <input type="hidden" name="subnets[${index}].Tags" value="Azure" disabled>
+                                        <input type="hidden" name="subnets[${index}].FullyEncompassesVNetPrefix" value="${subnet.fullyEncompassesVNetPrefix || false}" disabled>
                                         <label class="form-check-label" for="${subnetId}">
                                             <strong>${subnet.name}</strong> ${multiSchemeBadge}<br>
                                             <span class="text-muted">${subnet.addressPrefix}</span>

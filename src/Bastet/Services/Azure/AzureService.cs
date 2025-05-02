@@ -158,21 +158,47 @@ namespace Bastet.Services.Azure
 
             try
             {
+                // Get the VNet resource and its address prefixes for comparison
                 VirtualNetworkResource vnetResource = _armClient.GetVirtualNetworkResource(new ResourceIdentifier(vnetResourceId));
+                List<string> vnetAddressPrefixes = vnetResource.Data.AddressSpace.AddressPrefixes?.ToList() ?? [];
 
                 await foreach (SubnetResource? subnet in vnetResource.GetSubnets())
                 {
                     // Case 1: Only has one IP scheme (either IPv4 or IPv6)
                     if (subnet.Data.AddressPrefix is not null)
                     {
-                        // Check if this subnet would be a valid child of our Bastet subnet
-                        TryAddCompatibleSubnet(
-                            result,
-                            subnet.Data.Name,
-                            subnet.Data.AddressPrefix,
-                            false,
-                            networkAddress,
-                            cidr);
+                        if (IsIpv4AddressPrefix(subnet.Data.AddressPrefix))
+                        {
+                            // Check if this subnet's prefix exactly matches any VNet address prefix
+                            bool fullyEncompassesVNetPrefix = vnetAddressPrefixes.Any(prefix =>
+                                string.Equals(prefix, subnet.Data.AddressPrefix, StringComparison.OrdinalIgnoreCase));
+
+                            // If subnet fully encompasses a VNet prefix AND matches the parent subnet's network and CIDR,
+                            // add it to results regardless of containment validation
+                            if (fullyEncompassesVNetPrefix &&
+                                string.Equals(GetNetworkAddressFromCidr(subnet.Data.AddressPrefix), networkAddress, StringComparison.OrdinalIgnoreCase) &&
+                                GetCidrFromAddressPrefix(subnet.Data.AddressPrefix) == cidr)
+                            {
+                                result.Add(new AzureSubnetViewModel
+                                {
+                                    Name = subnet.Data.Name,
+                                    AddressPrefix = subnet.Data.AddressPrefix,
+                                    HasMultipleAddressSchemes = false,
+                                    FullyEncompassesVNetPrefix = true
+                                });
+                            }
+                            // Otherwise apply normal containment validation
+                            else
+                            {
+                                TryAddCompatibleSubnet(
+                                    result,
+                                    subnet.Data.Name,
+                                    subnet.Data.AddressPrefix,
+                                    false,
+                                    networkAddress,
+                                    cidr);
+                            }
+                        }
                     }
                     // Case 2: Has address prefixes (could be IPv4 only or both IPv4 and IPv6)
                     else if (subnet.Data.AddressPrefixes?.Any() == true)
@@ -187,7 +213,6 @@ namespace Bastet.Services.Azure
                             {
                                 hasIpv4 = true;
                             }
-
                             else
                             {
                                 hasIpv6 = true;
@@ -208,13 +233,36 @@ namespace Bastet.Services.Azure
                         {
                             if (IsIpv4AddressPrefix(addressPrefix))
                             {
-                                TryAddCompatibleSubnet(
-                                    result,
-                                    subnet.Data.Name,
-                                    addressPrefix,
-                                    hasMultipleAddressSchemes,
-                                    networkAddress,
-                                    cidr);
+                                // Check if this subnet's prefix exactly matches any VNet address prefix
+                                bool fullyEncompassesVNetPrefix = vnetAddressPrefixes.Any(prefix =>
+                                    string.Equals(prefix, addressPrefix, StringComparison.OrdinalIgnoreCase));
+
+                                // If subnet fully encompasses a VNet prefix AND matches the parent subnet's network and CIDR,
+                                // add it to results regardless of containment validation
+                                if (fullyEncompassesVNetPrefix &&
+                                    string.Equals(GetNetworkAddressFromCidr(addressPrefix), networkAddress, StringComparison.OrdinalIgnoreCase) &&
+                                    GetCidrFromAddressPrefix(addressPrefix) == cidr)
+                                {
+                                    result.Add(new AzureSubnetViewModel
+                                    {
+                                        Name = subnet.Data.Name,
+                                        AddressPrefix = addressPrefix,
+                                        HasMultipleAddressSchemes = hasMultipleAddressSchemes,
+                                        FullyEncompassesVNetPrefix = true
+                                    });
+                                }
+                                // Otherwise apply normal containment validation
+                                else
+                                {
+                                    TryAddCompatibleSubnet(
+                                        result,
+                                        subnet.Data.Name,
+                                        addressPrefix,
+                                        hasMultipleAddressSchemes,
+                                        networkAddress,
+                                        cidr);
+                                }
+
                                 break; // Take only the first valid IPv4 address
                             }
                         }
@@ -254,7 +302,8 @@ namespace Bastet.Services.Azure
                 {
                     Name = name,
                     AddressPrefix = addressPrefix,
-                    HasMultipleAddressSchemes = hasMultipleAddressSchemes
+                    HasMultipleAddressSchemes = hasMultipleAddressSchemes,
+                    FullyEncompassesVNetPrefix = false
                 });
             }
         }
