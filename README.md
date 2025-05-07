@@ -49,12 +49,17 @@ BASTET uses OpenID Connect (OIDC) for authentication in production environments.
 
 - **OIDC Provider Requirements**:
   - Support OpenID Connect protocol
-  - Issue ID tokens (application uses `ResponseType = "id_token"`)
-  - Support `openid` and `profile` scopes
-  - Issue tokens with one of these user identifier claims:
-    - `preferred_username` (preferred)
-    - `name` (ClaimTypes.Name)
-    - `email` (ClaimTypes.Email)
+  - Support either implicit flow (`id_token`) or authorization code flow (`code`) with PKCE
+  - Support the following scopes:
+    - `openid`
+    - `profile`
+    - `email`
+    - `roles`
+    - `offline_access` (for refresh tokens)
+  - Issue tokens with one of these user identifier claims (checked in this order):
+    - `preferred_username` (checked first)
+    - `email` (ClaimTypes.Email, fallback)
+    - `name` (ClaimTypes.Name, final fallback)
 
 - **Role-Based Authorization Requirements**:
   - Issue role claims that map to ASP.NET Core `ClaimTypes.Role`
@@ -62,15 +67,23 @@ BASTET uses OpenID Connect (OIDC) for authentication in production environments.
     - `View` - Basic read access to subnet information
     - `Edit` - Permission to create and modify subnets
     - `Delete` - Permission to remove subnets
+    - `Admin` - Full administrative access
 
 - **OIDC Configuration**:
   - Register BASTET as a client in your identity provider
   - Configure the following redirect URIs:
     - Login callback: `/signin-oidc` (relative to application base URL)
     - Logout callback: `/signout-callback-oidc` (relative to application base URL)
-  - Set the environment variables:
+  - Set the required environment variables:
     - `BASTET_OIDC_AUTHORITY`: URL of your OIDC provider
     - `BASTET_OIDC_CLIENT_ID`: Client ID registered with your provider
+  - Set optional environment variables based on your authentication flow:
+    - `BASTET_OIDC_RESPONSE_TYPE`: Set to `code` (default) for authorization code flow with PKCE, or `id_token` for implicit flow
+    - `BASTET_OIDC_CLIENT_SECRET`: Required when using authorization code flow with identity providers that require client authentication (e.g., Microsoft Entra ID)
+
+- **Provider-Specific Notes**:
+  - **Auth0**: Supports authorization code flow with PKCE without requiring a client secret
+  - **Microsoft Entra ID**: Requires a client secret when using authorization code flow, even with PKCE
 
 In development environments, authentication is automatically handled by `DevAuthHandler`, which provides a simulated user with all roles.
 
@@ -113,6 +126,8 @@ BASTET supports configuration through environment variables:
 | Server Configuration | **AZURE_CLIENT_ID** | Specifies the client ID for Azure Managed Identity | `123e4567-e89b-12d3-a456-426614174000` | - | Required when using Managed Identity in Azure for server authentication to SQL server. |
 | Authentication Configuration | **BASTET_OIDC_CLIENT_ID** | OpenID Connect client ID | `mvc_client` or `0e0e7c73-5fce-45c1-be7c-0161f462fd9d` | `mvc_client` | Required in non-development environments. Authentication is disabled in development environments. |
 | Authentication Configuration | **BASTET_OIDC_AUTHORITY** | OpenID Connect authority URL | `https://identity.your-domain.com` or `https://login.microsoftonline.com/0af80680-dd36-43bf-bf53-b951b9fdd68b` | `https://localhost` | Required in non-development environments. Authentication is disabled in development environments. |
+| Authentication Configuration | **BASTET_OIDC_CLIENT_SECRET** | Client secret for authentication with the OIDC provider | `your-client-secret` | - | Required when using authorization code flow with providers that require client authentication (e.g., Microsoft Entra ID). Not needed for providers that support PKCE without client authentication (e.g., Auth0). |
+| Authentication Configuration | **BASTET_OIDC_RESPONSE_TYPE** | OIDC response type | `id_token` or `code` | `code` | Controls the authentication flow: `id_token` for implicit flow, `code` for authorization code flow. Set to `code` when using PKCE. |
 | Logging Configuration | **BASTET_LOG_LEVEL_DEFAULT** | Default logging level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ASPNETCORE** | Logging level for ASP.NET Core components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ENTITYFRAMEWORK** | Logging level for Entity Framework components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |

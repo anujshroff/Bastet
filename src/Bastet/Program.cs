@@ -73,20 +73,32 @@ else
         options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
         options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
     })
-    .AddCookie(options => options.AccessDeniedPath = "/Account/AccessDenied")
+    .AddCookie(options =>
+    {
+        options.AccessDeniedPath = "/Account/AccessDenied";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.ExpireTimeSpan = TimeSpan.FromHours(1);
+        options.SlidingExpiration = true;
+    })
     .AddOpenIdConnect(options =>
      {
          options.ClientId = Environment.GetEnvironmentVariable("BASTET_OIDC_CLIENT_ID") ?? "mvc_client";
          options.Authority = Environment.GetEnvironmentVariable("BASTET_OIDC_AUTHORITY") ?? "https://localhost";
+         options.ClientSecret = Environment.GetEnvironmentVariable("BASTET_OIDC_CLIENT_SECRET") ?? null;
          options.CallbackPath = "/signin-oidc";
          options.SignedOutCallbackPath = "/signout-callback-oidc";
-         options.ResponseType = "id_token";
+         options.ResponseType = Environment.GetEnvironmentVariable("BASTET_OIDC_RESPONSE_TYPE") ?? "code";
+         options.UsePkce = true;
          options.SaveTokens = true;
          options.UseTokenLifetime = true;
+         options.GetClaimsFromUserInfoEndpoint = true;
          options.Scope.Add("openid");
          options.Scope.Add("profile");
          options.Scope.Add("email");
          options.Scope.Add("roles");
+         options.Scope.Add("offline_access");
      });
 }
 
