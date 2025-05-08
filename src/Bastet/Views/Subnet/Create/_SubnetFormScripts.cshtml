@@ -1,6 +1,44 @@
 <script>
-    // Function to update subnet mask display when CIDR changes
-    function updateSubnetMask() {
+    // Function to calculate subnet mask from CIDR
+    function calculateSubnetMask(cidr) {
+        if (cidr < 0 || cidr > 32) return "Invalid CIDR";
+        
+        // Special case for CIDR 0
+        if (cidr === 0) return "0.0.0.0";
+        
+        // Create a bit mask based on the CIDR
+        const mask = ~((1 << (32 - cidr)) - 1);
+        
+        // Convert to IP format
+        return [
+            (mask >>> 24) & 255,
+            (mask >>> 16) & 255,
+            (mask >>> 8) & 255,
+            mask & 255
+        ].join('.');
+    }
+    
+    // Function to calculate total IP addresses from CIDR
+    function calculateTotalIPs(cidr) {
+        if (cidr < 0 || cidr > 32) return 0;
+        return Math.pow(2, 32 - cidr);
+    }
+    
+    // Function to calculate usable IP addresses from CIDR
+    function calculateUsableIPs(cidr) {
+        if (cidr < 0 || cidr > 32) return 0;
+        
+        // Special cases: /31 allows 2 usable addresses (RFC 3021), /32 is a single host
+        if (cidr >= 31) {
+            return cidr === 31 ? 2 : 1;
+        }
+        
+        // Normal case: total IPs minus network and broadcast addresses
+        return Math.pow(2, 32 - cidr) - 2;
+    }
+    
+    // Function to update subnet information when CIDR changes
+    function updateSubnetInfo() {
         const cidrValue = parseInt($('#cidrInput').val(), 10);
         
         if (!isNaN(cidrValue) && cidrValue >= 0 && cidrValue <= 32) {
@@ -8,21 +46,22 @@
             $.get(`/api/subnets/calculate-mask?cidr=${cidrValue}`, function(data) {
                 $('#subnetMaskDisplay').text(data.subnetMask);
             }).fail(function() {
-                // Fallback calculation for IPv4 CIDRs
-                let mask = '';
-                switch(cidrValue) {
-                    case 8: mask = '255.0.0.0'; break;
-                    case 16: mask = '255.255.0.0'; break;
-                    case 24: mask = '255.255.255.0'; break;
-                    case 28: mask = '255.255.255.240'; break;
-                    case 30: mask = '255.255.255.252'; break;
-                    case 32: mask = '255.255.255.255'; break;
-                    default: mask = 'calculating...'; break;
-                }
+                // Fallback calculation for all IPv4 CIDRs
+                const mask = calculateSubnetMask(cidrValue);
                 $('#subnetMaskDisplay').text(mask);
             });
+            
+            // Calculate and display IP counts
+            const totalIPs = calculateTotalIPs(cidrValue);
+            const usableIPs = calculateUsableIPs(cidrValue);
+            
+            // Format large numbers with commas
+            $('#maxIpsDisplay').text(totalIPs.toLocaleString());
+            $('#usableIpsDisplay').text(usableIPs.toLocaleString());
         } else {
             $('#subnetMaskDisplay').text('Invalid CIDR');
+            $('#maxIpsDisplay').text('-');
+            $('#usableIpsDisplay').text('-');
         }
     }
     
@@ -38,17 +77,19 @@
         $('#networkAddressHelp').text('Enter the network address (e.g. 192.168.1.0)');
         $('#networkAddressInput').attr('placeholder', '192.168.1.0');
         
-        // Update subnet mask display if a value exists
+        // Update subnet info if a value exists
         if (cidrInput.val() !== '') {
-            updateSubnetMask();
+            updateSubnetInfo();
         } else {
             $('#subnetMaskDisplay').text('');
+            $('#maxIpsDisplay').text('-');
+            $('#usableIpsDisplay').text('-');
         }
     }
 
     // Attach event handlers
     $(document).ready(function() {
-        $('#cidrInput').on('input', updateSubnetMask);
+        $('#cidrInput').on('input', updateSubnetInfo);
         
         // Initialize form settings
         initializeForm();
