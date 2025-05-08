@@ -44,7 +44,13 @@
                                     <i class="bi bi-person-circle"></i> @UserContextService.GetCurrentUsername()
                                 </a>
                                 <ul class="dropdown-menu dropdown-menu-end">
-                                    <li><a class="dropdown-item" asp-controller="Account" asp-action="Logout">Logout</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Account" asp-action="Roles">
+                                        <i class="bi bi-shield-lock me-2"></i> My Roles
+                                    </a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li><a class="dropdown-item" asp-controller="Account" asp-action="Logout">
+                                        <i class="bi bi-box-arrow-right me-2"></i> Logout
+                                    </a></li>
                                 </ul>
                             </li>
                         </ul>
