@@ -37,38 +37,29 @@ public class UserContextService(IHttpContextAccessor httpContextAccessor) : IUse
         {
             return false;
         }
-        
+
         // Role inheritance logic:
         // Admin can do everything
         // Delete can also Edit and View
         // Edit can also View
-        
+
         // Direct role check first
         if (httpContextAccessor.HttpContext.User.IsInRole(role))
         {
             return true;
         }
-        
+
         // Check for higher roles that imply the requested role
-        switch (role)
+        return role switch
         {
-            case ApplicationRoles.View:
-                // If they have Edit or Delete or Admin, they automatically have View
-                return httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Edit) ||
-                       httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Delete) ||
-                       httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin);
-                
-            case ApplicationRoles.Edit:
-                // If they have Delete or Admin, they automatically have Edit
-                return httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Delete) ||
-                       httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin);
-                
-            case ApplicationRoles.Delete:
-                // If they have Admin, they automatically have Delete
-                return httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin);
-        }
-        
-        return false;
+            ApplicationRoles.View => httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Edit) ||
+                                   httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Delete) ||
+                                   httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin),// If they have Edit or Delete or Admin, they automatically have View
+            ApplicationRoles.Edit => httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Delete) ||
+                                   httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin),// If they have Delete or Admin, they automatically have Edit
+            ApplicationRoles.Delete => httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin),// If they have Admin, they automatically have Delete
+            _ => false,
+        };
     }
 
     public IEnumerable<string> GetUserBastetRoles()
