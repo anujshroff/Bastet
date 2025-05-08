@@ -24,9 +24,6 @@ public class DevAuthHandler(
             new Claim(ClaimTypes.Name, "development-user"),
             new Claim(ClaimTypes.Email, "dev@example.com"),
             // Add all defined roles
-            new Claim(ClaimTypes.Role, ApplicationRoles.View),
-            new Claim(ClaimTypes.Role, ApplicationRoles.Edit),
-            new Claim(ClaimTypes.Role, ApplicationRoles.Delete),
             new Claim(ClaimTypes.Role, ApplicationRoles.Admin)
         ];
 

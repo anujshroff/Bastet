@@ -1,0 +1,14 @@
+@{
+    string? username = ViewData["Username"] as string;
+}
+
+<div class="card">
+    <div class="card-body">
+        <h1 class="card-title">
+            <i class="bi bi-person-badge"></i> User Roles
+        </h1>
+        <p class="card-text">
+            Viewing roles and permissions for user: <strong>@username</strong>
+        </p>
+    </div>
+</div>
