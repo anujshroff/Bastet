@@ -1,0 +1,63 @@
+@using Bastet.Models
+@{
+    var bastetRoles = ViewData["BastetRoles"] as IEnumerable<string> ?? Enumerable.Empty<string>();
+}
+
+<div class="card h-100">
+    <div class="card-header bg-primary text-white">
+        <h4 class="mb-0">
+            <i class="bi bi-shield-lock"></i> Bastet Application Roles
+        </h4>
+    </div>
+    <div class="card-body">
+        @if (bastetRoles.Any())
+        {
+            <div class="list-group">
+                @foreach (var role in bastetRoles)
+                {
+                    <div class="list-group-item">
+                        @{
+                            var iconClass = role switch
+                            {
+                                ApplicationRoles.View => "bi-eye",
+                                ApplicationRoles.Edit => "bi-pencil",
+                                ApplicationRoles.Delete => "bi-trash",
+                                ApplicationRoles.Admin => "bi-star-fill",
+                                _ => "bi-check"
+                            };
+                        }
+                        <i class="bi @iconClass me-2"></i>
+                        <span class="fw-bold">@role</span>
+                        <div class="mt-1 text-muted small">
+                            @switch (role)
+                            {
+                                case ApplicationRoles.View:
+                                    <span>Can view subnet and host IP information</span>
+                                    break;
+                                case ApplicationRoles.Edit:
+                                    <span>Can create and modify subnets and host IPs</span>
+                                    break;
+                                case ApplicationRoles.Delete:
+                                    <span>Can delete subnets and host IPs</span>
+                                    break;
+                                case ApplicationRoles.Admin:
+                                    <span>Has full administrative access to all features</span>
+                                    break;
+                                default:
+                                    <span>Custom application role</span>
+                                    break;
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                You don't have any Bastet application roles assigned.
+            </div>
+        }
+    </div>
+</div>

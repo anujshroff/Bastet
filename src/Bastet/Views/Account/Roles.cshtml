@@ -1,0 +1,21 @@
+@{
+    ViewData["Title"] = "User Roles";
+}
+
+<div class="container">
+    <div class="row mb-4">
+        <div class="col">
+            @await Html.PartialAsync("Roles/_Header")
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            @await Html.PartialAsync("Roles/_BastetRoles")
+        </div>
+        
+        <div class="col-md-6 mb-4">
+            @await Html.PartialAsync("Roles/_TokenRoles")
+        </div>
+    </div>
+</div>

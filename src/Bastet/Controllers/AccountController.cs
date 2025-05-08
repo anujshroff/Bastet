@@ -1,3 +1,4 @@
+using Bastet.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -5,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Bastet.Controllers;
 
-public class AccountController(IWebHostEnvironment environment) : Controller
+public class AccountController(IWebHostEnvironment environment, IUserContextService userContextService) : Controller
 {
     public IActionResult AccessDenied(string returnUrl = "/")
     {
@@ -37,5 +38,25 @@ public class AccountController(IWebHostEnvironment environment) : Controller
 
         // In development, just redirect to the specified URL or home
         return Redirect("/");
+    }
+
+    public IActionResult Roles()
+    {
+        // Only accessible to authenticated users
+        if (!User.Identity?.IsAuthenticated == true)
+        {
+            return RedirectToAction("Index", "Home");
+        }
+
+        // Get the current username
+        ViewData["Username"] = userContextService.GetCurrentUsername();
+
+        // Get the user's Bastet roles
+        ViewData["BastetRoles"] = userContextService.GetUserBastetRoles();
+
+        // Get the user's token roles
+        ViewData["TokenRoles"] = userContextService.GetUserTokenRoles();
+
+        return View();
     }
 }
