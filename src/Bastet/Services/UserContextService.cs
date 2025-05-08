@@ -31,10 +31,45 @@ public class UserContextService(IHttpContextAccessor httpContextAccessor) : IUse
         return username;
     }
 
-    public bool UserHasRole(string role) =>
-        // Simply check if the user is in the specified role
-        // DevAuthHandler will automatically add all roles in development
-        httpContextAccessor.HttpContext?.User?.IsInRole(role) == true;
+    public bool UserHasRole(string role)
+    {
+        if (httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated != true)
+        {
+            return false;
+        }
+        
+        // Role inheritance logic:
+        // Admin can do everything
+        // Delete can also Edit and View
+        // Edit can also View
+        
+        // Direct role check first
+        if (httpContextAccessor.HttpContext.User.IsInRole(role))
+        {
+            return true;
+        }
+        
+        // Check for higher roles that imply the requested role
+        switch (role)
+        {
+            case ApplicationRoles.View:
+                // If they have Edit or Delete or Admin, they automatically have View
+                return httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Edit) ||
+                       httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Delete) ||
+                       httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin);
+                
+            case ApplicationRoles.Edit:
+                // If they have Delete or Admin, they automatically have Edit
+                return httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Delete) ||
+                       httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin);
+                
+            case ApplicationRoles.Delete:
+                // If they have Admin, they automatically have Delete
+                return httpContextAccessor.HttpContext.User.IsInRole(ApplicationRoles.Admin);
+        }
+        
+        return false;
+    }
 
     public IEnumerable<string> GetUserBastetRoles()
     {
