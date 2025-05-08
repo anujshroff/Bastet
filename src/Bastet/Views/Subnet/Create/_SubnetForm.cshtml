@@ -25,6 +25,10 @@
                     <span id="cidrRangeText">CIDR values: 0-32</span>
                     <span class="ms-3">Subnet mask: <span id="subnetMaskDisplay">@Model.CalculatedSubnetMask</span></span>
                 </div>
+                <div class="form-text">
+                    <span>Maximum IPs: <span id="maxIpsDisplay">-</span></span>
+                    <span class="ms-3">Usable IPs: <span id="usableIpsDisplay">-</span></span>
+                </div>
                 <span asp-validation-for="Cidr" class="text-danger"></span>
             </div>
             
