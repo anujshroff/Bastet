@@ -37,7 +37,8 @@ public partial class SubnetController : Controller
             Tags = subnet.Tags,
             SubnetMask = ipUtilityService.CalculateSubnetMask(subnet.Cidr),
             CreatedAt = subnet.CreatedAt,
-            LastModifiedAt = subnet.LastModifiedAt
+            LastModifiedAt = subnet.LastModifiedAt,
+            RowVersion = subnet.RowVersion
         };
 
         // Add parent subnet info if exists
@@ -136,6 +137,7 @@ public partial class SubnetController : Controller
                             viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
                             viewModel.CreatedAt = subnet.CreatedAt;
                             viewModel.LastModifiedAt = subnet.LastModifiedAt;
+                            viewModel.RowVersion = subnet.RowVersion;
 
                             if (subnet.ParentSubnet != null)
                             {
@@ -168,6 +170,7 @@ public partial class SubnetController : Controller
                                 // Early return with validation errors
                                 viewModel.CreatedAt = subnet.CreatedAt;
                                 viewModel.LastModifiedAt = subnet.LastModifiedAt;
+                                viewModel.RowVersion = subnet.RowVersion;
 
                                 if (subnet.ParentSubnet != null)
                                 {
@@ -193,6 +196,10 @@ public partial class SubnetController : Controller
                         subnet.Cidr = viewModel.Cidr;
                     }
 
+                    // Set the original RowVersion for concurrency control
+                    // This tells EF what the RowVersion was when the user started editing
+                    context.Entry(subnet).OriginalValues["RowVersion"] = viewModel.RowVersion;
+
                     context.Subnets.Update(subnet);
                     await context.SaveChangesAsync();
 
@@ -202,6 +209,48 @@ public partial class SubnetController : Controller
                     TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' was updated successfully.";
                     return RedirectToAction(nameof(Details), new { id = subnet.Id });
                 }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // Rollback the transaction on concurrency error
+                    await transaction.RollbackAsync();
+
+                    if (!SubnetExists(id))
+                    {
+                        return RedirectToAction("HttpStatusCodeHandler", "Error", new
+                        {
+                            statusCode = 404,
+                            errorMessage = "The subnet no longer exists. It may have been deleted by another user."
+                        });
+                    }
+
+                    // Handle concurrency conflict - reload current data and show user-friendly message
+                    Subnet? currentSubnet = await context.Subnets
+                        .Include(s => s.ParentSubnet)
+                        .FirstOrDefaultAsync(s => s.Id == id);
+
+                    if (currentSubnet != null)
+                    {
+                        // Update the view model with current database values for concurrency control
+                        viewModel.RowVersion = currentSubnet.RowVersion;
+                        viewModel.NetworkAddress = currentSubnet.NetworkAddress;
+                        viewModel.OriginalCidr = currentSubnet.Cidr;
+                        viewModel.CreatedAt = currentSubnet.CreatedAt;
+                        viewModel.LastModifiedAt = currentSubnet.LastModifiedAt;
+
+                        if (currentSubnet.ParentSubnet != null)
+                        {
+                            viewModel.ParentSubnetInfo = $"{currentSubnet.ParentSubnet.Name} ({currentSubnet.ParentSubnet.NetworkAddress}/{currentSubnet.ParentSubnet.Cidr})";
+                        }
+
+                        // Clear the RowVersion from ModelState so the form field uses the updated model value
+                        ModelState.Remove(nameof(viewModel.RowVersion));
+                    }
+
+                    ModelState.AddModelError("",
+                        "This subnet was modified by another user while you were editing it. " +
+                        "Your changes have been preserved below, but you should review the current values before saving. " +
+                        "Click 'Save Changes' again to apply your updates.");
+                }
                 catch (Exception ex)
                 {
                     // Rollback the transaction on error
@@ -209,19 +258,10 @@ public partial class SubnetController : Controller
                     ModelState.AddModelError("", $"Error updating subnet: {ex.Message}");
                 }
             }
-            catch (DbUpdateConcurrencyException)
+            catch (Exception ex)
             {
-                if (!SubnetExists(id))
-                {
-                    return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                    {
-                        statusCode = 404,
-                        errorMessage = "The subnet no longer exists. It may have been deleted by another user."
-                    });
-                }
-
-                // Handle concurrency conflict
-                ModelState.AddModelError("", "The subnet was modified by another user. Please reload and try again.");
+                // Handle any other exceptions outside the transaction
+                ModelState.AddModelError("", $"Error updating subnet: {ex.Message}");
             }
         }
 
@@ -259,6 +299,8 @@ public partial class SubnetController : Controller
 
         viewModel.CreatedAt = origSubnet.CreatedAt;
         viewModel.LastModifiedAt = origSubnet.LastModifiedAt;
+        // Ensure RowVersion is updated for concurrency control
+        viewModel.RowVersion = origSubnet.RowVersion;
 
         if (origSubnet.ParentSubnet != null)
         {

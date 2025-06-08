@@ -220,9 +220,40 @@ public class HostIpController(
 
                 if (!validationResult.IsValid)
                 {
-                    foreach (ValidationError error in validationResult.Errors)
+                    // Check if this is a concurrency conflict
+                    bool isConcurrencyConflict = validationResult.Errors.Any(e => e.Code == "CONCURRENCY_CONFLICT");
+
+                    if (isConcurrencyConflict)
                     {
-                        ModelState.AddModelError("", error.Message);
+                        // Handle concurrency conflict - reload current data and show user-friendly message
+                        HostIpAssignment? currentHostIp = await context.HostIpAssignments
+                            .Include(h => h.Subnet)
+                            .FirstOrDefaultAsync(h => h.IP == ip);
+
+                        if (currentHostIp != null)
+                        {
+                            // Update the view model with current database values for concurrency control
+                            viewModel.RowVersion = currentHostIp.RowVersion ?? [];
+                            viewModel.SubnetInfo = $"{currentHostIp.Subnet.Name} ({currentHostIp.Subnet.NetworkAddress}/{currentHostIp.Subnet.Cidr})";
+                            viewModel.CreatedAt = currentHostIp.CreatedAt;
+                            viewModel.LastModifiedAt = currentHostIp.LastModifiedAt;
+
+                            // Clear the RowVersion from ModelState so the form field uses the updated model value
+                            ModelState.Remove(nameof(viewModel.RowVersion));
+                        }
+
+                        ModelState.AddModelError("",
+                            "This host IP was modified by another user while you were editing it. " +
+                            "Your changes have been preserved below, but you should review the current values before saving. " +
+                            "Click 'Save Changes' again to apply your updates.");
+                    }
+                    else
+                    {
+                        // Handle other validation errors normally
+                        foreach (ValidationError error in validationResult.Errors)
+                        {
+                            ModelState.AddModelError("", error.Message);
+                        }
                     }
 
                     return View(viewModel);
