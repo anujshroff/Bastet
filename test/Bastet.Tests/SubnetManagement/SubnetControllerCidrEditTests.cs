@@ -34,7 +34,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         HostIpValidationService hostIpValidationService = new(_ipUtilityService, _context);
 
         // Create and configure the controller
-        _controller = new SubnetController(_context, _ipUtilityService, _validationService, hostIpValidationService, _userContextService);
+        _controller = new SubnetController(_context, _ipUtilityService, _validationService, hostIpValidationService, _userContextService, ControllerTestHelper.CreateMockSubnetLockingService());
         ControllerTestHelper.SetupController(_controller);
 
         // Set up test data

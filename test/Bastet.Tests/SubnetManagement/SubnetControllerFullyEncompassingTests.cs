@@ -46,7 +46,8 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
             _ipUtilityService,
             _validationService,
             _hostIpValidationService,
-            _userContextService
+            _userContextService,
+            ControllerTestHelper.CreateMockSubnetLockingService()
         );
         ControllerTestHelper.SetupController(_controller);
 
