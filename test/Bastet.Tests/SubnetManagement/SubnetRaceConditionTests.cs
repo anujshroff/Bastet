@@ -150,8 +150,7 @@ public class SubnetRaceConditionTests : IDisposable
 
         // The failed request should have validation errors
         ViewResult viewResult = results.OfType<ViewResult>().First();
-        SubnetController controller = viewResult.ViewData.ModelState.Keys.Contains("") ? controller1 : controller2;
-        Assert.False(controller.ModelState.IsValid);
+        Assert.False(viewResult.ViewData.ModelState.IsValid);
     }
 
     [Fact]
