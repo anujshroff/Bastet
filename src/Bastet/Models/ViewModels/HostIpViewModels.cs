@@ -1,3 +1,4 @@
+using Bastet.Services.Security;
 using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Models.ViewModels;
@@ -21,12 +22,13 @@ public class HostIpViewModel
 public class CreateHostIpViewModel
 {
     [Required(ErrorMessage = "IP address is required")]
-    [RegularExpression(@"^(\d{1,3}\.){3}\d{1,3}$",
-        ErrorMessage = "Invalid IPv4 address format")]
+    [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid IP address format")]
     [Display(Name = "IP Address")]
     public string IP { get; set; } = string.Empty;
 
     [StringLength(100, ErrorMessage = "Name cannot exceed 100 characters")]
+    [NoHtml(ErrorMessage = "HTML tags are not allowed in host names")]
+    [SafeText(ErrorMessage = "Host name contains invalid characters")]
     [Display(Name = "Host Name (Optional)")]
     public string? Name { get; set; }
 
@@ -49,6 +51,8 @@ public class EditHostIpViewModel
     public string IP { get; set; } = string.Empty; // Primary key, read-only
 
     [StringLength(100, ErrorMessage = "Name cannot exceed 100 characters")]
+    [NoHtml(ErrorMessage = "HTML tags are not allowed in host names")]
+    [SafeText(ErrorMessage = "Host name contains invalid characters")]
     [Display(Name = "Host Name (Optional)")]
     public string? Name { get; set; }
 

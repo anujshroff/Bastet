@@ -41,6 +41,7 @@ builder.Services.AddScoped<Bastet.Services.Validation.ISubnetValidationService, 
 builder.Services.AddScoped<Bastet.Services.Validation.IHostIpValidationService, Bastet.Services.Validation.HostIpValidationService>();
 builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bastet.Services.Division.SubnetDivisionService>();
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureService, Bastet.Services.Azure.AzureService>();
+builder.Services.AddScoped<Bastet.Services.Security.IInputSanitizationService, Bastet.Services.Security.InputSanitizationService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
 
 // Register subnet locking service with auto-detection based on database provider
