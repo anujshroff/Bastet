@@ -1,5 +1,6 @@
 using Bastet.Data;
 using Bastet.Services;
+using Bastet.Services.Locking;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,6 +11,7 @@ public partial class SubnetController(
     IIpUtilityService ipUtilityService,
     ISubnetValidationService subnetValidationService,
     IHostIpValidationService hostIpValidationService,
-    IUserContextService userContextService) : Controller
+    IUserContextService userContextService,
+    ISubnetLockingService subnetLockingService) : Controller
 {
 }

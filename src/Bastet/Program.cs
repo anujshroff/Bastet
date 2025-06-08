@@ -43,6 +43,19 @@ builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bast
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureService, Bastet.Services.Azure.AzureService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
 
+// Register subnet locking service with auto-detection based on database provider
+builder.Services.AddScoped<Bastet.Services.Locking.ISubnetLockingService>(provider =>
+{
+    BastetDbContext context = provider.GetRequiredService<BastetDbContext>();
+
+    return context.Database.ProviderName?.ToLower() switch
+    {
+        "microsoft.entityframeworkcore.sqlite" => new Bastet.Services.Locking.SqliteSubnetLockingService(context),
+        "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context),
+        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context) // Default to SQL Server
+    };
+});
+
 // Add HttpContextAccessor for accessing the current user
 builder.Services.AddHttpContextAccessor();
 

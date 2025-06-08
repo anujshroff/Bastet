@@ -69,23 +69,13 @@ public partial class SubnetController : Controller
         {
             try
             {
-                // Begin a transaction to ensure data consistency for CIDR changes
-                using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
-                try
+                // Execute validation and update within distributed lock to prevent race conditions
+                Subnet result = await subnetLockingService.ExecuteWithSubnetEditLockAsync(id, async () =>
                 {
                     // Retrieve existing subnet with relations for validation
                     Subnet? subnet = await context.Subnets
                         .Include(s => s.ParentSubnet)
-                        .FirstOrDefaultAsync(s => s.Id == id);
-
-                    if (subnet == null)
-                    {
-                        return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                        {
-                            statusCode = 404,
-                            errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
-                        });
-                    }
+                        .FirstOrDefaultAsync(s => s.Id == id) ?? throw new InvalidOperationException($"The subnet with ID {id} could not be found or may have been deleted.");
 
                     // Load child subnets directly to avoid navigation property issues
                     List<Subnet> childSubnets = await context.Subnets
@@ -93,7 +83,7 @@ public partial class SubnetController : Controller
                         .ToListAsync();
 
                     // Check if CIDR has changed
-                    bool cidrChanged = viewModel.Cidr != viewModel.OriginalCidr;
+                    bool cidrChanged = viewModel.Cidr != subnet.Cidr;
 
                     // Always validate CIDR changes, regardless of whether this is a first or subsequent attempt
                     // This ensures validation is never bypassed, even on multiple form submissions
@@ -127,28 +117,9 @@ public partial class SubnetController : Controller
 
                         if (!validationResult.IsValid)
                         {
-                            foreach (ValidationError error in validationResult.Errors)
-                            {
-                                ModelState.AddModelError("Cidr", error.Message);
-                            }
-
-                            // Early return with validation errors
-                            // Populate info for the view
-                            viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
-                            viewModel.CreatedAt = subnet.CreatedAt;
-                            viewModel.LastModifiedAt = subnet.LastModifiedAt;
-                            viewModel.RowVersion = subnet.RowVersion;
-
-                            if (subnet.ParentSubnet != null)
-                            {
-                                viewModel.ParentSubnetInfo = $"{subnet.ParentSubnet.Name} ({subnet.ParentSubnet.NetworkAddress}/{subnet.ParentSubnet.Cidr})";
-                            }
-
-                            return View(viewModel);
+                            string errorMessage = string.Join("; ", validationResult.Errors.Select(e => e.Message));
+                            throw new ValidationException($"CIDR validation failed: {errorMessage}");
                         }
-
-                        // Update subnet mask for display after validation
-                        viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
 
                         // Only validate host IPs when CIDR is increasing (making subnet smaller)
                         if (viewModel.Cidr > subnet.Cidr)
@@ -162,22 +133,8 @@ public partial class SubnetController : Controller
 
                             if (!hostIpValidationResult.IsValid)
                             {
-                                foreach (ValidationError error in hostIpValidationResult.Errors)
-                                {
-                                    ModelState.AddModelError("Cidr", error.Message);
-                                }
-
-                                // Early return with validation errors
-                                viewModel.CreatedAt = subnet.CreatedAt;
-                                viewModel.LastModifiedAt = subnet.LastModifiedAt;
-                                viewModel.RowVersion = subnet.RowVersion;
-
-                                if (subnet.ParentSubnet != null)
-                                {
-                                    viewModel.ParentSubnetInfo = $"{subnet.ParentSubnet.Name} ({subnet.ParentSubnet.NetworkAddress}/{subnet.ParentSubnet.Cidr})";
-                                }
-
-                                return View(viewModel);
+                                string errorMessage = string.Join("; ", hostIpValidationResult.Errors.Select(e => e.Message));
+                                throw new ValidationException($"Host IP validation failed: {errorMessage}");
                             }
                         }
                         // For CIDR decreases (subnet expansion), no host IP validation is needed
@@ -203,64 +160,62 @@ public partial class SubnetController : Controller
                     context.Subnets.Update(subnet);
                     await context.SaveChangesAsync();
 
-                    // Commit the transaction
-                    await transaction.CommitAsync();
+                    return subnet;
+                });
 
-                    TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' was updated successfully.";
-                    return RedirectToAction(nameof(Details), new { id = subnet.Id });
-                }
-                catch (DbUpdateConcurrencyException)
+                TempData["SuccessMessage"] = $"Subnet '{result.Name}' was updated successfully.";
+                return RedirectToAction(nameof(Details), new { id = result.Id });
+            }
+            catch (ValidationException ex)
+            {
+                // Handle validation errors
+                ModelState.AddModelError("Cidr", ex.Message);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!SubnetExists(id))
                 {
-                    // Rollback the transaction on concurrency error
-                    await transaction.RollbackAsync();
-
-                    if (!SubnetExists(id))
+                    return RedirectToAction("HttpStatusCodeHandler", "Error", new
                     {
-                        return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                        {
-                            statusCode = 404,
-                            errorMessage = "The subnet no longer exists. It may have been deleted by another user."
-                        });
+                        statusCode = 404,
+                        errorMessage = "The subnet no longer exists. It may have been deleted by another user."
+                    });
+                }
+
+                // Handle concurrency conflict - reload current data and show user-friendly message
+                Subnet? currentSubnet = await context.Subnets
+                    .Include(s => s.ParentSubnet)
+                    .FirstOrDefaultAsync(s => s.Id == id);
+
+                if (currentSubnet != null)
+                {
+                    // Update the view model with current database values for concurrency control
+                    viewModel.RowVersion = currentSubnet.RowVersion;
+                    viewModel.NetworkAddress = currentSubnet.NetworkAddress;
+                    viewModel.OriginalCidr = currentSubnet.Cidr;
+                    viewModel.CreatedAt = currentSubnet.CreatedAt;
+                    viewModel.LastModifiedAt = currentSubnet.LastModifiedAt;
+
+                    if (currentSubnet.ParentSubnet != null)
+                    {
+                        viewModel.ParentSubnetInfo = $"{currentSubnet.ParentSubnet.Name} ({currentSubnet.ParentSubnet.NetworkAddress}/{currentSubnet.ParentSubnet.Cidr})";
                     }
 
-                    // Handle concurrency conflict - reload current data and show user-friendly message
-                    Subnet? currentSubnet = await context.Subnets
-                        .Include(s => s.ParentSubnet)
-                        .FirstOrDefaultAsync(s => s.Id == id);
-
-                    if (currentSubnet != null)
-                    {
-                        // Update the view model with current database values for concurrency control
-                        viewModel.RowVersion = currentSubnet.RowVersion;
-                        viewModel.NetworkAddress = currentSubnet.NetworkAddress;
-                        viewModel.OriginalCidr = currentSubnet.Cidr;
-                        viewModel.CreatedAt = currentSubnet.CreatedAt;
-                        viewModel.LastModifiedAt = currentSubnet.LastModifiedAt;
-
-                        if (currentSubnet.ParentSubnet != null)
-                        {
-                            viewModel.ParentSubnetInfo = $"{currentSubnet.ParentSubnet.Name} ({currentSubnet.ParentSubnet.NetworkAddress}/{currentSubnet.ParentSubnet.Cidr})";
-                        }
-
-                        // Clear the RowVersion from ModelState so the form field uses the updated model value
-                        ModelState.Remove(nameof(viewModel.RowVersion));
-                    }
-
-                    ModelState.AddModelError("",
-                        "This subnet was modified by another user while you were editing it. " +
-                        "Your changes have been preserved below, but you should review the current values before saving. " +
-                        "Click 'Save Changes' again to apply your updates.");
+                    // Clear the RowVersion from ModelState so the form field uses the updated model value
+                    ModelState.Remove(nameof(viewModel.RowVersion));
                 }
-                catch (Exception ex)
-                {
-                    // Rollback the transaction on error
-                    await transaction.RollbackAsync();
-                    ModelState.AddModelError("", $"Error updating subnet: {ex.Message}");
-                }
+
+                ModelState.AddModelError("",
+                    "This subnet was modified by another user while you were editing it. " +
+                    "Your changes have been preserved below, but you should review the current values before saving. " +
+                    "Click 'Save Changes' again to apply your updates.");
+            }
+            catch (TimeoutException)
+            {
+                ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
             }
             catch (Exception ex)
             {
-                // Handle any other exceptions outside the transaction
                 ModelState.AddModelError("", $"Error updating subnet: {ex.Message}");
             }
         }
@@ -309,4 +264,9 @@ public partial class SubnetController : Controller
 
         return View(viewModel);
     }
+}
+
+// Custom validation exception for cleaner error handling
+public class ValidationException(string message) : Exception(message)
+{
 }
