@@ -4,6 +4,7 @@ using Bastet.Models;
 using Bastet.Models.DTOs;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,7 @@ public class SubnetHostIpInteractionTests : IDisposable
     private readonly IIpUtilityService _ipUtilityService;
     private readonly SubnetValidationService _subnetValidationService;
     private readonly HostIpValidationService _hostIpValidationService;
+    private readonly IInputSanitizationService _sanitizationService;
     private readonly SubnetController _subnetController;
     private readonly HostIpController _hostIpController;
 
@@ -35,10 +37,12 @@ public class SubnetHostIpInteractionTests : IDisposable
         _ipUtilityService = new IpUtilityService();
         _subnetValidationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
+        _sanitizationService = new InputSanitizationService();
 
         // Create controllers
         _subnetController = new SubnetController(_context, _ipUtilityService,
-            _subnetValidationService, _hostIpValidationService, _userContextService);
+            _subnetValidationService, _hostIpValidationService, _userContextService,
+            ControllerTestHelper.CreateMockSubnetLockingService());
         ControllerTestHelper.SetupController(_subnetController);
 
         _hostIpController = new HostIpController(_context, _hostIpValidationService,

@@ -1,3 +1,4 @@
+using Bastet.Services.Security;
 using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Models.ViewModels;
@@ -6,10 +7,15 @@ public class CreateSubnetViewModel
 {
     [Required(ErrorMessage = "Name is required")]
     [StringLength(50, ErrorMessage = "Name cannot be longer than 50 characters")]
+    [NoHtml(ErrorMessage = "HTML tags are not allowed in subnet names")]
+    [SafeText(ErrorMessage = "Subnet name contains invalid characters")]
+    [SanitizeName] // Auto-sanitization
     [Display(Name = "Subnet Name")]
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Network address is required")]
+    [NetworkInput(ErrorMessage = "Invalid network address format")]
+    [SanitizeNetworkInput] // Auto-sanitization
     [Display(Name = "Network Address")]
     public string NetworkAddress { get; set; } = string.Empty;
 
@@ -18,14 +24,19 @@ public class CreateSubnetViewModel
     [Display(Name = "CIDR Notation")]
     public int Cidr { get; set; }
 
+    [StringLength(1000, ErrorMessage = "Description cannot be longer than 1000 characters")]
+    [NoHtml(ErrorMessage = "HTML tags are not allowed in descriptions")]
+    [SanitizeDescription] // Auto-sanitization
     [Display(Name = "Description")]
     public string? Description { get; set; }
 
     [Display(Name = "Parent Subnet")]
     public int? ParentSubnetId { get; set; }
 
-    [Display(Name = "Tags")]
     [StringLength(255, ErrorMessage = "Tags cannot be longer than 255 characters")]
+    [Bastet.Services.Security.Tags(MaxTags = 10, MaxTagLength = 50, ErrorMessage = "Invalid tags format")]
+    [SanitizeTags] // Auto-sanitization
+    [Display(Name = "Tags")]
     public string? Tags { get; set; }
 
     // Navigation properties (not mapped to database)

@@ -63,11 +63,18 @@ public partial class SubnetController : Controller
     [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Create(CreateSubnetViewModel viewModel)
     {
-        if (ModelState.IsValid)
+        if (!ModelState.IsValid)
         {
-            try
+            await LoadParentSubnets(viewModel);
+            return View(viewModel);
+        }
+
+        try
+        {
+            // Execute validation and creation within distributed lock to prevent race conditions
+            Subnet? result = await subnetLockingService.ExecuteWithSubnetLockAsync(async () =>
             {
-                // Validate the subnet using our helper method
+                // Validate the subnet using our helper method (now within the lock)
                 if (await ValidateSubnetCreation(viewModel))
                 {
                     // Create subnet directly in the database
@@ -86,14 +93,25 @@ public partial class SubnetController : Controller
                     context.Subnets.Add(subnet);
                     await context.SaveChangesAsync();
 
-                    TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' was created successfully.";
-                    return RedirectToAction(nameof(Details), new { id = subnet.Id });
+                    return subnet;
                 }
-            }
-            catch (Exception ex)
+
+                return null;
+            });
+
+            if (result != null)
             {
-                ModelState.AddModelError("", $"Error creating subnet: {ex.Message}");
+                TempData["SuccessMessage"] = $"Subnet '{result.Name}' was created successfully.";
+                return RedirectToAction(nameof(Details), new { id = result.Id });
             }
+        }
+        catch (TimeoutException)
+        {
+            ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
+        }
+        catch (Exception ex)
+        {
+            ModelState.AddModelError("", $"Error creating subnet: {ex.Message}");
         }
 
         // If we get here, something went wrong

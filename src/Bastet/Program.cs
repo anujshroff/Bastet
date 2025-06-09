@@ -1,4 +1,5 @@
 using Bastet.Data;
+using Bastet.Filters;
 using Bastet.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -19,10 +20,9 @@ if (!builder.Environment.IsDevelopment())
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
-builder.Services.AddControllers();
 
-// Add MVC
-builder.Services.AddControllersWithViews();
+// Add MVC with global sanitization filter
+builder.Services.AddControllersWithViews(options => options.Filters.Add<GlobalSanitizationFilter>());
 
 // Add DbContext
 builder.Services.AddDbContext<BastetDbContext>(options =>
@@ -41,7 +41,21 @@ builder.Services.AddScoped<Bastet.Services.Validation.ISubnetValidationService, 
 builder.Services.AddScoped<Bastet.Services.Validation.IHostIpValidationService, Bastet.Services.Validation.HostIpValidationService>();
 builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bastet.Services.Division.SubnetDivisionService>();
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureService, Bastet.Services.Azure.AzureService>();
+builder.Services.AddScoped<Bastet.Services.Security.IInputSanitizationService, Bastet.Services.Security.InputSanitizationService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
+
+// Register subnet locking service with auto-detection based on database provider
+builder.Services.AddScoped<Bastet.Services.Locking.ISubnetLockingService>(provider =>
+{
+    BastetDbContext context = provider.GetRequiredService<BastetDbContext>();
+
+    return context.Database.ProviderName?.ToLower() switch
+    {
+        "microsoft.entityframeworkcore.sqlite" => new Bastet.Services.Locking.SqliteSubnetLockingService(context),
+        "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context),
+        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context) // Default to SQL Server
+    };
+});
 
 // Add HttpContextAccessor for accessing the current user
 builder.Services.AddHttpContextAccessor();

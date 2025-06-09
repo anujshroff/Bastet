@@ -1,4 +1,5 @@
 using Bastet.Services;
+using Bastet.Services.Locking;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
@@ -45,4 +46,25 @@ public static class ControllerTestHelper
         mock.Setup(m => m.GetCurrentUsername()).Returns(username);
         return mock.Object;
     }
+
+    /// <summary>
+    /// Creates a no-op subnet locking service that simply executes operations without locking
+    /// </summary>
+    /// <returns>A no-op subnet locking service</returns>
+    public static ISubnetLockingService CreateMockSubnetLockingService() => new NoOpSubnetLockingService();
+}
+
+/// <summary>
+/// A no-op implementation of ISubnetLockingService for testing
+/// Simply executes operations without any locking
+/// </summary>
+public class NoOpSubnetLockingService : ISubnetLockingService
+{
+    public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null) =>
+        // Simply execute the operation without any locking
+        await operation();
+
+    public async Task<T> ExecuteWithSubnetEditLockAsync<T>(int subnetId, Func<Task<T>> operation, TimeSpan? timeout = null) =>
+        // Simply execute the operation without any locking
+        await operation();
 }

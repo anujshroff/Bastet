@@ -1,3 +1,4 @@
+using Bastet.Services.Security;
 using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Models.ViewModels;
@@ -35,15 +36,18 @@ public class EditSubnetViewModel
 
     [Required(ErrorMessage = "Name is required")]
     [StringLength(50, ErrorMessage = "Name cannot be longer than 50 characters")]
+    [SanitizeName] // Auto-sanitization
     [Display(Name = "Subnet Name")]
     public string Name { get; set; } = string.Empty;
 
     [Display(Name = "Description")]
     [StringLength(500, ErrorMessage = "Description cannot be longer than 500 characters")]
+    [SanitizeDescription] // Auto-sanitization
     public string? Description { get; set; }
 
     [Display(Name = "Tags")]
     [StringLength(255, ErrorMessage = "Tags cannot be longer than 255 characters")]
+    [SanitizeTags] // Auto-sanitization
     public string? Tags { get; set; }
 
     /// <summary>
