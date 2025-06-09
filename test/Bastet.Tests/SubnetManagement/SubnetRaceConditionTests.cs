@@ -4,6 +4,7 @@ using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
 using Bastet.Services.Locking;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,7 @@ public class SubnetRaceConditionTests : IDisposable
     private readonly SubnetValidationService _subnetValidationService;
     private readonly HostIpValidationService _hostIpValidationService;
     private readonly ISubnetLockingService _lockingService;
+    private readonly IInputSanitizationService _sanitizationService;
 
     public SubnetRaceConditionTests()
     {
@@ -33,6 +35,7 @@ public class SubnetRaceConditionTests : IDisposable
         _ipUtilityService = new IpUtilityService();
         _subnetValidationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
+        _sanitizationService = new InputSanitizationService();
 
         // Use the real SQLite locking service for these tests
         _lockingService = new SqliteSubnetLockingService(_context);
@@ -108,7 +111,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller1.Create(createViewModel1);
+                    IActionResult result = await controller1.Create(createViewModel1, _sanitizationService);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)
@@ -120,7 +123,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller2.Create(createViewModel2);
+                    IActionResult result = await controller2.Create(createViewModel2, _sanitizationService);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)
@@ -218,7 +221,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller1.Edit(10, editViewModel1);
+                    IActionResult result = await controller1.Edit(10, editViewModel1, _sanitizationService);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)
@@ -230,7 +233,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller2.Edit(10, editViewModel2);
+                    IActionResult result = await controller2.Edit(10, editViewModel2, _sanitizationService);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)
