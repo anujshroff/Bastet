@@ -1,5 +1,6 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -54,7 +55,7 @@ public partial class SubnetController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
-    public async Task<IActionResult> Edit(int id, EditSubnetViewModel viewModel)
+    public async Task<IActionResult> Edit(int id, EditSubnetViewModel viewModel, [FromServices] IInputSanitizationService sanitizationService)
     {
         if (id != viewModel.Id)
         {
@@ -64,6 +65,11 @@ public partial class SubnetController : Controller
                 errorMessage = "The ID in the URL doesn't match the ID in the form data."
             });
         }
+
+        // Sanitize user inputs before processing
+        viewModel.Name = sanitizationService.SanitizeName(viewModel.Name);
+        viewModel.Description = sanitizationService.SanitizeDescription(viewModel.Description);
+        viewModel.Tags = sanitizationService.SanitizeTags(viewModel.Tags);
 
         if (ModelState.IsValid)
         {

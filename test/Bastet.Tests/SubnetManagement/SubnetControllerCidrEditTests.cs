@@ -3,6 +3,7 @@ using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
@@ -18,6 +19,7 @@ public class SubnetControllerCidrEditTests : IDisposable
     private readonly IUserContextService _userContextService;
     private readonly IIpUtilityService _ipUtilityService;
     private readonly SubnetValidationService _validationService;
+    private readonly IInputSanitizationService _sanitizationService;
     private readonly SubnetController _controller;
 
     public SubnetControllerCidrEditTests()
@@ -29,6 +31,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         _userContextService = ControllerTestHelper.CreateMockUserContextService();
         _ipUtilityService = new IpUtilityService();
         _validationService = new SubnetValidationService(_ipUtilityService);
+        _sanitizationService = new InputSanitizationService();
 
         // Need HostIpValidationService for the updated controller signature
         HostIpValidationService hostIpValidationService = new(_ipUtilityService, _context);
@@ -213,7 +216,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -245,7 +248,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -282,7 +285,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -321,7 +324,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(10, viewModel);
+        IActionResult result = await _controller.Edit(10, viewModel, _sanitizationService);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -352,7 +355,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         _ = Assert.IsType<ViewResult>(result);
@@ -376,7 +379,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         _ = Assert.IsType<ViewResult>(result);
@@ -400,7 +403,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         ViewResult viewResult = Assert.IsType<ViewResult>(result);
@@ -431,7 +434,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         _ = Assert.IsType<ViewResult>(result);
@@ -461,7 +464,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         _ = Assert.IsType<ViewResult>(result);
@@ -503,7 +506,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         _ = Assert.IsType<ViewResult>(result);
@@ -564,7 +567,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -596,7 +599,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(4, viewModel);
+        IActionResult result = await _controller.Edit(4, viewModel, _sanitizationService);
 
         // Assert
         _ = Assert.IsType<ViewResult>(result);
@@ -622,7 +625,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _controller.Edit(nonExistentId, viewModel);
+        IActionResult result = await _controller.Edit(nonExistentId, viewModel, _sanitizationService);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
