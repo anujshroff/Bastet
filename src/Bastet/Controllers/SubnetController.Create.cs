@@ -1,6 +1,5 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
-using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -62,14 +61,8 @@ public partial class SubnetController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
-    public async Task<IActionResult> Create(CreateSubnetViewModel viewModel, [FromServices] IInputSanitizationService sanitizationService)
+    public async Task<IActionResult> Create(CreateSubnetViewModel viewModel)
     {
-        // Sanitize user inputs before validation
-        viewModel.Name = sanitizationService.SanitizeName(viewModel.Name);
-        viewModel.NetworkAddress = sanitizationService.SanitizeNetworkInput(viewModel.NetworkAddress);
-        viewModel.Description = sanitizationService.SanitizeDescription(viewModel.Description);
-        viewModel.Tags = sanitizationService.SanitizeTags(viewModel.Tags);
-
         if (!ModelState.IsValid)
         {
             await LoadParentSubnets(viewModel);
