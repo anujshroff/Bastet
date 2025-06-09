@@ -111,7 +111,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller1.Create(createViewModel1, _sanitizationService);
+                    IActionResult result = await controller1.Create(createViewModel1);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)
@@ -123,7 +123,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller2.Create(createViewModel2, _sanitizationService);
+                    IActionResult result = await controller2.Create(createViewModel2);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)
@@ -221,7 +221,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller1.Edit(10, editViewModel1, _sanitizationService);
+                    IActionResult result = await controller1.Edit(10, editViewModel1);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)
@@ -233,7 +233,7 @@ public class SubnetRaceConditionTests : IDisposable
             {
                 try
                 {
-                    IActionResult result = await controller2.Edit(10, editViewModel2, _sanitizationService);
+                    IActionResult result = await controller2.Edit(10, editViewModel2);
                     lock (results) { results.Add(result); }
                 }
                 catch (Exception ex)

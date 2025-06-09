@@ -3,7 +3,6 @@ using Bastet.Models;
 using Bastet.Models.DTOs;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
-using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -102,12 +101,8 @@ public class HostIpController(
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
-    public async Task<IActionResult> Create(CreateHostIpViewModel viewModel, [FromServices] IInputSanitizationService sanitizationService)
+    public async Task<IActionResult> Create(CreateHostIpViewModel viewModel)
     {
-        // Sanitize user inputs before validation
-        viewModel.IP = sanitizationService.SanitizeNetworkInput(viewModel.IP);
-        viewModel.Name = sanitizationService.SanitizeName(viewModel.Name);
-
         if (ModelState.IsValid)
         {
             try
@@ -201,15 +196,12 @@ public class HostIpController(
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
-    public async Task<IActionResult> Edit(string ip, EditHostIpViewModel viewModel, [FromServices] IInputSanitizationService sanitizationService)
+    public async Task<IActionResult> Edit(string ip, EditHostIpViewModel viewModel)
     {
         if (ip != viewModel.IP)
         {
             return NotFound();
         }
-
-        // Sanitize user inputs before validation
-        viewModel.Name = sanitizationService.SanitizeName(viewModel.Name);
 
         if (ModelState.IsValid)
         {

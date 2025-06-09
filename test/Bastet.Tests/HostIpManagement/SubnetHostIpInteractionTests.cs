@@ -244,7 +244,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _subnetController.Edit(subnetId, viewModel, _sanitizationService);
+        IActionResult result = await _subnetController.Edit(subnetId, viewModel);
 
         // Assert - This should be a successful operation
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -274,7 +274,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _subnetController.Edit(subnetId, viewModel, _sanitizationService);
+        IActionResult result = await _subnetController.Edit(subnetId, viewModel);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
@@ -304,7 +304,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
 
         // Act
-        IActionResult result = await _subnetController.Edit(subnetId, viewModel, _sanitizationService);
+        IActionResult result = await _subnetController.Edit(subnetId, viewModel);
 
         // Assert
         _ = Assert.IsType<ViewResult>(result);

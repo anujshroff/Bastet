@@ -23,12 +23,14 @@ public class CreateHostIpViewModel
 {
     [Required(ErrorMessage = "IP address is required")]
     [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid IP address format")]
+    [SanitizeNetworkInput] // Auto-sanitization
     [Display(Name = "IP Address")]
     public string IP { get; set; } = string.Empty;
 
     [StringLength(100, ErrorMessage = "Name cannot exceed 100 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in host names")]
     [SafeText(ErrorMessage = "Host name contains invalid characters")]
+    [SanitizeName] // Auto-sanitization
     [Display(Name = "Host Name (Optional)")]
     public string? Name { get; set; }
 
@@ -53,6 +55,7 @@ public class EditHostIpViewModel
     [StringLength(100, ErrorMessage = "Name cannot exceed 100 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in host names")]
     [SafeText(ErrorMessage = "Host name contains invalid characters")]
+    [SanitizeName] // Auto-sanitization
     [Display(Name = "Host Name (Optional)")]
     public string? Name { get; set; }
 

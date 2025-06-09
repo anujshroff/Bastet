@@ -1,4 +1,5 @@
 using Bastet.Data;
+using Bastet.Filters;
 using Bastet.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -19,10 +20,9 @@ if (!builder.Environment.IsDevelopment())
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
-builder.Services.AddControllers();
 
-// Add MVC
-builder.Services.AddControllersWithViews();
+// Add MVC with global sanitization filter
+builder.Services.AddControllersWithViews(options => options.Filters.Add<GlobalSanitizationFilter>());
 
 // Add DbContext
 builder.Services.AddDbContext<BastetDbContext>(options =>
