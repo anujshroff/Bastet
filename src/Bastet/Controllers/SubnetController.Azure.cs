@@ -1,5 +1,6 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,11 +12,29 @@ public partial class SubnetController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null)
+    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null, [FromServices] IInputSanitizationService? sanitizationService = null)
     {
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        // Sanitize user inputs before processing
+        if (sanitizationService != null)
+        {
+            foreach (CreateSubnetViewModel subnet in subnets)
+            {
+                subnet.Name = sanitizationService.SanitizeName(subnet.Name);
+                subnet.NetworkAddress = sanitizationService.SanitizeNetworkInput(subnet.NetworkAddress);
+                subnet.Description = sanitizationService.SanitizeDescription(subnet.Description);
+                subnet.Tags = sanitizationService.SanitizeTags(subnet.Tags);
+            }
+
+            // Also sanitize vnetName if provided
+            if (!string.IsNullOrEmpty(vnetName))
+            {
+                vnetName = sanitizationService.SanitizeName(vnetName);
+            }
         }
 
         // Begin transaction
