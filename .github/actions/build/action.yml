@@ -6,7 +6,7 @@ inputs:
     default: 'Release'
   DOTNET_CORE_VERSION: 
     required: false
-    default: '9.x'
+    default: '10.x'
   GITHUB_TOKEN:
     required: true
   
@@ -14,7 +14,7 @@ runs:
   using: 'composite'
   steps:
     - name: Setup .NET SDK
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: ${{ inputs.DOTNET_CORE_VERSION }}
 
