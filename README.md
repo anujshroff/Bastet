@@ -14,7 +14,7 @@ BASTET is a modern, web-based subnet management system that helps network admini
 
 ## Technologies
 
-- **ASP.NET Core MVC** (.NET 9.0)
+- **ASP.NET Core MVC** (.NET 10.0)
 - **Entity Framework Core**
 - **SQL Server**
 - **Bootstrap for responsive UI**
@@ -22,7 +22,7 @@ BASTET is a modern, web-based subnet management system that helps network admini
 
 ## Prerequisites
 
-- **.NET 9.0 SDK**
+- **.NET 10.0 SDK**
 - **SQL Server** (or compatible database)
 - **Modern web browser**
 
