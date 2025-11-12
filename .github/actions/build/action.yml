@@ -6,7 +6,7 @@ inputs:
     default: 'Release'
   DOTNET_CORE_VERSION: 
     required: false
-    default: '9.x'
+    default: '10.x'
   GITHUB_TOKEN:
     required: true
   
