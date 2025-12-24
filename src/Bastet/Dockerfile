@@ -1,9 +1,9 @@
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled
 
 WORKDIR /app
 
-COPY --chmod=755 . .
+COPY . .
 
 USER app
 
-CMD [ "dotnet", "Bastet.dll" ]
+ENTRYPOINT [ "dotnet", "Bastet.dll" ]
