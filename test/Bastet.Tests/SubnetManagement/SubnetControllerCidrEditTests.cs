@@ -255,7 +255,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Equal("Details", redirectResult.ActionName);
 
         // Verify the database was updated
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([4], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
 
         // Use null-safe accessors for properties
@@ -271,9 +271,9 @@ public class SubnetControllerCidrEditTests : IDisposable
     public async Task Edit_POST_IncreaseCidr_NoOrphanedChildren_ReturnsRedirectToDetails()
     {
         // Arrange - First delete children to avoid validation errors
-        _context.Subnets.Remove(await _context.Subnets.FindAsync(5) ?? throw new Exception("Child 1 not found"));
-        _context.Subnets.Remove(await _context.Subnets.FindAsync(6) ?? throw new Exception("Child 2 not found"));
-        await _context.SaveChangesAsync();
+        _context.Subnets.Remove(await _context.Subnets.FindAsync([5], TestContext.Current.CancellationToken) ?? throw new Exception("Child 1 not found"));
+        _context.Subnets.Remove(await _context.Subnets.FindAsync([6], TestContext.Current.CancellationToken) ?? throw new Exception("Child 2 not found"));
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         EditSubnetViewModel viewModel = new()
         {
@@ -292,7 +292,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Equal("Details", redirectResult.ActionName);
 
         // Verify the database was updated
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([4], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         int cidr = updatedSubnet.Cidr; // Safely access cidr value
         Assert.Equal(25, cidr);
@@ -312,7 +312,7 @@ public class SubnetControllerCidrEditTests : IDisposable
             CreatedBy = "test-admin"
         };
         _context.Subnets.Add(isolatedSubnet);
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         EditSubnetViewModel viewModel = new()
         {
@@ -331,7 +331,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Equal("Details", redirectResult.ActionName);
 
         // Verify the database was updated
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(10);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([10], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         int cidr = updatedSubnet.Cidr; // Safely access cidr value
         Assert.Equal(23, cidr);
@@ -491,7 +491,7 @@ public class SubnetControllerCidrEditTests : IDisposable
             CreatedBy = "test-admin"
         };
         _context.Subnets.Add(unrelatedOverlapSubnet);
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // Arrange - Set ModelState error manually to simulate validation failure
         _controller.ModelState.AddModelError("Cidr", "Expanding to 10.0.2.0/22 would conflict with existing subnet: Unrelated Subnet (10.0.3.0/24)");
@@ -524,9 +524,9 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Arrange - First reconfigure our test data to create a boundary case scenario
 
         // First, remove existing children
-        _context.Subnets.Remove(await _context.Subnets.FindAsync(5) ?? throw new Exception("Child 1 not found"));
-        _context.Subnets.Remove(await _context.Subnets.FindAsync(6) ?? throw new Exception("Child 2 not found"));
-        await _context.SaveChangesAsync();
+        _context.Subnets.Remove(await _context.Subnets.FindAsync([5], TestContext.Current.CancellationToken) ?? throw new Exception("Child 1 not found"));
+        _context.Subnets.Remove(await _context.Subnets.FindAsync([6], TestContext.Current.CancellationToken) ?? throw new Exception("Child 2 not found"));
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // Then add children that would exactly fit in a /24 subnet
         Subnet newChild1 = new()
@@ -553,9 +553,9 @@ public class SubnetControllerCidrEditTests : IDisposable
         _context.Subnets.Add(newChild2);
 
         // Adjust our target subnet to be /23 so we can decrease its size to /24
-        Subnet? targetSubnet = await _context.Subnets.FindAsync(4) ?? throw new Exception("Target subnet not found");
+        Subnet? targetSubnet = await _context.Subnets.FindAsync([4], TestContext.Current.CancellationToken) ?? throw new Exception("Target subnet not found");
         targetSubnet.Cidr = 23;
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         EditSubnetViewModel viewModel = new()
         {
@@ -574,7 +574,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Equal("Details", redirectResult.ActionName);
 
         // Verify the database was updated
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(4);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([4], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         int cidr = updatedSubnet.Cidr; // Safely access cidr value
         Assert.Equal(24, cidr);

@@ -252,7 +252,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
         // Verify database was updated
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         Assert.Equal(23, updatedSubnet.Cidr); // CIDR was decreased from 24 to 23
     }
@@ -282,7 +282,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
         // Verify database was updated
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         Assert.Equal(24, updatedSubnet.Cidr);
     }
@@ -311,7 +311,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.False(_subnetController.ModelState.IsValid);
 
         // Verify database was not updated
-        Subnet? unchangedSubnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? unchangedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(unchangedSubnet);
         Assert.Equal(23, unchangedSubnet.Cidr); // CIDR remains unchanged
     }
@@ -336,7 +336,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
         // Verify database was updated
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         Assert.True(updatedSubnet.IsFullyAllocated);
     }
@@ -364,7 +364,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Contains("host IP assignments", _hostIpController.TempData["ErrorMessage"]?.ToString() ?? "");
 
         // Verify database was not updated
-        Subnet? unchangedSubnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? unchangedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(unchangedSubnet);
         Assert.False(unchangedSubnet.IsFullyAllocated); // Still not fully allocated
     }
@@ -392,7 +392,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Contains("child subnets", _hostIpController.TempData["ErrorMessage"]?.ToString() ?? "");
 
         // Verify database was not updated
-        Subnet? unchangedSubnet = await _context.Subnets.FindAsync(subnetId);
+        Subnet? unchangedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(unchangedSubnet);
         Assert.False(unchangedSubnet.IsFullyAllocated); // Still not fully allocated
     }
@@ -407,10 +407,10 @@ public class SubnetHostIpInteractionTests : IDisposable
         _subnetController.TempData.Clear();
 
         // Record initial counts
-        int initialSubnetCount = await _context.Subnets.CountAsync();
-        int initialHostIpCount = await _context.HostIpAssignments.CountAsync();
-        int initialDeletedSubnetCount = await _context.DeletedSubnets.CountAsync();
-        int initialDeletedHostIpCount = await _context.DeletedHostIpAssignments.CountAsync();
+        int initialSubnetCount = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
+        int initialHostIpCount = await _context.HostIpAssignments.CountAsync(TestContext.Current.CancellationToken);
+        int initialDeletedSubnetCount = await _context.DeletedSubnets.CountAsync(TestContext.Current.CancellationToken);
+        int initialDeletedHostIpCount = await _context.DeletedHostIpAssignments.CountAsync(TestContext.Current.CancellationToken);
 
         // Act
         IActionResult result = await _subnetController.DeleteConfirmed(subnetId, "approved");
@@ -424,21 +424,21 @@ public class SubnetHostIpInteractionTests : IDisposable
 
         // Verify subnets were deleted from main table
         int expectedDeletedSubnets = 3; // Parent + 2 children
-        Assert.Equal(initialSubnetCount - expectedDeletedSubnets, await _context.Subnets.CountAsync());
+        Assert.Equal(initialSubnetCount - expectedDeletedSubnets, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
 
         // Verify host IPs were deleted from main table
         int expectedDeletedHostIps = 1; // One host IP in child subnet
-        Assert.Equal(initialHostIpCount - expectedDeletedHostIps, await _context.HostIpAssignments.CountAsync());
+        Assert.Equal(initialHostIpCount - expectedDeletedHostIps, await _context.HostIpAssignments.CountAsync(TestContext.Current.CancellationToken));
 
         // Verify subnets were archived in deleted table
-        Assert.Equal(initialDeletedSubnetCount + expectedDeletedSubnets, await _context.DeletedSubnets.CountAsync());
+        Assert.Equal(initialDeletedSubnetCount + expectedDeletedSubnets, await _context.DeletedSubnets.CountAsync(TestContext.Current.CancellationToken));
 
         // Verify host IPs were archived in deleted table
-        Assert.Equal(initialDeletedHostIpCount + expectedDeletedHostIps, await _context.DeletedHostIpAssignments.CountAsync());
+        Assert.Equal(initialDeletedHostIpCount + expectedDeletedHostIps, await _context.DeletedHostIpAssignments.CountAsync(TestContext.Current.CancellationToken));
 
         // Check that the host IP specifically was archived with the correct original subnet ID
         DeletedHostIpAssignment? archivedHostIp = await _context.DeletedHostIpAssignments
-            .FirstOrDefaultAsync(h => h.OriginalIP == "10.10.1.10");
+            .FirstOrDefaultAsync(h => h.OriginalIP == "10.10.1.10", TestContext.Current.CancellationToken);
         Assert.NotNull(archivedHostIp);
         Assert.Equal(5, archivedHostIp.OriginalSubnetId); // Child subnet ID
         Assert.Equal("Host 7", archivedHostIp.Name);

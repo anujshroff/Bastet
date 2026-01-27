@@ -168,7 +168,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         // Verify subnets were created in the database
         List<Subnet> createdSubnets = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
-            .ToListAsync();
+            .ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(2, createdSubnets.Count);
         Assert.Contains(createdSubnets, s => s.Name == "Test Subnet 1" && s.NetworkAddress == "10.0.1.0" && s.Cidr == 24);
@@ -203,13 +203,13 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
 
         // Verify parent subnet was renamed
-        Subnet? parentSubnet = await _context.Subnets.FindAsync(parentId);
+        Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.Equal(vnetName, parentSubnet.Name);
 
         // Verify child subnet was created
         Subnet? childSubnet = await _context.Subnets
-            .FirstOrDefaultAsync(s => s.ParentSubnetId == parentId && s.Name == "Azure Subnet 1");
+            .FirstOrDefaultAsync(s => s.ParentSubnetId == parentId && s.Name == "Azure Subnet 1", TestContext.Current.CancellationToken);
         Assert.NotNull(childSubnet);
     }
 
@@ -242,7 +242,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         _ = Assert.IsType<OkObjectResult>(result);
 
         // Verify parent subnet was NOT renamed
-        Subnet? parentSubnet = await _context.Subnets.FindAsync(parentId);
+        Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.Equal(originalName, parentSubnet.Name);
     }
@@ -256,9 +256,9 @@ public class SubnetControllerBatchCreateTests : IDisposable
         // First clear any existing subnets with this parent to ensure clean test state
         List<Subnet> existingSubnets = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
-            .ToListAsync();
+            .ToListAsync(TestContext.Current.CancellationToken);
         _context.Subnets.RemoveRange(existingSubnets);
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // Set referer to a non-Azure URL to get a BadRequest result instead of a redirect
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
@@ -290,7 +290,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         // Verify no subnets were created
         int subnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
-            .CountAsync();
+            .CountAsync(TestContext.Current.CancellationToken);
 
         // With proper transaction management, no subnets should be created when there's an overlap
         // The transaction should roll back all changes
@@ -322,7 +322,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         // Verify no subnets were created
         int subnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
-            .CountAsync();
+            .CountAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, subnetCount);
     }
@@ -397,7 +397,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
 
         // Verify subnet was created
         Subnet? createdSubnet = await _context.Subnets
-            .FirstOrDefaultAsync(s => s.ParentSubnetId == parentId && s.Name == "Azure Import Subnet");
+            .FirstOrDefaultAsync(s => s.ParentSubnetId == parentId && s.Name == "Azure Import Subnet", TestContext.Current.CancellationToken);
 
         Assert.NotNull(createdSubnet);
     }

@@ -118,7 +118,7 @@ public class SubnetRaceConditionTests : IDisposable
                 {
                     lock (exceptions) { exceptions.Add(ex); }
                 }
-            }),
+            }, TestContext.Current.CancellationToken),
             Task.Run(async () =>
             {
                 try
@@ -130,10 +130,10 @@ public class SubnetRaceConditionTests : IDisposable
                 {
                     lock (exceptions) { exceptions.Add(ex); }
                 }
-            })
+            }, TestContext.Current.CancellationToken)
         ];
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).WaitAsync(TestContext.Current.CancellationToken);
 
         // Assert - Only one subnet should be created, one should fail
         Assert.Empty(exceptions); // No unhandled exceptions should occur
@@ -141,7 +141,7 @@ public class SubnetRaceConditionTests : IDisposable
         // Check database state
         List<Subnet> createdSubnets = await _context.Subnets
             .Where(s => s.ParentSubnetId == 1 && s.Id != 1)
-            .ToListAsync();
+            .ToListAsync(TestContext.Current.CancellationToken);
 
         // With proper locking, only one subnet should be created
         Assert.Single(createdSubnets);
@@ -171,7 +171,7 @@ public class SubnetRaceConditionTests : IDisposable
             CreatedBy = "test-user"
         };
         _context.Subnets.Add(subnet);
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         // Store original state for comparison
         string originalName = subnet.Name;
@@ -228,7 +228,7 @@ public class SubnetRaceConditionTests : IDisposable
                 {
                     lock (exceptions) { exceptions.Add(ex); }
                 }
-            }),
+            }, TestContext.Current.CancellationToken),
             Task.Run(async () =>
             {
                 try
@@ -240,10 +240,10 @@ public class SubnetRaceConditionTests : IDisposable
                 {
                     lock (exceptions) { exceptions.Add(ex); }
                 }
-            })
+            }, TestContext.Current.CancellationToken)
         ];
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).WaitAsync(TestContext.Current.CancellationToken);
 
         // Assert - No unhandled exceptions should occur
         Assert.Empty(exceptions);
@@ -252,7 +252,7 @@ public class SubnetRaceConditionTests : IDisposable
         Assert.Equal(2, results.Count);
 
         // Verify the subnet state in database - this is the most important check
-        Subnet? updatedSubnet = await _context.Subnets.FindAsync(10);
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([10], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
 
         // Check result types to understand what happened
