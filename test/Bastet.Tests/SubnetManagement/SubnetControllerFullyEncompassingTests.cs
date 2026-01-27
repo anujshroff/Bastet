@@ -135,7 +135,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
 
         // Verify parent subnet was renamed and marked as fully allocated
-        Subnet? parentSubnet = await _context.Subnets.FindAsync(parentId);
+        Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.Equal(vnetName, parentSubnet.Name);
         Assert.True(parentSubnet.IsFullyAllocated);
@@ -147,7 +147,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         // Verify no child subnets were created
         int childSubnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
-            .CountAsync();
+            .CountAsync(TestContext.Current.CancellationToken);
         Assert.Equal(0, childSubnetCount);
     }
 
@@ -200,7 +200,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
 
         // Verify parent subnet is renamed and marked as fully allocated
-        Subnet? parentSubnet = await _context.Subnets.FindAsync(parentId);
+        Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.Equal(vnetName, parentSubnet.Name);
         Assert.True(parentSubnet.IsFullyAllocated);
@@ -211,7 +211,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         // Verify no child subnets were created - since the first subnet fully encompasses the VNet prefix
         int childSubnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
-            .CountAsync();
+            .CountAsync(TestContext.Current.CancellationToken);
         Assert.Equal(0, childSubnetCount);
     }
 }
