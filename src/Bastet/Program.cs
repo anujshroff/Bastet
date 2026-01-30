@@ -3,7 +3,9 @@ using Bastet.Filters;
 using Bastet.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -24,16 +26,57 @@ builder.Services.AddOpenApi();
 // Add MVC with global sanitization filter
 builder.Services.AddControllersWithViews(options => options.Filters.Add<GlobalSanitizationFilter>());
 
+// Get connection string (used by both DbContexts)
+string? connectionString = Environment.GetEnvironmentVariable("BASTET_CONNECTION_STRING")
+    ?? (builder.Environment.IsDevelopment()
+        ? builder.Configuration.GetConnectionString("DefaultConnection")
+        : throw new InvalidOperationException("Production environment requires BASTET_CONNECTION_STRING environment variable to be set."));
+
 // Add DbContext
 builder.Services.AddDbContext<BastetDbContext>(options =>
 {
-    string? connectionString = Environment.GetEnvironmentVariable("BASTET_CONNECTION_STRING")
-        ?? (builder.Environment.IsDevelopment()
-            ? builder.Configuration.GetConnectionString("DefaultConnection")
-            : throw new InvalidOperationException("Production environment requires BASTET_CONNECTION_STRING environment variable to be set."));
-
     options.UseSqlServer(connectionString);
 });
+
+// Add DataProtection DbContext for storing Data Protection keys
+// This enables multi-replica deployments without session affinity
+builder.Services.AddDbContext<DataProtectionDbContext>(options =>
+{
+    options.UseSqlServer(connectionString);
+});
+
+// Check if DataProtectionKeys table exists BEFORE configuring Data Protection
+// This allows graceful fallback to ephemeral keys if the table doesn't exist
+bool dataProtectionTableExists = false;
+try
+{
+    using SqlConnection connection = new(connectionString);
+    connection.Open();
+    using SqlCommand command = new(
+        "SELECT CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'DataProtectionKeys') THEN 1 ELSE 0 END",
+        connection);
+    dataProtectionTableExists = (int)command.ExecuteScalar() == 1;
+}
+catch
+{
+    // Connection failed or query failed - assume table doesn't exist
+    dataProtectionTableExists = false;
+}
+
+// Configure Data Protection
+// If table exists, use database for key storage (enables multi-replica without session affinity)
+// If table doesn't exist, use default ephemeral keys (works for single replica only)
+if (dataProtectionTableExists)
+{
+    builder.Services.AddDataProtection()
+        .SetApplicationName("Bastet")
+        .PersistKeysToDbContext<DataProtectionDbContext>();
+}
+else
+{
+    builder.Services.AddDataProtection()
+        .SetApplicationName("Bastet");
+}
 
 // Register services
 builder.Services.AddScoped<IIpUtilityService, IpUtilityService>();
@@ -140,8 +183,24 @@ bool autoMigrate = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AUTO
 if (autoMigrate)
 {
     using IServiceScope scope = app.Services.CreateScope();
+
+    // Migrate main application database
     BastetDbContext dbContext = scope.ServiceProvider.GetRequiredService<BastetDbContext>();
     dbContext.Database.Migrate();
+
+    // Migrate Data Protection keys database
+    DataProtectionDbContext dpContext = scope.ServiceProvider.GetRequiredService<DataProtectionDbContext>();
+    dpContext.Database.Migrate();
+}
+
+// Log warning if DataProtectionKeys table doesn't exist
+// This helps users understand why multi-replica deployments may have authentication issues
+if (!dataProtectionTableExists)
+{
+    app.Logger.LogWarning(
+        "DataProtectionKeys table not found in database. Data Protection keys will use ephemeral storage. " +
+        "This works for single-replica deployments but will cause authentication issues with multiple replicas " +
+        "without session affinity. Run the 2.5.sql or higher migration script or enable BASTET_AUTO_MIGRATE=true to resolve this.");
 }
 
 // Configure the HTTP request pipeline.
