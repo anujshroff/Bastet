@@ -45,26 +45,38 @@ builder.Services.AddDbContext<DataProtectionDbContext>(options =>
     options.UseSqlServer(connectionString);
 });
 
-// Check if DataProtectionKeys table exists BEFORE configuring Data Protection
-// This allows graceful fallback to ephemeral keys if the table doesn't exist
+// Determine if we should use database for Data Protection keys
+// If auto-migrate is enabled, assume the table will exist after migration runs
+// Otherwise, check if the table currently exists
+bool autoMigrate = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AUTO_MIGRATE"), out bool autoMigrateResult) && autoMigrateResult;
 bool dataProtectionTableExists = false;
-try
+
+if (autoMigrate)
 {
-    using SqlConnection connection = new(connectionString);
-    connection.Open();
-    using SqlCommand command = new(
-        "SELECT CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'DataProtectionKeys') THEN 1 ELSE 0 END",
-        connection);
-    dataProtectionTableExists = (int)command.ExecuteScalar() == 1;
+    // Auto-migrate will create the table, so we can use database persistence
+    dataProtectionTableExists = true;
 }
-catch
+else
 {
-    // Connection failed or query failed - assume table doesn't exist
-    dataProtectionTableExists = false;
+    // Check if table exists in database
+    try
+    {
+        using SqlConnection connection = new(connectionString);
+        connection.Open();
+        using SqlCommand command = new(
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'DataProtectionKeys') THEN 1 ELSE 0 END",
+            connection);
+        dataProtectionTableExists = (int)command.ExecuteScalar() == 1;
+    }
+    catch
+    {
+        // Connection failed or query failed - assume table doesn't exist
+        dataProtectionTableExists = false;
+    }
 }
 
 // Configure Data Protection
-// If table exists, use database for key storage (enables multi-replica without session affinity)
+// If table exists (or will exist via auto-migrate), use database for key storage (enables multi-replica without session affinity)
 // If table doesn't exist, use default ephemeral keys (works for single replica only)
 if (dataProtectionTableExists)
 {
@@ -179,7 +191,6 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 WebApplication app = builder.Build();
 
 // Auto-run migrations if environment variable is set to true
-bool autoMigrate = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AUTO_MIGRATE"), out bool result) && result;
 if (autoMigrate)
 {
     using IServiceScope scope = app.Services.CreateScope();
