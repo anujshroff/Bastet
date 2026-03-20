@@ -84,7 +84,7 @@ runs:
 
     - id: pr
       if: ${{ github.event_name == 'pull_request' && inputs.add_to_pr == 'true' }}
-      uses: marocchino/sticky-pull-request-comment@v2
+      uses: marocchino/sticky-pull-request-comment@v3
       with:
         recreate: true
         path: ${{ inputs.root_folder }}/${{ inputs.output_file }}
