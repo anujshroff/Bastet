@@ -55,6 +55,7 @@ public partial class SubnetController : Controller
             Cidr = subnet.Cidr,
             Description = subnet.Description,
             Tags = subnet.Tags,
+            AzureResourceId = subnet.AzureResourceId,
             ParentSubnetId = subnet.ParentSubnetId,
             CreatedAt = subnet.CreatedAt,
             LastModifiedAt = subnet.LastModifiedAt,

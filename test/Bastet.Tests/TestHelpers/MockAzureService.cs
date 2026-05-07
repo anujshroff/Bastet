@@ -114,6 +114,7 @@ public class MockAzureService : IAzureService
                 // Create a copy of the subnet with the FullyEncompassesVNetPrefix flag set
                 filteredSubnets.Add(new AzureSubnetViewModel
                 {
+                    ResourceId = subnet.ResourceId,
                     Name = subnet.Name,
                     AddressPrefix = subnet.AddressPrefix,
                     HasMultipleAddressSchemes = subnet.HasMultipleAddressSchemes,
@@ -128,6 +129,7 @@ public class MockAzureService : IAzureService
                     // Regular subnet that is contained within the parent subnet
                     filteredSubnets.Add(new AzureSubnetViewModel
                     {
+                        ResourceId = subnet.ResourceId,
                         Name = subnet.Name,
                         AddressPrefix = subnet.AddressPrefix,
                         HasMultipleAddressSchemes = subnet.HasMultipleAddressSchemes,
@@ -185,6 +187,7 @@ public class MockAzureService : IAzureService
                 {
                     bulkVnet.Subnets.Add(new BulkAzureSubnetViewModel
                     {
+                        ResourceId = sub.ResourceId,
                         Name = sub.Name,
                         AddressPrefix = sub.AddressPrefix
                     });

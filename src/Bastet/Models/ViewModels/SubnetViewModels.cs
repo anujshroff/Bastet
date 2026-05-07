@@ -49,6 +49,12 @@ public class CreateSubnetViewModel
     /// Indicates whether this subnet fully encompasses a VNet address prefix (for Azure imports)
     /// </summary>
     public bool FullyEncompassesVNetPrefix { get; set; }
+
+    /// <summary>
+    /// Azure resource ID of the source resource (VNet or subnet). Populated only by import flows;
+    /// not user-editable.
+    /// </summary>
+    public string? AzureResourceId { get; set; }
 }
 
 public class SubnetViewModel
@@ -78,6 +84,7 @@ public class SubnetDetailsViewModel
     public int Cidr { get; set; }
     public string? Description { get; set; }
     public string? Tags { get; set; }
+    public string? AzureResourceId { get; set; }
     public int? ParentSubnetId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? LastModifiedAt { get; set; }
