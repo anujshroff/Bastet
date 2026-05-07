@@ -135,7 +135,7 @@ BASTET supports configuration through environment variables:
 
 ## Azure Integration
 
-BASTET includes two flows for importing subnets directly from Azure Virtual Networks, allowing network administrators to easily synchronize their cloud and on-premises network configurations. Both flows are admin-only and gated by the `BASTET_AZURE_IMPORT` environment variable.
+BASTET includes two flows for importing subnets directly from Azure Virtual Networks, allowing network administrators to easily synchronize their cloud and on-premises network configurations. Both flows are admin-only and gated by the `BASTET_AZURE_IMPORT` environment variable. Imported subnets retain their source Azure Resource ID and the Subnet Details page links back to the matching VNet (or VNet's subnet list) in the Azure portal.
 
 ### Prerequisites
 
@@ -211,4 +211,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## AI Notice
 
-This project was almost entirely generated using AI, leveraging the power of **Cline** with **Claude 3.7**. It serves as a testament to the capabilities of modern AI in automating complex development tasks and streamlining the software creation process.
+This project was almost entirely generated using AI, leveraging various Claude models from Anthropic across tools including **Cline** and **Claude Code**. It serves as a testament to the capabilities of modern AI in automating complex development tasks and streamlining the software creation process.
