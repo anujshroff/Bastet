@@ -10,7 +10,7 @@ BASTET is a modern, web-based subnet management system that helps network admini
 - **IP Address Allocation**: Track and manage allocated/unallocated IP spaces
 - **Deleted Subnet Archive**: Recover information from deleted subnets
 - **IP Validation**: Built-in validation ensures IP/CIDR configurations are valid
-- **Azure Integration**: Import subnets directly from Azure Virtual Networks
+- **Azure Integration**: Import subnets per-target or in bulk from Azure Virtual Networks
 
 ## Technologies
 
@@ -135,7 +135,7 @@ BASTET supports configuration through environment variables:
 
 ## Azure Integration
 
-BASTET includes a feature to import subnets directly from Azure Virtual Networks, allowing network administrators to easily synchronize their cloud and on-premises network configurations.
+BASTET includes two flows for importing subnets directly from Azure Virtual Networks, allowing network administrators to easily synchronize their cloud and on-premises network configurations. Both flows are admin-only and gated by the `BASTET_AZURE_IMPORT` environment variable.
 
 ### Prerequisites
 
@@ -152,16 +152,32 @@ BASTET includes a feature to import subnets directly from Azure Virtual Networks
 2. Ensure proper Azure authentication is configured
 3. Restart the application
 
-### Importing Subnets from Azure
+### Subnet Azure Import (per-subnet)
+
+Import children of a single, empty Bastet subnet whose address space exactly matches an Azure VNet's prefix.
 
 1. Navigate to a subnet's details page
-2. If the subnet has no child subnets or host IP assignments, an "Azure Import" button will appear (admin role required)
-3. Click "Azure Import" to start the import wizard
+2. If the subnet has no child subnets or host IP assignments, a "Subnet Azure Import" button will appear (admin role required)
+3. Click "Subnet Azure Import" to start the import wizard
 4. Follow the multi-step process:
    - Select an Azure Subscription
    - Choose a compatible Virtual Network
    - Select specific subnets to import
 5. The selected Azure subnets will be imported as child subnets
+
+### Bulk Azure Import (across the tree)
+
+Import many VNets and their IPv4 subnets in one transaction, applied across the entire Bastet tree. Available from the top-level "Bulk Azure Import" nav link.
+
+1. Click "Bulk Azure Import" in the top navigation bar (admin role required)
+2. Pick an Azure subscription
+3. Tree-select the VNets and IPv4 subnets you want to import
+4. Review the server-computed plan — every conflict (overlapping prefixes, would-create-invalid-hierarchy, target subnet already populated, etc.) is surfaced before commit and blocks it
+5. Commit — all imports are applied in a single database transaction (all-or-nothing)
+
+The planner matches each selected VNet IPv4 prefix to an existing Bastet subnet (exact match → deepest container → top-level), and either populates that subnet or auto-creates a new one. Scope per session is one subscription, IPv4 only.
+
+For the full design (matching algorithm, conflict rules, edge-case behaviors), see [`docs/bulk-azure-import.md`](docs/bulk-azure-import.md).
 
 ## Usage
 
