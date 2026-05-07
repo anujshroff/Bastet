@@ -9,7 +9,6 @@
         let selectedSubscriptionName = "";
         let vnets = []; // [{ resourceId, name, ipv4AddressPrefixes:[], subnets:[{name, addressPrefix}] }]
         let lastSelection = null; // last BulkImportSelectionDto submitted
-        let lastPlan = null;      // last plan returned from preview
 
         // ---------------------------------------------------------------
         // Step navigation helpers
@@ -285,7 +284,6 @@
                     subnets: []
                 };
 
-
                 $(`.bulk-subnet-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']:checked`).each(function () {
                     prefixDto.subnets.push({
                         name: $(this).attr('data-name'),
@@ -322,7 +320,6 @@
                         $("#bulk-preview-error").removeClass("d-none");
                         return;
                     }
-                    lastPlan = result.plan;
                     renderPlan(result.plan);
                     $("#bulk-preview-content").removeClass("d-none");
                 },

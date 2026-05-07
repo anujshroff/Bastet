@@ -94,7 +94,6 @@ namespace Bastet.Models.ViewModels
         /// Selected Azure subnets that fall under this VNet prefix
         /// </summary>
         public List<BulkImportSelectedSubnetDto> Subnets { get; set; } = [];
-
     }
 
     /// <summary>
