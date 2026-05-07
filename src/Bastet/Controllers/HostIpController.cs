@@ -326,8 +326,14 @@ public class HostIpController(
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
-    public async Task<IActionResult> DeleteConfirmed(string ip)
+    public async Task<IActionResult> DeleteConfirmed(string ip, string confirmation)
     {
+        if (confirmation != "approved")
+        {
+            TempData["ErrorMessage"] = "You must type 'approved' to confirm deletion.";
+            return RedirectToAction(nameof(Delete), new { ip });
+        }
+
         // Validate host IP deletion
         ValidationResult validationResult = hostIpValidationService.ValidateHostIpDeletion(ip);
         if (!validationResult.IsValid)
