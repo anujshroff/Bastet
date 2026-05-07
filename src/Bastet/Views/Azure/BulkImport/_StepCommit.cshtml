@@ -1,0 +1,36 @@
+@model Bastet.Models.ViewModels.BulkImportInitialViewModel
+
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    Click the button below to apply the plan to Bastet. This is performed in a single transaction;
+    if anything fails, no changes are saved.
+</div>
+
+<div id="bulk-commit-progress" class="text-center py-3 d-none">
+    <div class="spinner-border text-success" role="status">
+        <span class="visually-hidden">Committing...</span>
+    </div>
+    <p class="mt-2">Committing import...</p>
+</div>
+
+<div id="bulk-commit-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    <strong>Commit failed:</strong>
+    <span id="bulk-commit-error-message"></span>
+    <ul id="bulk-commit-error-list" class="mb-0 mt-2"></ul>
+</div>
+
+<div id="bulk-commit-success" class="alert alert-success d-none">
+    <i class="bi bi-check-circle"></i>
+    <strong>Bulk import completed.</strong>
+    <span id="bulk-commit-success-message"></span>
+</div>
+
+<div class="d-grid gap-2 mt-3">
+    <button type="button" id="bulk-confirm-commit-btn" class="btn btn-success btn-lg">
+        <i class="bi bi-cloud-upload"></i> Confirm Import
+    </button>
+    <button type="button" id="bulk-back-to-preview-btn" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Preview
+    </button>
+</div>

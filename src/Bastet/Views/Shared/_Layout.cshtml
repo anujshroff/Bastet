@@ -34,7 +34,20 @@
                                 <li><a class="dropdown-item" asp-controller="HostIp" asp-action="AllDeletedHostIps">All Deleted Host IPs</a></li>
                             </ul>
                         </li>
+                        @{
+                            // Bulk Azure Import is only shown when the feature flag is enabled and the user is an admin.
+                            bool bulkAzureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _enabled) && _enabled;
+                        }
+                        @if (bulkAzureImportEnabled && UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link" asp-controller="Azure" asp-action="BulkImport">
+                                    <i class="bi bi-cloud-download"></i> Bulk Azure Import
+                                </a>
+                            </li>
+                        }
                     </ul>
+
                     
                     @if (User.Identity?.IsAuthenticated == true)
                     {
@@ -67,7 +80,7 @@
 
 <footer class="border-top footer text-muted">
         <div class="container-fluid">
-            &copy; 2025 Anuj Shroff - 
+            &copy; 2025-2026 Anuj Shroff - 
             <a href="https://bastet.anujshroff.com" target="_blank">BASTET</a>
             (Badass Subnetting Tools for Enhanced Transmission)
             <span class="float-end">Version: @VersionService.GetVersion()</span>

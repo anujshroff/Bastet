@@ -26,6 +26,12 @@ builder.Services.AddOpenApi();
 // Add MVC with global sanitization filter
 builder.Services.AddControllersWithViews(options => options.Filters.Add<GlobalSanitizationFilter>());
 
+// Allow antiforgery tokens to be sent via the "RequestVerificationToken" header in addition to
+// the default form field. Required by AJAX endpoints that POST application/json (e.g. the
+// Bulk Azure Import preview/commit endpoints).
+builder.Services.AddAntiforgery(options => options.HeaderName = "RequestVerificationToken");
+
+
 // Get connection string (used by both DbContexts)
 string? connectionString = Environment.GetEnvironmentVariable("BASTET_CONNECTION_STRING")
     ?? (builder.Environment.IsDevelopment()
@@ -96,6 +102,8 @@ builder.Services.AddScoped<Bastet.Services.Validation.ISubnetValidationService, 
 builder.Services.AddScoped<Bastet.Services.Validation.IHostIpValidationService, Bastet.Services.Validation.HostIpValidationService>();
 builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bastet.Services.Division.SubnetDivisionService>();
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureService, Bastet.Services.Azure.AzureService>();
+builder.Services.AddScoped<Bastet.Services.Azure.IAzureBulkImportPlanner, Bastet.Services.Azure.AzureBulkImportPlanner>();
+
 builder.Services.AddScoped<Bastet.Services.Security.IInputSanitizationService, Bastet.Services.Security.InputSanitizationService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
 

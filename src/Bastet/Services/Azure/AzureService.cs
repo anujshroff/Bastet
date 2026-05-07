@@ -278,6 +278,101 @@ namespace Bastet.Services.Azure
             }
         }
 
+        /// <inheritdoc/>
+        public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId)
+        {
+            if (_armClient == null || string.IsNullOrEmpty(subscriptionId))
+            {
+                return [];
+            }
+
+            List<BulkAzureVNetViewModel> result = [];
+
+            try
+            {
+                ResourceIdentifier resourceIdentifier = SubscriptionResource.CreateResourceIdentifier(subscriptionId);
+                SubscriptionResource selectedSubscription = _armClient.GetSubscriptionResource(resourceIdentifier);
+
+                await foreach (VirtualNetworkResource vnet in selectedSubscription.GetVirtualNetworksAsync())
+                {
+                    BulkAzureVNetViewModel vnetVm = new()
+                    {
+                        ResourceId = vnet.Id.ToString(),
+                        Name = vnet.Data.Name
+                    };
+
+                    // Collect IPv4 prefixes only
+                    if (vnet.Data.AddressSpace?.AddressPrefixes != null)
+                    {
+                        foreach (string? prefix in vnet.Data.AddressSpace.AddressPrefixes)
+                        {
+                            if (!string.IsNullOrEmpty(prefix) && IsIpv4AddressPrefix(prefix))
+                            {
+                                vnetVm.Ipv4AddressPrefixes.Add(prefix);
+                            }
+                        }
+                    }
+
+                    // Skip VNets that have no IPv4 prefixes (IPv6-only is out of scope)
+                    if (vnetVm.Ipv4AddressPrefixes.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    // Enumerate subnets in the VNet (IPv4 only)
+                    await foreach (SubnetResource? subnet in vnet.GetSubnets())
+                    {
+                        string? ipv4Prefix = ExtractIpv4Prefix(subnet);
+                        if (string.IsNullOrEmpty(ipv4Prefix))
+                        {
+                            continue;
+                        }
+
+                        vnetVm.Subnets.Add(new BulkAzureSubnetViewModel
+                        {
+                            Name = subnet.Data.Name ?? string.Empty,
+                            AddressPrefix = ipv4Prefix
+                        });
+                    }
+
+                    result.Add(vnetVm);
+                }
+
+                return result;
+            }
+            catch (Exception)
+            {
+                return [];
+            }
+        }
+
+        /// <summary>
+        /// Returns the first IPv4 prefix associated with the given Azure subnet, or null if none exists.
+        /// Handles both single-prefix subnets and dual-stack subnets.
+        /// </summary>
+        private static string? ExtractIpv4Prefix(SubnetResource subnet)
+        {
+            // Case 1: Single address prefix
+            if (subnet.Data.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.Data.AddressPrefix))
+            {
+                return subnet.Data.AddressPrefix;
+            }
+
+            // Case 2: Multiple address prefixes (dual-stack)
+            if (subnet.Data.AddressPrefixes?.Any() == true)
+            {
+                foreach (string? prefix in subnet.Data.AddressPrefixes)
+                {
+                    if (!string.IsNullOrEmpty(prefix) && IsIpv4AddressPrefix(prefix))
+                    {
+                        return prefix;
+                    }
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// Tries to add a subnet to the result list if it's a valid child of the specified parent subnet
         /// </summary>
@@ -290,6 +385,7 @@ namespace Bastet.Services.Azure
             int parentCidr)
         {
             string networkAddress = GetNetworkAddressFromCidr(addressPrefix);
+
             int subnetCidr = GetCidrFromAddressPrefix(addressPrefix);
 
             // Check if this subnet would be a valid child of our Bastet subnet

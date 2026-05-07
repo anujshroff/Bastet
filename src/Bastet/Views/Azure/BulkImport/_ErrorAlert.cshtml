@@ -1,0 +1,14 @@
+@model Bastet.Models.ViewModels.BulkImportInitialViewModel
+
+<div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle"></i>
+    <ul class="mb-0">
+        @foreach (Microsoft.AspNetCore.Mvc.ModelBinding.ModelStateEntry entry in ViewData.ModelState.Values)
+        {
+            foreach (Microsoft.AspNetCore.Mvc.ModelBinding.ModelError error in entry.Errors)
+            {
+                <li>@error.ErrorMessage</li>
+            }
+        }
+    </ul>
+</div>
