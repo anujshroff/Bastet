@@ -22,11 +22,11 @@
                 {
                     portalPath = portalPath.Substring(0, subnetSegment) + "/subnets";
                 }
+                string portalUrl = $"https://portal.azure.com/#@/resource{portalPath}";
 
                 <dt class="col-sm-4">Azure Resource</dt>
                 <dd class="col-sm-8">
-                    <a href="https://portal.azure.com/#@@/resource@portalPath"
-                       target="_blank" rel="noopener noreferrer">View in Azure Portal</a>
+                    <a href="@portalUrl" target="_blank" rel="noopener noreferrer">View in Azure Portal</a>
                 </dd>
             }
 
