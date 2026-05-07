@@ -1,0 +1,57 @@
+@model Bastet.Models.ViewModels.BulkImportInitialViewModel
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Pick the VNets and subnets you want to import. Each selected VNet IPv4 prefix becomes a Bastet subnet target. Selected Azure subnets are placed under it.
+    <br />
+    <small>IPv6 prefixes and IPv6-only subnets are not shown.</small>
+</div>
+
+<div id="bulk-vnet-loading" class="text-center py-3 d-none">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading VNets...</span>
+    </div>
+    <p class="mt-2">Loading VNets and subnets from Azure...</p>
+</div>
+
+<div id="bulk-vnet-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="bulk-vnet-error-message"></span>
+</div>
+
+<div id="bulk-no-vnets" class="alert alert-warning d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    No IPv4 VNets were found in this subscription.
+</div>
+
+<div id="bulk-vnet-selection" class="d-none">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div>
+            <button type="button" id="bulk-select-all-btn" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-check-all"></i> Select all
+            </button>
+            <button type="button" id="bulk-deselect-all-btn" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-x-circle"></i> Deselect all
+            </button>
+        </div>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="bulk-rename-matched">
+            <label class="form-check-label" for="bulk-rename-matched">
+                Rename matched Bastet subnets to VNet names
+            </label>
+        </div>
+    </div>
+
+    <div id="bulk-vnet-tree" class="mb-3">
+        <!-- Populated dynamically -->
+    </div>
+
+    <div class="d-grid gap-2">
+        <button type="button" id="bulk-go-preview-btn" class="btn btn-primary" disabled>
+            Next: Preview <i class="bi bi-arrow-right"></i>
+        </button>
+        <button type="button" id="bulk-back-to-subscription-btn" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Subscription
+        </button>
+    </div>
+</div>

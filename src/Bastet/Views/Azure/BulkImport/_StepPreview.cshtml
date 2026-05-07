@@ -1,0 +1,38 @@
+@model Bastet.Models.ViewModels.BulkImportInitialViewModel
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Review the import plan below. Errors must be resolved before you can commit.
+</div>
+
+<div id="bulk-preview-loading" class="text-center py-3 d-none">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Building plan...</span>
+    </div>
+    <p class="mt-2">Building import plan...</p>
+</div>
+
+<div id="bulk-preview-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="bulk-preview-error-message"></span>
+</div>
+
+<div id="bulk-preview-content" class="d-none">
+    <div id="bulk-global-errors" class="alert alert-danger d-none">
+        <strong><i class="bi bi-exclamation-octagon"></i> Cannot import:</strong>
+        <ul id="bulk-global-errors-list" class="mb-0"></ul>
+    </div>
+
+    <div id="bulk-plan-tree" class="mb-3">
+        <!-- Populated dynamically -->
+    </div>
+
+    <div class="d-grid gap-2">
+        <button type="button" id="bulk-go-commit-btn" class="btn btn-success" disabled>
+            <i class="bi bi-check-circle"></i> Continue to Commit
+        </button>
+        <button type="button" id="bulk-back-to-selection-btn" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Selection
+        </button>
+    </div>
+</div>

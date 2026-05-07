@@ -42,5 +42,17 @@ namespace Bastet.Services.Azure
             string vnetResourceId,
             string networkAddress,
             int cidr);
+
+        /// <summary>
+        /// Gets every VNet in a subscription with its IPv4 prefixes and IPv4 subnets.
+        /// Intended for the Bulk Azure Import flow where the user picks across the whole subscription.
+        /// IPv6 prefixes/subnets are filtered out. Subnets that have only IPv6 prefixes are excluded;
+        /// subnets that have both IPv4 and IPv6 prefixes return only their IPv4 prefix.
+        /// </summary>
+        /// <param name="subscriptionId">The Azure subscription ID</param>
+        /// <returns>List of VNets with their IPv4 prefixes and IPv4 subnets</returns>
+        Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId);
     }
 }
+
+

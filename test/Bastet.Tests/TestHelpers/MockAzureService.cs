@@ -141,9 +141,67 @@ public class MockAzureService : IAzureService
     }
 
     /// <summary>
+    /// Mock implementation of bulk-import enumeration. Returns every VNet in the test corpus,
+    /// with their IPv4 prefixes and IPv4 subnets. The single-import tests don't exercise this
+    /// path, so it just returns an empty list when no VNets are configured.
+    /// </summary>
+    public Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId)
+    {
+        if (string.IsNullOrEmpty(subscriptionId))
+        {
+            return Task.FromResult(new List<BulkAzureVNetViewModel>());
+        }
+
+        List<BulkAzureVNetViewModel> result = [];
+        foreach (AzureVNetViewModel vnet in _vnets)
+        {
+            BulkAzureVNetViewModel bulkVnet = new()
+            {
+                ResourceId = vnet.ResourceId,
+                Name = vnet.Name,
+                Ipv4AddressPrefixes = [.. vnet.AddressPrefixes.Where(p => !string.IsNullOrEmpty(p) && p.Split('/')[0].Split('.').Length == 4)]
+            };
+
+            if (bulkVnet.Ipv4AddressPrefixes.Count == 0)
+            {
+                continue;
+            }
+
+            // Include any subnet whose prefix is contained in any of this VNet's prefixes
+            foreach (AzureSubnetViewModel sub in _subnets)
+            {
+                if (string.IsNullOrEmpty(sub.AddressPrefix))
+                {
+                    continue;
+                }
+                bool contained = bulkVnet.Ipv4AddressPrefixes.Any(p =>
+                {
+                    string[] parts = p.Split('/');
+                    return parts.Length == 2
+                        && int.TryParse(parts[1], out int pCidr)
+                        && IsSubnetWithinParent(sub.AddressPrefix, parts[0], pCidr);
+                });
+                if (contained || bulkVnet.Ipv4AddressPrefixes.Any(p => string.Equals(p, sub.AddressPrefix, StringComparison.OrdinalIgnoreCase)))
+                {
+                    bulkVnet.Subnets.Add(new BulkAzureSubnetViewModel
+                    {
+                        Name = sub.Name,
+                        AddressPrefix = sub.AddressPrefix
+                    });
+                }
+            }
+
+            result.Add(bulkVnet);
+        }
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>
     /// Helper method to check if an address prefix is compatible with parent network
     /// </summary>
     private bool IsAddressCompatible(string addressPrefix, string parentAddress, int parentCidr)
+
     {
         if (string.IsNullOrEmpty(addressPrefix))
         {

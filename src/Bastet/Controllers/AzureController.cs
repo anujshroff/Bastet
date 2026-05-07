@@ -1,4 +1,5 @@
 using Bastet.Data;
+using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services.Azure;
 using Microsoft.AspNetCore.Authorization;
@@ -172,8 +173,130 @@ namespace Bastet.Controllers
 
         // Removed ImportSubnets action - we now submit directly to SubnetController.BatchCreate
 
+        // -------------------------------------------------------------------
+        // Bulk Azure Import endpoints
+        // -------------------------------------------------------------------
+
+        // GET: /Azure/BulkImport — landing page; user picks subscription and selects VNets/subnets via AJAX
+        public async Task<IActionResult> BulkImport()
+        {
+            if (!IsAzureImportEnabled())
+            {
+                return RedirectToAction("HttpStatusCodeHandler", "Error", new
+                {
+                    statusCode = 403,
+                    errorMessage = "Azure Import feature is not enabled"
+                });
+            }
+
+            BulkImportInitialViewModel viewModel = new() { IsFeatureEnabled = true };
+
+            // Initial connectivity check (mirrors the single-import flow)
+            try
+            {
+                if (!await azureService.IsCredentialValid())
+                {
+                    ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModelState.AddModelError("", $"Error connecting to Azure: {ex.Message}");
+            }
+
+            return View(viewModel);
+        }
+
+        // AJAX: Get every IPv4 VNet+subnet in the chosen subscription
+        [HttpGet]
+        public async Task<IActionResult> BulkGetVNets(string subscriptionId)
+        {
+            if (!IsAzureImportEnabled())
+            {
+                return Json(new { success = false, error = "Azure Import feature is not enabled" });
+            }
+
+            if (string.IsNullOrWhiteSpace(subscriptionId))
+            {
+                return Json(new { success = false, error = "Subscription ID is required" });
+            }
+
+            try
+            {
+                List<BulkAzureVNetViewModel> vnets = await azureService.GetAllVNetsWithSubnets(subscriptionId);
+                return Json(new { success = true, vnets });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, error = ex.Message });
+            }
+        }
+
+        // AJAX: Build a plan from a selection. Plan includes any conflict errors.
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> BulkImportPreview(
+            [FromBody] BulkImportSelectionDto selection,
+            [FromServices] IAzureBulkImportPlanner planner)
+        {
+            if (!IsAzureImportEnabled())
+            {
+                return Json(new { success = false, error = "Azure Import feature is not enabled" });
+            }
+
+            if (selection is null)
+            {
+                return Json(new { success = false, error = "No selection was provided." });
+            }
+
+            try
+            {
+                IReadOnlyList<ExistingSubnetSnapshot> existing = await BuildExistingSnapshotAsync();
+                BulkImportPlanViewModel plan = planner.BuildPlan(selection, existing);
+                return Json(new { success = true, plan });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Loads every Bastet subnet (with the booleans the planner needs) into a snapshot list,
+        /// avoiding the planner having to know about EF.
+        /// </summary>
+        private async Task<IReadOnlyList<ExistingSubnetSnapshot>> BuildExistingSnapshotAsync()
+        {
+            // Pull ids and counts in a single query rather than including children/host IPs which would be expensive
+            // for large trees. We only need flags (any-children / any-host-ips), not the entities themselves.
+            List<Subnet> all = await context.Subnets
+                .AsNoTracking()
+                .ToListAsync();
+
+            // Need parent-child counts too. Compute via the in-memory list since we already loaded it.
+            HashSet<int> parentsWithChildren = [.. all.Where(s => s.ParentSubnetId.HasValue).Select(s => s.ParentSubnetId!.Value).Distinct()];
+
+            // Host IP counts: need a small DB query grouped by SubnetId.
+            HashSet<int> subnetsWithHostIps = await context.HostIpAssignments
+                .AsNoTracking()
+                .Select(h => h.SubnetId)
+                .Distinct()
+                .ToHashSetAsync();
+
+            return [.. all.Select(s => new ExistingSubnetSnapshot
+            {
+                Id = s.Id,
+                Name = s.Name,
+                NetworkAddress = s.NetworkAddress,
+                Cidr = s.Cidr,
+                HasChildSubnets = parentsWithChildren.Contains(s.Id),
+                HasHostIpAssignments = subnetsWithHostIps.Contains(s.Id),
+                IsFullyAllocated = s.IsFullyAllocated
+            })];
+        }
+
         // Helper method to check Azure Import environment variable
-        private static bool IsAzureImportEnabled() => bool.TryParse(
+        internal static bool IsAzureImportEnabled() => bool.TryParse(
                 Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"),
                 out bool result) && result;
     }
