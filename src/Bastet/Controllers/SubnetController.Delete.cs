@@ -254,4 +254,35 @@ public partial class SubnetController : Controller
 
         return View(model);
     }
+
+    // GET: Subnet/PurgeAllDeletedSubnets
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> PurgeAllDeletedSubnets()
+    {
+        int count = await context.DeletedSubnets.CountAsync();
+        if (count == 0)
+        {
+            TempData["ErrorMessage"] = "There are no deleted subnet records to purge.";
+            return RedirectToAction(nameof(DeletedSubnets));
+        }
+
+        return View(new PurgeAllDeletedSubnetsViewModel { Count = count });
+    }
+
+    // POST: Subnet/PurgeAllDeletedSubnets
+    [HttpPost, ActionName("PurgeAllDeletedSubnets")]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> PurgeAllDeletedSubnetsConfirmed(string confirmation)
+    {
+        if (confirmation != "approved")
+        {
+            TempData["ErrorMessage"] = "You must type 'approved' to confirm purge.";
+            return RedirectToAction(nameof(PurgeAllDeletedSubnets));
+        }
+
+        int removed = await context.DeletedSubnets.ExecuteDeleteAsync();
+        TempData["SuccessMessage"] = $"Permanently purged {removed} deleted subnet record(s).";
+        return RedirectToAction(nameof(DeletedSubnets));
+    }
 }

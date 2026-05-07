@@ -1,13 +1,38 @@
 @model AllDeletedHostIpsViewModel
+@inject Bastet.Services.IUserContextService UserContextService
 
 @{
     ViewData["Title"] = "All Deleted Host IP Assignments";
 }
 
 <div class="mb-4">
-    <h1>All Deleted Host IP Assignments</h1>
+    <div class="d-flex justify-content-between align-items-center">
+        <h1>All Deleted Host IP Assignments</h1>
+        @if (Model.TotalCount > 0 && UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
+        {
+            <a asp-action="PurgeAllDeletedHostIps" class="btn btn-danger">
+                <i class="bi bi-trash"></i> Purge All
+            </a>
+        }
+    </div>
     <p class="lead">View all deleted host IP assignments across all subnets</p>
 </div>
+
+@if (TempData["SuccessMessage"] != null)
+{
+    <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+        @TempData["SuccessMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        @TempData["ErrorMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
 
 @if (Model.TotalCount == 0)
 {

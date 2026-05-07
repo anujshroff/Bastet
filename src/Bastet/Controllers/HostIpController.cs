@@ -541,6 +541,37 @@ public class HostIpController(
         return View(allDeletedHostIpsViewModel);
     }
 
+    // GET: HostIp/PurgeAllDeletedHostIps
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> PurgeAllDeletedHostIps()
+    {
+        int count = await context.DeletedHostIpAssignments.CountAsync();
+        if (count == 0)
+        {
+            TempData["ErrorMessage"] = "There are no deleted host IP records to purge.";
+            return RedirectToAction(nameof(AllDeletedHostIps));
+        }
+
+        return View(new PurgeAllDeletedHostIpsViewModel { Count = count });
+    }
+
+    // POST: HostIp/PurgeAllDeletedHostIps
+    [HttpPost, ActionName("PurgeAllDeletedHostIps")]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> PurgeAllDeletedHostIpsConfirmed(string confirmation)
+    {
+        if (confirmation != "approved")
+        {
+            TempData["ErrorMessage"] = "You must type 'approved' to confirm purge.";
+            return RedirectToAction(nameof(PurgeAllDeletedHostIps));
+        }
+
+        int removed = await context.DeletedHostIpAssignments.ExecuteDeleteAsync();
+        TempData["SuccessMessage"] = $"Permanently purged {removed} deleted host IP record(s).";
+        return RedirectToAction(nameof(AllDeletedHostIps));
+    }
+
     // GET: HostIp/DeletedHostIps/{subnetId}
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> DeletedHostIps(int subnetId)

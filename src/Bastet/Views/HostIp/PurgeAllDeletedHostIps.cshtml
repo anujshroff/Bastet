@@ -1,0 +1,42 @@
+@model PurgeAllDeletedHostIpsViewModel
+
+@{
+    ViewData["Title"] = "Purge All Deleted Host IPs";
+}
+
+<div class="mb-4">
+    <h1>Purge All Deleted Host IPs</h1>
+    <p class="lead">Permanently remove all archived host IP assignment records.</p>
+</div>
+
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        @TempData["ErrorMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<div class="alert alert-danger">
+    <h5 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> This cannot be undone</h5>
+    <p class="mb-0">
+        You are about to permanently delete <strong>@Model.Count</strong> archived host IP record(s).
+        After purging, these records will be gone forever &mdash; there is no recovery.
+    </p>
+</div>
+
+<form asp-action="PurgeAllDeletedHostIps" method="post">
+    @Html.AntiForgeryToken()
+
+    <div class="mb-4">
+        <label for="confirmation" class="form-label fw-bold">Type "approved" to confirm purge:</label>
+        <input type="text" class="form-control form-control-lg" id="confirmation" name="confirmation" required autocomplete="off" />
+    </div>
+
+    <div class="mb-4">
+        <button type="submit" class="btn btn-danger btn-lg">
+            <i class="bi bi-trash"></i> Purge All
+        </button>
+        <a asp-action="AllDeletedHostIps" class="btn btn-outline-secondary btn-lg ms-2">Cancel</a>
+    </div>
+</form>
