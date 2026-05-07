@@ -14,9 +14,18 @@
 
             @if (!string.IsNullOrEmpty(Model.AzureResourceId))
             {
+                // Per-subnet portal pages are nearly empty — for subnet resource IDs we link to the
+                // parent VNet's /subnets list instead, which renders the useful subnet table.
+                string portalPath = Model.AzureResourceId;
+                int subnetSegment = portalPath.IndexOf("/subnets/", StringComparison.OrdinalIgnoreCase);
+                if (subnetSegment >= 0)
+                {
+                    portalPath = portalPath.Substring(0, subnetSegment) + "/subnets";
+                }
+
                 <dt class="col-sm-4">Azure Resource</dt>
                 <dd class="col-sm-8">
-                    <a href="https://portal.azure.com/#@@/resource@Model.AzureResourceId"
+                    <a href="https://portal.azure.com/#@@/resource@portalPath"
                        target="_blank" rel="noopener noreferrer">View in Azure Portal</a>
                 </dd>
             }
