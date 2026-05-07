@@ -280,7 +280,8 @@ namespace Bastet.Services.Azure
                     Name = finalName,
                     NetworkAddress = sub.Network,
                     Cidr = sub.Cidr,
-                    FullyEncompassesTarget = false
+                    FullyEncompassesTarget = false,
+                    AzureResourceId = sub.Source.AzureResourceId
                 });
             }
 

@@ -43,6 +43,11 @@ namespace Bastet.Models.ViewModels
     public class AzureSubnetViewModel
     {
         /// <summary>
+        /// The Azure resource ID of the subnet
+        /// </summary>
+        public string ResourceId { get; set; } = string.Empty;
+
+        /// <summary>
         /// The name of the subnet
         /// </summary>
         public string Name { get; set; } = string.Empty;

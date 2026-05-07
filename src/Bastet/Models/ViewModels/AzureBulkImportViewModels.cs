@@ -7,6 +7,11 @@ namespace Bastet.Models.ViewModels
     public class BulkAzureSubnetViewModel
     {
         /// <summary>
+        /// The Azure resource ID of the subnet
+        /// </summary>
+        public string ResourceId { get; set; } = string.Empty;
+
+        /// <summary>
         /// The Azure-given name of the subnet
         /// </summary>
         public string Name { get; set; } = string.Empty;
@@ -66,6 +71,12 @@ namespace Bastet.Models.ViewModels
         /// The IPv4 address prefix in CIDR notation (e.g. "10.0.1.0/24")
         /// </summary>
         public string AddressPrefix { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The Azure resource ID of the subnet (round-tripped through the browser
+        /// so we can persist it onto the imported Bastet subnet without re-querying Azure).
+        /// </summary>
+        public string AzureResourceId { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -182,6 +193,12 @@ namespace Bastet.Models.ViewModels
         /// In that case we do NOT create the child; instead the target is marked IsFullyAllocated.
         /// </summary>
         public bool FullyEncompassesTarget { get; set; }
+
+        /// <summary>
+        /// The Azure resource ID of the source subnet (forwarded from the selection
+        /// so the commit step can persist it onto the new Bastet subnet).
+        /// </summary>
+        public string AzureResourceId { get; set; } = string.Empty;
     }
 
     /// <summary>

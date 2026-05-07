@@ -77,6 +77,12 @@ public partial class SubnetController : Controller
             {
                 Subnet targetSubnet;
 
+                // Sanitize the VNet resource ID once; treat it as untrusted user input even
+                // though it originates from the Azure SDK (it round-tripped through the browser).
+                string? sanitizedVNetResourceId = string.IsNullOrEmpty(item.VNetResourceId)
+                    ? null
+                    : sanitizationService?.SanitizeDescription(item.VNetResourceId) ?? item.VNetResourceId;
+
                 // 1) Resolve / create the target Bastet subnet for this VNet prefix
                 if (item.TargetType == BulkImportTargetType.ExactMatch)
                 {
@@ -92,6 +98,8 @@ public partial class SubnetController : Controller
                     }
                     targetSubnet = existingSubnet;
 
+                    bool targetModified = false;
+
                     // Apply rename if the plan calls for it
                     if (item.WillRename && !string.IsNullOrEmpty(item.NewName))
                     {
@@ -99,11 +107,24 @@ public partial class SubnetController : Controller
                         if (!string.Equals(targetSubnet.Name, newName, StringComparison.Ordinal))
                         {
                             targetSubnet.Name = newName;
-                            targetSubnet.LastModifiedAt = DateTime.UtcNow;
-                            targetSubnet.ModifiedBy = userContextService.GetCurrentUsername();
-                            await context.SaveChangesAsync();
+                            targetModified = true;
                             totalTargetsRenamed++;
                         }
+                    }
+
+                    // Stamp the VNet resource ID onto the matched target so the Details page can link to Azure.
+                    if (!string.IsNullOrEmpty(sanitizedVNetResourceId)
+                        && !string.Equals(targetSubnet.AzureResourceId, sanitizedVNetResourceId, StringComparison.Ordinal))
+                    {
+                        targetSubnet.AzureResourceId = sanitizedVNetResourceId;
+                        targetModified = true;
+                    }
+
+                    if (targetModified)
+                    {
+                        targetSubnet.LastModifiedAt = DateTime.UtcNow;
+                        targetSubnet.ModifiedBy = userContextService.GetCurrentUsername();
+                        await context.SaveChangesAsync();
                     }
                 }
                 else
@@ -119,7 +140,8 @@ public partial class SubnetController : Controller
                         Description = null,
                         Tags = null,
                         ParentSubnetId = item.AutoCreateParentSubnetId,
-                        FullyEncompassesVNetPrefix = false
+                        FullyEncompassesVNetPrefix = false,
+                        AzureResourceId = sanitizedVNetResourceId
                     };
 
                     if (!await ValidateSubnetCreation(targetVm))
@@ -135,6 +157,7 @@ public partial class SubnetController : Controller
                         Cidr = targetVm.Cidr,
                         Description = targetVm.Description,
                         Tags = targetVm.Tags,
+                        AzureResourceId = targetVm.AzureResourceId,
                         ParentSubnetId = targetVm.ParentSubnetId,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = userContextService.GetCurrentUsername()
@@ -166,6 +189,9 @@ public partial class SubnetController : Controller
                 {
                     string childName = sanitizationService?.SanitizeName(child.Name) ?? child.Name;
                     string childNetwork = sanitizationService?.SanitizeNetworkInput(child.NetworkAddress) ?? child.NetworkAddress;
+                    string? sanitizedChildResourceId = string.IsNullOrEmpty(child.AzureResourceId)
+                        ? null
+                        : sanitizationService?.SanitizeDescription(child.AzureResourceId) ?? child.AzureResourceId;
 
                     CreateSubnetViewModel childVm = new()
                     {
@@ -175,7 +201,8 @@ public partial class SubnetController : Controller
                         Description = null,
                         Tags = null,
                         ParentSubnetId = targetSubnet.Id,
-                        FullyEncompassesVNetPrefix = false
+                        FullyEncompassesVNetPrefix = false,
+                        AzureResourceId = sanitizedChildResourceId
                     };
 
                     if (!await ValidateSubnetCreation(childVm))
@@ -191,6 +218,7 @@ public partial class SubnetController : Controller
                         Cidr = childVm.Cidr,
                         Description = childVm.Description,
                         Tags = childVm.Tags,
+                        AzureResourceId = childVm.AzureResourceId,
                         ParentSubnetId = targetSubnet.Id,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = userContextService.GetCurrentUsername()

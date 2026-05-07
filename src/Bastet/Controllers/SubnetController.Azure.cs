@@ -12,7 +12,7 @@ public partial class SubnetController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null, [FromServices] IInputSanitizationService? sanitizationService = null)
+    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null, string? vnetResourceId = null, [FromServices] IInputSanitizationService? sanitizationService = null)
     {
         if (!ModelState.IsValid)
         {
@@ -28,12 +28,21 @@ public partial class SubnetController : Controller
                 subnet.NetworkAddress = sanitizationService.SanitizeNetworkInput(subnet.NetworkAddress);
                 subnet.Description = sanitizationService.SanitizeDescription(subnet.Description);
                 subnet.Tags = sanitizationService.SanitizeTags(subnet.Tags);
+                if (!string.IsNullOrEmpty(subnet.AzureResourceId))
+                {
+                    subnet.AzureResourceId = sanitizationService.SanitizeDescription(subnet.AzureResourceId);
+                }
             }
 
             // Also sanitize vnetName if provided
             if (!string.IsNullOrEmpty(vnetName))
             {
                 vnetName = sanitizationService.SanitizeName(vnetName);
+            }
+
+            if (!string.IsNullOrEmpty(vnetResourceId))
+            {
+                vnetResourceId = sanitizationService.SanitizeDescription(vnetResourceId);
             }
         }
 
@@ -83,6 +92,12 @@ public partial class SubnetController : Controller
                 // Update the name to match the Azure VNet name
                 parentSubnet.Name = vnetName;
 
+                // Stamp the VNet resource ID onto the parent so the Details page can link to Azure.
+                if (!string.IsNullOrEmpty(vnetResourceId))
+                {
+                    parentSubnet.AzureResourceId = vnetResourceId;
+                }
+
                 // If a subnet fully encompasses the VNet address prefix, mark parent as fully allocated
                 if (hasFullyEncompassingSubnet)
                 {
@@ -129,6 +144,7 @@ public partial class SubnetController : Controller
                         Cidr = subnet.Cidr,
                         Description = subnet.Description,
                         Tags = subnet.Tags,
+                        AzureResourceId = subnet.AzureResourceId,
                         ParentSubnetId = parentId,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = userContextService.GetCurrentUsername()

@@ -11,7 +11,16 @@
             
             <dt class="col-sm-4">Tags</dt>
             <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.Tags) ? "None" : Model.Tags)</dd>
-            
+
+            @if (!string.IsNullOrEmpty(Model.AzureResourceId))
+            {
+                <dt class="col-sm-4">Azure Resource</dt>
+                <dd class="col-sm-8">
+                    <a href="https://portal.azure.com/#@@/resource@Model.AzureResourceId"
+                       target="_blank" rel="noopener noreferrer">View in Azure Portal</a>
+                </dd>
+            }
+
             <dt class="col-sm-4">Created</dt>
             <dd class="col-sm-8">@Model.CreatedAt.ToString("g")</dd>
             

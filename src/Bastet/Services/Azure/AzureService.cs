@@ -182,6 +182,7 @@ namespace Bastet.Services.Azure
                             {
                                 result.Add(new AzureSubnetViewModel
                                 {
+                                    ResourceId = subnet.Id.ToString(),
                                     Name = subnet.Data.Name,
                                     AddressPrefix = subnet.Data.AddressPrefix,
                                     HasMultipleAddressSchemes = false,
@@ -193,6 +194,7 @@ namespace Bastet.Services.Azure
                             {
                                 TryAddCompatibleSubnet(
                                     result,
+                                    subnet.Id.ToString(),
                                     subnet.Data.Name,
                                     subnet.Data.AddressPrefix,
                                     false,
@@ -246,6 +248,7 @@ namespace Bastet.Services.Azure
                                 {
                                     result.Add(new AzureSubnetViewModel
                                     {
+                                        ResourceId = subnet.Id.ToString(),
                                         Name = subnet.Data.Name,
                                         AddressPrefix = addressPrefix,
                                         HasMultipleAddressSchemes = hasMultipleAddressSchemes,
@@ -257,6 +260,7 @@ namespace Bastet.Services.Azure
                                 {
                                     TryAddCompatibleSubnet(
                                         result,
+                                        subnet.Id.ToString(),
                                         subnet.Data.Name,
                                         addressPrefix,
                                         hasMultipleAddressSchemes,
@@ -330,6 +334,7 @@ namespace Bastet.Services.Azure
 
                         vnetVm.Subnets.Add(new BulkAzureSubnetViewModel
                         {
+                            ResourceId = subnet.Id.ToString(),
                             Name = subnet.Data.Name ?? string.Empty,
                             AddressPrefix = ipv4Prefix
                         });
@@ -378,6 +383,7 @@ namespace Bastet.Services.Azure
         /// </summary>
         private void TryAddCompatibleSubnet(
             List<AzureSubnetViewModel> result,
+            string resourceId,
             string name,
             string addressPrefix,
             bool hasMultipleAddressSchemes,
@@ -397,6 +403,7 @@ namespace Bastet.Services.Azure
             {
                 result.Add(new AzureSubnetViewModel
                 {
+                    ResourceId = resourceId,
                     Name = name,
                     AddressPrefix = addressPrefix,
                     HasMultipleAddressSchemes = hasMultipleAddressSchemes,

@@ -53,6 +53,9 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
             entity.Property(s => s.Tags)
                 .HasMaxLength(255);
 
+            entity.Property(s => s.AzureResourceId)
+                .HasMaxLength(500);
+
             // Add check constraints using the new API
             entity.ToTable(t => t.HasCheckConstraint("CK_Subnet_ValidCidr", "Cidr >= 0 AND Cidr <= 32"));
         });

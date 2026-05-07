@@ -546,4 +546,31 @@ public class AzureBulkImportPlannerTests
         Assert.False(plan.CanCommit);
         Assert.Contains(plan.GlobalErrors, e => e.Contains("No VNet"));
     }
+
+    // -------------------------------------------------------------------------
+    // Azure resource ID propagation
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void AzureResourceIds_AreForwardedFromSelectionToPlan()
+    {
+        const string webId = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-prod/subnets/web";
+        const string appId = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-prod/subnets/app";
+
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-prod", "10.0.0.0/16",
+                new BulkImportSelectedSubnetDto { Name = "web", AddressPrefix = "10.0.1.0/24", AzureResourceId = webId },
+                new BulkImportSelectedSubnetDto { Name = "app", AddressPrefix = "10.0.2.0/24", AzureResourceId = appId }));
+
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16)];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
+
+        Assert.True(plan.CanCommit);
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.Equal($"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-prod", item.VNetResourceId);
+        Assert.Equal(2, item.ChildSubnets.Count);
+        Assert.Contains(item.ChildSubnets, c => c.Name == "web" && c.AzureResourceId == webId);
+        Assert.Contains(item.ChildSubnets, c => c.Name == "app" && c.AzureResourceId == appId);
+    }
 }

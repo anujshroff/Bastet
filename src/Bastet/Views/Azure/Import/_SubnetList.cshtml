@@ -21,6 +21,7 @@
     @Html.AntiForgeryToken()
     <input type="hidden" name="parentId" value="@Model.SubnetId" />
     <input type="hidden" id="vnet-name" name="vnetName" value="" />
+    <input type="hidden" id="vnet-resource-id" name="vnetResourceId" value="" />
     
     <div id="subnet-selection" class="d-none">
         <div class="form-check mb-2">

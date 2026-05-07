@@ -169,7 +169,8 @@
                                 .attr('data-vnet-idx', vIdx)
                                 .attr('data-prefix', prefix)
                                 .attr('data-name', subnet.name)
-                                .attr('data-address-prefix', subnet.addressPrefix);
+                                .attr('data-address-prefix', subnet.addressPrefix)
+                                .attr('data-resource-id', subnet.resourceId || '');
                             const $subnetLabel = $('<label class="form-check-label"></label>')
                                 .attr('for', subnetId)
                                 .html(`${escapeHtml(subnet.name)} <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>`);
@@ -287,7 +288,8 @@
                 $(`.bulk-subnet-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']:checked`).each(function () {
                     prefixDto.subnets.push({
                         name: $(this).attr('data-name'),
-                        addressPrefix: $(this).attr('data-address-prefix')
+                        addressPrefix: $(this).attr('data-address-prefix'),
+                        azureResourceId: $(this).attr('data-resource-id') || ''
                     });
                 });
 

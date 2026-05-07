@@ -30,6 +30,9 @@ public class Subnet : BaseEntity
     [MaxLength(255)]
     public string? Tags { get; set; }
 
+    [MaxLength(500)]
+    public string? AzureResourceId { get; set; }
+
     // Parent-Child Relationship
     public int? ParentSubnetId { get; set; }
 
