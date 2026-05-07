@@ -91,15 +91,10 @@ namespace Bastet.Models.ViewModels
         public string AddressPrefix { get; set; } = string.Empty;
 
         /// <summary>
-        /// True when this VNet has more than one IPv4 address prefix selected
-        /// (used to drive auto-created target naming).
-        /// </summary>
-        public bool VNetHasMultiplePrefixes { get; set; }
-
-        /// <summary>
         /// Selected Azure subnets that fall under this VNet prefix
         /// </summary>
         public List<BulkImportSelectedSubnetDto> Subnets { get; set; } = [];
+
     }
 
     /// <summary>

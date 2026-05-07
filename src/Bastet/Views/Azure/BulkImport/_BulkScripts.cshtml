@@ -282,9 +282,9 @@
                     vNetName: vnet.name,
                     vNetResourceId: vnet.resourceId,
                     addressPrefix: prefix,
-                    vNetHasMultiplePrefixes: vnet.ipv4AddressPrefixes.length > 1,
                     subnets: []
                 };
+
 
                 $(`.bulk-subnet-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']:checked`).each(function () {
                     prefixDto.subnets.push({

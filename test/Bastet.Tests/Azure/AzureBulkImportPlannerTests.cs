@@ -266,7 +266,17 @@ public class AzureBulkImportPlannerTests
         Assert.True(plan.CanCommit);
         Assert.Equal(2, plan.Items.Count);
         Assert.All(plan.Items, i => Assert.Equal(BulkImportTargetType.AutoCreateTopLevel, i.TargetType));
+
+        // Each plan item is for a distinct prefix.
+        Assert.Contains(plan.Items, i => i.PrefixNetworkAddress == "10.0.0.0" && i.PrefixCidr == 16);
+        Assert.Contains(plan.Items, i => i.PrefixNetworkAddress == "10.1.0.0" && i.PrefixCidr == 16);
+
+        // Both auto-created targets keep the unmodified VNet name (intentional — Bastet
+        // allows duplicate Subnet.Name; only NetworkAddress+Cidr is unique). If a future
+        // change introduces auto-disambiguation of these names, this assertion will catch it.
+        Assert.All(plan.Items, i => Assert.Equal("vnet-multi", i.AutoCreateTargetName));
     }
+
 
     // -------------------------------------------------------------------------
     // Conflict detection — VNet vs VNet
@@ -324,10 +334,16 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void AzureSubnetAlreadyInBastet_HardFails()
     {
+        // Plan attempts to import 10.2.5.0/24 from VNet 10.2.0.0/16. Bastet has
+        // 10.0.0.0/8 + 10.2.5.0/24 (no /16 between them), so the planner will
+        // simultaneously trip two distinct hard fails — both correct, both expected:
+        //   * the Azure subnet 10.2.5.0/24 already exists in Bastet (the case under test)
+        //   * the auto-created /16 target would contain the existing /24
+        // We assert the duplicate-existence error is present; the would-contain
+        // error is exercised independently by VNetPrefixWouldContainExistingSubnet_HardFails.
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-x", "10.2.0.0/16", Sub("default", "10.2.5.0/24")));
 
-        // Existing Bastet tree contains 10.2.5.0/24 already (somewhere unrelated)
         List<ExistingSubnetSnapshot> existing =
         [
             Existing(1, "RootSlash8", "10.0.0.0", 8),
@@ -339,6 +355,7 @@ public class AzureBulkImportPlannerTests
         Assert.False(plan.CanCommit);
         Assert.Contains(plan.GlobalErrors, e => e.Contains("already exists in Bastet"));
     }
+
 
     // -------------------------------------------------------------------------
     // Conflict detection — VNet prefix would contain existing Bastet subnet
