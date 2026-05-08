@@ -5,6 +5,23 @@
 }
 
 @await Html.PartialAsync("DeletedSubnets/_Header")
+
+@if (TempData["SuccessMessage"] != null)
+{
+    <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+        @TempData["SuccessMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        @TempData["ErrorMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
 @await Html.PartialAsync("DeletedSubnets/_CountInfo", Model)
 @await Html.PartialAsync("DeletedSubnets/_EmptyState", Model)
 @await Html.PartialAsync("DeletedSubnets/_SubnetTable", Model)
