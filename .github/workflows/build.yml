@@ -10,10 +10,12 @@ concurrency: build
 permissions:
   packages: write
   contents: write
+  id-token: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    environment: code-signing
 
     steps:
       - uses: actions/checkout@v6
@@ -25,3 +27,9 @@ jobs:
         name: Build
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
