@@ -1,0 +1,85 @@
+name: 'Deploy'
+description: 'Deploy'
+inputs:
+  GITHUB_TOKEN:
+    required: true
+  VERSION:
+    required: true
+  MAJOR:
+    required: true
+  MINOR:
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect Mode
+      id: mode
+      run: |
+        if [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+          echo "is_release=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_release=false" >> "$GITHUB_OUTPUT"
+        fi
+      shell: bash
+
+    - name: Download Publish Folder
+      uses: actions/download-artifact@v8
+      with:
+        name: publish-folder
+        path: ${{ github.workspace }}/publish
+
+    - name: Download Signed Bastet.dll
+      uses: actions/download-artifact@v8
+      with:
+        name: bastet-dll-signed
+        path: ${{ github.workspace }}/publish
+
+    - name: Docker Build
+      env:
+        IS_RELEASE: ${{ steps.mode.outputs.is_release }}
+        VERSION: ${{ inputs.VERSION }}
+        MAJOR: ${{ inputs.MAJOR }}
+        MINOR: ${{ inputs.MINOR }}
+      run: |
+        echo "${{ inputs.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+        IMAGE="ghcr.io/${{ github.repository_owner }}/bastet"
+
+        if [ "$IS_RELEASE" = "true" ]; then
+          CURRENT_VERSION="${MAJOR}.${MINOR}"
+          echo "Current branch version: $CURRENT_VERSION"
+
+          git fetch origin
+          ALL_BRANCHES=$(git branch -r | grep -E "origin/release/[0-9]+\.[0-9]+$" | sed 's/.*release\///' | sort -V)
+          echo "All release branches: $ALL_BRANCHES"
+
+          HIGHEST_VERSION=$(echo "$ALL_BRANCHES" | tail -n 1)
+          echo "Highest branch version: $HIGHEST_VERSION"
+
+          DOCKER_TAGS="--tag=${IMAGE}:${VERSION} --tag=${IMAGE}:${MAJOR}.${MINOR} --tag=${IMAGE}:${MAJOR}"
+
+          if [ "$(echo "$CURRENT_VERSION $HIGHEST_VERSION" | tr ' ' '\n' | sort -V | tail -n 1)" = "$CURRENT_VERSION" ]; then
+            echo "This version ($CURRENT_VERSION) is greater than or equal to the highest branch version ($HIGHEST_VERSION). Adding 'latest' tag."
+            DOCKER_TAGS="$DOCKER_TAGS --tag=${IMAGE}:latest"
+          else
+            echo "Not the highest version release branch. Skipping 'latest' tag."
+          fi
+        else
+          DOCKER_TAGS="--tag=${IMAGE}:alpha"
+        fi
+
+        docker build ${{ github.workspace }}/publish --file ${{ github.workspace }}/src/Bastet/Dockerfile $DOCKER_TAGS
+        docker push -a "$IMAGE"
+      shell: bash
+
+    - name: Push Git Tag
+      if: steps.mode.outputs.is_release == 'true'
+      env:
+        VERSION: ${{ inputs.VERSION }}
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "github-actions@users.noreply.github.com"
+        git tag v${VERSION}
+        git push origin v${VERSION}
+      shell: bash
