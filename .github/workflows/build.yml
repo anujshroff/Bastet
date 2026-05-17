@@ -10,9 +10,47 @@ concurrency: build
 permissions:
   packages: write
   contents: write
+  id-token: write
 
 jobs:
-  build:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.build.outputs.VERSION }}
+      MAJOR: ${{ steps.build.outputs.MAJOR }}
+      MINOR: ${{ steps.build.outputs.MINOR }}
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Checkout
+        with:
+          fetch-depth: 0
+
+      - id: build
+        uses: ./.github/actions/build/
+        name: Build
+
+  sign:
+    needs: publish
+    runs-on: windows-latest
+    environment: code-signing
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Checkout
+
+      - uses: ./.github/actions/sign/
+        name: Sign
+        with:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+
+  release:
+    needs: [publish, sign]
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +59,55 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/build/
-        name: Build
+      - name: Download Publish Folder
+        uses: actions/download-artifact@v8
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: publish-folder
+          path: ${{ github.workspace }}/publish
+
+      - name: Download Signed Bastet.dll
+        uses: actions/download-artifact@v8
+        with:
+          name: bastet-dll-signed
+          path: ${{ github.workspace }}/publish
+
+      - name: Docker Build
+        env:
+          VERSION: ${{ needs.publish.outputs.VERSION }}
+          MAJOR: ${{ needs.publish.outputs.MAJOR }}
+          MINOR: ${{ needs.publish.outputs.MINOR }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          CURRENT_VERSION="${MAJOR}.${MINOR}"
+          echo "Current branch version: $CURRENT_VERSION"
+
+          git fetch origin
+          ALL_BRANCHES=$(git branch -r | grep -E "origin/release/[0-9]+\.[0-9]+$" | sed 's/.*release\///' | sort -V)
+          echo "All release branches: $ALL_BRANCHES"
+
+          HIGHEST_VERSION=$(echo "$ALL_BRANCHES" | tail -n 1)
+          echo "Highest branch version: $HIGHEST_VERSION"
+
+          DOCKER_TAGS="--tag=ghcr.io/${{ github.repository_owner }}/bastet:${VERSION} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${MAJOR}.${MINOR} --tag=ghcr.io/${{ github.repository_owner }}/bastet:${MAJOR}"
+
+          if [ "$(echo "$CURRENT_VERSION $HIGHEST_VERSION" | tr ' ' '\n' | sort -V | tail -n 1)" = "$CURRENT_VERSION" ]; then
+            echo "This version ($CURRENT_VERSION) is greater than or equal to the highest branch version ($HIGHEST_VERSION). Adding 'latest' tag."
+            DOCKER_TAGS="$DOCKER_TAGS --tag=ghcr.io/${{ github.repository_owner }}/bastet:latest"
+          else
+            echo "Not the highest version release branch. Skipping 'latest' tag."
+          fi
+
+          docker build ${{ github.workspace }}/publish --file ${{ github.workspace }}/src/Bastet/Dockerfile $DOCKER_TAGS
+          docker push -a ghcr.io/${{ github.repository_owner }}/bastet
+        shell: bash
+
+      - name: Push Git Tag
+        env:
+          VERSION: ${{ needs.publish.outputs.VERSION }}
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git tag v${VERSION}
+          git push origin v${VERSION}
+        shell: bash

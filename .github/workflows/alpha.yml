@@ -10,9 +10,10 @@ concurrency: alpha
 permissions:
   packages: write
   contents: write
+  id-token: write
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +22,51 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/alpha/
-        name: Alpha
+      - uses: ./.github/actions/build/
+        name: Build
+
+  sign:
+    needs: publish
+    runs-on: windows-latest
+    environment: code-signing
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Checkout
+
+      - uses: ./.github/actions/sign/
+        name: Sign
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+
+  release:
+    needs: [publish, sign]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        name: Checkout
+
+      - name: Download Publish Folder
+        uses: actions/download-artifact@v8
+        with:
+          name: publish-folder
+          path: ${{ github.workspace }}/publish
+
+      - name: Download Signed Bastet.dll
+        uses: actions/download-artifact@v8
+        with:
+          name: bastet-dll-signed
+          path: ${{ github.workspace }}/publish
+
+      - name: Docker Build
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker build ${{ github.workspace }}/publish --file ${{ github.workspace }}/src/Bastet/Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:alpha
+          docker push -a ghcr.io/${{ github.repository_owner }}/bastet
+        shell: bash
