@@ -15,6 +15,10 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.build.outputs.VERSION }}
+      MAJOR: ${{ steps.build.outputs.MAJOR }}
+      MINOR: ${{ steps.build.outputs.MINOR }}
 
     steps:
       - uses: actions/checkout@v6
@@ -22,7 +26,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ./.github/actions/build/
+      - id: build
+        uses: ./.github/actions/build/
         name: Build
 
   sign:
@@ -44,29 +49,20 @@ jobs:
           TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
           TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
 
-  release:
+  deploy:
     needs: [publish, sign]
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v6
         name: Checkout
-
-      - name: Download Publish Folder
-        uses: actions/download-artifact@v8
         with:
-          name: publish-folder
-          path: ${{ github.workspace }}/publish
+          fetch-depth: 0
 
-      - name: Download Signed Bastet.dll
-        uses: actions/download-artifact@v8
+      - uses: ./.github/actions/deploy/
+        name: Deploy
         with:
-          name: bastet-dll-signed
-          path: ${{ github.workspace }}/publish
-
-      - name: Docker Build
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker build ${{ github.workspace }}/publish --file ${{ github.workspace }}/src/Bastet/Dockerfile --tag=ghcr.io/${{ github.repository_owner }}/bastet:alpha
-          docker push -a ghcr.io/${{ github.repository_owner }}/bastet
-        shell: bash
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.publish.outputs.VERSION }}
+          MAJOR: ${{ needs.publish.outputs.MAJOR }}
+          MINOR: ${{ needs.publish.outputs.MINOR }}
