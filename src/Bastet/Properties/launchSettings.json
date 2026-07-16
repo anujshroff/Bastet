@@ -8,7 +8,9 @@
 			"applicationUrl": "https://localhost:5139",
 			"environmentVariables": {
 				"ASPNETCORE_ENVIRONMENT": "Development",
-				"BASTET_AUTO_MIGRATE": "true"
+				"BASTET_AUTO_MIGRATE": "true",
+				"BASTET_AZURE_IMPORT": "true",
+				"AZURE_TOKEN_CREDENTIALS": "dev"
 			}
 		},
 		"http-auth0": {
@@ -21,7 +23,9 @@
 				"BASTET_AUTO_MIGRATE": "true",
 				"BASTET_CONNECTION_STRING": "Data Source=(LocalDB)\\MSSQLLocalDB;Initial Catalog=bastet;Integrated Security=True;",
 				"BASTET_OIDC_CLIENT_ID": "hNCmG6cwZlWpkXhqtXvzPp4VoYJ5iEuv",
-				"BASTET_OIDC_AUTHORITY": "https://anujshroff-bastet-dev.us.auth0.com"
+				"BASTET_OIDC_AUTHORITY": "https://anujshroff-bastet-dev.us.auth0.com",
+				"BASTET_AZURE_IMPORT": "true",
+				"AZURE_TOKEN_CREDENTIALS": "dev"
 			}
 		},
 		"http-entra": {
@@ -34,7 +38,9 @@
 				"BASTET_AUTO_MIGRATE": "true",
 				"BASTET_CONNECTION_STRING": "Data Source=(LocalDB)\\MSSQLLocalDB;Initial Catalog=bastet;Integrated Security=True;",
 				"BASTET_OIDC_CLIENT_ID": "b53db434-452d-44bd-a0fb-a19328ae4804",
-				"BASTET_OIDC_AUTHORITY": "https://login.microsoftonline.com/a47d40a2-34d7-46cd-863a-a16017b567e0"
+				"BASTET_OIDC_AUTHORITY": "https://login.microsoftonline.com/a47d40a2-34d7-46cd-863a-a16017b567e0",
+				"BASTET_AZURE_IMPORT": "true",
+				"AZURE_TOKEN_CREDENTIALS": "dev"
 			}
 		}
 	}
