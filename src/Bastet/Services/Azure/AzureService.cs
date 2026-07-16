@@ -1,5 +1,4 @@
 using Azure.Core;
-using Azure.Identity;
 using Azure.ResourceManager;
 using Azure.ResourceManager.Network;
 using Azure.ResourceManager.Resources;
@@ -14,27 +13,22 @@ namespace Bastet.Services.Azure
     {
         private readonly ArmClient? _armClient;
         private readonly IIpUtilityService _ipUtilityService;
+        private readonly ILogger<AzureService> _logger;
 
         /// <summary>
         /// Creates a new instance of the AzureService
         /// </summary>
         /// <param name="ipUtilityService">The IP utility service for subnet calculations</param>
-        public AzureService(IIpUtilityService ipUtilityService)
+        /// <param name="armClientProvider">Provides the shared ArmClient</param>
+        /// <param name="logger">Logger for reporting Azure access failures</param>
+        public AzureService(
+            IIpUtilityService ipUtilityService,
+            AzureArmClientProvider armClientProvider,
+            ILogger<AzureService> logger)
         {
             _ipUtilityService = ipUtilityService;
-
-            try
-            {
-                // DefaultAzureCredential attempts multiple authentication methods
-                // including environment variables, managed identity, and Visual Studio/CLI credentials
-                DefaultAzureCredential credential = new();
-                _armClient = new ArmClient(credential);
-            }
-            catch (Exception)
-            {
-                // Handle credential creation failure
-                _armClient = null;
-            }
+            _armClient = armClientProvider.Client;
+            _logger = logger;
         }
 
         /// <inheritdoc/>
@@ -59,9 +53,9 @@ namespace Bastet.Services.Azure
                 // No error, but no subscriptions either
                 return false;
             }
-            catch
+            catch (Exception ex)
             {
-                // Error occurred during access
+                _logger.LogWarning(ex, "Azure credential validation failed");
                 return false;
             }
         }
@@ -76,16 +70,24 @@ namespace Bastet.Services.Azure
 
             List<AzureSubscriptionViewModel> result = [];
 
-            await foreach (SubscriptionResource? subscription in _armClient.GetSubscriptions())
+            try
             {
-                result.Add(new AzureSubscriptionViewModel
+                await foreach (SubscriptionResource? subscription in _armClient.GetSubscriptions())
                 {
-                    SubscriptionId = subscription.Data.SubscriptionId,
-                    DisplayName = subscription.Data.DisplayName
-                });
-            }
+                    result.Add(new AzureSubscriptionViewModel
+                    {
+                        SubscriptionId = subscription.Data.SubscriptionId,
+                        DisplayName = subscription.Data.DisplayName
+                    });
+                }
 
-            return result;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve Azure subscriptions");
+                return [];
+            }
         }
 
         /// <inheritdoc/>
@@ -139,8 +141,9 @@ namespace Bastet.Services.Azure
 
                 return result;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to retrieve compatible Azure VNets for subscription {SubscriptionId}", subscriptionId);
                 return [];
             }
         }
@@ -276,8 +279,9 @@ namespace Bastet.Services.Azure
 
                 return result;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to retrieve compatible Azure subnets for VNet {VNetResourceId}", vnetResourceId);
                 return [];
             }
         }
@@ -345,8 +349,9 @@ namespace Bastet.Services.Azure
 
                 return result;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to retrieve Azure VNets with subnets for subscription {SubscriptionId}", subscriptionId);
                 return [];
             }
         }
