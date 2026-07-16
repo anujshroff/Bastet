@@ -37,13 +37,22 @@ public class ControllerAuthorizationTests
         ["AccountController.Logout"] = "Deliberately a GET for backwards compatibility; logout CSRF accepted."
     };
 
-    public static IEnumerable<object[]> AllActions() =>
-        typeof(SubnetController).Assembly
+    public static TheoryData<string> AllActions() => [.. ActionsById.Keys];
+
+    /// <summary>
+    /// Actions keyed by a serializable id (name plus parameter types, to disambiguate GET/POST
+    /// overloads) so Test Explorer can enumerate individual data rows. Each test resolves the id
+    /// back to its MethodInfo, since MethodInfo itself cannot cross the serialization boundary.
+    /// </summary>
+    private static readonly SortedDictionary<string, MethodInfo> ActionsById =
+        new(typeof(SubnetController).Assembly
             .GetTypes()
             .Where(IsController)
             .SelectMany(GetActions)
-            .Select(a => new object[] { Key(a), a })
-            .OrderBy(o => (string)o[0]);
+            .ToDictionary(Id, a => a));
+
+    private static string Id(MethodInfo action) =>
+        $"{Key(action)}({string.Join(", ", action.GetParameters().Select(p => p.ParameterType.Name))})";
 
     // -------------------------------------------------------------------------
     // Every action is guarded
@@ -51,8 +60,11 @@ public class ControllerAuthorizationTests
 
     [Theory]
     [MemberData(nameof(AllActions))]
-    public void EveryAction_IsAuthorizedOrExplicitlyAnonymous(string key, MethodInfo action)
+    public void EveryAction_IsAuthorizedOrExplicitlyAnonymous(string actionId)
     {
+        MethodInfo action = ActionsById[actionId];
+        string key = Key(action);
+
         bool anonymous = HasAttribute<AllowAnonymousAttribute>(action);
         bool authorized = HasAttribute<AuthorizeAttribute>(action);
 
@@ -72,8 +84,11 @@ public class ControllerAuthorizationTests
     /// </summary>
     [Theory]
     [MemberData(nameof(AllActions))]
-    public void EveryAuthorizedAction_NamesARolePolicy(string key, MethodInfo action)
+    public void EveryAuthorizedAction_NamesARolePolicy(string actionId)
     {
+        MethodInfo action = ActionsById[actionId];
+        string key = Key(action);
+
         if (AllowedAnonymousActions.ContainsKey(key))
         {
             return;
@@ -97,8 +112,11 @@ public class ControllerAuthorizationTests
 
     [Theory]
     [MemberData(nameof(AllActions))]
-    public void EveryStateChangingAction_ValidatesAntiForgeryToken(string key, MethodInfo action)
+    public void EveryStateChangingAction_ValidatesAntiForgeryToken(string actionId)
     {
+        MethodInfo action = ActionsById[actionId];
+        string key = Key(action);
+
         if (!IsStateChanging(action) || AllowedMissingAntiForgery.ContainsKey(key))
         {
             return;
@@ -116,7 +134,7 @@ public class ControllerAuthorizationTests
     [Fact]
     public void ActionDiscovery_FindsControllersAndActions()
     {
-        List<string> keys = [.. AllActions().Select(o => (string)o[0])];
+        List<string> keys = [.. ActionsById.Values.Select(Key)];
 
         // A refactor that breaks discovery would make every test above vacuously pass.
         Assert.Contains("SubnetController.BulkCreateFromAzurePlan", keys);
@@ -128,7 +146,7 @@ public class ControllerAuthorizationTests
     [Fact]
     public void AnonymousAllowList_HasNoStaleEntries()
     {
-        List<string> keys = [.. AllActions().Select(o => (string)o[0])];
+        List<string> keys = [.. ActionsById.Values.Select(Key)];
 
         foreach (string allowed in AllowedAnonymousActions.Keys.Concat(AllowedMissingAntiForgery.Keys))
         {
