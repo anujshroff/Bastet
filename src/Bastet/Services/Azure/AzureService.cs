@@ -136,7 +136,7 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to retrieve compatible Azure VNets for subscription {SubscriptionId}", subscriptionId);
+                _logger.LogError(ex, "Failed to retrieve compatible Azure VNets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
                 return [];
             }
         }
@@ -274,7 +274,7 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to retrieve compatible Azure subnets for VNet {VNetResourceId}", vnetResourceId);
+                _logger.LogError(ex, "Failed to retrieve compatible Azure subnets for VNet {VNetResourceId}", SanitizeForLog(vnetResourceId));
                 return [];
             }
         }
@@ -357,7 +357,7 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to retrieve Azure VNets with subnets for subscription {SubscriptionId}", subscriptionId);
+                _logger.LogError(ex, "Failed to retrieve Azure VNets with subnets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
 
                 // Report the failure rather than an empty inventory: callers must be able to tell
                 // "this subscription has no VNets" apart from "Azure could not be reached".
@@ -468,5 +468,12 @@ namespace Bastet.Services.Azure
             string[] parts = addressPrefix.Split('/');
             return parts.Length > 1 && int.TryParse(parts[1], out int cidr) ? cidr : 0;
         }
+
+        /// <summary>
+        /// Strips line breaks from request-supplied values before logging, so crafted input can't
+        /// forge additional log entries (CodeQL: log entries created from user input).
+        /// </summary>
+        private static string SanitizeForLog(string? value) =>
+            (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
     }
 }
