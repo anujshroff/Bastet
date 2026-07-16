@@ -124,6 +124,7 @@ BASTET supports configuration through environment variables:
 | Server Configuration | **ASPNETCORE_URLS** | Configures the URLs and ports the application will listen on | `http://+:5000` | ? | In development environments, defaults to settings in launchSettings.json |
 | Server Configuration | **WEBSITES_PORT** | Tells Azure App Service which port the app is listening on | `5000` | - | Should match the port specified in ASPNETCORE_URLS when deployed to Azure App Service |
 | Server Configuration | **AZURE_CLIENT_ID** | Specifies the client ID for Azure Managed Identity | `123e4567-e89b-12d3-a456-426614174000` | - | Required when using Managed Identity in Azure for server authentication to SQL server. |
+| Server Configuration | **AZURE_TOKEN_CREDENTIALS** | Restricts which credentials DefaultAzureCredential will try | `dev`, `prod`, or a credential name such as `AzureCliCredential` | - | Local development only. Set to `dev` to authenticate with `az login`; leave unset when deployed so Managed Identity is used. See [Local development](#local-development). |
 | Authentication Configuration | **BASTET_OIDC_CLIENT_ID** | OpenID Connect client ID | `mvc_client` or `0e0e7c73-5fce-45c1-be7c-0161f462fd9d` | `mvc_client` | Required in non-development environments. Authentication is disabled in development environments. |
 | Authentication Configuration | **BASTET_OIDC_AUTHORITY** | OpenID Connect authority URL | `https://identity.your-domain.com` or `https://login.microsoftonline.com/0af80680-dd36-43bf-bf53-b951b9fdd68b` | `https://localhost` | Required in non-development environments. Authentication is disabled in development environments. |
 | Authentication Configuration | **BASTET_OIDC_CLIENT_SECRET** | Client secret for authentication with the OIDC provider | `your-client-secret` | - | Required when using authorization code flow with providers that require client authentication (e.g., Microsoft Entra ID). Not needed for providers that support PKCE without client authentication (e.g., Auth0). |
@@ -139,12 +140,22 @@ BASTET includes two flows for importing subnets directly from Azure Virtual Netw
 
 ### Prerequisites
 
-- **Azure Authentication**: The application uses DefaultAzureCredential for authentication to Azure, which supports various authentication methods:
+- **Azure Authentication**: The application uses DefaultAzureCredential for authentication to Azure, which tries the following methods in order:
   - Environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_CLIENT_SECRET)
+  - Workload Identity
   - Managed Identity
-  - Visual Studio Code authentication
+  - Visual Studio authentication
   - Azure CLI authentication
-  - Interactive browser authentication
+  - Azure PowerShell authentication
+  - Azure Developer CLI authentication
+
+#### Local development
+
+Sign in with `az login`, then set `AZURE_TOKEN_CREDENTIALS=dev` so DefaultAzureCredential only tries the developer tool credentials. The `dotnet run` launch profiles in `src/Bastet/Properties/launchSettings.json` already set this.
+
+This is a **temporary workaround for an Azure.Core regression**, not a permanent requirement. On a machine where the Managed Identity endpoint (169.254.169.254) is unreachable, `ManagedIdentityCredential` throws `AuthenticationFailedException` instead of reporting itself unavailable. Because Managed Identity is a deployed-service credential, that *terminates* the chain before Azure CLI is ever tried, so `az login` is ignored and every Azure call fails after ~27s of IMDS retries.
+
+Azure.Core 1.59.0 introduced this with its managed identity host capability detection; 1.60.0 attempted a fix that does not cover the unreachable-socket path. Azure.Core is a transitive dependency pulled in by `Azure.ResourceManager.Network` (1.16.1 requires `>= 1.60.0`), so it is not pinned in `Bastet.csproj`. Once a release after 1.60.0 completes the fix, `AZURE_TOKEN_CREDENTIALS` can be removed from the launch profiles. See the [Azure.Core changelog](https://github.com/Azure/azure-sdk-for-net/blob/main/sdk/core/Azure.Core/CHANGELOG.md) and [credential chains](https://learn.microsoft.com/en-us/dotnet/azure/sdk/authentication/credential-chains).
 
 ### Enabling Azure Import
 
