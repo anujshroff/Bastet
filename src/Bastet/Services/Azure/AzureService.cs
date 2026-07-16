@@ -9,27 +9,20 @@ namespace Bastet.Services.Azure
     /// <summary>
     /// Implementation of the Azure service for interacting with Azure APIs
     /// </summary>
-    public class AzureService : IAzureService
+    /// <remarks>
+    /// Creates a new instance of the AzureService
+    /// </remarks>
+    /// <param name="ipUtilityService">The IP utility service for subnet calculations</param>
+    /// <param name="armClientProvider">Provides the shared ArmClient</param>
+    /// <param name="logger">Logger for reporting Azure access failures</param>
+    public class AzureService(
+        IIpUtilityService ipUtilityService,
+        AzureArmClientProvider armClientProvider,
+        ILogger<AzureService> logger) : IAzureService
     {
-        private readonly ArmClient? _armClient;
-        private readonly IIpUtilityService _ipUtilityService;
-        private readonly ILogger<AzureService> _logger;
-
-        /// <summary>
-        /// Creates a new instance of the AzureService
-        /// </summary>
-        /// <param name="ipUtilityService">The IP utility service for subnet calculations</param>
-        /// <param name="armClientProvider">Provides the shared ArmClient</param>
-        /// <param name="logger">Logger for reporting Azure access failures</param>
-        public AzureService(
-            IIpUtilityService ipUtilityService,
-            AzureArmClientProvider armClientProvider,
-            ILogger<AzureService> logger)
-        {
-            _ipUtilityService = ipUtilityService;
-            _armClient = armClientProvider.Client;
-            _logger = logger;
-        }
+        private readonly ArmClient? _armClient = armClientProvider.Client;
+        private readonly IIpUtilityService _ipUtilityService = ipUtilityService;
+        private readonly ILogger<AzureService> _logger = logger;
 
         /// <inheritdoc/>
         public async Task<bool> IsCredentialValid()
