@@ -10,7 +10,7 @@ BASTET is a modern, web-based subnet management system that helps network admini
 - **IP Address Allocation**: Track and manage allocated/unallocated IP spaces
 - **Deleted Subnet Archive**: Recover information from deleted subnets
 - **IP Validation**: Built-in validation ensures IP/CIDR configurations are valid
-- **Azure Integration**: Import subnets per-target or in bulk from Azure Virtual Networks
+- **Azure Integration**: Import subnets per-target or in bulk from Azure Virtual Networks, and reconcile against Azure to find subnets whose VNets have been deleted
 
 ## Technologies
 
@@ -123,6 +123,7 @@ BASTET supports configuration through environment variables:
 | Database Configuration | **BASTET_AUTO_MIGRATE** | Controls whether database migrations are automatically applied on startup | `true` or `false` | `false` | If true, app will need to be able to modify the schema. If false, db_datareader and db_datawriter would be sufficient. |
 | Server Configuration | **ASPNETCORE_URLS** | Configures the URLs and ports the application will listen on | `http://+:5000` | ? | In development environments, defaults to settings in launchSettings.json |
 | Server Configuration | **WEBSITES_PORT** | Tells Azure App Service which port the app is listening on | `5000` | - | Should match the port specified in ASPNETCORE_URLS when deployed to Azure App Service |
+| Server Configuration | **BASTET_CORS_ORIGINS** | Comma-separated list of origins allowed to make cross-origin requests | `https://app.your-domain.com,https://other.your-domain.com` | - | Optional. CORS is disabled unless set, which suits normal use since BASTET serves its own UI and all of its requests are same-origin. Credentials are never allowed, so cross-origin callers are not authenticated. |
 | Server Configuration | **AZURE_CLIENT_ID** | Specifies the client ID for Azure Managed Identity | `123e4567-e89b-12d3-a456-426614174000` | - | Required when using Managed Identity in Azure for server authentication to SQL server. |
 | Server Configuration | **AZURE_TOKEN_CREDENTIALS** | Restricts which credentials DefaultAzureCredential will try | `dev`, `prod`, or a credential name such as `AzureCliCredential` | - | Local development only. Set to `dev` to authenticate with `az login`; leave unset when deployed so Managed Identity is used. See [Local development](#local-development). |
 | Authentication Configuration | **BASTET_OIDC_CLIENT_ID** | OpenID Connect client ID | `mvc_client` or `0e0e7c73-5fce-45c1-be7c-0161f462fd9d` | `mvc_client` | Required in non-development environments. Authentication is disabled in development environments. |
@@ -132,11 +133,17 @@ BASTET supports configuration through environment variables:
 | Logging Configuration | **BASTET_LOG_LEVEL_DEFAULT** | Default logging level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ASPNETCORE** | Logging level for ASP.NET Core components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ENTITYFRAMEWORK** | Logging level for Entity Framework components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
-| Feature Configuration | **BASTET_AZURE_IMPORT** | Enables Azure VNet subnet import functionality | `true` or `false` | `false` | Admin users can import subnets from Azure VNets when enabled |
+| Feature Configuration | **BASTET_AZURE_IMPORT** | Enables the Azure integration | `true` or `false` | `false` | When enabled, admin users can import subnets from Azure VNets and run Azure Reconcile. Gates the Subnet Azure Import, Bulk Azure Import, and Azure Reconcile flows. |
 
 ## Azure Integration
 
-BASTET includes two flows for importing subnets directly from Azure Virtual Networks, allowing network administrators to easily synchronize their cloud and on-premises network configurations. Both flows are admin-only and gated by the `BASTET_AZURE_IMPORT` environment variable. Imported subnets retain their source Azure Resource ID and the Subnet Details page links back to the matching VNet (or VNet's subnet list) in the Azure portal.
+BASTET includes three flows for keeping subnets in step with Azure Virtual Networks: two for importing, and one for finding what Azure no longer has. All are admin-only and gated by the `BASTET_AZURE_IMPORT` environment variable. Imported subnets retain their source Azure Resource ID and the Subnet Details page links back to the matching VNet (or VNet's subnet list) in the Azure portal.
+
+| Flow | Direction | Use it to |
+|------|-----------|-----------|
+| [Subnet Azure Import](#subnet-azure-import-per-subnet) | Azure → BASTET | Fill in one empty BASTET subnet from the matching Azure VNet |
+| [Bulk Azure Import](#bulk-azure-import-across-the-tree) | Azure → BASTET | Import many VNets and subnets across the whole tree in one transaction |
+| [Azure Reconcile](#azure-reconcile-find-what-azure-deleted) | Azure → BASTET | Find imported subnets whose Azure VNet or subnet has since been deleted, and remove them |
 
 ### Prerequisites
 
@@ -178,17 +185,49 @@ Import children of a single, empty Bastet subnet whose address space exactly mat
 
 ### Bulk Azure Import (across the tree)
 
-Import many VNets and their IPv4 subnets in one transaction, applied across the entire Bastet tree. Available from the top-level "Bulk Azure Import" nav link.
+Import many VNets and their IPv4 subnets in one transaction, applied across the entire BASTET tree. Available from the top-level "Bulk Azure Import" nav link.
 
 1. Click "Bulk Azure Import" in the top navigation bar (admin role required)
 2. Pick an Azure subscription
-3. Tree-select the VNets and IPv4 subnets you want to import
+3. Tree-select the VNets and IPv4 subnets you want to import. Anything BASTET already has is greyed out and cannot be selected, so re-importing a subscription only offers what is genuinely new:
+   - **Already imported** — imported from this exact Azure resource
+   - **Cannot import** — the address is already used by another BASTET subnet, or the target subnet already has children, host IPs, or is fully allocated
+   - **Will update existing** — the VNet prefix matches a BASTET subnet that will receive the import
+
+   Use the **Hide already imported** switch to show only what is still importable.
 4. Review the server-computed plan — every conflict (overlapping prefixes, would-create-invalid-hierarchy, target subnet already populated, etc.) is surfaced before commit and blocks it
 5. Commit — all imports are applied in a single database transaction (all-or-nothing)
 
-The planner matches each selected VNet IPv4 prefix to an existing Bastet subnet (exact match → deepest container → top-level), and either populates that subnet or auto-creates a new one. Scope per session is one subscription, IPv4 only.
+The planner matches each selected VNet IPv4 prefix to an existing BASTET subnet (exact match → deepest container → top-level), and either populates that subnet or auto-creates a new one. Scope per session is one subscription, IPv4 only.
 
-For the full design (matching algorithm, conflict rules, edge-case behaviors), see [`docs/bulk-azure-import.md`](docs/bulk-azure-import.md).
+**Fully-encompassing subnets:** when an Azure subnet covers its VNet's entire address prefix (e.g. a `10.11.0.0/24` VNet whose only subnet is also `10.11.0.0/24`), it is not created as a child. Instead the target subnet is marked **fully allocated**, since there is no free space left in it. That produces one BASTET subnet, not two.
+
+### Azure Reconcile (find what Azure deleted)
+
+VNets and address prefixes get deleted in Azure over time, but the subnets they created in BASTET stay. A stale subnet also blocks re-importing its address, because BASTET requires network address + CIDR to be unique. Azure Reconcile finds them.
+
+1. Click "Azure Reconcile" in the top navigation bar (admin role required)
+2. Pick an Azure subscription — only subnets imported from **that** subscription are considered
+3. Review what is reported:
+
+   | Status | Meaning |
+   |--------|---------|
+   | **VNet deleted** | The VNet this subnet was imported from no longer exists |
+   | **Prefix removed** | The VNet still exists but no longer has this address prefix |
+   | **Subnet deleted** | The Azure subnet this was imported from no longer exists |
+   | **Prefix changed** | The Azure subnet still exists but has been re-addressed |
+   | **Needs review** | Reported but not deletable — see below |
+
+4. Select what to remove. Rows that would archive child subnets or host IP assignments show a cascade count first
+5. Type `approved` to confirm. Deletions run in one transaction and the subnets are archived to Deleted Subnets, not destroyed
+
+Only subnets carrying an Azure Resource ID are ever considered, so subnets you created by hand are never touched — as are subnets imported from a subscription other than the one being scanned.
+
+**Safety:** if Azure cannot be read (expired credentials, a transient outage), reconcile reports the error and offers **nothing** for deletion. An empty answer from Azure and an unanswered question are not the same thing, and only one of them means "everything was deleted".
+
+**Needs review** covers drift that deleting cannot fix. If a fully-encompassing Azure subnet is deleted but its VNet and prefix survive, the BASTET subnet stays marked fully allocated with nothing backing that flag. Reconcile reports it and leaves it alone — the flag can also be set by hand, so it is never cleared automatically.
+
+For a step-by-step way to exercise every import and reconcile condition against real Azure resources, see [`docs/azure-test-matrix.md`](docs/azure-test-matrix.md).
 
 ## Usage
 

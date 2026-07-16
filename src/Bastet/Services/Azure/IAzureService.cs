@@ -52,6 +52,20 @@ namespace Bastet.Services.Azure
         /// <param name="subscriptionId">The Azure subscription ID</param>
         /// <returns>List of VNets with their IPv4 prefixes and IPv4 subnets</returns>
         Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId);
+
+        /// <summary>
+        /// Same inventory as <see cref="GetAllVNetsWithSubnets"/>, but reports whether the call
+        /// actually succeeded instead of collapsing every failure to an empty list.
+        /// </summary>
+        /// <remarks>
+        /// Callers that treat "absent from Azure" as a reason to change Bastet data must use this
+        /// overload. An empty list means "this subscription has no VNets" only when
+        /// <see cref="AzureVNetInventory.Success"/> is true; otherwise it means the question was
+        /// never answered, and acting on it would delete subnets because Azure happened to be
+        /// unreachable.
+        /// </remarks>
+        /// <param name="subscriptionId">The Azure subscription ID</param>
+        Task<AzureVNetInventory> GetVNetInventory(string subscriptionId);
     }
 }
 

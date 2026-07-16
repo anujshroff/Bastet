@@ -22,6 +22,8 @@
     <input type="hidden" name="parentId" value="@Model.SubnetId" />
     <input type="hidden" id="vnet-name" name="vnetName" value="" />
     <input type="hidden" id="vnet-resource-id" name="vnetResourceId" value="" />
+    @* Tells the controller to rename/stamp the parent and redirect. Previously inferred from the Referer header. *@
+    <input type="hidden" name="isAzureImport" value="true" />
     
     <div id="subnet-selection" class="d-none">
         <div class="form-check mb-2">

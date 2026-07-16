@@ -1,10 +1,17 @@
 using Bastet.Models.ViewModels;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 
 namespace Bastet.Controllers;
 
+/// <summary>
+/// Error pages. These are the targets of UseStatusCodePagesWithReExecute and UseExceptionHandler,
+/// so they must stay anonymous - if the authorization fallback policy challenged them, handling a
+/// 401 would produce another 401 and the error pipeline would recurse.
+/// </summary>
+[AllowAnonymous]
 public class ErrorController : Controller
 {
     [Route("/Error/{statusCode}")]

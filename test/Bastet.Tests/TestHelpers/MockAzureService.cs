@@ -147,11 +147,31 @@ public class MockAzureService : IAzureService
     /// with their IPv4 prefixes and IPv4 subnets. The single-import tests don't exercise this
     /// path, so it just returns an empty list when no VNets are configured.
     /// </summary>
-    public Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId)
+    public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId) =>
+        (await GetVNetInventory(subscriptionId)).VNets;
+
+    /// <summary>
+    /// Mock inventory read. Reports failure when the mock is configured with invalid credentials,
+    /// so tests can exercise the "Azure could not be reached" path.
+    /// </summary>
+    public Task<AzureVNetInventory> GetVNetInventory(string subscriptionId)
     {
+        if (!_credentialValid)
+        {
+            return Task.FromResult(new AzureVNetInventory
+            {
+                Success = false,
+                ErrorMessage = "Mock credential is not valid."
+            });
+        }
+
         if (string.IsNullOrEmpty(subscriptionId))
         {
-            return Task.FromResult(new List<BulkAzureVNetViewModel>());
+            return Task.FromResult(new AzureVNetInventory
+            {
+                Success = false,
+                ErrorMessage = "No subscription was specified."
+            });
         }
 
         List<BulkAzureVNetViewModel> result = [];
@@ -197,7 +217,7 @@ public class MockAzureService : IAzureService
             result.Add(bulkVnet);
         }
 
-        return Task.FromResult(result);
+        return Task.FromResult(new AzureVNetInventory { Success = true, VNets = result });
     }
 
     /// <summary>

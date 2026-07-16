@@ -41,7 +41,7 @@
                             </ul>
                         </li>
                         @{
-                            // Bulk Azure Import is only shown when the feature flag is enabled and the user is an admin.
+                            // The Azure pages are only shown when the feature flag is enabled and the user is an admin.
                             bool bulkAzureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _enabled) && _enabled;
                         }
                         @if (bulkAzureImportEnabled && UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
@@ -49,6 +49,11 @@
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="Azure" asp-action="BulkImport">
                                     <i class="bi bi-cloud-download"></i> Bulk Azure Import
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" asp-controller="Azure" asp-action="Reconcile">
+                                    <i class="bi bi-arrow-repeat"></i> Azure Reconcile
                                 </a>
                             </li>
                         }

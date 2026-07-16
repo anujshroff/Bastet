@@ -1,0 +1,12 @@
+@model Bastet.Models.ViewModels.AzureReconcileInitialViewModel
+
+<div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>Could not connect to Azure.</strong>
+    <ul class="mb-0 mt-2">
+        @foreach (string error in ViewData.ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))
+        {
+            <li>@error</li>
+        }
+    </ul>
+</div>

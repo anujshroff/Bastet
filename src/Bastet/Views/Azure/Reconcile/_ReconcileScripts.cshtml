@@ -1,0 +1,364 @@
+@model Bastet.Models.ViewModels.AzureReconcileInitialViewModel
+
+<script>
+    $(function () {
+        "use strict";
+
+        let selectedSubscriptionId = "";
+        let selectedSubscriptionName = "";
+        let lastPlan = null;
+
+        function getAntiForgeryToken() {
+            return $("input[name='__RequestVerificationToken']").first().val();
+        }
+
+        function escapeHtml(text) {
+            if (text === null || text === undefined) {
+                return "";
+            }
+            return String(text)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function activateTab(tabId) {
+            $("#reconcile-tabs .nav-link").removeClass("active");
+            $("#reconcile-tab-content .tab-pane").removeClass("show active");
+            $("#" + tabId + "-tab").removeClass("disabled").addClass("active");
+            $("#" + tabId).addClass("show active");
+        }
+
+        // The scan is only valid for the subscription it ran against. Any change to that choice
+        // re-locks the later steps and drops the cached plan, so the pills cannot be used to walk
+        // back into a stale result and delete the wrong subnets.
+        function invalidateScan() {
+            lastPlan = null;
+            $("#rec-step2-tab, #rec-step3-tab").addClass("disabled");
+            $("#rec-go-confirm-btn").prop("disabled", true);
+            $("#rec-confirm-delete-btn").prop("disabled", true);
+        }
+
+        // ------------------------------------------------------------------
+        // Step 1: subscriptions
+        // ------------------------------------------------------------------
+
+        function loadSubscriptions() {
+            $.ajax({
+                url: "@Url.Action("GetSubscriptions", "Azure")",
+                type: "GET",
+                dataType: "json",
+                beforeSend: function () {
+                    $("#rec-subscription-loading").removeClass("d-none");
+                    $("#rec-subscription-error").addClass("d-none");
+                    $("#rec-subscription-selection").addClass("d-none");
+                    $("#rec-no-subscriptions").addClass("d-none");
+                },
+                complete: function () {
+                    $("#rec-subscription-loading").addClass("d-none");
+                },
+                success: function (result) {
+                    if (!result.success) {
+                        $("#rec-subscription-error-message").text(result.error || "Failed to load subscriptions.");
+                        $("#rec-subscription-error").removeClass("d-none");
+                        return;
+                    }
+
+                    const subs = result.subscriptions || [];
+                    if (subs.length === 0) {
+                        $("#rec-no-subscriptions").removeClass("d-none");
+                        return;
+                    }
+
+                    const select = $("#rec-subscription-select");
+                    select.find("option:not(:first)").remove();
+                    subs.forEach(function (s) {
+                        select.append($("<option></option>")
+                            .attr("value", s.subscriptionId)
+                            .attr("data-name", s.displayName)
+                            .text(s.displayName + " (" + s.subscriptionId + ")"));
+                    });
+
+                    $("#rec-subscription-selection").removeClass("d-none");
+                },
+                error: function (xhr, status, error) {
+                    $("#rec-subscription-error-message").text("Error connecting to server: " + error);
+                    $("#rec-subscription-error").removeClass("d-none");
+                }
+            });
+        }
+
+        $("#rec-subscription-select").on("change", function () {
+            $("#rec-scan-btn").prop("disabled", !$(this).val());
+            invalidateScan();
+        });
+
+        $("#rec-scan-btn").on("click", function () {
+            const selected = $("#rec-subscription-select").find("option:selected");
+            selectedSubscriptionId = selected.val();
+            selectedSubscriptionName = selected.attr("data-name") || "";
+            activateTab("rec-step2");
+            runScan();
+        });
+
+        // ------------------------------------------------------------------
+        // Step 2: scan and review
+        // ------------------------------------------------------------------
+
+        function runScan() {
+            $.ajax({
+                url: "@Url.Action("ReconcileScan", "Azure")",
+                type: "POST",
+                dataType: "json",
+                headers: { "RequestVerificationToken": getAntiForgeryToken() },
+                data: { subscriptionId: selectedSubscriptionId, subscriptionName: selectedSubscriptionName },
+                beforeSend: function () {
+                    $("#rec-scan-loading").removeClass("d-none");
+                    $("#rec-scan-error").addClass("d-none");
+                    $("#rec-scan-warnings").addClass("d-none");
+                    $("#rec-scan-content").addClass("d-none");
+                },
+                complete: function () {
+                    $("#rec-scan-loading").addClass("d-none");
+                },
+                success: function (result) {
+                    if (!result.success) {
+                        showScanError(result.error || "The scan failed.");
+                        return;
+                    }
+                    renderPlan(result.plan);
+                },
+                error: function (xhr, status, error) {
+                    showScanError("Error connecting to server: " + error);
+                }
+            });
+        }
+
+        function showScanError(message) {
+            invalidateScan();
+            $("#rec-scan-error-message").text(message);
+            $("#rec-scan-error").removeClass("d-none");
+        }
+
+        function statusLabel(statusName) {
+            switch (statusName) {
+                case "VNetDeleted": return { text: "VNet deleted", css: "bg-danger" };
+                case "VNetPrefixRemoved": return { text: "Prefix removed", css: "bg-danger" };
+                case "SubnetDeleted": return { text: "Subnet deleted", css: "bg-danger" };
+                case "SubnetPrefixChanged": return { text: "Prefix changed", css: "bg-warning text-dark" };
+                case "FullyAllocatingSubnetDeleted": return { text: "Fully allocated", css: "bg-secondary" };
+                default: return { text: statusName || "Unknown", css: "bg-secondary" };
+            }
+        }
+
+        function cascadeNote(item) {
+            const parts = [];
+            if (item.descendantCount > 0) {
+                parts.push(item.descendantCount + " child subnet(s)");
+            }
+            if (item.hostIpCount > 0) {
+                parts.push(item.hostIpCount + " host IP(s)");
+            }
+            return parts.length ? "Also archives " + parts.join(" and ") + "." : "";
+        }
+
+        function renderPlan(plan) {
+            lastPlan = plan;
+
+            // A scan that did not succeed offers nothing, whatever else it says.
+            if (!plan.scanSucceeded) {
+                showScanError((plan.globalErrors || []).join(" ") || "Azure could not be read.");
+                return;
+            }
+
+            if (plan.globalErrors && plan.globalErrors.length > 0) {
+                showScanError(plan.globalErrors.join(" "));
+                return;
+            }
+
+            const warnings = plan.warnings || [];
+            const warnList = $("#rec-scan-warnings-list").empty();
+            warnings.forEach(function (w) { warnList.append($("<li></li>").text(w)); });
+            $("#rec-scan-warnings").toggleClass("d-none", warnings.length === 0);
+
+            const items = plan.items || [];
+            const rows = $("#rec-stale-rows").empty();
+
+            items.forEach(function (item) {
+                const label = statusLabel(item.statusName);
+                const cascade = cascadeNote(item);
+
+                const tr = $("<tr></tr>");
+                tr.append($('<td></td>').html(
+                    '<input class="form-check-input rec-item-checkbox" type="checkbox" value="' + item.subnetId + '">'));
+                tr.append($("<td></td>").text(item.name));
+                tr.append($("<td></td>").html("<code>" + escapeHtml(item.networkAddress) + "/" + escapeHtml(item.cidr) + "</code>"));
+                tr.append($("<td></td>").html('<span class="badge ' + label.css + '">' + escapeHtml(label.text) + "</span>"));
+
+                const reason = $("<td></td>").text(item.reason);
+                if (cascade) {
+                    reason.append($('<div class="text-danger small mt-1"></div>')
+                        .html('<i class="bi bi-exclamation-triangle-fill"></i> ' + escapeHtml(cascade)));
+                }
+                tr.append(reason);
+                rows.append(tr);
+            });
+
+            $("#rec-stale-section").toggleClass("d-none", items.length === 0);
+            $("#rec-nothing-stale").toggleClass("d-none", items.length > 0);
+
+            const reviewItems = plan.reviewItems || [];
+            const reviewRows = $("#rec-review-rows").empty();
+            reviewItems.forEach(function (item) {
+                const tr = $("<tr></tr>");
+                tr.append($("<td></td>").text(item.name));
+                tr.append($("<td></td>").html("<code>" + escapeHtml(item.networkAddress) + "/" + escapeHtml(item.cidr) + "</code>"));
+                tr.append($("<td></td>").text(item.reason));
+                reviewRows.append(tr);
+            });
+            $("#rec-review-section").toggleClass("d-none", reviewItems.length === 0);
+
+            $("#rec-select-all").prop("checked", false);
+            updateGoConfirmBtn();
+            $("#rec-scan-content").removeClass("d-none");
+        }
+
+        function selectedIds() {
+            return $(".rec-item-checkbox:checked").map(function () { return parseInt($(this).val(), 10); }).get();
+        }
+
+        function updateGoConfirmBtn() {
+            $("#rec-go-confirm-btn").prop("disabled", selectedIds().length === 0);
+        }
+
+        $(document).on("change", ".rec-item-checkbox", updateGoConfirmBtn);
+
+        $("#rec-select-all").on("change", function () {
+            $(".rec-item-checkbox").prop("checked", $(this).is(":checked"));
+            updateGoConfirmBtn();
+        });
+
+        $("#rec-back-to-subscription-btn").on("click", function () {
+            activateTab("rec-step1");
+        });
+
+        // ------------------------------------------------------------------
+        // Step 3: confirm and delete
+        // ------------------------------------------------------------------
+
+        $("#rec-go-confirm-btn").on("click", function () {
+            const ids = selectedIds();
+            if (ids.length === 0 || !lastPlan) {
+                return;
+            }
+
+            const chosen = (lastPlan.items || []).filter(function (i) { return ids.indexOf(i.subnetId) !== -1; });
+
+            $("#rec-confirm-count").text(chosen.length);
+
+            let descendants = 0;
+            let hostIps = 0;
+            chosen.forEach(function (i) {
+                descendants += i.descendantCount;
+                hostIps += i.hostIpCount;
+            });
+
+            if (descendants > 0 || hostIps > 0) {
+                $("#rec-confirm-cascade")
+                    .html("<strong>This also archives " + descendants + " child subnet(s) and " + hostIps +
+                        " host IP assignment(s)</strong> that live beneath them.")
+                    .removeClass("d-none");
+            } else {
+                $("#rec-confirm-cascade").addClass("d-none");
+            }
+
+            const list = $("#rec-confirm-list").empty();
+            chosen.forEach(function (i) {
+                list.append($('<li class="list-group-item"></li>')
+                    .text(i.name + " (" + i.networkAddress + "/" + i.cidr + ") - " + statusLabel(i.statusName).text));
+            });
+
+            $("#rec-confirmation").val("");
+            $("#rec-confirm-delete-btn").prop("disabled", true);
+            $("#rec-commit-error").addClass("d-none");
+            $("#rec-commit-success").addClass("d-none");
+
+            activateTab("rec-step3");
+        });
+
+        $("#rec-confirmation").on("input", function () {
+            $("#rec-confirm-delete-btn").prop("disabled", $(this).val() !== "approved");
+        });
+
+        $("#rec-back-to-review-btn").on("click", function () {
+            activateTab("rec-step2");
+        });
+
+        $("#rec-confirm-delete-btn").on("click", function () {
+            const ids = selectedIds();
+            if (ids.length === 0) {
+                return;
+            }
+
+            $.ajax({
+                url: "@Url.Action("BulkDeleteStaleAzureSubnets", "Subnet")",
+                type: "POST",
+                contentType: "application/json",
+                dataType: "json",
+                headers: { "RequestVerificationToken": getAntiForgeryToken() },
+                data: JSON.stringify({
+                    subscriptionId: selectedSubscriptionId,
+                    subnetIds: ids,
+                    confirmation: $("#rec-confirmation").val()
+                }),
+                beforeSend: function () {
+                    $("#rec-confirm-delete-btn").prop("disabled", true);
+                    $("#rec-commit-progress").removeClass("d-none");
+                    $("#rec-commit-error").addClass("d-none");
+                },
+                complete: function () {
+                    $("#rec-commit-progress").addClass("d-none");
+                },
+                success: function (result) {
+                    if (!result.success) {
+                        showCommitError(result);
+                        return;
+                    }
+
+                    $("#rec-commit-success-message").text(
+                        "Deleted " + result.targetsDeleted + " stale subnet(s), archiving " +
+                        result.subnetsArchived + " subnet(s) and " + result.hostIpsArchived + " host IP assignment(s).");
+                    $("#rec-commit-success").removeClass("d-none");
+                    $("#rec-confirm-delete-btn").addClass("d-none");
+                    $("#rec-back-to-review-btn").addClass("d-none");
+
+                    if (result.redirectUrl) {
+                        setTimeout(function () { window.location.href = result.redirectUrl; }, 2000);
+                    }
+                },
+                error: function (xhr) {
+                    let payload = null;
+                    try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
+                    showCommitError(payload || { error: "Server error: " + xhr.status });
+                }
+            });
+        });
+
+        function showCommitError(payload) {
+            $("#rec-commit-error-message").text(payload.error || "The deletion failed.");
+
+            const list = $("#rec-commit-error-list").empty();
+            (payload.globalErrors || []).forEach(function (e) {
+                list.append($("<li></li>").text(e));
+            });
+
+            $("#rec-commit-error").removeClass("d-none");
+            // Let the user retry: the commit is transactional, so nothing was partially applied.
+            $("#rec-confirm-delete-btn").prop("disabled", $("#rec-confirmation").val() !== "approved");
+        }
+
+        loadSubscriptions();
+    });
+</script>

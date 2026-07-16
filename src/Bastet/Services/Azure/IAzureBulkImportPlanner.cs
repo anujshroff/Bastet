@@ -19,5 +19,20 @@ namespace Bastet.Services.Azure
         BulkImportPlanViewModel BuildPlan(
             BulkImportSelectionDto selection,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets);
+
+        /// <summary>
+        /// Fills in the availability of every VNet prefix and Azure subnet, so the selection UI can
+        /// show what is already imported and stop the user picking something that cannot work.
+        /// </summary>
+        /// <remarks>
+        /// Applies the same rules as <see cref="BuildPlan"/>, which is why it lives here: anything
+        /// left selectable must produce a committable plan, and anything blocked must be something
+        /// BuildPlan would reject. Mutates the passed-in view models in place.
+        /// </remarks>
+        /// <param name="vnets">The Azure inventory to annotate</param>
+        /// <param name="existingSubnets">Snapshot of every Bastet subnet currently in the database</param>
+        void AnnotateAvailability(
+            IReadOnlyList<BulkAzureVNetViewModel> vnets,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets);
     }
 }

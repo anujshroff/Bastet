@@ -1,0 +1,64 @@
+@model Bastet.Models.ViewModels.AzureReconcileInitialViewModel
+
+@{
+    ViewData["Title"] = "Azure Reconcile";
+}
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-10 offset-md-1">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    @await Html.PartialAsync("Reconcile/_Header", Model)
+                </div>
+                <div class="card-body">
+                    @if (!ViewData.ModelState.IsValid)
+                    {
+                        @await Html.PartialAsync("Reconcile/_ErrorAlert", Model)
+                    }
+
+                    @Html.AntiForgeryToken()
+
+                    <ul class="nav nav-pills nav-justified mb-3" id="reconcile-tabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="rec-step1-tab" data-bs-toggle="pill" data-bs-target="#rec-step1" type="button" role="tab" aria-controls="rec-step1" aria-selected="true">
+                                <span class="badge rounded-pill bg-primary">1</span> Subscription
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link disabled" id="rec-step2-tab" data-bs-toggle="pill" data-bs-target="#rec-step2" type="button" role="tab" aria-controls="rec-step2" aria-selected="false">
+                                <span class="badge rounded-pill bg-primary">2</span> Review
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link disabled" id="rec-step3-tab" data-bs-toggle="pill" data-bs-target="#rec-step3" type="button" role="tab" aria-controls="rec-step3" aria-selected="false">
+                                <span class="badge rounded-pill bg-primary">3</span> Confirm
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content" id="reconcile-tab-content">
+                        <div class="tab-pane fade show active" id="rec-step1" role="tabpanel" aria-labelledby="rec-step1-tab">
+                            @await Html.PartialAsync("Reconcile/_StepSubscription", Model)
+                        </div>
+                        <div class="tab-pane fade" id="rec-step2" role="tabpanel" aria-labelledby="rec-step2-tab">
+                            @await Html.PartialAsync("Reconcile/_StepReview", Model)
+                        </div>
+                        <div class="tab-pane fade" id="rec-step3" role="tabpanel" aria-labelledby="rec-step3-tab">
+                            @await Html.PartialAsync("Reconcile/_StepConfirm", Model)
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a asp-controller="Subnet" asp-action="Index" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> Back to Subnets
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @await Html.PartialAsync("Reconcile/_ReconcileScripts", Model)
+}

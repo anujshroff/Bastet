@@ -4,7 +4,12 @@
     <i class="bi bi-info-circle"></i>
     Pick the VNets and subnets you want to import. Each selected VNet IPv4 prefix becomes a Bastet subnet target. Selected Azure subnets are placed under it.
     <br />
-    <small>IPv6 prefixes and IPv6-only subnets are not shown.</small>
+    <small>
+        IPv6 prefixes and IPv6-only subnets are not shown. Anything BASTET already has is greyed out and cannot be selected:
+        <span class="badge bg-secondary">Already imported</span> was imported from this Azure resource,
+        <span class="badge bg-danger">Cannot import</span> conflicts with something already in BASTET, and
+        <span class="badge bg-info">Will update existing</span> imports into a subnet you already have.
+    </small>
 </div>
 
 <div id="bulk-vnet-loading" class="text-center py-3 d-none">
@@ -34,11 +39,19 @@
                 <i class="bi bi-x-circle"></i> Deselect all
             </button>
         </div>
-        <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="bulk-rename-matched">
-            <label class="form-check-label" for="bulk-rename-matched">
-                Rename matched Bastet subnets to VNet names
-            </label>
+        <div class="d-flex gap-3">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="bulk-hide-imported">
+                <label class="form-check-label" for="bulk-hide-imported">
+                    Hide already imported
+                </label>
+            </div>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="bulk-rename-matched">
+                <label class="form-check-label" for="bulk-rename-matched">
+                    Rename matched Bastet subnets to VNet names
+                </label>
+            </div>
         </div>
     </div>
 

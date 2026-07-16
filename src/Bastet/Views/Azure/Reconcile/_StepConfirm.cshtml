@@ -1,0 +1,48 @@
+@model Bastet.Models.ViewModels.AzureReconcileInitialViewModel
+
+<div class="alert alert-danger">
+    <h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill me-2"></i>Warning!</h4>
+    <p>You are about to delete <strong><span id="rec-confirm-count">0</span></strong> subnet(s) that no longer exist in Azure.</p>
+    <p id="rec-confirm-cascade" class="d-none mb-2"></p>
+    <p class="mb-0">
+        Deleted subnets are archived and can be reviewed under Deleted Subnets, but they are removed from the
+        subnet tree and any host IP assignments beneath them are archived too.
+    </p>
+</div>
+
+<div id="rec-confirm-list-wrapper" class="mb-3">
+    <ul id="rec-confirm-list" class="list-group"></ul>
+</div>
+
+@* Same type-to-confirm gate as the single-subnet delete flow. Validated server-side. *@
+<div class="mb-4">
+    <label for="rec-confirmation" class="form-label fw-bold">Type "approved" to confirm deletion:</label>
+    <input type="text" class="form-control form-control-lg" id="rec-confirmation" name="confirmation" autocomplete="off" />
+</div>
+
+<div id="rec-commit-progress" class="text-center py-3 d-none">
+    <div class="spinner-border text-danger" role="status">
+        <span class="visually-hidden">Deleting...</span>
+    </div>
+    <p class="mt-2">Deleting stale subnets...</p>
+</div>
+
+<div id="rec-commit-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="rec-commit-error-message"></span>
+    <ul id="rec-commit-error-list" class="mb-0 mt-2"></ul>
+</div>
+
+<div id="rec-commit-success" class="alert alert-success d-none">
+    <i class="bi bi-check-circle"></i>
+    <span id="rec-commit-success-message"></span>
+</div>
+
+<div class="d-grid gap-2">
+    <button id="rec-confirm-delete-btn" class="btn btn-danger btn-lg" disabled>
+        <i class="bi bi-trash"></i> Delete Stale Subnets
+    </button>
+    <button id="rec-back-to-review-btn" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Review
+    </button>
+</div>

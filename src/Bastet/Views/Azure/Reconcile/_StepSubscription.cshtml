@@ -1,0 +1,40 @@
+@model Bastet.Models.ViewModels.AzureReconcileInitialViewModel
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    Pick a subscription to check. BASTET will compare every subnet imported from that subscription against what
+    currently exists in Azure, and report the ones whose VNet or subnet has been deleted. Subnets you created by
+    hand, and subnets imported from other subscriptions, are never touched.
+</div>
+
+<div id="rec-subscription-loading" class="text-center py-3 d-none">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading subscriptions...</span>
+    </div>
+    <p class="mt-2">Loading subscriptions...</p>
+</div>
+
+<div id="rec-subscription-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="rec-subscription-error-message"></span>
+</div>
+
+<div id="rec-subscription-selection" class="d-none">
+    <div class="form-group mb-3">
+        <label for="rec-subscription-select" class="form-label">Subscription</label>
+        <select id="rec-subscription-select" class="form-select">
+            <option value="" disabled selected>-- Select a subscription --</option>
+        </select>
+    </div>
+
+    <div class="d-grid gap-2">
+        <button id="rec-scan-btn" class="btn btn-primary" disabled>
+            Next: Scan for deleted resources <i class="bi bi-arrow-right"></i>
+        </button>
+    </div>
+</div>
+
+<div id="rec-no-subscriptions" class="alert alert-warning d-none">
+    <i class="bi bi-exclamation-triangle"></i>
+    No subscriptions found. Please check your Azure credentials.
+</div>

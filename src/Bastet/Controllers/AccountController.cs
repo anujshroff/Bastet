@@ -2,12 +2,18 @@ using Bastet.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Bastet.Controllers;
 
 public class AccountController(IWebHostEnvironment environment, IUserContextService userContextService) : Controller
 {
+    /// <summary>
+    /// Anonymous: this is the configured AccessDeniedPath, so it must be reachable by a user who
+    /// has just failed an authorization check.
+    /// </summary>
+    [AllowAnonymous]
     public IActionResult AccessDenied(string returnUrl = "/")
     {
         // Store the return URL in ViewData to potentially use it in the view
@@ -15,6 +21,16 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
         return View();
     }
 
+    /// <summary>
+    /// Anonymous so that signing out still works once the session is already gone.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately left as a GET without an antiforgery token. That allows logout CSRF, which is
+    /// accepted here: the worst outcome is an unwanted sign-out, and consumers of this open-source
+    /// project may have external logout links (IdP, reverse proxy, bookmarks) pointing at GET
+    /// /Account/Logout that would break with a 405. The authorization test exempts it explicitly.
+    /// </remarks>
+    [AllowAnonymous]
     public async Task<IActionResult> Logout(string returnUrl = "/")
     {
         // Clear all cookies
@@ -40,14 +56,9 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
         return Redirect("/");
     }
 
+    [Authorize]
     public IActionResult Roles()
     {
-        // Only accessible to authenticated users
-        if (!User.Identity?.IsAuthenticated == true)
-        {
-            return RedirectToAction("Index", "Home");
-        }
-
         // Get the current username
         ViewData["Username"] = userContextService.GetCurrentUsername();
 

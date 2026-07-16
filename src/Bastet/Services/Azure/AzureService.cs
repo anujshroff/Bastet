@@ -280,11 +280,24 @@ namespace Bastet.Services.Azure
         }
 
         /// <inheritdoc/>
-        public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId)
+        public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId) =>
+            (await GetVNetInventory(subscriptionId)).VNets;
+
+        /// <inheritdoc/>
+        public async Task<AzureVNetInventory> GetVNetInventory(string subscriptionId)
         {
-            if (_armClient == null || string.IsNullOrEmpty(subscriptionId))
+            if (_armClient == null)
             {
-                return [];
+                return new AzureVNetInventory
+                {
+                    Success = false,
+                    ErrorMessage = "No Azure credential is available. Check the application's Azure authentication configuration."
+                };
+            }
+
+            if (string.IsNullOrEmpty(subscriptionId))
+            {
+                return new AzureVNetInventory { Success = false, ErrorMessage = "No subscription was specified." };
             }
 
             List<BulkAzureVNetViewModel> result = [];
@@ -340,12 +353,15 @@ namespace Bastet.Services.Azure
                     result.Add(vnetVm);
                 }
 
-                return result;
+                return new AzureVNetInventory { Success = true, VNets = result };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to retrieve Azure VNets with subnets for subscription {SubscriptionId}", subscriptionId);
-                return [];
+
+                // Report the failure rather than an empty inventory: callers must be able to tell
+                // "this subscription has no VNets" apart from "Azure could not be reached".
+                return new AzureVNetInventory { Success = false, ErrorMessage = ex.Message };
             }
         }
 

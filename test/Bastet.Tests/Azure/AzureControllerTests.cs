@@ -2,6 +2,7 @@ using Bastet.Controllers;
 using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Services.Azure;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -36,7 +37,7 @@ public class AzureControllerTests : IDisposable
         _mockAzureService = new MockAzureService(true, CreateTestSubscriptions(), CreateTestVNets(), CreateTestSubnets());
 
         // Create and configure the controller
-        _controller = new AzureController(_context, _mockAzureService)
+        _controller = new AzureController(_context, _mockAzureService, new AzureSubnetSnapshotService(_context))
         {
             // Setup controller context with HttpContext
             ControllerContext = new ControllerContext
@@ -284,7 +285,7 @@ public class AzureControllerTests : IDisposable
     {
         // Arrange
         int subnetId = 2;
-        AzureController controller = new(_context, new MockAzureService(false))
+        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context))
         {
             ControllerContext = new ControllerContext
             {

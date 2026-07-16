@@ -3,6 +3,7 @@ using Bastet.Filters;
 using Bastet.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Data.SqlClient;
@@ -104,6 +105,8 @@ builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bast
 builder.Services.AddSingleton<Bastet.Services.Azure.AzureArmClientProvider>();
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureService, Bastet.Services.Azure.AzureService>();
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureBulkImportPlanner, Bastet.Services.Azure.AzureBulkImportPlanner>();
+builder.Services.AddScoped<Bastet.Services.Azure.IAzureSubnetSnapshotService, Bastet.Services.Azure.AzureSubnetSnapshotService>();
+builder.Services.AddScoped<Bastet.Services.Azure.IAzureReconciler, Bastet.Services.Azure.AzureReconciler>();
 
 builder.Services.AddScoped<Bastet.Services.Security.IInputSanitizationService, Bastet.Services.Security.InputSanitizationService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
@@ -127,10 +130,20 @@ builder.Services.AddHttpContextAccessor();
 // Register UserContextService
 builder.Services.AddScoped<IUserContextService, UserContextService>();
 
-// Add CORS for Web UI
-builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin()
-              .AllowAnyHeader()
-              .AllowAnyMethod()));
+// CORS is opt-in. Bastet renders its own UI and all of its AJAX is same-origin, so no cross-origin
+// access is needed by default. Set BASTET_CORS_ORIGINS to a comma-separated list of origins to
+// allow specific callers. Credentials are deliberately not allowed: the antiforgery token is
+// accepted via the RequestVerificationToken header, so permitting cross-origin credentialed
+// requests would open up CSRF.
+string[] corsOrigins = (Environment.GetEnvironmentVariable("BASTET_CORS_ORIGINS") ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+if (corsOrigins.Length > 0)
+{
+    builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(corsOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()));
+}
 
 // Configure authentication based on environment
 if (builder.Environment.IsDevelopment())
@@ -181,6 +194,9 @@ else
 }
 
 builder.Services.AddAuthorizationBuilder()
+    // Anything without an explicit [Authorize] or [AllowAnonymous] requires an authenticated user,
+    // so a new action that forgets its attribute fails closed rather than being served anonymously.
+    .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
     .AddPolicy("RequireViewRole", policy =>
         policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
     .AddPolicy("RequireEditRole", policy =>
@@ -251,7 +267,11 @@ else
 // Enable static files
 app.UseStaticFiles();
 
-app.UseCors();
+// Only registered when BASTET_CORS_ORIGINS is set; calling UseCors without a policy would throw.
+if (corsOrigins.Length > 0)
+{
+    app.UseCors();
+}
 
 app.UseRouting();
 

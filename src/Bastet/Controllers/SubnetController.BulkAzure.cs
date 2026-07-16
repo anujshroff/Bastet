@@ -25,6 +25,7 @@ public partial class SubnetController : Controller
     public async Task<IActionResult> BulkCreateFromAzurePlan(
         [FromBody] BulkImportSelectionDto selection,
         [FromServices] IAzureBulkImportPlanner planner,
+        [FromServices] IAzureSubnetSnapshotService snapshotService,
         [FromServices] IInputSanitizationService? sanitizationService = null)
     {
         // Feature flag guard — same as the AzureController endpoints
@@ -39,7 +40,7 @@ public partial class SubnetController : Controller
         }
 
         // Re-build the plan against the current Bastet tree right now
-        IReadOnlyList<ExistingSubnetSnapshot> existing = await BuildExistingSnapshotForPlannerAsync();
+        IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
         BulkImportPlanViewModel plan = planner.BuildPlan(selection, existing);
 
         if (!plan.CanCommit)
@@ -254,33 +255,4 @@ public partial class SubnetController : Controller
         }
     }
 
-    /// <summary>
-    /// Loads every Bastet subnet (with the booleans the planner needs) into a snapshot list.
-    /// Mirrors <c>AzureController.BuildExistingSnapshotAsync</c>.
-    /// </summary>
-    private async Task<IReadOnlyList<ExistingSubnetSnapshot>> BuildExistingSnapshotForPlannerAsync()
-    {
-        List<Subnet> all = await context.Subnets
-            .AsNoTracking()
-            .ToListAsync();
-
-        HashSet<int> parentsWithChildren = [.. all.Where(s => s.ParentSubnetId.HasValue).Select(s => s.ParentSubnetId!.Value).Distinct()];
-
-        HashSet<int> subnetsWithHostIps = await context.HostIpAssignments
-            .AsNoTracking()
-            .Select(h => h.SubnetId)
-            .Distinct()
-            .ToHashSetAsync();
-
-        return [.. all.Select(s => new ExistingSubnetSnapshot
-        {
-            Id = s.Id,
-            Name = s.Name,
-            NetworkAddress = s.NetworkAddress,
-            Cidr = s.Cidr,
-            HasChildSubnets = parentsWithChildren.Contains(s.Id),
-            HasHostIpAssignments = subnetsWithHostIps.Contains(s.Id),
-            IsFullyAllocated = s.IsFullyAllocated
-        })];
-    }
 }

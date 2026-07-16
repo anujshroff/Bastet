@@ -158,9 +158,9 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, isAzureImport: true);
 
-        // Assert - the controller returns a redirect when called from the Referer we set up
+        // Assert - the controller redirects when the caller declares this is an Azure import
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
@@ -195,9 +195,9 @@ public class SubnetControllerBatchCreateTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName, isAzureImport: true);
 
-        // Assert - the controller returns a redirect when called from the Referer we set up
+        // Assert - the controller redirects when the caller declares this is an Azure import
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
@@ -221,9 +221,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
         string originalName = "Parent Subnet";
         string vnetName = "Should-Not-Rename";
 
-        // Change the referer to something not from Azure/Import
-        _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
-
         List<CreateSubnetViewModel> subnets =
         [
             new()
@@ -235,7 +232,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // Act
+        // Act - isAzureImport defaults to false, so this is a plain batch create
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName);
 
         // Assert
@@ -384,11 +381,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // Set referer to Azure import page
-        _controller.HttpContext.Request.Headers.Referer = "https://localhost/Azure/Import/2";
-
         // Act
-        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, isAzureImport: true);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);

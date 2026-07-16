@@ -135,6 +135,149 @@ namespace Bastet.Services.Azure
         }
 
         // -------------------------------------------------------------------
+        // Availability annotation (drives the selection UI)
+        // -------------------------------------------------------------------
+
+        /// <inheritdoc/>
+        public void AnnotateAvailability(
+            IReadOnlyList<BulkAzureVNetViewModel> vnets,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
+        {
+            ArgumentNullException.ThrowIfNull(vnets);
+            ArgumentNullException.ThrowIfNull(existingSubnets);
+
+            foreach (BulkAzureVNetViewModel vnet in vnets)
+            {
+                vnet.Prefixes = [.. vnet.Ipv4AddressPrefixes.Select(p => AnnotatePrefix(p, existingSubnets))];
+
+                foreach (BulkAzureSubnetViewModel subnet in vnet.Subnets)
+                {
+                    AnnotateSubnet(subnet, vnet, existingSubnets);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A VNet prefix becomes one Bastet target: either an existing subnet it matches exactly, or
+        /// a newly created one. Blocked whenever <see cref="BuildPlanItem"/> would record an error.
+        /// </summary>
+        private BulkAzurePrefixViewModel AnnotatePrefix(
+            string addressPrefix,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
+        {
+            BulkAzurePrefixViewModel result = new() { AddressPrefix = addressPrefix };
+
+            if (!TryParseCidr(addressPrefix, out string network, out int cidr)
+                || !ipUtilityService.IsValidSubnet(network, cidr))
+            {
+                return Blocked(result, "This prefix is not a valid, CIDR-aligned IPv4 network.");
+            }
+
+            ExistingSubnetSnapshot? exact = existingSubnets.FirstOrDefault(e =>
+                e.Cidr == cidr && string.Equals(e.NetworkAddress, network, StringComparison.OrdinalIgnoreCase));
+
+            if (exact is not null)
+            {
+                // Mirrors the hard failures in BuildPlanItem for an ExactMatch target
+                if (exact.HasChildSubnets)
+                {
+                    return Blocked(result, $"Bastet subnet '{exact.Name}' already has child subnets. Already imported?");
+                }
+                if (exact.HasHostIpAssignments)
+                {
+                    return Blocked(result, $"Bastet subnet '{exact.Name}' already has host IP assignments.");
+                }
+                if (exact.IsFullyAllocated)
+                {
+                    return Blocked(result, $"Bastet subnet '{exact.Name}' is marked as fully allocated.");
+                }
+
+                result.Status = BulkImportAvailability.WillUpdateExisting;
+                result.Reason = $"Will import into existing Bastet subnet '{exact.Name}'.";
+                result.IsSelectable = true;
+                return result;
+            }
+
+            // Mirrors DetectVNetPrefixWouldContainExistingSubnet
+            ExistingSubnetSnapshot? contained = existingSubnets.FirstOrDefault(e =>
+                ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr));
+
+            return contained is not null
+                ? Blocked(result, $"Would contain existing Bastet subnet '{contained.Name}' ({contained.NetworkAddress}/{contained.Cidr}), which would create an invalid hierarchy.")
+                : Available(result, "Will create a new Bastet subnet.");
+        }
+
+        /// <summary>
+        /// An Azure subnet becomes a child of its prefix's target - unless it covers the whole
+        /// prefix, in which case it is never created and only marks the target fully allocated.
+        /// </summary>
+        private static void AnnotateSubnet(
+            BulkAzureSubnetViewModel subnet,
+            BulkAzureVNetViewModel vnet,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
+        {
+            // Encompassing subnets are excluded from the duplicate check in
+            // DetectExistingBastetSubnetConflicts because they are never created. Without this, such
+            // a subnet would always look like a duplicate of its own target once that target exists.
+            bool encompassesAPrefix = vnet.Ipv4AddressPrefixes
+                .Any(p => string.Equals(p, subnet.AddressPrefix, StringComparison.OrdinalIgnoreCase));
+
+            if (encompassesAPrefix)
+            {
+                subnet.Status = BulkImportAvailability.Available;
+                subnet.Reason = "Covers the whole VNet prefix, so it marks the target fully allocated instead of being created.";
+                subnet.IsSelectable = true;
+                return;
+            }
+
+            if (!TryParseCidr(subnet.AddressPrefix, out string network, out int cidr))
+            {
+                subnet.Status = BulkImportAvailability.Blocked;
+                subnet.Reason = "This subnet does not have a valid IPv4 address prefix.";
+                subnet.IsSelectable = false;
+                return;
+            }
+
+            // Bastet requires {NetworkAddress, Cidr} to be unique, so the address is what blocks the
+            // import. The resource ID only tells us whether we are the ones who put it there.
+            ExistingSubnetSnapshot? exact = existingSubnets.FirstOrDefault(e =>
+                e.Cidr == cidr && string.Equals(e.NetworkAddress, network, StringComparison.OrdinalIgnoreCase));
+
+            if (exact is null)
+            {
+                subnet.Status = BulkImportAvailability.Available;
+                subnet.Reason = null;
+                subnet.IsSelectable = true;
+                return;
+            }
+
+            bool sameAzureResource = !string.IsNullOrEmpty(exact.AzureResourceId)
+                && string.Equals(exact.AzureResourceId, subnet.ResourceId, StringComparison.OrdinalIgnoreCase);
+
+            subnet.Status = sameAzureResource ? BulkImportAvailability.AlreadyImported : BulkImportAvailability.Blocked;
+            subnet.Reason = sameAzureResource
+                ? $"Already imported as Bastet subnet '{exact.Name}'."
+                : $"Bastet subnet '{exact.Name}' already uses {subnet.AddressPrefix}.";
+            subnet.IsSelectable = false;
+        }
+
+        private static BulkAzurePrefixViewModel Blocked(BulkAzurePrefixViewModel result, string reason)
+        {
+            result.Status = BulkImportAvailability.Blocked;
+            result.Reason = reason;
+            result.IsSelectable = false;
+            return result;
+        }
+
+        private static BulkAzurePrefixViewModel Available(BulkAzurePrefixViewModel result, string reason)
+        {
+            result.Status = BulkImportAvailability.Available;
+            result.Reason = reason;
+            result.IsSelectable = true;
+            return result;
+        }
+
+        // -------------------------------------------------------------------
         // Plan item construction
         // -------------------------------------------------------------------
         private BulkImportPlanItem BuildPlanItem(
