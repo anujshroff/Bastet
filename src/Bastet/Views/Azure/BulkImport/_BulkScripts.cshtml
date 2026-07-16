@@ -21,6 +21,16 @@
             $("#" + tabId).addClass("show active");
         }
 
+        // Once a step has been visited its pill stays clickable, so without this the user could go
+        // back to step 2, change the selection, then jump straight to the preview or commit pill and
+        // act on a plan that no longer matches what is on screen. Any change to the selection
+        // re-locks the later steps and drops the cached selection.
+        function invalidatePlan() {
+            lastSelection = null;
+            $("#step3-tab, #step4-tab").addClass("disabled");
+            $("#bulk-go-commit-btn").prop("disabled", true);
+        }
+
         function escapeHtml(s) {
             if (s === null || s === undefined) {
                 return "";
@@ -136,32 +146,63 @@
             });
         }
 
+        // Badge for a server-computed availability status. Switches on the name rather than the
+        // enum ordinal, and falls back rather than rendering nothing for an unknown value.
+        function availabilityBadge(statusName) {
+            switch (statusName) {
+                case "Available": return "";
+                case "WillUpdateExisting": return '<span class="badge bg-info ms-1">Will update existing</span>';
+                case "AlreadyImported": return '<span class="badge bg-secondary ms-1">Already imported</span>';
+                case "Blocked": return '<span class="badge bg-danger ms-1">Cannot import</span>';
+                default: return '<span class="badge bg-secondary ms-1">' + escapeHtml(statusName) + "</span>";
+            }
+        }
+
+        function reasonHtml(reason) {
+            return reason ? `<div class="small text-muted ms-4">${escapeHtml(reason)}</div>` : "";
+        }
+
         function renderVNetTree() {
             const $tree = $("#bulk-vnet-tree").empty();
+            const hideImported = $("#bulk-hide-imported").is(":checked");
 
             $.each(vnets, function (vIdx, vnet) {
                 const $card = $('<div class="card mb-2"></div>');
                 const $body = $('<div class="card-body p-2"></div>');
+                let visiblePrefixes = 0;
 
-                $.each(vnet.ipv4AddressPrefixes, function (pIdx, prefix) {
+                $.each(vnet.prefixes, function (pIdx, prefixInfo) {
+                    const prefix = prefixInfo.addressPrefix;
+
+                    if (hideImported && !prefixInfo.isSelectable) {
+                        return; // continue
+                    }
+                    visiblePrefixes++;
+
                     const prefixId = `bulk-prefix-${vIdx}-${pIdx}`;
                     const $prefixDiv = $('<div class="form-check border-bottom pb-2 mb-2"></div>');
                     const $prefixCheckbox = $('<input type="checkbox" class="form-check-input bulk-prefix-checkbox">')
                         .attr('id', prefixId)
                         .attr('data-vnet-idx', vIdx)
-                        .attr('data-prefix', prefix);
+                        .attr('data-prefix', prefix)
+                        .prop('disabled', !prefixInfo.isSelectable);
                     const $prefixLabel = $('<label class="form-check-label"></label>')
                         .attr('for', prefixId)
-                        .html(`<strong>${escapeHtml(vnet.name)}</strong> <span class="badge bg-secondary">${escapeHtml(prefix)}</span>`);
+                        .html(`<strong>${escapeHtml(vnet.name)}</strong> <span class="badge bg-secondary">${escapeHtml(prefix)}</span>`
+                            + availabilityBadge(prefixInfo.statusName));
 
                     $prefixDiv.append($prefixCheckbox).append($prefixLabel);
+                    $prefixDiv.append(reasonHtml(prefixInfo.reason));
 
                     // Filter Azure subnets that are contained in this prefix only
                     const containedSubnets = vnet.subnets.filter(function (s) { return prefixContainsCidr(prefix, s.addressPrefix); });
+                    const shownSubnets = hideImported
+                        ? containedSubnets.filter(function (s) { return s.isSelectable; })
+                        : containedSubnets;
 
-                    if (containedSubnets.length > 0) {
+                    if (shownSubnets.length > 0) {
                         const $subList = $('<div class="ms-4 mt-2"></div>');
-                        $.each(containedSubnets, function (sIdx, subnet) {
+                        $.each(shownSubnets, function (sIdx, subnet) {
                             const subnetId = `bulk-subnet-${vIdx}-${pIdx}-${sIdx}`;
                             const $subnetDiv = $('<div class="form-check"></div>');
                             const $subnetCheckbox = $('<input type="checkbox" class="form-check-input bulk-subnet-checkbox">')
@@ -170,14 +211,24 @@
                                 .attr('data-prefix', prefix)
                                 .attr('data-name', subnet.name)
                                 .attr('data-address-prefix', subnet.addressPrefix)
-                                .attr('data-resource-id', subnet.resourceId || '');
+                                .attr('data-resource-id', subnet.resourceId || '')
+                                // A subnet is only ever imported underneath its prefix, so a blocked
+                                // prefix blocks its children too. Without this they'd stay tickable
+                                // but never submit: buildSelectionFromUI walks checked prefixes.
+                                .prop('disabled', !subnet.isSelectable || !prefixInfo.isSelectable);
                             const $subnetLabel = $('<label class="form-check-label"></label>')
                                 .attr('for', subnetId)
-                                .html(`${escapeHtml(subnet.name)} <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>`);
+                                .html(`${escapeHtml(subnet.name)} <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>`
+                                    + availabilityBadge(subnet.statusName));
                             $subnetDiv.append($subnetCheckbox).append($subnetLabel);
+                            if (!subnet.isSelectable) {
+                                $subnetDiv.append(reasonHtml(subnet.reason));
+                            }
                             $subList.append($subnetDiv);
                         });
                         $prefixDiv.append($subList);
+                    } else if (containedSubnets.length > 0) {
+                        $prefixDiv.append('<div class="ms-4 mt-1 text-muted small"><em>All subnets in this prefix are already imported.</em></div>');
                     } else {
                         $prefixDiv.append('<div class="ms-4 mt-1 text-muted small"><em>No IPv4 subnets in this prefix.</em></div>');
                     }
@@ -185,16 +236,27 @@
                     $body.append($prefixDiv);
                 });
 
+                // Don't render a card whose every prefix was filtered out
+                if (visiblePrefixes === 0) {
+                    return; // continue
+                }
+
                 $card.append($body);
                 $tree.append($card);
             });
 
-            // Subnet checked → check its prefix
+            if ($tree.children().length === 0) {
+                $tree.append('<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> '
+                    + 'Everything in this subscription has already been imported. Nothing left to select.</div>');
+            }
+
+            // Subnet checked → check its prefix (never force a disabled prefix on; a blocked target
+            // means the child can't be imported either)
             $(".bulk-subnet-checkbox").on("change", function () {
                 if ($(this).is(":checked")) {
                     const vIdx = $(this).attr('data-vnet-idx');
                     const prefix = $(this).attr('data-prefix');
-                    $(`.bulk-prefix-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']`).prop("checked", true);
+                    $(`.bulk-prefix-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']:not(:disabled)`).prop("checked", true);
                 }
                 updateGoPreviewBtn();
             });
@@ -211,17 +273,51 @@
         }
 
         function updateGoPreviewBtn() {
-            const anyPrefix = $(".bulk-prefix-checkbox:checked").length > 0;
+            // :not(:disabled) throughout - jQuery's :checked matches disabled inputs, so without it
+            // a greyed-out row would still count and still be submitted.
+            const anyPrefix = $(".bulk-prefix-checkbox:checked:not(:disabled)").length > 0;
             $("#bulk-go-preview-btn").prop("disabled", !anyPrefix);
+
+            // Every selection change routes through here, so this is where a previously-built plan
+            // stops matching the UI.
+            invalidatePlan();
         }
 
+        // The rename switch is part of the selection but doesn't touch the checkboxes.
+        $("#bulk-rename-matched").on("change", invalidatePlan);
+
         $("#bulk-select-all-btn").on("click", function () {
-            $(".bulk-prefix-checkbox, .bulk-subnet-checkbox").prop("checked", true);
+            // Skip anything that can't be imported, so Select all is safe on a subscription that has
+            // already been imported once.
+            $(".bulk-prefix-checkbox:not(:disabled), .bulk-subnet-checkbox:not(:disabled)").prop("checked", true);
             updateGoPreviewBtn();
         });
 
         $("#bulk-deselect-all-btn").on("click", function () {
             $(".bulk-prefix-checkbox, .bulk-subnet-checkbox").prop("checked", false);
+            updateGoPreviewBtn();
+        });
+
+        // Purely a display filter, but re-rendering wipes the checkboxes, so capture the selection
+        // and restore it afterwards. This still re-locks the later steps via updateGoPreviewBtn,
+        // which is deliberate: cheaper to re-run the preview than to trust a restore to be perfect.
+        $("#bulk-hide-imported").on("change", function () {
+            const checkedPrefixes = $(".bulk-prefix-checkbox:checked:not(:disabled)")
+                .map(function () { return $(this).attr("data-vnet-idx") + "|" + $(this).attr("data-prefix"); }).get();
+            const checkedSubnets = $(".bulk-subnet-checkbox:checked:not(:disabled)")
+                .map(function () { return $(this).attr("data-vnet-idx") + "|" + $(this).attr("data-address-prefix"); }).get();
+
+            renderVNetTree();
+
+            $(".bulk-prefix-checkbox:not(:disabled)").each(function () {
+                const key = $(this).attr("data-vnet-idx") + "|" + $(this).attr("data-prefix");
+                $(this).prop("checked", checkedPrefixes.indexOf(key) !== -1);
+            });
+            $(".bulk-subnet-checkbox:not(:disabled)").each(function () {
+                const key = $(this).attr("data-vnet-idx") + "|" + $(this).attr("data-address-prefix");
+                $(this).prop("checked", checkedSubnets.indexOf(key) !== -1);
+            });
+
             updateGoPreviewBtn();
         });
 
@@ -273,7 +369,9 @@
             const renameMatched = $("#bulk-rename-matched").is(":checked");
             const prefixSelections = [];
 
-            $(".bulk-prefix-checkbox:checked").each(function () {
+            // :not(:disabled) is load-bearing here - jQuery's :checked matches disabled inputs, so
+            // without it "Select all" would submit the very rows the server marked un-importable.
+            $(".bulk-prefix-checkbox:checked:not(:disabled)").each(function () {
                 const vIdx = parseInt($(this).attr('data-vnet-idx'), 10);
                 const prefix = $(this).attr('data-prefix');
                 const vnet = vnets[vIdx];
@@ -285,7 +383,7 @@
                     subnets: []
                 };
 
-                $(`.bulk-subnet-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']:checked`).each(function () {
+                $(`.bulk-subnet-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']:checked:not(:disabled)`).each(function () {
                     prefixDto.subnets.push({
                         name: $(this).attr('data-name'),
                         addressPrefix: $(this).attr('data-address-prefix'),
@@ -354,19 +452,24 @@
                 const headerCss = item.errors && item.errors.length > 0 ? "card-header bg-danger text-white" : "card-header bg-light";
                 const $header = $('<div></div>').addClass(headerCss);
 
+                // Switch on the name rather than the enum ordinal, so reordering BulkImportTargetType
+                // or serializing it as a string can't silently blank out the description.
                 let targetText = "";
-                switch (item.targetType) {
-                    case 0: // ExactMatch
-                        targetText = `<span class="badge bg-success">Exact match</span> Bastet subnet "${escapeHtml(item.existingTargetSubnetName)}" (${escapeHtml(item.prefixNetworkAddress)}/${item.prefixCidr})`;
+                switch (item.targetTypeName) {
+                    case "ExactMatch":
+                        targetText = `<span class="badge bg-success">Exact match</span> Bastet subnet "${escapeHtml(item.existingTargetSubnetName)}" (${escapeHtml(item.prefixNetworkAddress)}/${escapeHtml(item.prefixCidr)})`;
                         if (item.willRename) {
                             targetText += ` &rarr; will rename to <strong>${escapeHtml(item.newName)}</strong>`;
                         }
                         break;
-                    case 1: // AutoCreateChild
-                        targetText = `<span class="badge bg-info">New child</span> create <strong>${escapeHtml(item.autoCreateTargetName)}</strong> (${escapeHtml(item.prefixNetworkAddress)}/${item.prefixCidr}) under "${escapeHtml(item.autoCreateParentSubnetName)}"`;
+                    case "AutoCreateChild":
+                        targetText = `<span class="badge bg-info">New child</span> create <strong>${escapeHtml(item.autoCreateTargetName)}</strong> (${escapeHtml(item.prefixNetworkAddress)}/${escapeHtml(item.prefixCidr)}) under "${escapeHtml(item.autoCreateParentSubnetName)}"`;
                         break;
-                    case 2: // AutoCreateTopLevel
-                        targetText = `<span class="badge bg-warning text-dark">New top-level</span> create <strong>${escapeHtml(item.autoCreateTargetName)}</strong> (${escapeHtml(item.prefixNetworkAddress)}/${item.prefixCidr})`;
+                    case "AutoCreateTopLevel":
+                        targetText = `<span class="badge bg-warning text-dark">New top-level</span> create <strong>${escapeHtml(item.autoCreateTargetName)}</strong> (${escapeHtml(item.prefixNetworkAddress)}/${escapeHtml(item.prefixCidr)})`;
+                        break;
+                    default:
+                        targetText = `<span class="badge bg-secondary">${escapeHtml(item.targetTypeName)}</span> ${escapeHtml(item.prefixNetworkAddress)}/${escapeHtml(item.prefixCidr)}`;
                         break;
                 }
 
@@ -399,7 +502,7 @@
                     const $childList = $('<ul class="list-unstyled ms-3 mb-0"></ul>');
                     $.each(item.childSubnets, function (j, c) {
                         $childList.append($('<li></li>').html(
-                            `<i class="bi bi-plus-circle text-success"></i> Create <strong>${escapeHtml(c.name)}</strong> <code>${escapeHtml(c.networkAddress)}/${c.cidr}</code>` +
+                            `<i class="bi bi-plus-circle text-success"></i> Create <strong>${escapeHtml(c.name)}</strong> <code>${escapeHtml(c.networkAddress)}/${escapeHtml(c.cidr)}</code>` +
                             (c.originalAzureName !== c.name ? ` <small class="text-muted">(was "${escapeHtml(c.originalAzureName)}")</small>` : "")
                         ));
                     });

@@ -1,5 +1,4 @@
 using Azure.Core;
-using Azure.Identity;
 using Azure.ResourceManager;
 using Azure.ResourceManager.Network;
 using Azure.ResourceManager.Resources;
@@ -10,32 +9,20 @@ namespace Bastet.Services.Azure
     /// <summary>
     /// Implementation of the Azure service for interacting with Azure APIs
     /// </summary>
-    public class AzureService : IAzureService
+    /// <remarks>
+    /// Creates a new instance of the AzureService
+    /// </remarks>
+    /// <param name="ipUtilityService">The IP utility service for subnet calculations</param>
+    /// <param name="armClientProvider">Provides the shared ArmClient</param>
+    /// <param name="logger">Logger for reporting Azure access failures</param>
+    public class AzureService(
+        IIpUtilityService ipUtilityService,
+        AzureArmClientProvider armClientProvider,
+        ILogger<AzureService> logger) : IAzureService
     {
-        private readonly ArmClient? _armClient;
-        private readonly IIpUtilityService _ipUtilityService;
-
-        /// <summary>
-        /// Creates a new instance of the AzureService
-        /// </summary>
-        /// <param name="ipUtilityService">The IP utility service for subnet calculations</param>
-        public AzureService(IIpUtilityService ipUtilityService)
-        {
-            _ipUtilityService = ipUtilityService;
-
-            try
-            {
-                // DefaultAzureCredential attempts multiple authentication methods
-                // including environment variables, managed identity, and Visual Studio/CLI credentials
-                DefaultAzureCredential credential = new();
-                _armClient = new ArmClient(credential);
-            }
-            catch (Exception)
-            {
-                // Handle credential creation failure
-                _armClient = null;
-            }
-        }
+        private readonly ArmClient? _armClient = armClientProvider.Client;
+        private readonly IIpUtilityService _ipUtilityService = ipUtilityService;
+        private readonly ILogger<AzureService> _logger = logger;
 
         /// <inheritdoc/>
         public async Task<bool> IsCredentialValid()
@@ -59,9 +46,9 @@ namespace Bastet.Services.Azure
                 // No error, but no subscriptions either
                 return false;
             }
-            catch
+            catch (Exception ex)
             {
-                // Error occurred during access
+                _logger.LogWarning(ex, "Azure credential validation failed");
                 return false;
             }
         }
@@ -76,16 +63,24 @@ namespace Bastet.Services.Azure
 
             List<AzureSubscriptionViewModel> result = [];
 
-            await foreach (SubscriptionResource? subscription in _armClient.GetSubscriptions())
+            try
             {
-                result.Add(new AzureSubscriptionViewModel
+                await foreach (SubscriptionResource? subscription in _armClient.GetSubscriptions())
                 {
-                    SubscriptionId = subscription.Data.SubscriptionId,
-                    DisplayName = subscription.Data.DisplayName
-                });
-            }
+                    result.Add(new AzureSubscriptionViewModel
+                    {
+                        SubscriptionId = subscription.Data.SubscriptionId,
+                        DisplayName = subscription.Data.DisplayName
+                    });
+                }
 
-            return result;
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to retrieve Azure subscriptions");
+                return [];
+            }
         }
 
         /// <inheritdoc/>
@@ -139,8 +134,9 @@ namespace Bastet.Services.Azure
 
                 return result;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to retrieve compatible Azure VNets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
                 return [];
             }
         }
@@ -276,18 +272,32 @@ namespace Bastet.Services.Azure
 
                 return result;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to retrieve compatible Azure subnets for VNet {VNetResourceId}", SanitizeForLog(vnetResourceId));
                 return [];
             }
         }
 
         /// <inheritdoc/>
-        public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId)
+        public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId) =>
+            (await GetVNetInventory(subscriptionId)).VNets;
+
+        /// <inheritdoc/>
+        public async Task<AzureVNetInventory> GetVNetInventory(string subscriptionId)
         {
-            if (_armClient == null || string.IsNullOrEmpty(subscriptionId))
+            if (_armClient == null)
             {
-                return [];
+                return new AzureVNetInventory
+                {
+                    Success = false,
+                    ErrorMessage = "No Azure credential is available. Check the application's Azure authentication configuration."
+                };
+            }
+
+            if (string.IsNullOrEmpty(subscriptionId))
+            {
+                return new AzureVNetInventory { Success = false, ErrorMessage = "No subscription was specified." };
             }
 
             List<BulkAzureVNetViewModel> result = [];
@@ -343,11 +353,15 @@ namespace Bastet.Services.Azure
                     result.Add(vnetVm);
                 }
 
-                return result;
+                return new AzureVNetInventory { Success = true, VNets = result };
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                return [];
+                _logger.LogError(ex, "Failed to retrieve Azure VNets with subnets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
+
+                // Report the failure rather than an empty inventory: callers must be able to tell
+                // "this subscription has no VNets" apart from "Azure could not be reached".
+                return new AzureVNetInventory { Success = false, ErrorMessage = ex.Message };
             }
         }
 
@@ -454,5 +468,12 @@ namespace Bastet.Services.Azure
             string[] parts = addressPrefix.Split('/');
             return parts.Length > 1 && int.TryParse(parts[1], out int cidr) ? cidr : 0;
         }
+
+        /// <summary>
+        /// Strips line breaks from request-supplied values before logging, so crafted input can't
+        /// forge additional log entries (CodeQL: log entries created from user input).
+        /// </summary>
+        private static string SanitizeForLog(string? value) =>
+            (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
     }
 }

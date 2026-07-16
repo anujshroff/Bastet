@@ -47,7 +47,8 @@ public class AzureBulkImportPlannerTests
 
     private static ExistingSubnetSnapshot Existing(
         int id, string name, string network, int cidr,
-        bool hasChildren = false, bool hasHostIps = false, bool fullyAllocated = false) =>
+        bool hasChildren = false, bool hasHostIps = false, bool fullyAllocated = false,
+        string? azureResourceId = null) =>
         new()
         {
             Id = id,
@@ -56,7 +57,8 @@ public class AzureBulkImportPlannerTests
             Cidr = cidr,
             HasChildSubnets = hasChildren,
             HasHostIpAssignments = hasHostIps,
-            IsFullyAllocated = fullyAllocated
+            IsFullyAllocated = fullyAllocated,
+            AzureResourceId = azureResourceId
         };
 
     // -------------------------------------------------------------------------
@@ -572,5 +574,259 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(2, item.ChildSubnets.Count);
         Assert.Contains(item.ChildSubnets, c => c.Name == "web" && c.AzureResourceId == webId);
         Assert.Contains(item.ChildSubnets, c => c.Name == "app" && c.AzureResourceId == appId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Availability annotation
+    // -------------------------------------------------------------------------
+    //
+    // Drives the selection UI: anything left selectable must produce a committable
+    // plan, and anything blocked must be something BuildPlan would reject. The two
+    // agreeing is the whole point of computing this on the server.
+
+    private static string AzSubnetId(string vnetName, string subnetName) =>
+        $"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}";
+
+    private static BulkAzureSubnetViewModel AzSub(string vnetName, string name, string prefix) =>
+        new() { ResourceId = AzSubnetId(vnetName, name), Name = name, AddressPrefix = prefix };
+
+    private static BulkAzureVNetViewModel AzVNet(
+        string name, string[] prefixes, params BulkAzureSubnetViewModel[] subnets) =>
+        new()
+        {
+            ResourceId = $"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/{name}",
+            Name = name,
+            Ipv4AddressPrefixes = [.. prefixes],
+            Subnets = [.. subnets]
+        };
+
+    [Fact]
+    public void Availability_NewPrefixAndSubnet_AreAvailable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
+
+        _planner.AnnotateAvailability([vnet], []);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.Available, prefix.Status);
+        Assert.True(prefix.IsSelectable);
+        Assert.True(Assert.Single(vnet.Subnets).IsSelectable);
+    }
+
+    [Fact]
+    public void Availability_PrefixWithCleanExactMatch_WillUpdateExisting()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
+        Assert.True(prefix.IsSelectable);
+        Assert.Contains("Existing", prefix.Reason);
+    }
+
+    [Fact]
+    public void Availability_PrefixTargetHasChildren_IsNotSelectable()
+    {
+        // Re-importing a VNet you already imported: its target now has children.
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16, hasChildren: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+        Assert.Contains("child subnets", prefix.Reason);
+    }
+
+    [Fact]
+    public void Availability_PrefixTargetHasHostIps_IsNotSelectable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16, hasHostIps: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        Assert.False(Assert.Single(vnet.Prefixes).IsSelectable);
+        Assert.Contains("host IP assignments", vnet.Prefixes[0].Reason);
+    }
+
+    [Fact]
+    public void Availability_PrefixTargetFullyAllocated_IsNotSelectable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16, fullyAllocated: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        Assert.False(Assert.Single(vnet.Prefixes).IsSelectable);
+        Assert.Contains("fully allocated", vnet.Prefixes[0].Reason);
+    }
+
+    [Fact]
+    public void Availability_PrefixWouldContainExisting_IsNotSelectable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Child", "10.0.5.0", 24)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.False(prefix.IsSelectable);
+        Assert.Contains("Would contain existing", prefix.Reason);
+    }
+
+    [Fact]
+    public void Availability_SubnetAlreadyImported_IsNotSelectable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "Target", "10.0.0.0", 16),
+            Existing(2, "web", "10.0.1.0", 24, azureResourceId: AzSubnetId("vnet-a", "web"))
+        ];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel subnet = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.AlreadyImported, subnet.Status);
+        Assert.False(subnet.IsSelectable);
+        Assert.Contains("Already imported", subnet.Reason);
+    }
+
+    [Fact]
+    public void Availability_SubnetAddressTakenByHandMadeSubnet_IsBlockedNotAlreadyImported()
+    {
+        // Bastet requires {NetworkAddress, Cidr} to be unique, so a hand-made subnet blocks the
+        // import just as hard - but it isn't "already imported", and the wording should say so.
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "Target", "10.0.0.0", 16),
+            Existing(2, "Hand made", "10.0.1.0", 24)
+        ];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel subnet = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Blocked, subnet.Status);
+        Assert.False(subnet.IsSelectable);
+        Assert.Contains("already uses", subnet.Reason);
+    }
+
+    [Fact]
+    public void Availability_SubnetImportedFromADifferentAzureResource_IsBlocked()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "Target", "10.0.0.0", 16),
+            Existing(2, "web", "10.0.1.0", 24, azureResourceId: AzSubnetId("vnet-other", "web"))
+        ];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        Assert.Equal(BulkImportAvailability.Blocked, Assert.Single(vnet.Subnets).Status);
+    }
+
+    [Fact]
+    public void Availability_EncompassingSubnet_IsSelectableEvenWhenTargetExists()
+    {
+        // VNet 10.11.0.0/24 whose only subnet is also 10.11.0.0/24. The subnet is never created -
+        // it marks the target fully allocated - so it must not be reported as a duplicate of the
+        // very target it would mark. Without this it would always look blocked once imported.
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-e", ["10.11.0.0/24"], AzSub("vnet-e", "default", "10.11.0.0/24"));
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Target", "10.11.0.0", 24)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel subnet = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Available, subnet.Status);
+        Assert.True(subnet.IsSelectable);
+        Assert.Contains("fully allocated", subnet.Reason);
+    }
+
+    [Fact]
+    public void Availability_InvalidPrefix_IsNotSelectable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.1/16"]); // not CIDR-aligned
+
+        _planner.AnnotateAvailability([vnet], []);
+
+        Assert.False(Assert.Single(vnet.Prefixes).IsSelectable);
+    }
+
+    [Fact]
+    public void Availability_StatusName_IsSerializedAsAName_NotAnOrdinal()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
+
+        _planner.AnnotateAvailability([vnet], []);
+
+        Assert.Equal("Available", vnet.Prefixes[0].StatusName);
+        Assert.Equal("Available", vnet.Subnets[0].StatusName);
+    }
+
+    [Fact]
+    public void Availability_SelectableItems_ProduceACommittablePlan()
+    {
+        // The property the whole feature rests on: if the UI lets you check it, importing it works.
+        // Mixes every state - a fresh VNet, a clean exact match, an already-imported subnet, a
+        // blocked target with children, and an encompassing subnet.
+        BulkAzureVNetViewModel fresh = AzVNet("vnet-fresh", ["10.40.0.0/16"], AzSub("vnet-fresh", "new", "10.40.1.0/24"));
+        BulkAzureVNetViewModel partial = AzVNet("vnet-partial", ["10.41.0.0/16"],
+            AzSub("vnet-partial", "old", "10.41.1.0/24"),
+            AzSub("vnet-partial", "new", "10.41.2.0/24"));
+        BulkAzureVNetViewModel blocked = AzVNet("vnet-blocked", ["10.42.0.0/16"], AzSub("vnet-blocked", "x", "10.42.1.0/24"));
+        BulkAzureVNetViewModel encompass = AzVNet("vnet-enc", ["10.43.0.0/24"], AzSub("vnet-enc", "all", "10.43.0.0/24"));
+
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "Partial target", "10.41.0.0", 16),
+            Existing(2, "old", "10.41.1.0", 24, azureResourceId: AzSubnetId("vnet-partial", "old")),
+            Existing(3, "Blocked target", "10.42.0.0", 16, hasChildren: true)
+        ];
+
+        List<BulkAzureVNetViewModel> vnets = [fresh, partial, blocked, encompass];
+        _planner.AnnotateAvailability(vnets, existing);
+
+        // Build a selection from ONLY what the UI would leave enabled
+        List<BulkImportSelectedVNetPrefixDto> selected = [];
+        foreach (BulkAzureVNetViewModel vnet in vnets)
+        {
+            foreach (BulkAzurePrefixViewModel prefix in vnet.Prefixes.Where(p => p.IsSelectable))
+            {
+                selected.Add(new BulkImportSelectedVNetPrefixDto
+                {
+                    VNetName = vnet.Name,
+                    VNetResourceId = vnet.ResourceId,
+                    AddressPrefix = prefix.AddressPrefix,
+                    Subnets =
+                    [
+                        .. vnet.Subnets
+                            .Where(s => s.IsSelectable)
+                            .Select(s => new BulkImportSelectedSubnetDto
+                            {
+                                Name = s.Name,
+                                AddressPrefix = s.AddressPrefix,
+                                AzureResourceId = s.ResourceId
+                            })
+                    ]
+                });
+            }
+        }
+
+        // The blocked VNet must have been filtered out, and the rest must import cleanly
+        Assert.DoesNotContain(selected, p => p.VNetName == "vnet-blocked");
+        Assert.Equal(3, selected.Count);
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(Sel(false, [.. selected]), existing);
+
+        Assert.True(plan.CanCommit,
+            "Everything the annotation left selectable should import. Global errors: "
+            + string.Join(" | ", plan.GlobalErrors.Concat(plan.Items.SelectMany(i => i.Errors))));
     }
 }

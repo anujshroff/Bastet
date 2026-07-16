@@ -1,6 +1,29 @@
 namespace Bastet.Models.ViewModels
 {
     /// <summary>
+    /// Whether something in Azure can be imported into Bastet right now.
+    /// </summary>
+    /// <remarks>
+    /// Computed server-side so the selection UI and the planner apply one set of rules. If the UI
+    /// re-derived this, the two could disagree and either disable an importable item or offer one
+    /// that fails at preview.
+    /// </remarks>
+    public enum BulkImportAvailability
+    {
+        /// <summary>Nothing in Bastet occupies this address; importing creates it.</summary>
+        Available,
+
+        /// <summary>An existing Bastet subnet matches this VNet prefix and can receive the import.</summary>
+        WillUpdateExisting,
+
+        /// <summary>Already imported from this exact Azure resource. Importing again would fail.</summary>
+        AlreadyImported,
+
+        /// <summary>Cannot be imported; see the reason.</summary>
+        Blocked
+    }
+
+    /// <summary>
     /// Lightweight Azure subnet info used in the Bulk Azure Import flow.
     /// IPv4-only.
     /// </summary>
@@ -20,6 +43,43 @@ namespace Bastet.Models.ViewModels
         /// The IPv4 address prefix in CIDR notation (e.g. "10.0.1.0/24")
         /// </summary>
         public string AddressPrefix { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Whether this subnet can be imported. Populated by
+        /// <c>IAzureBulkImportPlanner.AnnotateAvailability</c>; defaults to Available for callers
+        /// that never annotate.
+        /// </summary>
+        public BulkImportAvailability Status { get; set; } = BulkImportAvailability.Available;
+
+        /// <summary>The status name, so clients don't switch on the enum's ordinal.</summary>
+        public string StatusName => Status.ToString();
+
+        /// <summary>Human-readable explanation of <see cref="Status"/>.</summary>
+        public string? Reason { get; set; }
+
+        /// <summary>False when selecting this would always fail; the UI disables it.</summary>
+        public bool IsSelectable { get; set; } = true;
+    }
+
+    /// <summary>
+    /// One IPv4 address prefix of a VNet, annotated with whether it can be imported.
+    /// Each selected prefix becomes one Bastet target subnet.
+    /// </summary>
+    public class BulkAzurePrefixViewModel
+    {
+        /// <summary>The IPv4 address prefix in CIDR notation (e.g. "10.0.0.0/16")</summary>
+        public string AddressPrefix { get; set; } = string.Empty;
+
+        public BulkImportAvailability Status { get; set; } = BulkImportAvailability.Available;
+
+        /// <summary>The status name, so clients don't switch on the enum's ordinal.</summary>
+        public string StatusName => Status.ToString();
+
+        /// <summary>Human-readable explanation of <see cref="Status"/>.</summary>
+        public string? Reason { get; set; }
+
+        /// <summary>False when selecting this would always fail; the UI disables it.</summary>
+        public bool IsSelectable { get; set; } = true;
     }
 
     /// <summary>
@@ -39,9 +99,16 @@ namespace Bastet.Models.ViewModels
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// The VNet's IPv4 address prefixes (CIDR notation)
+        /// The VNet's IPv4 address prefixes (CIDR notation). Populated straight from Azure.
         /// </summary>
         public List<string> Ipv4AddressPrefixes { get; set; } = [];
+
+        /// <summary>
+        /// The same prefixes annotated with whether each can be imported. Built by
+        /// <c>IAzureBulkImportPlanner.AnnotateAvailability</c> and therefore empty on paths that
+        /// don't annotate (such as Azure Reconcile, which reads <see cref="Ipv4AddressPrefixes"/>).
+        /// </summary>
+        public List<BulkAzurePrefixViewModel> Prefixes { get; set; } = [];
 
         /// <summary>
         /// IPv4 subnets contained in this VNet
@@ -141,6 +208,14 @@ namespace Bastet.Models.ViewModels
         public bool HasChildSubnets { get; set; }
         public bool HasHostIpAssignments { get; set; }
         public bool IsFullyAllocated { get; set; }
+
+        /// <summary>
+        /// The Azure resource this subnet was imported from, or null if it was created by hand.
+        /// Lets the availability annotation say "already imported" rather than just "this address is
+        /// taken" - the address is what blocks the import either way, since Bastet requires
+        /// {NetworkAddress, Cidr} to be unique.
+        /// </summary>
+        public string? AzureResourceId { get; set; }
     }
 
     /// <summary>
@@ -218,6 +293,12 @@ namespace Bastet.Models.ViewModels
         public int PrefixCidr { get; set; }
 
         public BulkImportTargetType TargetType { get; set; }
+
+        /// <summary>
+        /// The target type's name, so clients don't switch on the enum's ordinal - reordering the
+        /// enum or serializing it as a string would silently change what those ordinals mean.
+        /// </summary>
+        public string TargetTypeName => TargetType.ToString();
 
         // Populated when TargetType = ExactMatch
         public int? ExistingTargetSubnetId { get; set; }

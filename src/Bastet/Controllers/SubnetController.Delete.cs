@@ -124,79 +124,7 @@ public partial class SubnetController : Controller
 
         try
         {
-            // Get all descendants to delete (ordered for proper deletion - deepest first)
-            List<Subnet> allDescendants = await GetAllDescendantsOrdered(id);
-
-            // Add the subnet itself to be deleted (will be processed last)
-            allDescendants.Add(subnet);
-
-            // Get all host IPs for all subnets to be deleted
-            List<HostIpAssignment> allHostIps = [];
-
-            // First, load all host IPs for each subnet to be deleted
-            foreach (Subnet subnetToProcess in allDescendants)
-            {
-                // We need to load host IPs for each subnet since they're not included in GetAllDescendantsOrdered
-                Subnet? subnetWithHostIps = await context.Subnets
-                    .Include(s => s.HostIpAssignments)
-                    .FirstOrDefaultAsync(s => s.Id == subnetToProcess.Id);
-
-                if (subnetWithHostIps != null && subnetWithHostIps.HostIpAssignments.Count > 0)
-                {
-                    allHostIps.AddRange(subnetWithHostIps.HostIpAssignments);
-                }
-            }
-
-            // First handle all host IPs (archive them in DeletedHostIpAssignments)
-            foreach (HostIpAssignment hostIp in allHostIps)
-            {
-                // Create a deletion record
-                DeletedHostIpAssignment deletedHostIp = new()
-                {
-                    OriginalIP = hostIp.IP,
-                    Name = hostIp.Name,
-                    OriginalSubnetId = hostIp.SubnetId,
-                    CreatedAt = hostIp.CreatedAt,
-                    LastModifiedAt = hostIp.LastModifiedAt,
-                    CreatedBy = hostIp.CreatedBy,
-                    ModifiedBy = hostIp.ModifiedBy,
-                    DeletedAt = DateTime.UtcNow,
-                    DeletedBy = userContextService.GetCurrentUsername()
-                };
-
-                // Add to DeletedHostIpAssignments table
-                context.DeletedHostIpAssignments.Add(deletedHostIp);
-
-                // Remove from HostIpAssignments table
-                context.HostIpAssignments.Remove(hostIp);
-            }
-
-            // Now process each subnet
-            foreach (Subnet subnetToDelete in allDescendants)
-            {
-                // Add to DeletedSubnets table
-                DeletedSubnet deletedSubnet = new()
-                {
-                    OriginalId = subnetToDelete.Id,
-                    OriginalParentId = subnetToDelete.ParentSubnetId,
-                    Name = subnetToDelete.Name,
-                    NetworkAddress = subnetToDelete.NetworkAddress,
-                    Cidr = subnetToDelete.Cidr,
-                    Description = subnetToDelete.Description,
-                    Tags = subnetToDelete.Tags,
-                    CreatedAt = subnetToDelete.CreatedAt,
-                    LastModifiedAt = subnetToDelete.LastModifiedAt,
-                    CreatedBy = subnetToDelete.CreatedBy,
-                    ModifiedBy = subnetToDelete.ModifiedBy,
-                    DeletedAt = DateTime.UtcNow,
-                    DeletedBy = userContextService.GetCurrentUsername()
-                };
-
-                context.DeletedSubnets.Add(deletedSubnet);
-
-                // Remove from Subnets table
-                context.Subnets.Remove(subnetToDelete);
-            }
+            (int subnetsArchived, int hostIpsArchived) = await ArchiveSubnetSubtreeAsync(subnet);
 
             // Save all changes
             await context.SaveChangesAsync();
@@ -204,9 +132,8 @@ public partial class SubnetController : Controller
             // Commit the transaction
             await transaction.CommitAsync();
 
-            int totalHostIpsDeleted = allHostIps.Count;
-            TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' and {allDescendants.Count - 1} child subnet(s) were deleted successfully. " +
-                                       $"{totalHostIpsDeleted} host IP assignment(s) were archived.";
+            TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' and {subnetsArchived - 1} child subnet(s) were deleted successfully. " +
+                                       $"{hostIpsArchived} host IP assignment(s) were archived.";
 
             return RedirectToAction(nameof(Index));
         }
@@ -217,6 +144,82 @@ public partial class SubnetController : Controller
             TempData["ErrorMessage"] = $"Error deleting subnet: {ex.Message}";
             return RedirectToAction(nameof(Delete), new { id });
         }
+    }
+
+    /// <summary>
+    /// Archives <paramref name="subnet"/> and every descendant into the DeletedSubnets /
+    /// DeletedHostIpAssignments tables and removes them from the live tables.
+    /// </summary>
+    /// <remarks>
+    /// Does not save or manage a transaction - the caller owns both, so several subtrees can be
+    /// archived atomically. Entities are queued deepest-first because the self-referencing FK is
+    /// Restrict, so a parent cannot be removed before its children.
+    /// </remarks>
+    /// <returns>How many subnets and host IP assignments were archived.</returns>
+    private async Task<(int SubnetsArchived, int HostIpsArchived)> ArchiveSubnetSubtreeAsync(Subnet subnet)
+    {
+        // Deepest first, with the subnet itself processed last
+        List<Subnet> toDelete = await GetAllDescendantsOrdered(subnet.Id);
+        toDelete.Add(subnet);
+
+        string? deletedBy = userContextService.GetCurrentUsername();
+        DateTime deletedAt = DateTime.UtcNow;
+
+        // Host IPs are not loaded by GetAllDescendantsOrdered, so fetch them per subnet
+        List<HostIpAssignment> allHostIps = [];
+        foreach (Subnet subnetToProcess in toDelete)
+        {
+            Subnet? subnetWithHostIps = await context.Subnets
+                .Include(s => s.HostIpAssignments)
+                .FirstOrDefaultAsync(s => s.Id == subnetToProcess.Id);
+
+            if (subnetWithHostIps != null && subnetWithHostIps.HostIpAssignments.Count > 0)
+            {
+                allHostIps.AddRange(subnetWithHostIps.HostIpAssignments);
+            }
+        }
+
+        foreach (HostIpAssignment hostIp in allHostIps)
+        {
+            context.DeletedHostIpAssignments.Add(new DeletedHostIpAssignment
+            {
+                OriginalIP = hostIp.IP,
+                Name = hostIp.Name,
+                OriginalSubnetId = hostIp.SubnetId,
+                CreatedAt = hostIp.CreatedAt,
+                LastModifiedAt = hostIp.LastModifiedAt,
+                CreatedBy = hostIp.CreatedBy,
+                ModifiedBy = hostIp.ModifiedBy,
+                DeletedAt = deletedAt,
+                DeletedBy = deletedBy
+            });
+
+            context.HostIpAssignments.Remove(hostIp);
+        }
+
+        foreach (Subnet subnetToDelete in toDelete)
+        {
+            context.DeletedSubnets.Add(new DeletedSubnet
+            {
+                OriginalId = subnetToDelete.Id,
+                OriginalParentId = subnetToDelete.ParentSubnetId,
+                Name = subnetToDelete.Name,
+                NetworkAddress = subnetToDelete.NetworkAddress,
+                Cidr = subnetToDelete.Cidr,
+                Description = subnetToDelete.Description,
+                Tags = subnetToDelete.Tags,
+                CreatedAt = subnetToDelete.CreatedAt,
+                LastModifiedAt = subnetToDelete.LastModifiedAt,
+                CreatedBy = subnetToDelete.CreatedBy,
+                ModifiedBy = subnetToDelete.ModifiedBy,
+                DeletedAt = deletedAt,
+                DeletedBy = deletedBy
+            });
+
+            context.Subnets.Remove(subnetToDelete);
+        }
+
+        return (toDelete.Count, allHostIps.Count);
     }
 
     // GET: Subnet/DeletedSubnets

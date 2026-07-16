@@ -11,6 +11,12 @@ using System.Net;
 
 namespace Bastet.Controllers;
 
+/// <summary>
+/// Baseline authorization for every action. Individual actions apply stricter policies on top;
+/// because the role policies are cumulative (View is satisfied by Edit, Delete or Admin), this
+/// baseline never rejects anyone the action itself would allow.
+/// </summary>
+[Authorize(Policy = "RequireViewRole")]
 public class HostIpController(
     BastetDbContext context,
     IHostIpValidationService hostIpValidationService,

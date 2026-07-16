@@ -127,9 +127,9 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName, isAzureImport: true);
 
-        // Assert - the controller returns a redirect when called from the Azure/Import
+        // Assert - the controller redirects when the caller declares this is an Azure import
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
@@ -194,7 +194,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         ];
 
         // Act
-        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName);
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName, isAzureImport: true);
 
         // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);

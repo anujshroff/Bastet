@@ -1,5 +1,4 @@
 using Bastet.Data;
-using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services.Azure;
 using Microsoft.AspNetCore.Authorization;
@@ -11,7 +10,8 @@ namespace Bastet.Controllers
     [Authorize(Policy = "RequireAdminRole")]
     public class AzureController(
         BastetDbContext context,
-        IAzureService azureService) : Controller
+        IAzureService azureService,
+        IAzureSubnetSnapshotService snapshotService) : Controller
     {
 
         // GET: Azure/Import/{id}
@@ -207,9 +207,14 @@ namespace Bastet.Controllers
             return View(viewModel);
         }
 
-        // AJAX: Get every IPv4 VNet+subnet in the chosen subscription
+        /// <summary>
+        /// AJAX: every IPv4 VNet+subnet in the chosen subscription, annotated with what Bastet
+        /// already has so the selection UI can grey out anything that cannot be imported.
+        /// </summary>
         [HttpGet]
-        public async Task<IActionResult> BulkGetVNets(string subscriptionId)
+        public async Task<IActionResult> BulkGetVNets(
+            string subscriptionId,
+            [FromServices] IAzureBulkImportPlanner planner)
         {
             if (!IsAzureImportEnabled())
             {
@@ -224,6 +229,12 @@ namespace Bastet.Controllers
             try
             {
                 List<BulkAzureVNetViewModel> vnets = await azureService.GetAllVNetsWithSubnets(subscriptionId);
+
+                // Annotate with the planner's own rules, so what the UI lets you select and what the
+                // planner will accept cannot drift apart.
+                IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
+                planner.AnnotateAvailability(vnets, existing);
+
                 return Json(new { success = true, vnets });
             }
             catch (Exception ex)
@@ -251,7 +262,7 @@ namespace Bastet.Controllers
 
             try
             {
-                IReadOnlyList<ExistingSubnetSnapshot> existing = await BuildExistingSnapshotAsync();
+                IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
                 BulkImportPlanViewModel plan = planner.BuildPlan(selection, existing);
                 return Json(new { success = true, plan });
             }
@@ -261,38 +272,77 @@ namespace Bastet.Controllers
             }
         }
 
-        /// <summary>
-        /// Loads every Bastet subnet (with the booleans the planner needs) into a snapshot list,
-        /// avoiding the planner having to know about EF.
-        /// </summary>
-        private async Task<IReadOnlyList<ExistingSubnetSnapshot>> BuildExistingSnapshotAsync()
+        // -------------------------------------------------------------------
+        // Azure Reconcile — find Bastet subnets whose Azure resources are gone
+        // -------------------------------------------------------------------
+
+        // GET: /Azure/Reconcile — landing page; user picks a subscription and scans it via AJAX
+        public async Task<IActionResult> Reconcile()
         {
-            // Pull ids and counts in a single query rather than including children/host IPs which would be expensive
-            // for large trees. We only need flags (any-children / any-host-ips), not the entities themselves.
-            List<Subnet> all = await context.Subnets
-                .AsNoTracking()
-                .ToListAsync();
-
-            // Need parent-child counts too. Compute via the in-memory list since we already loaded it.
-            HashSet<int> parentsWithChildren = [.. all.Where(s => s.ParentSubnetId.HasValue).Select(s => s.ParentSubnetId!.Value).Distinct()];
-
-            // Host IP counts: need a small DB query grouped by SubnetId.
-            HashSet<int> subnetsWithHostIps = await context.HostIpAssignments
-                .AsNoTracking()
-                .Select(h => h.SubnetId)
-                .Distinct()
-                .ToHashSetAsync();
-
-            return [.. all.Select(s => new ExistingSubnetSnapshot
+            if (!IsAzureImportEnabled())
             {
-                Id = s.Id,
-                Name = s.Name,
-                NetworkAddress = s.NetworkAddress,
-                Cidr = s.Cidr,
-                HasChildSubnets = parentsWithChildren.Contains(s.Id),
-                HasHostIpAssignments = subnetsWithHostIps.Contains(s.Id),
-                IsFullyAllocated = s.IsFullyAllocated
-            })];
+                return RedirectToAction("HttpStatusCodeHandler", "Error", new
+                {
+                    statusCode = 403,
+                    errorMessage = "Azure Import feature is not enabled"
+                });
+            }
+
+            AzureReconcileInitialViewModel viewModel = new() { IsFeatureEnabled = true };
+
+            // Initial connectivity check (mirrors the import flows)
+            try
+            {
+                if (!await azureService.IsCredentialValid())
+                {
+                    ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ModelState.AddModelError("", $"Error connecting to Azure: {ex.Message}");
+            }
+
+            return View(viewModel);
+        }
+
+        /// <summary>
+        /// AJAX: compare one subscription's live VNets against the Azure-linked subnets in Bastet.
+        /// </summary>
+        /// <remarks>
+        /// Uses <see cref="IAzureService.GetVNetInventory"/> rather than GetAllVNetsWithSubnets, so a
+        /// failed Azure call is reported as a failure instead of an empty inventory that would make
+        /// every imported subnet look deleted.
+        /// </remarks>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ReconcileScan(
+            string subscriptionId,
+            string? subscriptionName,
+            [FromServices] IAzureReconciler reconciler)
+        {
+            if (!IsAzureImportEnabled())
+            {
+                return Json(new { success = false, error = "Azure Import feature is not enabled" });
+            }
+
+            if (string.IsNullOrWhiteSpace(subscriptionId))
+            {
+                return Json(new { success = false, error = "Subscription ID is required" });
+            }
+
+            try
+            {
+                AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
+                IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
+                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked);
+
+                return Json(new { success = true, plan });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { success = false, error = ex.Message });
+            }
         }
 
         // Helper method to check Azure Import environment variable

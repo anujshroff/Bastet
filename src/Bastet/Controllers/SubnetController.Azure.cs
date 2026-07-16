@@ -9,10 +9,17 @@ namespace Bastet.Controllers;
 public partial class SubnetController : Controller
 {
     // POST: Subnet/BatchCreateChildSubnets
+    /// <param name="isAzureImport">
+    /// True when called from the Azure import wizard, which additionally renames the parent to the
+    /// VNet name, stamps its resource ID, and redirects to Details instead of returning JSON.
+    /// This used to be inferred from the Referer header, which is client-supplied: it could be
+    /// forged, and a browser that strips it silently disabled the rename. Defaults to false, so
+    /// callers using this as a plain batch-create API keep their existing JSON behaviour.
+    /// </param>
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null, string? vnetResourceId = null, [FromServices] IInputSanitizationService? sanitizationService = null)
+    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null, string? vnetResourceId = null, bool isAzureImport = false, [FromServices] IInputSanitizationService? sanitizationService = null)
     {
         if (!ModelState.IsValid)
         {
@@ -87,7 +94,7 @@ public partial class SubnetController : Controller
             }
 
             // Update parent subnet if this is an Azure import
-            if (!string.IsNullOrEmpty(vnetName) && Request.Headers.Referer.ToString().Contains("/Azure/Import/"))
+            if (!string.IsNullOrEmpty(vnetName) && isAzureImport)
             {
                 // Update the name to match the Azure VNet name
                 parentSubnet.Name = vnetName;
@@ -162,12 +169,12 @@ public partial class SubnetController : Controller
             // Add appropriate success message
             TempData["SuccessMessage"] = hasFullyEncompassingSubnet
                 ? $"Successfully renamed parent subnet to '{vnetName}' and marked it as fully allocated by Azure subnet '{fullyEncompassingSubnetName}'."
-                : !string.IsNullOrEmpty(vnetName) && Request.Headers.Referer.ToString().Contains("/Azure/Import/")
+                : !string.IsNullOrEmpty(vnetName) && isAzureImport
                     ? $"Successfully renamed parent subnet to '{vnetName}' and imported {createdSubnetIds.Count} child subnets."
                     : (object)$"Successfully imported {createdSubnetIds.Count} subnets.";
 
             // If this was called from the Azure import flow, redirect to details
-            if (Request.Headers.Referer.ToString().Contains("/Azure/Import/"))
+            if (isAzureImport)
             {
                 return RedirectToAction("Details", new { id = parentId });
             }

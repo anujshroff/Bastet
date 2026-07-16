@@ -1,0 +1,99 @@
+@model Bastet.Models.ViewModels.AzureReconcileInitialViewModel
+
+<div id="rec-scan-loading" class="text-center py-3 d-none">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Scanning Azure...</span>
+    </div>
+    <p class="mt-2">Comparing Azure against BASTET...</p>
+</div>
+
+@* Shown when the scan itself failed. No rows and no delete option are rendered in that case:
+   an unanswered question must never look like "everything was deleted". *@
+<div id="rec-scan-error" class="alert alert-danger d-none">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>Nothing was checked.</strong>
+    <div id="rec-scan-error-message" class="mt-1"></div>
+    <hr>
+    <p class="mb-0">
+        Because Azure could not be read, BASTET cannot tell which resources still exist, so nothing is offered for
+        deletion. Fix the connection and scan again.
+    </p>
+</div>
+
+<div id="rec-scan-warnings" class="alert alert-warning d-none">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>Check this before deleting anything</strong>
+    <ul id="rec-scan-warnings-list" class="mb-0 mt-2"></ul>
+</div>
+
+<div id="rec-scan-content" class="d-none">
+    <div id="rec-nothing-stale" class="alert alert-success d-none">
+        <i class="bi bi-check-circle-fill me-2"></i>
+        Everything imported from this subscription still exists in Azure. There is nothing to clean up.
+    </div>
+
+    <div id="rec-stale-section" class="d-none">
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <strong>These BASTET subnets no longer exist in Azure.</strong>
+            Deleting one also archives everything beneath it. Rows with a cascade warning will take child subnets or
+            host IP assignments with them, including any you created by hand.
+        </div>
+
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="rec-select-all">
+            <label class="form-check-label" for="rec-select-all">
+                <strong>Select all</strong>
+            </label>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col" style="width: 2rem;"></th>
+                        <th scope="col">Subnet</th>
+                        <th scope="col">Network</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="rec-stale-rows"></tbody>
+            </table>
+        </div>
+
+        <div class="d-grid gap-2 mt-3">
+            <button id="rec-go-confirm-btn" class="btn btn-danger" disabled>
+                Next: Confirm deletion <i class="bi bi-arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+    @* Drift that cannot be fixed by deleting anything, so it is listed without checkboxes. *@
+    <div id="rec-review-section" class="d-none mt-4">
+        <h5><i class="bi bi-eye"></i> Needs review</h5>
+        <div class="alert alert-secondary">
+            These subnets still exist in Azure, so there is nothing to delete, but something about them has drifted.
+            BASTET will not change them automatically.
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col">Subnet</th>
+                        <th scope="col">Network</th>
+                        <th scope="col">Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="rec-review-rows"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="d-grid gap-2 mt-3">
+        <button id="rec-back-to-subscription-btn" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Subscription
+        </button>
+    </div>
+</div>
