@@ -227,8 +227,6 @@ Only subnets carrying an Azure Resource ID are ever considered, so subnets you c
 
 **Needs review** covers drift that deleting cannot fix. If a fully-encompassing Azure subnet is deleted but its VNet and prefix survive, the BASTET subnet stays marked fully allocated with nothing backing that flag. Reconcile reports it and leaves it alone — the flag can also be set by hand, so it is never cleared automatically.
 
-For a step-by-step way to exercise every import and reconcile condition against real Azure resources, see [`docs/azure-test-matrix.md`](docs/azure-test-matrix.md).
-
 ## Usage
 
 ### Creating a Root Subnet
