@@ -78,14 +78,18 @@ public partial class SubnetController : Controller
             });
         }
 
+        int subnetsArchived = 0;
+        int hostIpsArchived = 0;
+        int targetsDeleted = 0;
+
         using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
             await context.Database.BeginTransactionAsync();
 
+        // Only the database work is guarded. Building the response happens after the commit, so a
+        // failure there can't send us into a rollback of an already-committed transaction - which
+        // would throw and mask the real error while the rows were already gone.
         try
         {
-            int subnetsArchived = 0;
-            int hostIpsArchived = 0;
-            int targetsDeleted = 0;
 
             // Parents first (smaller CIDR = larger network). Archiving a parent takes its whole
             // subtree, so a selected child may already be gone by the time we reach it - skip those
@@ -127,24 +131,24 @@ public partial class SubnetController : Controller
             }
 
             await transaction.CommitAsync();
-
-            TempData["SuccessMessage"] =
-                $"Azure reconcile: deleted {targetsDeleted} stale subnet(s), archiving {subnetsArchived} subnet(s) " +
-                $"and {hostIpsArchived} host IP assignment(s) in total.";
-
-            return Ok(new
-            {
-                success = true,
-                redirectUrl = Url.Action("Index", "Subnet"),
-                targetsDeleted,
-                subnetsArchived,
-                hostIpsArchived
-            });
         }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
             return StatusCode(500, new { success = false, error = ex.Message });
         }
+
+        TempData["SuccessMessage"] =
+            $"Azure reconcile: deleted {targetsDeleted} stale subnet(s), archiving {subnetsArchived} subnet(s) " +
+            $"and {hostIpsArchived} host IP assignment(s) in total.";
+
+        return Ok(new
+        {
+            success = true,
+            redirectUrl = Url.Action("Index", "Subnet"),
+            targetsDeleted,
+            subnetsArchived,
+            hostIpsArchived
+        });
     }
 }

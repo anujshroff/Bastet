@@ -16,6 +16,7 @@ namespace Bastet.Tests.Azure;
 /// <summary>
 /// Integration tests for the AzureController
 /// </summary>
+[Collection(AzureFeatureFlagCollection.Name)]
 public class AzureControllerTests : IDisposable
 {
     private readonly BastetDbContext _context;
