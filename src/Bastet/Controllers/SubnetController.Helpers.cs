@@ -141,6 +141,14 @@ public partial class SubnetController : Controller
                 return false;
             }
 
+            // A fully-allocated subnet cannot receive child subnets (mirrors Subnet.CanAddChildSubnet)
+            if (parentSubnet.IsFullyAllocated)
+            {
+                ModelState.AddModelError("ParentSubnetId",
+                    "Cannot create a child subnet under a subnet marked as fully allocated.");
+                return false;
+            }
+
             // Validate that child subnet is within parent subnet range
             if (!ipUtilityService.IsSubnetContainedInParent(
                 viewModel.NetworkAddress, viewModel.Cidr,
