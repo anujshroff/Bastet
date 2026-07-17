@@ -680,6 +680,76 @@ public class AzureBulkImportPlannerTests
     }
 
     [Fact]
+    public void Availability_PrefixContainerHasHostIps_IsNotSelectable()
+    {
+        // The prefix would be auto-created as a child of the /16, which BuildPlanItem rejects
+        // because a subnet with host IPs cannot have children. The badge must agree.
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.1.0/24"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Container", "10.0.0.0", 16, hasHostIps: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+        Assert.Contains("host IP assignments", prefix.Reason);
+    }
+
+    [Fact]
+    public void Availability_PrefixContainerFullyAllocated_IsNotSelectable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.1.0/24"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Container", "10.0.0.0", 16, fullyAllocated: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+        Assert.Contains("fully allocated", prefix.Reason);
+    }
+
+    [Fact]
+    public void Availability_PrefixWithEligibleContainer_IsAvailable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.1.0/24"]);
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "Container", "10.0.0.0", 16)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.Available, prefix.Status);
+        Assert.True(prefix.IsSelectable);
+    }
+
+    [Fact]
+    public void Availability_OnlyTheDeepestContainerDecides_JustLikeBuildPlanItem()
+    {
+        // The parent is always the deepest container, so only its eligibility matters:
+        // an ineligible /16 blocks even under a clean /8, and a clean /16 imports
+        // even under an ineligible /8.
+        List<ExistingSubnetSnapshot> deepIneligible =
+        [
+            Existing(1, "Clean root", "10.0.0.0", 8),
+            Existing(2, "Busy container", "10.0.0.0", 16, hasHostIps: true)
+        ];
+        List<ExistingSubnetSnapshot> deepEligible =
+        [
+            Existing(1, "Busy root", "10.0.0.0", 8, hasHostIps: true),
+            Existing(2, "Clean container", "10.0.0.0", 16)
+        ];
+
+        BulkAzureVNetViewModel blocked = AzVNet("vnet-a", ["10.0.1.0/24"]);
+        _planner.AnnotateAvailability([blocked], deepIneligible);
+        Assert.False(Assert.Single(blocked.Prefixes).IsSelectable);
+        Assert.Contains("Busy container", blocked.Prefixes[0].Reason);
+
+        BulkAzureVNetViewModel available = AzVNet("vnet-a", ["10.0.1.0/24"]);
+        _planner.AnnotateAvailability([available], deepEligible);
+        Assert.True(Assert.Single(available.Prefixes).IsSelectable);
+    }
+
+    [Fact]
     public void Availability_SubnetAlreadyImported_IsNotSelectable()
     {
         BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
@@ -775,22 +845,25 @@ public class AzureBulkImportPlannerTests
     {
         // The property the whole feature rests on: if the UI lets you check it, importing it works.
         // Mixes every state - a fresh VNet, a clean exact match, an already-imported subnet, a
-        // blocked target with children, and an encompassing subnet.
+        // blocked target with children, an encompassing subnet, and a prefix whose containing
+        // subnet has host IPs.
         BulkAzureVNetViewModel fresh = AzVNet("vnet-fresh", ["10.40.0.0/16"], AzSub("vnet-fresh", "new", "10.40.1.0/24"));
         BulkAzureVNetViewModel partial = AzVNet("vnet-partial", ["10.41.0.0/16"],
             AzSub("vnet-partial", "old", "10.41.1.0/24"),
             AzSub("vnet-partial", "new", "10.41.2.0/24"));
         BulkAzureVNetViewModel blocked = AzVNet("vnet-blocked", ["10.42.0.0/16"], AzSub("vnet-blocked", "x", "10.42.1.0/24"));
         BulkAzureVNetViewModel encompass = AzVNet("vnet-enc", ["10.43.0.0/24"], AzSub("vnet-enc", "all", "10.43.0.0/24"));
+        BulkAzureVNetViewModel nested = AzVNet("vnet-nested", ["10.44.1.0/24"], AzSub("vnet-nested", "y", "10.44.1.0/25"));
 
         List<ExistingSubnetSnapshot> existing =
         [
             Existing(1, "Partial target", "10.41.0.0", 16),
             Existing(2, "old", "10.41.1.0", 24, azureResourceId: AzSubnetId("vnet-partial", "old")),
-            Existing(3, "Blocked target", "10.42.0.0", 16, hasChildren: true)
+            Existing(3, "Blocked target", "10.42.0.0", 16, hasChildren: true),
+            Existing(4, "Busy container", "10.44.0.0", 16, hasHostIps: true)
         ];
 
-        List<BulkAzureVNetViewModel> vnets = [fresh, partial, blocked, encompass];
+        List<BulkAzureVNetViewModel> vnets = [fresh, partial, blocked, encompass, nested];
         _planner.AnnotateAvailability(vnets, existing);
 
         // Build a selection from ONLY what the UI would leave enabled
@@ -819,8 +892,9 @@ public class AzureBulkImportPlannerTests
             }
         }
 
-        // The blocked VNet must have been filtered out, and the rest must import cleanly
+        // The blocked and nested VNets must have been filtered out, and the rest must import cleanly
         Assert.DoesNotContain(selected, p => p.VNetName == "vnet-blocked");
+        Assert.DoesNotContain(selected, p => p.VNetName == "vnet-nested");
         Assert.Equal(3, selected.Count);
 
         BulkImportPlanViewModel plan = _planner.BuildPlan(Sel(false, [.. selected]), existing);

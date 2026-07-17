@@ -47,7 +47,7 @@ public class AzureReconcilerTests
 
     private static AzureLinkedSubnetSnapshot Linked(
         int id, string name, string network, int cidr, string azureResourceId,
-        bool fullyAllocated = false, int descendants = 0, int hostIps = 0) =>
+        bool fullyAllocated = false, int descendants = 0, int hostIps = 0, int[]? descendantIds = null) =>
         new()
         {
             Id = id,
@@ -57,7 +57,8 @@ public class AzureReconcilerTests
             AzureResourceId = azureResourceId,
             IsFullyAllocated = fullyAllocated,
             DescendantCount = descendants,
-            HostIpCount = hostIps
+            HostIpCount = hostIps,
+            DescendantSubnetIds = descendantIds ?? []
         };
 
     private AzureReconcilePlanViewModel Build(
@@ -330,11 +331,14 @@ public class AzureReconcilerTests
         // before the user confirms.
         AzureReconcilePlanViewModel plan = Build(
             Live(),
-            Linked(1, "vnet-a", "10.0.0.0", 16, VNetId("vnet-a"), descendants: 3, hostIps: 7));
+            Linked(1, "vnet-a", "10.0.0.0", 16, VNetId("vnet-a"), descendants: 3, hostIps: 7,
+                descendantIds: [2, 3, 4]));
 
         AzureReconcileItem item = Assert.Single(plan.Items);
         Assert.Equal(3, item.DescendantCount);
         Assert.Equal(7, item.HostIpCount);
+        // The subtree ids let the confirm dialog skip items an ancestor's counts already cover.
+        Assert.Equal([2, 3, 4], item.DescendantSubnetIds);
     }
 
     [Fact]

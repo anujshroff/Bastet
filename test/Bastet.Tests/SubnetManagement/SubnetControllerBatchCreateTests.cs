@@ -8,6 +8,7 @@ using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
@@ -47,7 +48,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
             _validationService,
             _hostIpValidationService,
             _userContextService,
-            ControllerTestHelper.CreateMockSubnetLockingService()
+            ControllerTestHelper.CreateMockSubnetLockingService(),
+            NullLogger<SubnetController>.Instance
         );
         ControllerTestHelper.SetupController(_controller);
 
@@ -135,7 +137,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     {
         // Arrange
         int parentId = 2; // Parent Subnet
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -176,12 +178,39 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
+    public async Task BatchCreateChildSubnets_WithAzureResourceId_PersistsItOnTheCreatedSubnet()
+    {
+        // The import wizard posts the Azure resource ID with each subnet; reconcile and the portal
+        // link both depend on it landing on the entity.
+        int parentId = 2; // Parent Subnet
+        string resourceId = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-a/subnets/web";
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "Imported Subnet",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                AzureResourceId = resourceId
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+        Subnet created = Assert.Single(
+            await _context.Subnets.Where(s => s.Name == "Imported Subnet").ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(resourceId, created.AzureResourceId);
+    }
+
+    [Fact]
     public async Task BatchCreateChildSubnets_WithVNetName_RenamesParentSubnet()
     {
         // Arrange
         int parentId = 2; // Parent Subnet
         string vnetName = "Azure-VNet-1";
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -221,7 +250,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         string originalName = "Parent Subnet";
         string vnetName = "Should-Not-Rename";
 
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -260,7 +289,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         // Set referer to a non-Azure URL to get a BadRequest result instead of a redirect
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
 
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -299,7 +328,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     {
         // Arrange
         int parentId = 2; // Parent Subnet - 10.0.0.0/16
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -329,7 +358,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     {
         // Arrange
         int parentId = 2;
-        List<CreateSubnetViewModel> subnets = [];
+        List<AzureImportSubnetViewModel> subnets = [];
 
         // Act
         // Set referer to a non-Azure URL to get a BadRequest result instead of a redirect
@@ -345,7 +374,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     {
         // Arrange
         int nonExistentParentId = 999;
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -368,7 +397,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     {
         // Arrange
         int parentId = 2;
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {

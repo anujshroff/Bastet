@@ -258,9 +258,20 @@
 
             $("#rec-confirm-count").text(chosen.length);
 
+            // The counts are subtree-inclusive, so an item selected together with one of its
+            // ancestors is already inside the ancestor's numbers - same rule the server applies
+            // when it archives. Sum only items no other chosen item covers.
+            const covered = {};
+            chosen.forEach(function (i) {
+                (i.descendantSubnetIds || []).forEach(function (id) { covered[id] = true; });
+            });
+
             let descendants = 0;
             let hostIps = 0;
             chosen.forEach(function (i) {
+                if (covered[i.subnetId]) {
+                    return;
+                }
                 descendants += i.descendantCount;
                 hostIps += i.hostIpCount;
             });

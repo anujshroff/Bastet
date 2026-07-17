@@ -69,8 +69,10 @@ public partial class SubnetController : Controller
         {
             try
             {
-                // Execute validation and update within distributed lock to prevent race conditions
-                Subnet result = await subnetLockingService.ExecuteWithSubnetEditLockAsync(id, async () =>
+                // The global lock (not a per-subnet one): a CIDR change alters containment
+                // relationships, so it must exclude concurrent creates/imports/deletes that
+                // validate against this subnet. Same-subnet conflicts are caught by RowVersion.
+                Subnet result = await subnetLockingService.ExecuteWithSubnetLockAsync(async () =>
                 {
                     // Retrieve existing subnet with relations for validation
                     Subnet? subnet = await context.Subnets
@@ -216,7 +218,8 @@ public partial class SubnetController : Controller
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError("", $"Error updating subnet: {ex.Message}");
+                logger.LogError(ex, "Subnet edit failed for subnet {SubnetId}", id);
+                ModelState.AddModelError("", "Error updating subnet. Details have been logged.");
             }
         }
 

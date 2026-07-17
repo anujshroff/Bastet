@@ -9,6 +9,7 @@ using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.HostIpManagement;
 
@@ -42,11 +43,12 @@ public class SubnetHostIpInteractionTests : IDisposable
         // Create controllers
         _subnetController = new SubnetController(_context, _ipUtilityService,
             _subnetValidationService, _hostIpValidationService, _userContextService,
-            ControllerTestHelper.CreateMockSubnetLockingService());
+            ControllerTestHelper.CreateMockSubnetLockingService(), NullLogger<SubnetController>.Instance);
         ControllerTestHelper.SetupController(_subnetController);
 
         _hostIpController = new HostIpController(_context, _hostIpValidationService,
-            _ipUtilityService, _userContextService);
+            _ipUtilityService, _userContextService, ControllerTestHelper.CreateMockSubnetLockingService(),
+            NullLogger<HostIpController>.Instance);
         ControllerTestHelper.SetupController(_hostIpController);
 
         // Set up test data

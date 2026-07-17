@@ -111,7 +111,8 @@ public partial class SubnetController : Controller
         }
         catch (Exception ex)
         {
-            ModelState.AddModelError("", $"Error creating subnet: {ex.Message}");
+            logger.LogError(ex, "Subnet create failed");
+            ModelState.AddModelError("", "Error creating subnet. Details have been logged.");
         }
 
         // If we get here, something went wrong

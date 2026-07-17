@@ -56,6 +56,11 @@ namespace Bastet.Models.ViewModels
 
         /// <summary>Host IP assignments on this subnet and all of its descendants.</summary>
         public int HostIpCount { get; set; }
+
+        /// <summary>
+        /// IDs of every subnet in this subnet's subtree - the rows the counts above include.
+        /// </summary>
+        public IReadOnlyList<int> DescendantSubnetIds { get; set; } = [];
     }
 
     /// <summary>
@@ -107,6 +112,12 @@ namespace Bastet.Models.ViewModels
 
         /// <summary>Host IPs that would be archived along with this subnet and its descendants.</summary>
         public int HostIpCount { get; set; }
+
+        /// <summary>
+        /// IDs of every subnet in this subnet's subtree - the rows the counts above include. Lets
+        /// the client avoid double-counting when an item and its ancestor are both selected.
+        /// </summary>
+        public IReadOnlyList<int> DescendantSubnetIds { get; set; } = [];
 
         /// <summary>The status name, so clients don't depend on the enum's ordinal.</summary>
         public string StatusName => Status.ToString();

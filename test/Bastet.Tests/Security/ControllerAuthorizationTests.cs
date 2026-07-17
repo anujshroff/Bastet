@@ -23,7 +23,8 @@ public class ControllerAuthorizationTests
         ["ErrorController.HttpStatusCodeHandler"] = "Target of UseStatusCodePagesWithReExecute; challenging it would recurse.",
         ["ErrorController.Error"] = "Target of UseExceptionHandler; challenging it would recurse.",
         ["AccountController.AccessDenied"] = "Configured AccessDeniedPath; must be reachable after a failed authorization check.",
-        ["AccountController.Logout"] = "Must work once the session is already gone."
+        ["AccountController.Logout"] = "Must work once the session is already gone.",
+        ["AccountController.SignedOut"] = "Post-logout landing page; shown precisely when the user has no session."
     };
 
     /// <summary>

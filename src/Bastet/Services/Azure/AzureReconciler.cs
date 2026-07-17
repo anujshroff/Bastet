@@ -188,7 +188,8 @@ namespace Bastet.Services.Azure
                 Reason = reason,
                 IsVNetLevel = isVNetLevel,
                 DescendantCount = snapshot.DescendantCount,
-                HostIpCount = snapshot.HostIpCount
+                HostIpCount = snapshot.HostIpCount,
+                DescendantSubnetIds = snapshot.DescendantSubnetIds
             };
 
         /// <summary>
