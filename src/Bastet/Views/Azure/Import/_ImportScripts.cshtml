@@ -59,17 +59,33 @@
             $("#step2").addClass("show active");
         });
         
+        // Re-lock later steps when an upstream selection changes, so a stale VNet/subnet list
+        // can't be reached via the step pills and committed (mirrors the Bulk/Reconcile wizards).
+        function invalidateVNetStep() {
+            // Changing the subscription invalidates both the VNet and Subnet steps.
+            $("#step2-tab, #step3-tab").addClass("disabled");
+            $("#import-subnets-btn").prop("disabled", true);
+        }
+
+        function invalidateSubnetStep() {
+            // Changing the VNet invalidates the Subnet step.
+            $("#step3-tab").addClass("disabled");
+            $("#import-subnets-btn").prop("disabled", true);
+        }
+
         // Subscription dropdown change handler
         $("#subscription-select").change(function() {
+            invalidateVNetStep();
             if ($(this).val()) {
                 $("#select-subscription-btn").prop("disabled", false);
             } else {
                 $("#select-subscription-btn").prop("disabled", true);
             }
         });
-        
+
         // VNet dropdown change handler
         $("#vnet-select").change(function() {
+            invalidateSubnetStep();
             if ($(this).val()) {
                 $("#select-vnet-btn").prop("disabled", false);
             } else {
