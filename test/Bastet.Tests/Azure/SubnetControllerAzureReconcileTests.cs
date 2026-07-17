@@ -30,7 +30,7 @@ public class SubnetControllerAzureReconcileTests : IDisposable
     private readonly BastetDbContext _context;
     private readonly SubnetController _controller;
     private readonly IAzureReconciler _reconciler = new AzureReconciler();
-    private readonly IAzureSubnetSnapshotService _snapshotService;
+    private readonly AzureSubnetSnapshotService _snapshotService;
 
     public SubnetControllerAzureReconcileTests()
     {
@@ -199,5 +199,47 @@ public class SubnetControllerAzureReconcileTests : IDisposable
         Assert.Contains(
             await _context.DeletedSubnets.ToListAsync(TestContext.Current.CancellationToken),
             d => d.OriginalId == 1 && d.Name == "vnet-gone");
+    }
+
+    // -------------------------------------------------------------------------
+    // Snapshot subtree ids - what the confirm dialog's dedup rests on
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetAzureLinkedSubnets_DescendantSubnetIds_CoverTheWholeSubtree()
+    {
+        // The ids must match what DescendantCount counts, or the client-side dedup of
+        // overlapping selections drifts from the numbers it corrects.
+        _context.Subnets.AddRange(
+            new Subnet
+            {
+                Id = 2,
+                Name = "child",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = 1,
+                AzureResourceId = $"/subscriptions/{SubId}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-gone/subnets/child",
+                CreatedAt = DateTime.UtcNow
+            },
+            new Subnet
+            {
+                Id = 3,
+                Name = "grandchild",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 25,
+                ParentSubnetId = 2,
+                CreatedAt = DateTime.UtcNow
+            });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IReadOnlyList<AzureLinkedSubnetSnapshot> snapshots = await _snapshotService.GetAzureLinkedSubnetsAsync();
+
+        AzureLinkedSubnetSnapshot root = Assert.Single(snapshots, s => s.Id == 1);
+        Assert.Equal([2, 3], root.DescendantSubnetIds.Order());
+        Assert.Equal(root.DescendantCount, root.DescendantSubnetIds.Count);
+
+        // The Azure-linked child's own subtree is just the grandchild.
+        AzureLinkedSubnetSnapshot child = Assert.Single(snapshots, s => s.Id == 2);
+        Assert.Equal([3], child.DescendantSubnetIds);
     }
 }
