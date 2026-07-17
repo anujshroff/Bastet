@@ -135,7 +135,8 @@ public partial class SubnetController : Controller
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return StatusCode(500, new { success = false, error = ex.Message });
+            logger.LogError(ex, "Azure reconcile delete failed");
+            return StatusCode(500, new { success = false, error = "The delete failed and no changes were saved. Details have been logged." });
         }
 
         TempData["SuccessMessage"] =

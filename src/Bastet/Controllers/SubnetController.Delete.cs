@@ -141,7 +141,8 @@ public partial class SubnetController : Controller
         {
             // Rollback the transaction on error
             await transaction.RollbackAsync();
-            TempData["ErrorMessage"] = $"Error deleting subnet: {ex.Message}";
+            logger.LogError(ex, "Subnet delete failed for subnet {SubnetId}", id);
+            TempData["ErrorMessage"] = "Error deleting subnet. Details have been logged.";
             return RedirectToAction(nameof(Delete), new { id });
         }
     }

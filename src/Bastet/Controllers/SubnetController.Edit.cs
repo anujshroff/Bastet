@@ -216,7 +216,8 @@ public partial class SubnetController : Controller
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError("", $"Error updating subnet: {ex.Message}");
+                logger.LogError(ex, "Subnet edit failed for subnet {SubnetId}", id);
+                ModelState.AddModelError("", "Error updating subnet. Details have been logged.");
             }
         }
 

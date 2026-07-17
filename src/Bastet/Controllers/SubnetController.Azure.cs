@@ -185,7 +185,8 @@ public partial class SubnetController : Controller
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return StatusCode(500, ex.Message);
+            logger.LogError(ex, "Batch create of child subnets under parent {ParentId} failed", parentId);
+            return StatusCode(500, "An unexpected error occurred while creating subnets. Details have been logged.");
         }
     }
 }

@@ -9,6 +9,7 @@ using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
@@ -93,9 +94,9 @@ public class SubnetRaceConditionTests : IDisposable
 
         // Create two controllers with real locking service
         SubnetController controller1 = new(_context, _ipUtilityService,
-            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService);
+            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
         SubnetController controller2 = new(_context, _ipUtilityService,
-            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService);
+            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
 
         ControllerTestHelper.SetupController(controller1);
         ControllerTestHelper.SetupController(controller2);
@@ -203,9 +204,9 @@ public class SubnetRaceConditionTests : IDisposable
 
         // Create two controllers with real locking service
         SubnetController controller1 = new(_context, _ipUtilityService,
-            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService);
+            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
         SubnetController controller2 = new(_context, _ipUtilityService,
-            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService);
+            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
 
         ControllerTestHelper.SetupController(controller1);
         ControllerTestHelper.SetupController(controller2);

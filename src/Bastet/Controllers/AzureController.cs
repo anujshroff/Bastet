@@ -11,7 +11,8 @@ namespace Bastet.Controllers
     public class AzureController(
         BastetDbContext context,
         IAzureService azureService,
-        IAzureSubnetSnapshotService snapshotService) : Controller
+        IAzureSubnetSnapshotService snapshotService,
+        ILogger<AzureController> logger) : Controller
     {
 
         // GET: Azure/Import/{id}
@@ -70,7 +71,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError("", $"Error connecting to Azure: {ex.Message}");
+                logger.LogError(ex, "Azure connectivity check failed on the Import page");
+                ModelState.AddModelError("", "Error connecting to Azure. Details have been logged.");
             }
 
             return View(viewModel);
@@ -93,7 +95,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, error = ex.Message });
+                logger.LogError(ex, "Failed to load Azure subscriptions");
+                return Json(new { success = false, error = "Failed to load subscriptions from Azure. Details have been logged." });
             }
         }
 
@@ -130,7 +133,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, error = ex.Message });
+                logger.LogError(ex, "Failed to load compatible VNets for subnet {SubnetId}", subnetId);
+                return Json(new { success = false, error = "Failed to load VNets from Azure. Details have been logged." });
             }
         }
 
@@ -167,7 +171,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, error = ex.Message });
+                logger.LogError(ex, "Failed to load compatible Azure subnets for subnet {SubnetId}", subnetId);
+                return Json(new { success = false, error = "Failed to load subnets from Azure. Details have been logged." });
             }
         }
 
@@ -201,7 +206,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError("", $"Error connecting to Azure: {ex.Message}");
+                logger.LogError(ex, "Azure connectivity check failed on the Bulk Import page");
+                ModelState.AddModelError("", "Error connecting to Azure. Details have been logged.");
             }
 
             return View(viewModel);
@@ -239,7 +245,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, error = ex.Message });
+                logger.LogError(ex, "Failed to load the subscription's VNets for bulk import");
+                return Json(new { success = false, error = "Failed to load VNets from Azure. Details have been logged." });
             }
         }
 
@@ -268,7 +275,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, error = ex.Message });
+                logger.LogError(ex, "Failed to build the bulk import preview plan");
+                return Json(new { success = false, error = "Failed to build the import preview. Details have been logged." });
             }
         }
 
@@ -300,7 +308,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError("", $"Error connecting to Azure: {ex.Message}");
+                logger.LogError(ex, "Azure connectivity check failed on the Reconcile page");
+                ModelState.AddModelError("", "Error connecting to Azure. Details have been logged.");
             }
 
             return View(viewModel);
@@ -341,7 +350,8 @@ namespace Bastet.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, error = ex.Message });
+                logger.LogError(ex, "Reconcile scan failed");
+                return Json(new { success = false, error = "The reconcile scan failed. Details have been logged." });
             }
         }
 

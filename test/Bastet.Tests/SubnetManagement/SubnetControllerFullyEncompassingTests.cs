@@ -8,6 +8,7 @@ using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
@@ -47,7 +48,8 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
             _validationService,
             _hostIpValidationService,
             _userContextService,
-            ControllerTestHelper.CreateMockSubnetLockingService()
+            ControllerTestHelper.CreateMockSubnetLockingService(),
+            NullLogger<SubnetController>.Instance
         );
         ControllerTestHelper.SetupController(_controller);
 

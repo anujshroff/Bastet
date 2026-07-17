@@ -8,6 +8,7 @@ using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace Bastet.Tests.Azure;
@@ -52,7 +53,8 @@ public class SubnetControllerAzureReconcileTests : IDisposable
             new SubnetValidationService(ipUtilityService),
             new HostIpValidationService(ipUtilityService, _context),
             userContextService,
-            ControllerTestHelper.CreateMockSubnetLockingService());
+            ControllerTestHelper.CreateMockSubnetLockingService(),
+            NullLogger<SubnetController>.Instance);
         ControllerTestHelper.SetupController(_controller);
 
         // The action calls Url.Action after committing; without RequestServices the Url helper is

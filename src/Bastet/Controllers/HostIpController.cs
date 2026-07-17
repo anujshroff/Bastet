@@ -21,7 +21,8 @@ public class HostIpController(
     BastetDbContext context,
     IHostIpValidationService hostIpValidationService,
     IIpUtilityService ipUtilityService,
-    IUserContextService userContextService) : Controller
+    IUserContextService userContextService,
+    ILogger<HostIpController> logger) : Controller
 {
 
     // GET: HostIp/Index/5 (5 is the subnetId)
@@ -153,7 +154,8 @@ public class HostIpController(
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError("", $"Error creating host IP: {ex.Message}");
+                logger.LogError(ex, "Host IP create failed for subnet {SubnetId}", viewModel.SubnetId);
+                ModelState.AddModelError("", "Error creating host IP. Details have been logged.");
             }
         }
 
@@ -295,7 +297,8 @@ public class HostIpController(
             }
             catch (Exception ex)
             {
-                ModelState.AddModelError("", $"Error updating host IP: {ex.Message}");
+                logger.LogError(ex, "Host IP edit failed");
+                ModelState.AddModelError("", "Error updating host IP. Details have been logged.");
             }
         }
 
@@ -396,7 +399,8 @@ public class HostIpController(
         {
             // Rollback transaction on error
             await transaction.RollbackAsync();
-            TempData["ErrorMessage"] = $"Error deleting host IP: {ex.Message}";
+            logger.LogError(ex, "Host IP delete failed");
+            TempData["ErrorMessage"] = "Error deleting host IP. Details have been logged.";
             return RedirectToAction(nameof(Delete), new { ip });
         }
     }

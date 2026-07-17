@@ -7,6 +7,7 @@ using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
@@ -37,7 +38,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         HostIpValidationService hostIpValidationService = new(_ipUtilityService, _context);
 
         // Create and configure the controller
-        _controller = new SubnetController(_context, _ipUtilityService, _validationService, hostIpValidationService, _userContextService, ControllerTestHelper.CreateMockSubnetLockingService());
+        _controller = new SubnetController(_context, _ipUtilityService, _validationService, hostIpValidationService, _userContextService, ControllerTestHelper.CreateMockSubnetLockingService(), NullLogger<SubnetController>.Instance);
         ControllerTestHelper.SetupController(_controller);
 
         // Set up test data

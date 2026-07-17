@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Text.Json;
 
@@ -38,7 +39,7 @@ public class AzureControllerTests : IDisposable
         _mockAzureService = new MockAzureService(true, CreateTestSubscriptions(), CreateTestVNets(), CreateTestSubnets());
 
         // Create and configure the controller
-        _controller = new AzureController(_context, _mockAzureService, new AzureSubnetSnapshotService(_context))
+        _controller = new AzureController(_context, _mockAzureService, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
         {
             // Setup controller context with HttpContext
             ControllerContext = new ControllerContext
@@ -286,7 +287,7 @@ public class AzureControllerTests : IDisposable
     {
         // Arrange
         int subnetId = 2;
-        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context))
+        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext
             {
@@ -347,6 +348,32 @@ public class AzureControllerTests : IDisposable
         Assert.False(resultObj.success);
         Assert.NotNull(resultObj.error);
         Assert.Contains("not enabled", resultObj.error);
+    }
+
+    [Fact]
+    public async Task GetSubscriptions_WhenAzureThrows_DoesNotLeakTheExceptionMessage()
+    {
+        // EF/SQL/Azure SDK exception text can carry schema or tenant details; the client must only
+        // ever see the generic message while the real exception goes to the server log.
+        Mock<IAzureService> throwingService = new();
+        throwingService.Setup(s => s.GetSubscriptions()).ThrowsAsync(new Exception("boom: secret detail"));
+        AzureController controller = new(
+            _context, throwingService.Object, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        IActionResult result = await controller.GetSubscriptions();
+
+        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
+        string json = JsonSerializer.Serialize(jsonResult.Value);
+        JsonResponse? resultObj = JsonSerializer.Deserialize<JsonResponse>(json);
+
+        Assert.NotNull(resultObj);
+        Assert.False(resultObj.success);
+        Assert.NotNull(resultObj.error);
+        Assert.DoesNotContain("boom", resultObj.error);
+        Assert.DoesNotContain("secret", resultObj.error);
     }
 
     [Fact]
