@@ -280,10 +280,6 @@ namespace Bastet.Services.Azure
         }
 
         /// <inheritdoc/>
-        public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId) =>
-            (await GetVNetInventory(subscriptionId)).VNets;
-
-        /// <inheritdoc/>
         public async Task<AzureVNetInventory> GetVNetInventory(string subscriptionId)
         {
             if (_armClient == null)
@@ -360,8 +356,9 @@ namespace Bastet.Services.Azure
                 _logger.LogError(ex, "Failed to retrieve Azure VNets with subnets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
 
                 // Report the failure rather than an empty inventory: callers must be able to tell
-                // "this subscription has no VNets" apart from "Azure could not be reached".
-                return new AzureVNetInventory { Success = false, ErrorMessage = ex.Message };
+                // "this subscription has no VNets" apart from "Azure could not be reached". The
+                // message can end up in the UI, so keep the exception text in the log only.
+                return new AzureVNetInventory { Success = false, ErrorMessage = "Azure could not be read for this subscription. Details have been logged." };
             }
         }
 

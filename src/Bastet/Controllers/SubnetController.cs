@@ -19,6 +19,7 @@ public partial class SubnetController(
     ISubnetValidationService subnetValidationService,
     IHostIpValidationService hostIpValidationService,
     IUserContextService userContextService,
-    ISubnetLockingService subnetLockingService) : Controller
+    ISubnetLockingService subnetLockingService,
+    ILogger<SubnetController> logger) : Controller
 {
 }

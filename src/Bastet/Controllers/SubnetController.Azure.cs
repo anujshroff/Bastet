@@ -19,7 +19,7 @@ public partial class SubnetController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<CreateSubnetViewModel> subnets, string? vnetName = null, string? vnetResourceId = null, bool isAzureImport = false, [FromServices] IInputSanitizationService? sanitizationService = null)
+    public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<AzureImportSubnetViewModel> subnets, string? vnetName = null, string? vnetResourceId = null, bool isAzureImport = false, [FromServices] IInputSanitizationService? sanitizationService = null)
     {
         if (!ModelState.IsValid)
         {
@@ -29,7 +29,7 @@ public partial class SubnetController : Controller
         // Sanitize user inputs before processing
         if (sanitizationService != null)
         {
-            foreach (CreateSubnetViewModel subnet in subnets)
+            foreach (AzureImportSubnetViewModel subnet in subnets)
             {
                 subnet.Name = sanitizationService.SanitizeName(subnet.Name);
                 subnet.NetworkAddress = sanitizationService.SanitizeNetworkInput(subnet.NetworkAddress);
@@ -53,6 +53,21 @@ public partial class SubnetController : Controller
             }
         }
 
+        try
+        {
+            // Validation reads and writes must happen under the global lock, or a concurrent
+            // create/import could pass overlap validation against a tree this batch is changing.
+            return await subnetLockingService.ExecuteWithSubnetLockAsync(() =>
+                BatchCreateChildSubnetsCore(parentId, subnets, vnetName, vnetResourceId, isAzureImport));
+        }
+        catch (TimeoutException)
+        {
+            return StatusCode(503, "The operation timed out because another subnet operation is in progress. Please try again.");
+        }
+    }
+
+    private async Task<IActionResult> BatchCreateChildSubnetsCore(int parentId, List<AzureImportSubnetViewModel> subnets, string? vnetName, string? vnetResourceId, bool isAzureImport)
+    {
         // Begin transaction
         using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
@@ -71,7 +86,7 @@ public partial class SubnetController : Controller
             string? fullyEncompassingSubnetName = null;
 
             // Initial validation to ensure all subnets are individually valid
-            foreach (CreateSubnetViewModel subnet in subnets)
+            foreach (AzureImportSubnetViewModel subnet in subnets)
             {
                 // Ensure parent ID is set correctly
                 subnet.ParentSubnetId = parentId;
@@ -127,7 +142,7 @@ public partial class SubnetController : Controller
             if (!hasFullyEncompassingSubnet)
             {
                 // Create each subnet - with validation right before adding to catch overlaps
-                foreach (CreateSubnetViewModel subnet in subnets)
+                foreach (AzureImportSubnetViewModel subnet in subnets)
                 {
                     // Skip subnets that fully encompass the VNet address prefix
                     if (subnet.FullyEncompassesVNetPrefix)
@@ -185,7 +200,8 @@ public partial class SubnetController : Controller
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return StatusCode(500, ex.Message);
+            logger.LogError(ex, "Batch create of child subnets under parent {ParentId} failed", parentId);
+            return StatusCode(500, "An unexpected error occurred while creating subnets. Details have been logged.");
         }
     }
 }

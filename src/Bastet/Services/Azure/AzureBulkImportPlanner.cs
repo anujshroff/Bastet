@@ -198,6 +198,21 @@ namespace Bastet.Services.Azure
                 return result;
             }
 
+            // Mirrors the AutoCreateChild hard failures in BuildPlanItem: the auto-created target's
+            // parent must be eligible to receive children.
+            ExistingSubnetSnapshot? deepest = FindDeepestContainer(network, cidr, existingSubnets);
+            if (deepest is not null)
+            {
+                if (deepest.HasHostIpAssignments)
+                {
+                    return Blocked(result, $"Containing Bastet subnet '{deepest.Name}' ({deepest.NetworkAddress}/{deepest.Cidr}) has host IP assignments and cannot have child subnets.");
+                }
+                if (deepest.IsFullyAllocated)
+                {
+                    return Blocked(result, $"Containing Bastet subnet '{deepest.Name}' ({deepest.NetworkAddress}/{deepest.Cidr}) is marked as fully allocated.");
+                }
+            }
+
             // Mirrors DetectVNetPrefixWouldContainExistingSubnet
             ExistingSubnetSnapshot? contained = existingSubnets.FirstOrDefault(e =>
                 ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr));
@@ -277,6 +292,32 @@ namespace Bastet.Services.Azure
             return result;
         }
 
+        /// <summary>
+        /// Finds the deepest (largest CIDR) existing Bastet subnet that strictly contains the given
+        /// network — the subnet an auto-created child would be parented under.
+        /// </summary>
+        private ExistingSubnetSnapshot? FindDeepestContainer(
+            string network,
+            int cidr,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
+        {
+            ExistingSubnetSnapshot? deepest = null;
+            foreach (ExistingSubnetSnapshot candidate in existingSubnets)
+            {
+                if (ipUtilityService.IsSubnetContainedInParent(
+                    network, cidr,
+                    candidate.NetworkAddress, candidate.Cidr))
+                {
+                    if (deepest is null || candidate.Cidr > deepest.Cidr)
+                    {
+                        deepest = candidate;
+                    }
+                }
+            }
+
+            return deepest;
+        }
+
         // -------------------------------------------------------------------
         // Plan item construction
         // -------------------------------------------------------------------
@@ -333,20 +374,8 @@ namespace Bastet.Services.Azure
             }
             else
             {
-                // 2) Find deepest containing Bastet subnet (strictly larger CIDR than the prefix? no — smaller CIDR number = larger network)
-                ExistingSubnetSnapshot? deepest = null;
-                foreach (ExistingSubnetSnapshot candidate in existingSubnets)
-                {
-                    if (ipUtilityService.IsSubnetContainedInParent(
-                        p.PrefixNetwork, p.PrefixCidr,
-                        candidate.NetworkAddress, candidate.Cidr))
-                    {
-                        if (deepest is null || candidate.Cidr > deepest.Cidr)
-                        {
-                            deepest = candidate;
-                        }
-                    }
-                }
+                // 2) Find deepest containing Bastet subnet
+                ExistingSubnetSnapshot? deepest = FindDeepestContainer(p.PrefixNetwork, p.PrefixCidr, existingSubnets);
 
                 if (deepest is not null)
                 {

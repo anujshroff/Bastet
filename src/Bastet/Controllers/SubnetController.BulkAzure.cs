@@ -4,7 +4,6 @@ using Bastet.Services.Azure;
 using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Controllers;
 
@@ -39,6 +38,25 @@ public partial class SubnetController : Controller
             return BadRequest(new { success = false, error = "No selection was provided." });
         }
 
+        try
+        {
+            // Re-plan and commit under the same global lock, so the tree the plan was validated
+            // against cannot change before the writes land.
+            return await subnetLockingService.ExecuteWithSubnetLockAsync(() =>
+                BulkCreateFromAzurePlanCore(selection, planner, snapshotService, sanitizationService));
+        }
+        catch (TimeoutException)
+        {
+            return StatusCode(503, new { success = false, error = "The operation timed out because another subnet operation is in progress. Please try again." });
+        }
+    }
+
+    private async Task<IActionResult> BulkCreateFromAzurePlanCore(
+        BulkImportSelectionDto selection,
+        IAzureBulkImportPlanner planner,
+        IAzureSubnetSnapshotService snapshotService,
+        IInputSanitizationService? sanitizationService)
+    {
         // Re-build the plan against the current Bastet tree right now
         IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
         BulkImportPlanViewModel plan = planner.BuildPlan(selection, existing);
@@ -133,7 +151,7 @@ public partial class SubnetController : Controller
                     // AutoCreateChild or AutoCreateTopLevel — create a fresh Bastet subnet for the VNet prefix
                     string targetName = sanitizationService?.SanitizeName(item.AutoCreateTargetName) ?? item.AutoCreateTargetName ?? string.Empty;
 
-                    CreateSubnetViewModel targetVm = new()
+                    AzureImportSubnetViewModel targetVm = new()
                     {
                         Name = targetName,
                         NetworkAddress = item.PrefixNetworkAddress,
@@ -194,7 +212,7 @@ public partial class SubnetController : Controller
                         ? null
                         : sanitizationService?.SanitizeDescription(child.AzureResourceId) ?? child.AzureResourceId;
 
-                    CreateSubnetViewModel childVm = new()
+                    AzureImportSubnetViewModel childVm = new()
                     {
                         Name = childName,
                         NetworkAddress = childNetwork,
@@ -251,7 +269,8 @@ public partial class SubnetController : Controller
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return StatusCode(500, new { success = false, error = ex.Message });
+            logger.LogError(ex, "Bulk Azure import commit failed");
+            return StatusCode(500, new { success = false, error = "The bulk import failed and no changes were saved. Details have been logged." });
         }
     }
 

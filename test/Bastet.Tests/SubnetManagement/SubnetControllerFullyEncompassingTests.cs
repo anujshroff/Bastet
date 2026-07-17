@@ -8,6 +8,7 @@ using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
@@ -47,7 +48,8 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
             _validationService,
             _hostIpValidationService,
             _userContextService,
-            ControllerTestHelper.CreateMockSubnetLockingService()
+            ControllerTestHelper.CreateMockSubnetLockingService(),
+            NullLogger<SubnetController>.Instance
         );
         ControllerTestHelper.SetupController(_controller);
 
@@ -112,7 +114,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         string vnetName = "Azure-VNet-1";
 
         // Create a subnet that fully encompasses the VNet's address prefix
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -159,7 +161,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         string vnetName = "Azure-VNet-2";
 
         // Create a mix of subnets, including one that fully encompasses the VNet prefix
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {

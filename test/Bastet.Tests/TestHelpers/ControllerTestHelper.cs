@@ -63,8 +63,4 @@ public class NoOpSubnetLockingService : ISubnetLockingService
     public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null) =>
         // Simply execute the operation without any locking
         await operation();
-
-    public async Task<T> ExecuteWithSubnetEditLockAsync<T>(int subnetId, Func<Task<T>> operation, TimeSpan? timeout = null) =>
-        // Simply execute the operation without any locking
-        await operation();
 }

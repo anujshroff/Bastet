@@ -31,8 +31,15 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
     /// /Account/Logout that would break with a 405. The authorization test exempts it explicitly.
     /// </remarks>
     [AllowAnonymous]
-    public async Task<IActionResult> Logout(string returnUrl = "/")
+    public async Task<IActionResult> Logout(string? returnUrl = null)
     {
+        // Never trust a caller-supplied absolute URL: it becomes the OIDC post-logout redirect, and
+        // how strictly that is validated varies by IdP product and deployment. Local paths only;
+        // everything else lands on the anonymous SignedOut page instead of an auto re-challenge.
+        string target = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl)
+            ? returnUrl
+            : Url.Action(nameof(SignedOut), "Account") ?? "/Account/SignedOut";
+
         // Clear all cookies
         foreach (string cookie in Request.Cookies.Keys)
         {
@@ -47,14 +54,23 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
         {
             // Redirect to OIDC provider for logout
             return SignOut(
-                new AuthenticationProperties { RedirectUri = returnUrl },
+                new AuthenticationProperties { RedirectUri = target },
                 CookieAuthenticationDefaults.AuthenticationScheme,
                 OpenIdConnectDefaults.AuthenticationScheme);
         }
 
-        // In development, just redirect to the specified URL or home
-        return Redirect("/");
+        // In development, just redirect to the specified URL or the signed-out page
+        return Redirect(target);
     }
+
+    /// <summary>
+    /// Anonymous: this is the post-logout landing page, shown precisely when the user has no
+    /// session. Without it, logout would bounce straight into a fresh OIDC challenge - a login
+    /// prompt at best, a silent re-login under SSO at worst.
+    /// </summary>
+    [AllowAnonymous]
+    public IActionResult SignedOut() =>
+        User.Identity?.IsAuthenticated == true ? RedirectToAction("Index", "Home") : View();
 
     [Authorize]
     public IActionResult Roles()
