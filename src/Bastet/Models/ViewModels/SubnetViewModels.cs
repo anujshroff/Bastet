@@ -44,15 +44,22 @@ public class CreateSubnetViewModel
 
     // Helper property for display
     public string CalculatedSubnetMask { get; set; } = string.Empty;
+}
 
+/// <summary>
+/// A subnet arriving through the Azure import flows. Carries the import-only fields so they are
+/// bindable only where import posts them - the interactive Create form binds the base class and
+/// can never smuggle them in.
+/// </summary>
+public class AzureImportSubnetViewModel : CreateSubnetViewModel
+{
     /// <summary>
-    /// Indicates whether this subnet fully encompasses a VNet address prefix (for Azure imports)
+    /// Indicates whether this subnet fully encompasses a VNet address prefix.
     /// </summary>
     public bool FullyEncompassesVNetPrefix { get; set; }
 
     /// <summary>
-    /// Azure resource ID of the source resource (VNet or subnet). Populated only by import flows;
-    /// not user-editable.
+    /// Azure resource ID of the source resource (VNet or subnet).
     /// </summary>
     public string? AzureResourceId { get; set; }
 }

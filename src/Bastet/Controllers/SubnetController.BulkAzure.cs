@@ -4,7 +4,6 @@ using Bastet.Services.Azure;
 using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Controllers;
 
@@ -133,7 +132,7 @@ public partial class SubnetController : Controller
                     // AutoCreateChild or AutoCreateTopLevel — create a fresh Bastet subnet for the VNet prefix
                     string targetName = sanitizationService?.SanitizeName(item.AutoCreateTargetName) ?? item.AutoCreateTargetName ?? string.Empty;
 
-                    CreateSubnetViewModel targetVm = new()
+                    AzureImportSubnetViewModel targetVm = new()
                     {
                         Name = targetName,
                         NetworkAddress = item.PrefixNetworkAddress,
@@ -194,7 +193,7 @@ public partial class SubnetController : Controller
                         ? null
                         : sanitizationService?.SanitizeDescription(child.AzureResourceId) ?? child.AzureResourceId;
 
-                    CreateSubnetViewModel childVm = new()
+                    AzureImportSubnetViewModel childVm = new()
                     {
                         Name = childName,
                         NetworkAddress = childNetwork,

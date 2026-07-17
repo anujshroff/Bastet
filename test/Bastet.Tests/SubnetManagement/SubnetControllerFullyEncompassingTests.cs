@@ -112,7 +112,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         string vnetName = "Azure-VNet-1";
 
         // Create a subnet that fully encompasses the VNet's address prefix
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
@@ -159,7 +159,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         string vnetName = "Azure-VNet-2";
 
         // Create a mix of subnets, including one that fully encompasses the VNet prefix
-        List<CreateSubnetViewModel> subnets =
+        List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
