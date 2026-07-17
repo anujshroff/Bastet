@@ -143,14 +143,6 @@ public class MockAzureService : IAzureService
     }
 
     /// <summary>
-    /// Mock implementation of bulk-import enumeration. Returns every VNet in the test corpus,
-    /// with their IPv4 prefixes and IPv4 subnets. The single-import tests don't exercise this
-    /// path, so it just returns an empty list when no VNets are configured.
-    /// </summary>
-    public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId) =>
-        (await GetVNetInventory(subscriptionId)).VNets;
-
-    /// <summary>
     /// Mock inventory read. Reports failure when the mock is configured with invalid credentials,
     /// so tests can exercise the "Azure could not be reached" path.
     /// </summary>

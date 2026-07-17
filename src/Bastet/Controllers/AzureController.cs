@@ -234,7 +234,16 @@ namespace Bastet.Controllers
 
             try
             {
-                List<BulkAzureVNetViewModel> vnets = await azureService.GetAllVNetsWithSubnets(subscriptionId);
+                // A failed Azure read must be reported as a failure, not an empty subscription -
+                // otherwise the wizard renders "nothing to import" over a credential or throttling
+                // error. Same fail-loud treatment as ReconcileScan.
+                AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
+                if (!inventory.Success)
+                {
+                    return Json(new { success = false, error = inventory.ErrorMessage });
+                }
+
+                List<BulkAzureVNetViewModel> vnets = inventory.VNets;
 
                 // Annotate with the planner's own rules, so what the UI lets you select and what the
                 // planner will accept cannot drift apart.
@@ -319,9 +328,8 @@ namespace Bastet.Controllers
         /// AJAX: compare one subscription's live VNets against the Azure-linked subnets in Bastet.
         /// </summary>
         /// <remarks>
-        /// Uses <see cref="IAzureService.GetVNetInventory"/> rather than GetAllVNetsWithSubnets, so a
-        /// failed Azure call is reported as a failure instead of an empty inventory that would make
-        /// every imported subnet look deleted.
+        /// Uses <see cref="IAzureService.GetVNetInventory"/> so a failed Azure call is reported as a
+        /// failure instead of an empty inventory that would make every imported subnet look deleted.
         /// </remarks>
         [HttpPost]
         [ValidateAntiForgeryToken]

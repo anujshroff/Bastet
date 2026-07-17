@@ -2,7 +2,9 @@ using Bastet.Controllers;
 using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Services;
 using Bastet.Services.Azure;
+using Bastet.Services.Security;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -424,6 +426,44 @@ public class AzureControllerTests : IDisposable
         Assert.Equal(2, resultObj.subnets.Count);
         Assert.Contains(resultObj.subnets, s => s.Name == "subnet1");
         Assert.Contains(resultObj.subnets, s => s.Name == "subnet2");
+    }
+
+    [Fact]
+    public async Task BulkGetVNets_AzureReadFails_ReportsFailureNotEmptySubscription()
+    {
+        // A failed Azure read must never render as "no VNets found / everything already imported" -
+        // the operator would wrongly conclude the subscription is fully handled.
+        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        AzureBulkImportPlanner planner = new(new IpUtilityService(), new InputSanitizationService());
+
+        IActionResult result = await controller.BulkGetVNets("sub-1", planner);
+
+        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
+        string json = JsonSerializer.Serialize(jsonResult.Value);
+        JsonResponse? resultObj = JsonSerializer.Deserialize<JsonResponse>(json);
+
+        Assert.NotNull(resultObj);
+        Assert.False(resultObj.success);
+        Assert.False(string.IsNullOrEmpty(resultObj.error));
+    }
+
+    [Fact]
+    public async Task BulkGetVNets_AzureReadSucceeds_ReturnsSuccess()
+    {
+        AzureBulkImportPlanner planner = new(new IpUtilityService(), new InputSanitizationService());
+
+        IActionResult result = await _controller.BulkGetVNets("sub-1", planner);
+
+        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
+        string json = JsonSerializer.Serialize(jsonResult.Value);
+        JsonResponse? resultObj = JsonSerializer.Deserialize<JsonResponse>(json);
+
+        Assert.NotNull(resultObj);
+        Assert.True(resultObj.success);
+        Assert.Null(resultObj.error);
     }
 
 #pragma warning disable IDE1006 // Naming Styles

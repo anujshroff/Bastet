@@ -280,10 +280,6 @@ namespace Bastet.Services.Azure
         }
 
         /// <inheritdoc/>
-        public async Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId) =>
-            (await GetVNetInventory(subscriptionId)).VNets;
-
-        /// <inheritdoc/>
         public async Task<AzureVNetInventory> GetVNetInventory(string subscriptionId)
         {
             if (_armClient == null)

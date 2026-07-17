@@ -44,18 +44,10 @@ namespace Bastet.Services.Azure
             int cidr);
 
         /// <summary>
-        /// Gets every VNet in a subscription with its IPv4 prefixes and IPv4 subnets.
-        /// Intended for the Bulk Azure Import flow where the user picks across the whole subscription.
+        /// Gets every VNet in a subscription with its IPv4 prefixes and IPv4 subnets, reporting
+        /// whether the call actually succeeded instead of collapsing every failure to an empty list.
         /// IPv6 prefixes/subnets are filtered out. Subnets that have only IPv6 prefixes are excluded;
         /// subnets that have both IPv4 and IPv6 prefixes return only their IPv4 prefix.
-        /// </summary>
-        /// <param name="subscriptionId">The Azure subscription ID</param>
-        /// <returns>List of VNets with their IPv4 prefixes and IPv4 subnets</returns>
-        Task<List<BulkAzureVNetViewModel>> GetAllVNetsWithSubnets(string subscriptionId);
-
-        /// <summary>
-        /// Same inventory as <see cref="GetAllVNetsWithSubnets"/>, but reports whether the call
-        /// actually succeeded instead of collapsing every failure to an empty list.
         /// </summary>
         /// <remarks>
         /// Callers that treat "absent from Azure" as a reason to change Bastet data must use this
