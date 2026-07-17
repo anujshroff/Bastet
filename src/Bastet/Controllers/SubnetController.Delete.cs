@@ -104,6 +104,22 @@ public partial class SubnetController : Controller
             return RedirectToAction(nameof(Delete), new { id });
         }
 
+        try
+        {
+            // The load, archive, and delete all run under the global lock so a concurrent host IP
+            // or child-subnet create cannot slip into the subtree mid-archive (and be cascaded
+            // away without an archive record).
+            return await subnetLockingService.ExecuteWithSubnetLockAsync(() => DeleteConfirmedCore(id));
+        }
+        catch (TimeoutException)
+        {
+            TempData["ErrorMessage"] = "The operation timed out because another subnet operation is in progress. Please try again.";
+            return RedirectToAction(nameof(Delete), new { id });
+        }
+    }
+
+    private async Task<IActionResult> DeleteConfirmedCore(int id)
+    {
         // Load the main subnet with its child relationships and host IPs
         Subnet? subnet = await context.Subnets
             .Include(s => s.ChildSubnets)

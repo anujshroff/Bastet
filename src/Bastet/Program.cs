@@ -118,7 +118,7 @@ builder.Services.AddScoped<Bastet.Services.Locking.ISubnetLockingService>(provid
 
     return context.Database.ProviderName?.ToLower() switch
     {
-        "microsoft.entityframeworkcore.sqlite" => new Bastet.Services.Locking.SqliteSubnetLockingService(context),
+        "microsoft.entityframeworkcore.sqlite" => new Bastet.Services.Locking.SqliteSubnetLockingService(),
         "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context),
         _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context) // Default to SQL Server
     };
@@ -220,13 +220,56 @@ if (autoMigrate)
 {
     using IServiceScope scope = app.Services.CreateScope();
 
-    // Migrate main application database
-    BastetDbContext dbContext = scope.ServiceProvider.GetRequiredService<BastetDbContext>();
-    dbContext.Database.Migrate();
+    // EF Core's Migrate() is not safe to run concurrently from multiple processes: on a
+    // multi-replica cold start (e.g. Container Apps scale-out), two instances can both see a
+    // pending migration and both apply it. Serialize replicas with a session-owned application
+    // lock held on a dedicated connection for the duration of both Migrate() calls. A replica
+    // that cannot get the lock within the timeout fails startup loudly; on restart it finds the
+    // migrations applied and Migrate() no-ops.
+    using SqlConnection migrationLockConnection = new(connectionString);
+    migrationLockConnection.Open();
 
-    // Migrate Data Protection keys database
-    DataProtectionDbContext dpContext = scope.ServiceProvider.GetRequiredService<DataProtectionDbContext>();
-    dpContext.Database.Migrate();
+    using (SqlCommand getLock = new("sp_getapplock", migrationLockConnection))
+    {
+        getLock.CommandType = System.Data.CommandType.StoredProcedure;
+        getLock.CommandTimeout = 330; // seconds; must exceed @LockTimeout below
+        getLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
+        getLock.Parameters.AddWithValue("@LockMode", "Exclusive");
+        getLock.Parameters.AddWithValue("@LockOwner", "Session");
+        getLock.Parameters.AddWithValue("@LockTimeout", 300000); // 5 min - a peer may be mid-migration
+        SqlParameter lockResult = getLock.Parameters.Add("@ReturnValue", System.Data.SqlDbType.Int);
+        lockResult.Direction = System.Data.ParameterDirection.ReturnValue;
+        getLock.ExecuteNonQuery();
+
+        if ((int)lockResult.Value < 0)
+        {
+            throw new InvalidOperationException(
+                $"Could not acquire the 'Bastet:Migration' application lock (result code {lockResult.Value}). "
+                + "Another replica appears to be stuck applying migrations. Startup was aborted rather than "
+                + "risking a concurrent migration.");
+        }
+    }
+
+    try
+    {
+        // Migrate main application database
+        BastetDbContext dbContext = scope.ServiceProvider.GetRequiredService<BastetDbContext>();
+        dbContext.Database.Migrate();
+
+        // Migrate Data Protection keys database
+        DataProtectionDbContext dpContext = scope.ServiceProvider.GetRequiredService<DataProtectionDbContext>();
+        dpContext.Database.Migrate();
+    }
+    finally
+    {
+        // Closing the connection would release the session lock too; releasing explicitly keeps
+        // the intent visible and covers connection-pool reuse.
+        using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
+        releaseLock.CommandType = System.Data.CommandType.StoredProcedure;
+        releaseLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
+        releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
+        releaseLock.ExecuteNonQuery();
+    }
 }
 
 // Log warning if DataProtectionKeys table doesn't exist

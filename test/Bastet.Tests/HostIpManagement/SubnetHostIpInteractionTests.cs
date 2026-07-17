@@ -47,7 +47,8 @@ public class SubnetHostIpInteractionTests : IDisposable
         ControllerTestHelper.SetupController(_subnetController);
 
         _hostIpController = new HostIpController(_context, _hostIpValidationService,
-            _ipUtilityService, _userContextService, NullLogger<HostIpController>.Instance);
+            _ipUtilityService, _userContextService, ControllerTestHelper.CreateMockSubnetLockingService(),
+            NullLogger<HostIpController>.Instance);
         ControllerTestHelper.SetupController(_hostIpController);
 
         // Set up test data

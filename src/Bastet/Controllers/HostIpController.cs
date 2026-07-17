@@ -3,6 +3,7 @@ using Bastet.Models;
 using Bastet.Models.DTOs;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Locking;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,7 @@ public class HostIpController(
     IHostIpValidationService hostIpValidationService,
     IIpUtilityService ipUtilityService,
     IUserContextService userContextService,
+    ISubnetLockingService subnetLockingService,
     ILogger<HostIpController> logger) : Controller
 {
 
@@ -114,43 +116,52 @@ public class HostIpController(
         {
             try
             {
-                // Validate host IP assignment
-                ValidationResult validationResult = hostIpValidationService.ValidateNewHostIp(viewModel.IP, viewModel.SubnetId);
-                if (!validationResult.IsValid)
+                // Validate and write under the global subnet lock, so this host IP cannot land in
+                // a subnet that a concurrent delete/edit is archiving or reshaping.
+                return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
                 {
-                    foreach (ValidationError error in validationResult.Errors)
+                    // Validate host IP assignment
+                    ValidationResult validationResult = hostIpValidationService.ValidateNewHostIp(viewModel.IP, viewModel.SubnetId);
+                    if (!validationResult.IsValid)
                     {
-                        ModelState.AddModelError("", error.Message);
+                        foreach (ValidationError error in validationResult.Errors)
+                        {
+                            ModelState.AddModelError("", error.Message);
+                        }
+
+                        // Refresh subnet info for display
+                        Subnet? subnet = await context.Subnets.FindAsync(viewModel.SubnetId);
+                        if (subnet != null)
+                        {
+                            viewModel.SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})";
+                            viewModel.NetworkAddress = subnet.NetworkAddress;
+                            viewModel.Cidr = subnet.Cidr;
+                            viewModel.SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}";
+                        }
+
+                        return View(viewModel);
                     }
 
-                    // Refresh subnet info for display
-                    Subnet? subnet = await context.Subnets.FindAsync(viewModel.SubnetId);
-                    if (subnet != null)
+                    // Create host IP assignment
+                    HostIpAssignment hostIp = new()
                     {
-                        viewModel.SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})";
-                        viewModel.NetworkAddress = subnet.NetworkAddress;
-                        viewModel.Cidr = subnet.Cidr;
-                        viewModel.SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}";
-                    }
+                        IP = viewModel.IP,
+                        Name = viewModel.Name,
+                        SubnetId = viewModel.SubnetId,
+                        CreatedAt = DateTime.UtcNow,
+                        CreatedBy = userContextService.GetCurrentUsername()
+                    };
 
-                    return View(viewModel);
-                }
+                    context.HostIpAssignments.Add(hostIp);
+                    await context.SaveChangesAsync();
 
-                // Create host IP assignment
-                HostIpAssignment hostIp = new()
-                {
-                    IP = viewModel.IP,
-                    Name = viewModel.Name,
-                    SubnetId = viewModel.SubnetId,
-                    CreatedAt = DateTime.UtcNow,
-                    CreatedBy = userContextService.GetCurrentUsername()
-                };
-
-                context.HostIpAssignments.Add(hostIp);
-                await context.SaveChangesAsync();
-
-                TempData["SuccessMessage"] = $"Host IP {hostIp.IP} was created successfully.";
-                return RedirectToAction(nameof(Index), new { subnetId = viewModel.SubnetId });
+                    TempData["SuccessMessage"] = $"Host IP {hostIp.IP} was created successfully.";
+                    return RedirectToAction(nameof(Index), new { subnetId = viewModel.SubnetId });
+                });
+            }
+            catch (TimeoutException)
+            {
+                ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
             }
             catch (Exception ex)
             {
@@ -215,74 +226,82 @@ public class HostIpController(
         {
             try
             {
-                // Validate host IP update
-                ValidationResult validationResult = hostIpValidationService.ValidateHostIpUpdate(
-                    ip,
-                    new UpdateHostIpDto
-                    {
-                        IP = viewModel.IP,
-                        Name = viewModel.Name,
-                        RowVersion = viewModel.RowVersion
-                    },
-                    viewModel.RowVersion);
-
-                if (!validationResult.IsValid)
+                return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
                 {
-                    // Check if this is a concurrency conflict
-                    bool isConcurrencyConflict = validationResult.Errors.Any(e => e.Code == "CONCURRENCY_CONFLICT");
-
-                    if (isConcurrencyConflict)
-                    {
-                        // Handle concurrency conflict - reload current data and show user-friendly message
-                        HostIpAssignment? currentHostIp = await context.HostIpAssignments
-                            .Include(h => h.Subnet)
-                            .FirstOrDefaultAsync(h => h.IP == ip);
-
-                        if (currentHostIp != null)
+                    // Validate host IP update
+                    ValidationResult validationResult = hostIpValidationService.ValidateHostIpUpdate(
+                        ip,
+                        new UpdateHostIpDto
                         {
-                            // Update the view model with current database values for concurrency control
-                            viewModel.RowVersion = currentHostIp.RowVersion ?? [];
-                            viewModel.SubnetInfo = $"{currentHostIp.Subnet.Name} ({currentHostIp.Subnet.NetworkAddress}/{currentHostIp.Subnet.Cidr})";
-                            viewModel.CreatedAt = currentHostIp.CreatedAt;
-                            viewModel.LastModifiedAt = currentHostIp.LastModifiedAt;
+                            IP = viewModel.IP,
+                            Name = viewModel.Name,
+                            RowVersion = viewModel.RowVersion
+                        },
+                        viewModel.RowVersion);
 
-                            // Clear the RowVersion from ModelState so the form field uses the updated model value
-                            ModelState.Remove(nameof(viewModel.RowVersion));
+                    if (!validationResult.IsValid)
+                    {
+                        // Check if this is a concurrency conflict
+                        bool isConcurrencyConflict = validationResult.Errors.Any(e => e.Code == "CONCURRENCY_CONFLICT");
+
+                        if (isConcurrencyConflict)
+                        {
+                            // Handle concurrency conflict - reload current data and show user-friendly message
+                            HostIpAssignment? currentHostIp = await context.HostIpAssignments
+                                .Include(h => h.Subnet)
+                                .FirstOrDefaultAsync(h => h.IP == ip);
+
+                            if (currentHostIp != null)
+                            {
+                                // Update the view model with current database values for concurrency control
+                                viewModel.RowVersion = currentHostIp.RowVersion ?? [];
+                                viewModel.SubnetInfo = $"{currentHostIp.Subnet.Name} ({currentHostIp.Subnet.NetworkAddress}/{currentHostIp.Subnet.Cidr})";
+                                viewModel.CreatedAt = currentHostIp.CreatedAt;
+                                viewModel.LastModifiedAt = currentHostIp.LastModifiedAt;
+
+                                // Clear the RowVersion from ModelState so the form field uses the updated model value
+                                ModelState.Remove(nameof(viewModel.RowVersion));
+                            }
+
+                            ModelState.AddModelError("",
+                                "This host IP was modified by another user while you were editing it. " +
+                                "Your changes have been preserved below, but you should review the current values before saving. " +
+                                "Click 'Save Changes' again to apply your updates.");
+                        }
+                        else
+                        {
+                            // Handle other validation errors normally
+                            foreach (ValidationError error in validationResult.Errors)
+                            {
+                                ModelState.AddModelError("", error.Message);
+                            }
                         }
 
-                        ModelState.AddModelError("",
-                            "This host IP was modified by another user while you were editing it. " +
-                            "Your changes have been preserved below, but you should review the current values before saving. " +
-                            "Click 'Save Changes' again to apply your updates.");
+                        return View(viewModel);
                     }
-                    else
+
+                    // Find and update the host IP
+                    HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
+                    if (hostIp == null)
                     {
-                        // Handle other validation errors normally
-                        foreach (ValidationError error in validationResult.Errors)
-                        {
-                            ModelState.AddModelError("", error.Message);
-                        }
+                        return NotFound();
                     }
 
-                    return View(viewModel);
-                }
+                    hostIp.Name = viewModel.Name;
+                    hostIp.LastModifiedAt = DateTime.UtcNow;
+                    hostIp.ModifiedBy = userContextService.GetCurrentUsername();
 
-                // Find and update the host IP
-                HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
-                if (hostIp == null)
-                {
-                    return NotFound();
-                }
+                    context.Update(hostIp);
+                    await context.SaveChangesAsync();
 
-                hostIp.Name = viewModel.Name;
-                hostIp.LastModifiedAt = DateTime.UtcNow;
-                hostIp.ModifiedBy = userContextService.GetCurrentUsername();
-
-                context.Update(hostIp);
-                await context.SaveChangesAsync();
-
-                TempData["SuccessMessage"] = $"Host IP {hostIp.IP} was updated successfully.";
-                return RedirectToAction(nameof(Index), new { subnetId = hostIp.SubnetId });
+                    TempData["SuccessMessage"] = $"Host IP {hostIp.IP} was updated successfully.";
+                    return RedirectToAction(nameof(Index), new { subnetId = hostIp.SubnetId });
+                });
+            }
+            catch (TimeoutException)
+            {
+                ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
+                return View(viewModel);
             }
             catch (DbUpdateConcurrencyException)
             {
@@ -343,64 +362,75 @@ public class HostIpController(
             return RedirectToAction(nameof(Delete), new { ip });
         }
 
-        // Validate host IP deletion
-        ValidationResult validationResult = hostIpValidationService.ValidateHostIpDeletion(ip);
-        if (!validationResult.IsValid)
-        {
-            foreach (ValidationError error in validationResult.Errors)
-            {
-                TempData["ErrorMessage"] = error.Message;
-            }
-
-            return RedirectToAction(nameof(Delete), new { ip });
-        }
-
-        // Begin a transaction to ensure data consistency
-        using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
-
         try
         {
-            // Get the host IP assignment
-            HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
-            if (hostIp == null)
+            return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
             {
-                return NotFound();
-            }
+                // Validate host IP deletion
+                ValidationResult validationResult = hostIpValidationService.ValidateHostIpDeletion(ip);
+                if (!validationResult.IsValid)
+                {
+                    foreach (ValidationError error in validationResult.Errors)
+                    {
+                        TempData["ErrorMessage"] = error.Message;
+                    }
 
-            int subnetId = hostIp.SubnetId;
+                    return RedirectToAction(nameof(Delete), new { ip });
+                }
 
-            // Create record in DeletedHostIpAssignments
-            DeletedHostIpAssignment deletedHostIp = new()
-            {
-                OriginalIP = hostIp.IP,
-                Name = hostIp.Name,
-                OriginalSubnetId = hostIp.SubnetId,
-                CreatedAt = hostIp.CreatedAt,
-                LastModifiedAt = hostIp.LastModifiedAt,
-                CreatedBy = hostIp.CreatedBy,
-                ModifiedBy = hostIp.ModifiedBy,
-                DeletedAt = DateTime.UtcNow,
-                DeletedBy = userContextService.GetCurrentUsername()
-            };
+                // Begin a transaction to ensure data consistency
+                using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
-            context.DeletedHostIpAssignments.Add(deletedHostIp);
+                try
+                {
+                    // Get the host IP assignment
+                    HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
+                    if (hostIp == null)
+                    {
+                        return NotFound();
+                    }
 
-            // Remove the host IP assignment
-            context.HostIpAssignments.Remove(hostIp);
-            await context.SaveChangesAsync();
+                    int subnetId = hostIp.SubnetId;
 
-            // Commit the transaction
-            await transaction.CommitAsync();
+                    // Create record in DeletedHostIpAssignments
+                    DeletedHostIpAssignment deletedHostIp = new()
+                    {
+                        OriginalIP = hostIp.IP,
+                        Name = hostIp.Name,
+                        OriginalSubnetId = hostIp.SubnetId,
+                        CreatedAt = hostIp.CreatedAt,
+                        LastModifiedAt = hostIp.LastModifiedAt,
+                        CreatedBy = hostIp.CreatedBy,
+                        ModifiedBy = hostIp.ModifiedBy,
+                        DeletedAt = DateTime.UtcNow,
+                        DeletedBy = userContextService.GetCurrentUsername()
+                    };
 
-            TempData["SuccessMessage"] = $"Host IP {ip} was deleted successfully.";
-            return RedirectToAction(nameof(Index), new { subnetId });
+                    context.DeletedHostIpAssignments.Add(deletedHostIp);
+
+                    // Remove the host IP assignment
+                    context.HostIpAssignments.Remove(hostIp);
+                    await context.SaveChangesAsync();
+
+                    // Commit the transaction
+                    await transaction.CommitAsync();
+
+                    TempData["SuccessMessage"] = $"Host IP {ip} was deleted successfully.";
+                    return RedirectToAction(nameof(Index), new { subnetId });
+                }
+                catch (Exception ex)
+                {
+                    // Rollback transaction on error
+                    await transaction.RollbackAsync();
+                    logger.LogError(ex, "Host IP delete failed");
+                    TempData["ErrorMessage"] = "Error deleting host IP. Details have been logged.";
+                    return RedirectToAction(nameof(Delete), new { ip });
+                }
+            });
         }
-        catch (Exception ex)
+        catch (TimeoutException)
         {
-            // Rollback transaction on error
-            await transaction.RollbackAsync();
-            logger.LogError(ex, "Host IP delete failed");
-            TempData["ErrorMessage"] = "Error deleting host IP. Details have been logged.";
+            TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
             return RedirectToAction(nameof(Delete), new { ip });
         }
     }
@@ -644,46 +674,59 @@ public class HostIpController(
             return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
         }
 
-        // Find the subnet
-        Subnet? subnet = await context.Subnets
-            .Include(s => s.ChildSubnets)
-            .Include(s => s.HostIpAssignments)
-            .FirstOrDefaultAsync(s => s.Id == dto.SubnetId);
-
-        if (subnet == null)
+        try
         {
-            return NotFound();
-        }
-
-        // If we're trying to mark as fully allocated, validate
-        if (dto.IsFullyAllocated)
-        {
-            ValidationResult validationResult = hostIpValidationService.ValidateSubnetCanBeFullyAllocated(dto.SubnetId);
-            if (!validationResult.IsValid)
+            // IsFullyAllocated gates child-subnet creation, so flipping it must not race the
+            // creates/imports that validate against it.
+            return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
             {
-                foreach (ValidationError error in validationResult.Errors)
+                // Find the subnet
+                Subnet? subnet = await context.Subnets
+                    .Include(s => s.ChildSubnets)
+                    .Include(s => s.HostIpAssignments)
+                    .FirstOrDefaultAsync(s => s.Id == dto.SubnetId);
+
+                if (subnet == null)
                 {
-                    TempData["ErrorMessage"] = error.Message;
+                    return NotFound();
                 }
 
+                // If we're trying to mark as fully allocated, validate
+                if (dto.IsFullyAllocated)
+                {
+                    ValidationResult validationResult = hostIpValidationService.ValidateSubnetCanBeFullyAllocated(dto.SubnetId);
+                    if (!validationResult.IsValid)
+                    {
+                        foreach (ValidationError error in validationResult.Errors)
+                        {
+                            TempData["ErrorMessage"] = error.Message;
+                        }
+
+                        return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
+                    }
+                }
+
+                // Update the subnet
+                subnet.IsFullyAllocated = dto.IsFullyAllocated;
+                subnet.LastModifiedAt = DateTime.UtcNow;
+                subnet.ModifiedBy = userContextService.GetCurrentUsername();
+
+                context.Update(subnet);
+                await context.SaveChangesAsync();
+
+                string statusMessage = dto.IsFullyAllocated
+                    ? $"Subnet '{subnet.Name}' was marked as fully allocated."
+                    : $"Subnet '{subnet.Name}' was marked as not fully allocated.";
+
+                TempData["SuccessMessage"] = statusMessage;
                 return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
-            }
+            });
         }
-
-        // Update the subnet
-        subnet.IsFullyAllocated = dto.IsFullyAllocated;
-        subnet.LastModifiedAt = DateTime.UtcNow;
-        subnet.ModifiedBy = userContextService.GetCurrentUsername();
-
-        context.Update(subnet);
-        await context.SaveChangesAsync();
-
-        string statusMessage = dto.IsFullyAllocated
-            ? $"Subnet '{subnet.Name}' was marked as fully allocated."
-            : $"Subnet '{subnet.Name}' was marked as not fully allocated.";
-
-        TempData["SuccessMessage"] = statusMessage;
-        return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
+        catch (TimeoutException)
+        {
+            TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
+            return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
+        }
     }
 
     private bool HostIpExists(string ip) =>

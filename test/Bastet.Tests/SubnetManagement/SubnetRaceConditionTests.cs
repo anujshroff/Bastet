@@ -39,7 +39,7 @@ public class SubnetRaceConditionTests : IDisposable
         _sanitizationService = new InputSanitizationService();
 
         // Use the real SQLite locking service for these tests
-        _lockingService = new SqliteSubnetLockingService(_context);
+        _lockingService = new SqliteSubnetLockingService();
 
         // Set up test data
         SeedTestData();
@@ -311,5 +311,69 @@ public class SubnetRaceConditionTests : IDisposable
             // This is still a valid test result - it shows that when operations conflict,
             // they fail gracefully rather than corrupting data
         }
+    }
+
+    [Fact]
+    public async Task ConcurrentCreateAndBatchImport_WithLocking_CannotCreateOverlappingSiblings()
+    {
+        // The A1 write-skew scenario: an interactive create of 10.0.9.0/24 races a batch import of
+        // 10.0.9.0/25 under the same parent. Each validates overlap against committed rows, so
+        // without the shared global lock both would pass validation and commit overlapping
+        // siblings. With it, whichever runs second must see the first's row and fail validation.
+        CreateSubnetViewModel createViewModel = new()
+        {
+            Name = "Interactive",
+            NetworkAddress = "10.0.9.0",
+            Cidr = 24,
+            ParentSubnetId = 1
+        };
+
+        List<AzureImportSubnetViewModel> batchSubnets =
+        [
+            new()
+            {
+                Name = "Imported",
+                NetworkAddress = "10.0.9.0",
+                Cidr = 25,
+                ParentSubnetId = 1
+            }
+        ];
+
+        SubnetController controller1 = new(_context, _ipUtilityService,
+            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
+        SubnetController controller2 = new(_context, _ipUtilityService,
+            _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
+
+        ControllerTestHelper.SetupController(controller1);
+        ControllerTestHelper.SetupController(controller2);
+
+        List<Exception> exceptions = [];
+
+        Task[] tasks =
+        [
+            Task.Run(async () =>
+            {
+                try { await controller1.Create(createViewModel); }
+                catch (Exception ex) { lock (exceptions) { exceptions.Add(ex); } }
+            }, TestContext.Current.CancellationToken),
+            Task.Run(async () =>
+            {
+                try { await controller2.BatchCreateChildSubnets(1, batchSubnets); }
+                catch (Exception ex) { lock (exceptions) { exceptions.Add(ex); } }
+            }, TestContext.Current.CancellationToken)
+        ];
+
+        await Task.WhenAll(tasks).WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty(exceptions);
+
+        // Exactly one of the two overlapping subnets may exist; both committing as siblings is the
+        // hierarchy corruption A1 describes.
+        List<Subnet> created = await _context.Subnets
+            .Where(s => s.ParentSubnetId == 1 && s.NetworkAddress == "10.0.9.0")
+            .ToListAsync(TestContext.Current.CancellationToken);
+
+        Subnet winner = Assert.Single(created);
+        Assert.True(winner.Cidr is 24 or 25);
     }
 }

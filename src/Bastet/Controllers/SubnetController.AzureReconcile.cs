@@ -82,61 +82,77 @@ public partial class SubnetController : Controller
         int hostIpsArchived = 0;
         int targetsDeleted = 0;
 
-        using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
-            await context.Database.BeginTransactionAsync();
-
-        // Only the database work is guarded. Building the response happens after the commit, so a
-        // failure there can't send us into a rollback of an already-committed transaction - which
+        // Only the database work is guarded (and holds the global subnet lock - the Azure re-scan
+        // above must not run while holding it). Building the response happens after the commit, so
+        // a failure there can't send us into a rollback of an already-committed transaction - which
         // would throw and mask the real error while the rows were already gone.
         try
         {
-
-            // Parents first (smaller CIDR = larger network). Archiving a parent takes its whole
-            // subtree, so a selected child may already be gone by the time we reach it - skip those
-            // rather than failing on a missing row.
-            List<int> ordered = [.. request.SubnetIds
-                .Distinct()
-                .OrderBy(id => stillStale[id].Cidr)];
-
-            HashSet<int> alreadyArchived = [];
-
-            foreach (int subnetId in ordered)
+            IActionResult? failure = await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult?>(async () =>
             {
-                if (alreadyArchived.Contains(subnetId))
+                using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
+                    await context.Database.BeginTransactionAsync();
+
+                try
                 {
-                    continue;
-                }
+                    // Parents first (smaller CIDR = larger network). Archiving a parent takes its whole
+                    // subtree, so a selected child may already be gone by the time we reach it - skip those
+                    // rather than failing on a missing row.
+                    List<int> ordered = [.. request.SubnetIds
+                        .Distinct()
+                        .OrderBy(id => stillStale[id].Cidr)];
 
-                Subnet? subnet = await context.Subnets.FindAsync(subnetId);
-                if (subnet is null)
+                    HashSet<int> alreadyArchived = [];
+
+                    foreach (int subnetId in ordered)
+                    {
+                        if (alreadyArchived.Contains(subnetId))
+                        {
+                            continue;
+                        }
+
+                        Subnet? subnet = await context.Subnets.FindAsync(subnetId);
+                        if (subnet is null)
+                        {
+                            // Cascaded away as part of an earlier subtree in this same transaction
+                            continue;
+                        }
+
+                        List<Subnet> descendants = await GetAllDescendantsOrdered(subnetId);
+                        (int archivedSubnets, int archivedHostIps) = await ArchiveSubnetSubtreeAsync(subnet);
+
+                        foreach (Subnet descendant in descendants)
+                        {
+                            alreadyArchived.Add(descendant.Id);
+                        }
+
+                        alreadyArchived.Add(subnetId);
+                        subnetsArchived += archivedSubnets;
+                        hostIpsArchived += archivedHostIps;
+                        targetsDeleted++;
+
+                        await context.SaveChangesAsync();
+                    }
+
+                    await transaction.CommitAsync();
+                    return null;
+                }
+                catch (Exception ex)
                 {
-                    // Cascaded away as part of an earlier subtree in this same transaction
-                    continue;
+                    await transaction.RollbackAsync();
+                    logger.LogError(ex, "Azure reconcile delete failed");
+                    return StatusCode(500, new { success = false, error = "The delete failed and no changes were saved. Details have been logged." });
                 }
+            });
 
-                List<Subnet> descendants = await GetAllDescendantsOrdered(subnetId);
-                (int archivedSubnets, int archivedHostIps) = await ArchiveSubnetSubtreeAsync(subnet);
-
-                foreach (Subnet descendant in descendants)
-                {
-                    alreadyArchived.Add(descendant.Id);
-                }
-
-                alreadyArchived.Add(subnetId);
-                subnetsArchived += archivedSubnets;
-                hostIpsArchived += archivedHostIps;
-                targetsDeleted++;
-
-                await context.SaveChangesAsync();
+            if (failure is not null)
+            {
+                return failure;
             }
-
-            await transaction.CommitAsync();
         }
-        catch (Exception ex)
+        catch (TimeoutException)
         {
-            await transaction.RollbackAsync();
-            logger.LogError(ex, "Azure reconcile delete failed");
-            return StatusCode(500, new { success = false, error = "The delete failed and no changes were saved. Details have been logged." });
+            return StatusCode(503, new { success = false, error = "The operation timed out because another subnet operation is in progress. Nothing was deleted. Please try again." });
         }
 
         TempData["SuccessMessage"] =

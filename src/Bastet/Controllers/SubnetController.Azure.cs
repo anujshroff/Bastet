@@ -53,6 +53,21 @@ public partial class SubnetController : Controller
             }
         }
 
+        try
+        {
+            // Validation reads and writes must happen under the global lock, or a concurrent
+            // create/import could pass overlap validation against a tree this batch is changing.
+            return await subnetLockingService.ExecuteWithSubnetLockAsync(() =>
+                BatchCreateChildSubnetsCore(parentId, subnets, vnetName, vnetResourceId, isAzureImport));
+        }
+        catch (TimeoutException)
+        {
+            return StatusCode(503, "The operation timed out because another subnet operation is in progress. Please try again.");
+        }
+    }
+
+    private async Task<IActionResult> BatchCreateChildSubnetsCore(int parentId, List<AzureImportSubnetViewModel> subnets, string? vnetName, string? vnetResourceId, bool isAzureImport)
+    {
         // Begin transaction
         using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 

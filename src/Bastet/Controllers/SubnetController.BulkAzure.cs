@@ -38,6 +38,25 @@ public partial class SubnetController : Controller
             return BadRequest(new { success = false, error = "No selection was provided." });
         }
 
+        try
+        {
+            // Re-plan and commit under the same global lock, so the tree the plan was validated
+            // against cannot change before the writes land.
+            return await subnetLockingService.ExecuteWithSubnetLockAsync(() =>
+                BulkCreateFromAzurePlanCore(selection, planner, snapshotService, sanitizationService));
+        }
+        catch (TimeoutException)
+        {
+            return StatusCode(503, new { success = false, error = "The operation timed out because another subnet operation is in progress. Please try again." });
+        }
+    }
+
+    private async Task<IActionResult> BulkCreateFromAzurePlanCore(
+        BulkImportSelectionDto selection,
+        IAzureBulkImportPlanner planner,
+        IAzureSubnetSnapshotService snapshotService,
+        IInputSanitizationService? sanitizationService)
+    {
         // Re-build the plan against the current Bastet tree right now
         IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
         BulkImportPlanViewModel plan = planner.BuildPlan(selection, existing);
