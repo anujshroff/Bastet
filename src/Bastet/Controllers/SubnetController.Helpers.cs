@@ -117,6 +117,7 @@ public partial class SubnetController : Controller
         if (viewModel.ParentSubnetId.HasValue)
         {
             parentSubnet = await context.Subnets
+                .Include(s => s.HostIpAssignments)
                 .FirstOrDefaultAsync(s => s.Id == viewModel.ParentSubnetId.Value);
 
             if (parentSubnet == null)
