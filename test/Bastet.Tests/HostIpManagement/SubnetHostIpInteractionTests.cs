@@ -400,6 +400,65 @@ public class SubnetHostIpInteractionTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateSubnet_UnderParentWithHostIps_IsRejected()
+    {
+        // Subnet 1 (192.168.0.0/24) has host IPs .10 and .20. Creating a child /25 that contains
+        // them would leave the parent with both a child and a host IP inside that child's range -
+        // the "children XOR host IPs" invariant the reverse path already enforces.
+        CreateSubnetViewModel viewModel = new()
+        {
+            Name = "Child under host-IP parent",
+            NetworkAddress = "192.168.0.0",
+            Cidr = 25,
+            ParentSubnetId = 1
+        };
+
+        // A real request uses a fresh DbContext that has not tracked the parent's host IPs. Clear
+        // the tracker so the controller reloads the parent from the DB, or EF relationship fixup
+        // would populate HostIpAssignments from the seeded-and-tracked entities and mask the bug.
+        _context.ChangeTracker.Clear();
+
+        IActionResult result = await _subnetController.Create(viewModel);
+
+        // Must be rejected, not created
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_subnetController.ModelState.IsValid);
+
+        Subnet? created = await _context.Subnets
+            .FirstOrDefaultAsync(s => s.NetworkAddress == "192.168.0.0" && s.Cidr == 25, TestContext.Current.CancellationToken);
+        Assert.Null(created);
+    }
+
+    [Fact]
+    public async Task CreateSubnet_UnderFullyAllocatedParent_IsRejected()
+    {
+        // Mark the empty subnet (id 7, 10.20.0.0/24) fully allocated, then try to nest a child.
+        // A "fully allocated" subnet with a child is an inconsistent state the model forbids.
+        Subnet parent = (await _context.Subnets.FindAsync([7], TestContext.Current.CancellationToken))!;
+        parent.IsFullyAllocated = true;
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        CreateSubnetViewModel viewModel = new()
+        {
+            Name = "Child under fully-allocated parent",
+            NetworkAddress = "10.20.0.0",
+            Cidr = 25,
+            ParentSubnetId = 7
+        };
+
+        _context.ChangeTracker.Clear();
+
+        IActionResult result = await _subnetController.Create(viewModel);
+
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_subnetController.ModelState.IsValid);
+
+        Subnet? created = await _context.Subnets
+            .FirstOrDefaultAsync(s => s.NetworkAddress == "10.20.0.0" && s.Cidr == 25, TestContext.Current.CancellationToken);
+        Assert.Null(created);
+    }
+
+    [Fact]
     public async Task DeleteSubnet_WithNestedHostIps_ArchivesAllHostIps()
     {
         // Arrange

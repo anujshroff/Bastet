@@ -264,7 +264,7 @@ public class IpUtilityService : IIpUtilityService
         uint subnetSize = 1u << (32 - targetCidr);
 
         // Generate all possible subnets
-        for (int i = 0 ; i < subnetCount ; i++)
+        for (int i = 0; i < subnetCount; i++)
         {
             uint newNetworkInt = networkInt + (subnetSize * (uint)i);
 
@@ -318,10 +318,10 @@ public class IpUtilityService : IIpUtilityService
 
         List<IPRange> unallocatedRanges = [];
 
-        // Get the subnet range
+        // Get the subnet range. long avoids the 1u << 32 wrap and the 2^32 overflow for a /0 subnet.
         uint startIp = BitConverter.ToUInt32([.. networkBytes.Reverse()], 0);
-        uint subnetSize = 1u << (32 - cidr);
-        uint endIp = startIp + subnetSize - 1;
+        long subnetSize = 1L << (32 - cidr);
+        uint endIp = (uint)(startIp + subnetSize - 1);
 
         // Get valid child subnets
         List<Subnet> validChildren = [.. childSubnets
@@ -405,7 +405,7 @@ public class IpUtilityService : IIpUtilityService
         if (allocatedRanges.Count > 0)
         {
             (uint Start, uint End) current = allocatedRanges[0];
-            for (int i = 1 ; i < allocatedRanges.Count ; i++)
+            for (int i = 1; i < allocatedRanges.Count; i++)
             {
                 (uint Start, uint End) next = allocatedRanges[i];
 

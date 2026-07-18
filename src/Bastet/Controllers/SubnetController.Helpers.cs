@@ -117,6 +117,7 @@ public partial class SubnetController : Controller
         if (viewModel.ParentSubnetId.HasValue)
         {
             parentSubnet = await context.Subnets
+                .Include(s => s.HostIpAssignments)
                 .FirstOrDefaultAsync(s => s.Id == viewModel.ParentSubnetId.Value);
 
             if (parentSubnet == null)
@@ -137,6 +138,14 @@ public partial class SubnetController : Controller
                     ModelState.AddModelError("ParentSubnetId", error.Message);
                 }
 
+                return false;
+            }
+
+            // A fully-allocated subnet cannot receive child subnets (mirrors Subnet.CanAddChildSubnet)
+            if (parentSubnet.IsFullyAllocated)
+            {
+                ModelState.AddModelError("ParentSubnetId",
+                    "Cannot create a child subnet under a subnet marked as fully allocated.");
                 return false;
             }
 

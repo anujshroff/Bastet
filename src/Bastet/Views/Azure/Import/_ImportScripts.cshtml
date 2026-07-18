@@ -6,6 +6,19 @@
         let selectedSubscriptionId = "";
         let selectedVNetId = "";
         let selectedVNetName = "";
+
+        // Escape Azure-derived strings before putting them in HTML (matches the Bulk/Reconcile wizards).
+        function escapeHtml(s) {
+            if (s === null || s === undefined) {
+                return "";
+            }
+            return String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
         
         // Step 1: Load Azure subscriptions
         loadAzureSubscriptions();
@@ -59,17 +72,33 @@
             $("#step2").addClass("show active");
         });
         
+        // Re-lock later steps when an upstream selection changes, so a stale VNet/subnet list
+        // can't be reached via the step pills and committed (mirrors the Bulk/Reconcile wizards).
+        function invalidateVNetStep() {
+            // Changing the subscription invalidates both the VNet and Subnet steps.
+            $("#step2-tab, #step3-tab").addClass("disabled");
+            $("#import-subnets-btn").prop("disabled", true);
+        }
+
+        function invalidateSubnetStep() {
+            // Changing the VNet invalidates the Subnet step.
+            $("#step3-tab").addClass("disabled");
+            $("#import-subnets-btn").prop("disabled", true);
+        }
+
         // Subscription dropdown change handler
         $("#subscription-select").change(function() {
+            invalidateVNetStep();
             if ($(this).val()) {
                 $("#select-subscription-btn").prop("disabled", false);
             } else {
                 $("#select-subscription-btn").prop("disabled", true);
             }
         });
-        
+
         // VNet dropdown change handler
         $("#vnet-select").change(function() {
+            invalidateSubnetStep();
             if ($(this).val()) {
                 $("#select-vnet-btn").prop("disabled", false);
             } else {
@@ -228,16 +257,16 @@
                                     <div class="form-check mb-2 border p-2 rounded">
                                         <input class="form-check-input subnet-checkbox" type="checkbox"
                                                id="${subnetId}">
-                                        <input type="hidden" name="subnets[${index}].Name" value="${subnet.name}" disabled>
-                                        <input type="hidden" name="subnets[${index}].NetworkAddress" value="${networkAddress}" disabled>
-                                        <input type="hidden" name="subnets[${index}].Cidr" value="${cidr}" disabled>
-                                        <input type="hidden" name="subnets[${index}].Description" value="Imported from Azure VNet: ${selectedVNetName}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Name" value="${escapeHtml(subnet.name)}" disabled>
+                                        <input type="hidden" name="subnets[${index}].NetworkAddress" value="${escapeHtml(networkAddress)}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Cidr" value="${escapeHtml(cidr)}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Description" value="Imported from Azure VNet: ${escapeHtml(selectedVNetName)}" disabled>
                                         <input type="hidden" name="subnets[${index}].Tags" value="Azure" disabled>
-                                        <input type="hidden" name="subnets[${index}].AzureResourceId" value="${subnet.resourceId || ''}" disabled>
+                                        <input type="hidden" name="subnets[${index}].AzureResourceId" value="${escapeHtml(subnet.resourceId || '')}" disabled>
                                         <input type="hidden" name="subnets[${index}].FullyEncompassesVNetPrefix" value="${subnet.fullyEncompassesVNetPrefix || false}" disabled>
                                         <label class="form-check-label" for="${subnetId}">
-                                            <strong>${subnet.name}</strong> ${multiSchemeBadge}<br>
-                                            <span class="text-muted">${subnet.addressPrefix}</span>
+                                            <strong>${escapeHtml(subnet.name)}</strong> ${multiSchemeBadge}<br>
+                                            <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>
                                         </label>
                                     </div>
                                 `;
@@ -280,27 +309,36 @@
         }
         
         // Add form submit handler to ensure VNet name is passed correctly
+        let importSubmitting = false;
         $("#import-form").submit(function(e) {
+            // Block a second submit (double-click / Enter) while the first is in flight.
+            if (importSubmitting) {
+                e.preventDefault();
+                return false;
+            }
+
             // Make sure we have at least one subnet selected
             if ($(".subnet-checkbox:checked").length === 0) {
                 alert("Please select at least one subnet to import");
                 e.preventDefault();
                 return false;
             }
-            
+
             // Ensure the hidden vnetName field is populated
             if (!$("#vnet-name").val()) {
                 $("#vnet-name").val(selectedVNetName);
             }
-            
+
             // Enable all fields for selected subnets
             $(".subnet-checkbox:checked").each(function() {
                 $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", false);
             });
-            
-            // Log for debugging
-            console.log("Submitting form with VNet name: " + $("#vnet-name").val());
-            
+
+            // Lock the button so a double-click can't POST the import twice.
+            importSubmitting = true;
+            $("#import-subnets-btn").prop("disabled", true)
+                .html('<span class="spinner-border spinner-border-sm"></span> Importing...');
+
             // Allow form submission to continue
             return true;
         });

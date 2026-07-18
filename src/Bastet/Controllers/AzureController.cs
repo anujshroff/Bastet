@@ -21,11 +21,8 @@ namespace Bastet.Controllers
             // Check environment variable
             if (!IsAzureImportEnabled())
             {
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                {
-                    statusCode = 403,
-                    errorMessage = "Azure Import feature is not enabled"
-                });
+                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
+                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
             }
 
             // Get the subnet
@@ -36,11 +33,8 @@ namespace Bastet.Controllers
 
             if (subnet == null)
             {
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                {
-                    statusCode = 404,
-                    errorMessage = $"Subnet with ID {id} could not be found."
-                });
+                TempData["ErrorPageMessage"] = $"Subnet with ID {id} could not be found.";
+                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
             }
 
             // Check if subnet has no children or host IPs and is not fully allocated
@@ -187,11 +181,8 @@ namespace Bastet.Controllers
         {
             if (!IsAzureImportEnabled())
             {
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                {
-                    statusCode = 403,
-                    errorMessage = "Azure Import feature is not enabled"
-                });
+                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
+                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
             }
 
             BulkImportInitialViewModel viewModel = new() { IsFeatureEnabled = true };
@@ -298,11 +289,8 @@ namespace Bastet.Controllers
         {
             if (!IsAzureImportEnabled())
             {
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                {
-                    statusCode = 403,
-                    errorMessage = "Azure Import feature is not enabled"
-                });
+                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
+                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
             }
 
             AzureReconcileInitialViewModel viewModel = new() { IsFeatureEnabled = true };
