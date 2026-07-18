@@ -19,11 +19,8 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new
-            {
-                statusCode = 404,
-                errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
-            });
+            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
         }
 
         EditSubnetViewModel viewModel = new()
@@ -58,11 +55,8 @@ public partial class SubnetController : Controller
     {
         if (id != viewModel.Id)
         {
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new
-            {
-                statusCode = 404,
-                errorMessage = "The ID in the URL doesn't match the ID in the form data."
-            });
+            TempData["ErrorPageMessage"] = "The ID in the URL doesn't match the ID in the form data.";
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
         }
 
         if (ModelState.IsValid)
@@ -177,11 +171,8 @@ public partial class SubnetController : Controller
             {
                 if (!SubnetExists(id))
                 {
-                    return RedirectToAction("HttpStatusCodeHandler", "Error", new
-                    {
-                        statusCode = 404,
-                        errorMessage = "The subnet no longer exists. It may have been deleted by another user."
-                    });
+                    TempData["ErrorPageMessage"] = "The subnet no longer exists. It may have been deleted by another user.";
+                    return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
                 }
 
                 // Handle concurrency conflict - reload current data and show user-friendly message
@@ -230,11 +221,8 @@ public partial class SubnetController : Controller
 
         if (origSubnet == null)
         {
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new
-            {
-                statusCode = 404,
-                errorMessage = $"The subnet with ID {id} could not be found or may have been deleted."
-            });
+            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
+            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
         }
 
         // Repopulate the display-only properties
