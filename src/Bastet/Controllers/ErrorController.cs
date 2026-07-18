@@ -15,14 +15,19 @@ namespace Bastet.Controllers;
 public class ErrorController : Controller
 {
     [Route("/Error/{statusCode}")]
-    public IActionResult HttpStatusCodeHandler(int statusCode, string? errorCode = null, string? errorMessage = null)
+    public IActionResult HttpStatusCodeHandler(int statusCode)
     {
         IStatusCodeReExecuteFeature? statusCodeResult = HttpContext.Features.Get<IStatusCodeReExecuteFeature>();
+
+        // The message is read from TempData (set server-side by the redirecting action), never from
+        // the query string - otherwise anyone could craft /Error/400?errorMessage=... and show
+        // arbitrary text under this origin. Falls back to the per-status default below.
+        string? errorMessage = TempData["ErrorPageMessage"] as string;
+
         ErrorViewModel viewModel = new()
         {
             RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier,
             StatusCode = statusCode,
-            ErrorCode = errorCode,
             OriginalPath = statusCodeResult?.OriginalPath,
             ErrorMessage = errorMessage
         };
