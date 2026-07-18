@@ -285,6 +285,26 @@ if (!dataProtectionTableExists)
 // Configure the HTTP request pipeline.
 app.UseForwardedHeaders(); // Process forwarded headers early to ensure HTTPS scheme is preserved
 
+// Security response headers on every response (any scheme/host, so plain-HTTP self-hosting and any
+// proxy work). Framing is configurable for hosts that legitimately embed the app; it defaults to
+// disallowing all framing (clickjacking protection). A full CSP is intentionally not added - the app
+// uses many inline <script> blocks.
+string? configuredFrameAncestors = Environment.GetEnvironmentVariable("BASTET_FRAME_ANCESTORS");
+string frameAncestors = string.IsNullOrWhiteSpace(configuredFrameAncestors) ? "'none'" : configuredFrameAncestors;
+app.Use(async (context, next) =>
+{
+    IHeaderDictionary headers = context.Response.Headers;
+    headers.XContentTypeOptions = "nosniff";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers.ContentSecurityPolicy = $"frame-ancestors {frameAncestors}";
+    if (frameAncestors == "'none'")
+    {
+        headers.XFrameOptions = "DENY"; // legacy-browser parity with frame-ancestors 'none'
+    }
+
+    await next();
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
