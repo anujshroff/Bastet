@@ -1,6 +1,7 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services.Security;
+using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -97,8 +98,7 @@ public partial class SubnetController : Controller
             }
 
             List<int> createdSubnetIds = [];
-            bool hasFullyEncompassingSubnet = false;
-            string? fullyEncompassingSubnetName = null;
+            AzureImportSubnetViewModel? fullyEncompassingSubnet = null;
 
             // Initial validation to ensure all subnets are individually valid
             foreach (AzureImportSubnetViewModel subnet in subnets)
@@ -109,15 +109,47 @@ public partial class SubnetController : Controller
                 // Check if this subnet fully encompasses a VNet address prefix
                 if (subnet.FullyEncompassesVNetPrefix)
                 {
-                    hasFullyEncompassingSubnet = true;
-                    fullyEncompassingSubnetName = subnet.Name;
-                    continue; // Skip validation for this subnet since we won't create it
+                    fullyEncompassingSubnet = subnet;
+                    continue; // Not created as a child; it marks the parent fully allocated instead
                 }
 
                 // Use the extracted validation method
                 if (!await ValidateSubnetCreation(subnet))
                 {
                     // Validation failed, rollback and return errors
+                    await transaction.RollbackAsync();
+                    return BadRequest(ModelState);
+                }
+            }
+
+            bool hasFullyEncompassingSubnet = fullyEncompassingSubnet != null;
+            string? fullyEncompassingSubnetName = fullyEncompassingSubnet?.Name;
+
+            // An encompassing entry is never created, so it skips the creation checks above - but it
+            // still drives a write to the parent, so the parent has to be validated for it. Without
+            // this, a caller could mark a parent that has children or host IPs as fully allocated (a
+            // state SetAllocationStatus and the bulk planner both forbid), or claim any unrelated
+            // prefix encompasses it.
+            if (fullyEncompassingSubnet != null)
+            {
+                if (!string.Equals(fullyEncompassingSubnet.NetworkAddress, parentSubnet.NetworkAddress, StringComparison.Ordinal)
+                    || fullyEncompassingSubnet.Cidr != parentSubnet.Cidr)
+                {
+                    ModelState.AddModelError("subnets",
+                        $"Subnet '{fullyEncompassingSubnet.Name}' ({fullyEncompassingSubnet.NetworkAddress}/{fullyEncompassingSubnet.Cidr}) " +
+                        $"does not cover the whole of {parentSubnet.NetworkAddress}/{parentSubnet.Cidr} and cannot mark it fully allocated.");
+                    await transaction.RollbackAsync();
+                    return BadRequest(ModelState);
+                }
+
+                ValidationResult allocationValidation = hostIpValidationService.ValidateSubnetCanBeFullyAllocated(parentId);
+                if (!allocationValidation.IsValid)
+                {
+                    foreach (ValidationError error in allocationValidation.Errors)
+                    {
+                        ModelState.AddModelError("subnets", error.Message);
+                    }
+
                     await transaction.RollbackAsync();
                     return BadRequest(ModelState);
                 }
