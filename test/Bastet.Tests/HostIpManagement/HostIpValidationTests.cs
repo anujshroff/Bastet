@@ -187,6 +187,64 @@ public class HostIpValidationTests : IDisposable
     }
 
     [Fact]
+    public void ValidateNewHostIp_NetworkOrBroadcastAddressOfNormalSubnet_Fails()
+    {
+        // The reservations still apply everywhere they mean something (10.1.0.0/24 here).
+        Assert.Contains(_validationService.ValidateNewHostIp("10.1.0.0", 1).Errors,
+            e => e.Code == "NETWORK_ADDRESS_RESERVED");
+        Assert.Contains(_validationService.ValidateNewHostIp("10.1.0.255", 1).Errors,
+            e => e.Code == "BROADCAST_ADDRESS_RESERVED");
+    }
+
+    [Fact]
+    public void ValidateNewHostIp_BothAddressesOfSlash31_Succeed()
+    {
+        // RFC 3021: a /31 point-to-point link has no network or broadcast address, and
+        // CalculateUsableIpAddresses reports 2 usable for it - both must be assignable.
+        Subnet pointToPoint = new()
+        {
+            Id = 20,
+            Name = "P2P Link",
+            NetworkAddress = "10.9.0.0",
+            Cidr = 31,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-user"
+        };
+        _context.Subnets.Add(pointToPoint);
+        _context.SaveChanges();
+
+        Assert.Equal(2, _ipUtilityService.CalculateUsableIpAddresses(31));
+        Assert.True(_validationService.ValidateNewHostIp("10.9.0.0", 20).IsValid);
+        Assert.True(_validationService.ValidateNewHostIp("10.9.0.1", 20).IsValid);
+
+        // The subnet is still only two addresses wide.
+        Assert.Contains(_validationService.ValidateNewHostIp("10.9.0.2", 20).Errors,
+            e => e.Message.Contains("outside the subnet range"));
+    }
+
+    [Fact]
+    public void ValidateNewHostIp_SingleAddressOfSlash32_Succeeds()
+    {
+        // A /32 is one host address, which is simultaneously its network and broadcast address.
+        Subnet singleHost = new()
+        {
+            Id = 21,
+            Name = "Single Host",
+            NetworkAddress = "10.9.1.5",
+            Cidr = 32,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-user"
+        };
+        _context.Subnets.Add(singleHost);
+        _context.SaveChanges();
+
+        Assert.Equal(1, _ipUtilityService.CalculateUsableIpAddresses(32));
+        Assert.True(_validationService.ValidateNewHostIp("10.9.1.5", 21).IsValid);
+        Assert.Contains(_validationService.ValidateNewHostIp("10.9.1.6", 21).Errors,
+            e => e.Message.Contains("outside the subnet range"));
+    }
+
+    [Fact]
     public void ValidateNewHostIp_OutsideSubnetRange_Fails()
     {
         // Arrange
