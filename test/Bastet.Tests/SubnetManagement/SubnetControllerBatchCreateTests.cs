@@ -178,6 +178,37 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Fact]
+    public async Task BatchCreateChildSubnets_WithLongVNetName_TruncatesParentNameToColumnLength()
+    {
+        // 54 characters: legal in Azure (names go up to 64) but longer than Subnet.Name's 50, and
+        // SanitizeName only trims at 100. On SQL Server the oversized value fails the insert and the
+        // whole import rolls back behind a generic 500, so the VNet can never be imported.
+        int parentId = 2; // Parent Subnet
+        string vnetName = "corporate-network-westeurope-production-environment-01";
+        Assert.Equal(54, vnetName.Length);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "web",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: vnetName, isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.Equal(vnetName[..50], parent.Name);
+    }
+
+    [Fact]
     public async Task BatchCreateChildSubnets_WithAzureResourceId_PersistsItOnTheCreatedSubnet()
     {
         // The import wizard posts the Azure resource ID with each subnet; reconcile and the portal

@@ -8,6 +8,12 @@ namespace Bastet.Controllers;
 
 public partial class SubnetController : Controller
 {
+    /// <summary>
+    /// Maximum length for <see cref="Models.Subnet.Name"/>; matches the [MaxLength(50)] attribute on
+    /// the entity, and the same limit the bulk import planner applies to Azure-derived names.
+    /// </summary>
+    private const int MaxSubnetNameLength = 50;
+
     // POST: Subnet/BatchCreateChildSubnets
     /// <param name="isAzureImport">
     /// True when called from the Azure import wizard, which additionally renames the parent to the
@@ -120,8 +126,13 @@ public partial class SubnetController : Controller
             // Update parent subnet if this is an Azure import
             if (!string.IsNullOrEmpty(vnetName) && isAzureImport)
             {
-                // Update the name to match the Azure VNet name
-                parentSubnet.Name = vnetName;
+                // Update the name to match the Azure VNet name. Azure allows 64-character VNet names
+                // and SanitizeName only trims at 100, so without this an over-long name reaches a
+                // column declared for 50 and fails the insert with a truncation error, rolling the
+                // whole import back behind a generic 500. The bulk path truncates in its planner.
+                parentSubnet.Name = vnetName.Length > MaxSubnetNameLength
+                    ? vnetName[..MaxSubnetNameLength]
+                    : vnetName;
 
                 // Stamp the VNet resource ID onto the parent so the Details page can link to Azure.
                 if (!string.IsNullOrEmpty(vnetResourceId))
