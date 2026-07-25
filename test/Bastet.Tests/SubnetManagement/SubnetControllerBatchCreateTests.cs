@@ -356,17 +356,21 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_EmptyList_ReturnsValidationError()
     {
-        // Arrange
+        // An empty list means nothing was selected, or nothing bound. It used to fall through to the
+        // parent rename and report "imported 0 child subnets" as a success.
         int parentId = 2;
-        List<AzureImportSubnetViewModel> subnets = [];
+        string originalName = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!.Name;
 
-        // Act
-        // Set referer to a non-Azure URL to get a BadRequest result instead of a redirect
-        _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
-        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, [], vnetName: "vnet-production", isAzureImport: true);
 
-        // Assert - when an empty list is passed, the controller returns OkObjectResult
-        _ = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+
+        // The parent must be left exactly as it was
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.Equal(originalName, parent.Name);
+        Assert.Null(parent.AzureResourceId);
     }
 
     [Fact]

@@ -26,6 +26,15 @@ public partial class SubnetController : Controller
             return BadRequest(ModelState);
         }
 
+        // Nothing bound means nothing was selected, or the post was malformed. Without this the
+        // import would fall through to the parent rename below and report "imported 0 child
+        // subnets" as a success, which reads as though the selection was honoured.
+        if (subnets is null or { Count: 0 })
+        {
+            ModelState.AddModelError("subnets", "No subnets were submitted for import.");
+            return BadRequest(ModelState);
+        }
+
         // Sanitize user inputs before processing
         if (sanitizationService != null)
         {
