@@ -300,6 +300,14 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
             // Check for overlaps with any other subnets in the system
             if (allOtherSubnets != null && allOtherSubnets.Any())
             {
+                // Ancestors and descendants are *supposed* to contain / be contained by this subnet,
+                // and expanding it cannot break either relation: containment in the direct parent is
+                // validated above and is transitive, so the subnet still fits every ancestor, and a
+                // larger subnet still holds every descendant it already held. Only unrelated subnets
+                // count as overlaps here - skipping just the direct relatives used to reject every
+                // CIDR decrease made on a subnet with a grandparent or grandchildren.
+                HashSet<int> hierarchyRelatedIds = CollectHierarchyRelatedIds(subnetId, parentSubnet, allOtherSubnets);
+
                 foreach (Subnet otherSubnet in allOtherSubnets)
                 {
                     // Skip siblings since we already checked them above
@@ -308,14 +316,8 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
                         continue;
                     }
 
-                    // Skip children since they should be contained within this subnet
-                    if (children != null && children.Contains(otherSubnet))
-                    {
-                        continue;
-                    }
-
-                    // Skip parent since we already checked it above
-                    if (parentSubnet != null && otherSubnet.Id == parentSubnet.Id)
+                    // Skip this subnet's own ancestors and descendants (see above)
+                    if (hierarchyRelatedIds.Contains(otherSubnet.Id))
                     {
                         continue;
                     }
@@ -360,6 +362,54 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Collects the ids of every ancestor and every descendant of <paramref name="subnetId"/>, whose
+    /// containment relationships with it are the hierarchy itself rather than overlaps. The subnet
+    /// being validated is not in <paramref name="allOtherSubnets"/>, so ancestors are walked from
+    /// <paramref name="parentSubnet"/> upwards; descendants are found by walking child links down.
+    /// </summary>
+    private static HashSet<int> CollectHierarchyRelatedIds(
+        int subnetId,
+        Subnet? parentSubnet,
+        IEnumerable<Subnet> allOtherSubnets)
+    {
+        List<Subnet> all = [.. allOtherSubnets];
+        HashSet<int> related = [];
+
+        // Ancestors: start at the direct parent and follow parent links up. Adding to the set is the
+        // loop condition, so a cycle in the data terminates instead of spinning.
+        Dictionary<int, Subnet> byId = [];
+        foreach (Subnet subnet in all)
+        {
+            byId.TryAdd(subnet.Id, subnet);
+        }
+
+        Subnet? ancestor = parentSubnet;
+        while (ancestor != null && related.Add(ancestor.Id))
+        {
+            ancestor = ancestor.ParentSubnetId.HasValue && byId.TryGetValue(ancestor.ParentSubnetId.Value, out Subnet? next)
+                ? next
+                : null;
+        }
+
+        // Descendants: breadth-first down the child links from the subnet being validated.
+        Queue<int> queue = new();
+        queue.Enqueue(subnetId);
+        while (queue.Count > 0)
+        {
+            int currentId = queue.Dequeue();
+            foreach (Subnet child in all.Where(s => s.ParentSubnetId == currentId))
+            {
+                if (related.Add(child.Id))
+                {
+                    queue.Enqueue(child.Id);
+                }
+            }
+        }
+
+        return related;
     }
 
     /// <inheritdoc />

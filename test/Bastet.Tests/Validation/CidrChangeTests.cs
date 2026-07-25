@@ -166,6 +166,57 @@ public class CidrChangeTests
         Assert.Contains(result.Errors, e => e.Code == "SUBNET_OVERLAP");
     }
 
+    [Fact]
+    public void ValidateSubnetCidrChange_DecreasingCidr_WithGrandparent_ReturnsValid()
+    {
+        // 10.0.0.0/8 -> 10.0.0.0/16 -> 10.0.0.0/24, expanding the deepest one to /23. The grandparent
+        // contains the expanded subnet, which is the hierarchy working, not an overlap: fitting the
+        // direct parent (checked separately) guarantees fitting every ancestor above it.
+        Subnet root = new() { Id = 1, Name = "Root", NetworkAddress = "10.0.0.0", Cidr = 8 };
+        Subnet parent = new() { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16, ParentSubnetId = 1 };
+
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
+            3, "10.0.0.0", 24, 23, parent, siblings: [], children: [],
+            allOtherSubnets: [root, parent]);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ValidateSubnetCidrChange_DecreasingCidr_WithGrandchildren_ReturnsValid()
+    {
+        // The subject 10.0.0.0/24 owns 10.0.0.128/25, which owns 10.0.0.128/26. Expanding the subject
+        // to /23 keeps both inside it - a subnet growing can never push out what it already contained.
+        Subnet parent = new() { Id = 2, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
+        Subnet child = new() { Id = 4, Name = "Child", NetworkAddress = "10.0.0.128", Cidr = 25, ParentSubnetId = 3 };
+        Subnet grandchild = new() { Id = 5, Name = "Grandchild", NetworkAddress = "10.0.0.128", Cidr = 26, ParentSubnetId = 4 };
+
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
+            3, "10.0.0.0", 24, 23, parent, siblings: [], children: [child],
+            allOtherSubnets: [parent, child, grandchild]);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public void ValidateSubnetCidrChange_DecreasingCidr_SwallowsSubnetInAnotherBranch_ReturnsInvalid()
+    {
+        // A subnet that is neither an ancestor nor a descendant must still block the expansion, even
+        // when it sits deeper in the tree: here 10.0.1.0/25 belongs to a sibling's subtree and would
+        // be swallowed by expanding 10.0.0.0/24 to /23.
+        Subnet parent = new() { Id = 1, Name = "Parent", NetworkAddress = "10.0.0.0", Cidr = 16 };
+        Subnet siblingChild = new() { Id = 4, Name = "Sibling's child", NetworkAddress = "10.0.1.0", Cidr = 25, ParentSubnetId = 3 };
+
+        ValidationResult result = _validationService.ValidateSubnetCidrChange(
+            2, "10.0.0.0", 24, 23, parent, siblings: [], children: [],
+            allOtherSubnets: [parent, siblingChild]);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Code == "SUBNET_OVERLAP");
+    }
+
     // Tests for increasing CIDR (making subnet smaller)
 
     [Fact]
