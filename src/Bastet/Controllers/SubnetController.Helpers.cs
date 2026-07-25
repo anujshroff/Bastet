@@ -4,6 +4,7 @@ using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
+using System.Net.Sockets;
 
 namespace Bastet.Controllers;
 
@@ -112,6 +113,23 @@ public partial class SubnetController : Controller
     // Helper method to validate subnet creation
     private async Task<bool> ValidateSubnetCreation(CreateSubnetViewModel viewModel)
     {
+        // Require a canonical dotted-quad IPv4 address. IPAddress.Parse also accepts partial
+        // ("10.0.0"), hex ("0x0A.0.0.0") and zero-padded/octal ("010.0.0.0") forms, which the checks
+        // below align and compare numerically while the address is stored exactly as typed - so an
+        // alias reads as a different subnet to the duplicate lookup, the parent self-skip and the
+        // {NetworkAddress, Cidr} unique index, and the stored text documents a different network
+        // than the one every calculation uses. The Azure import paths build their view models in
+        // code, so the model-binding attributes never run for them: this is the shared choke point.
+        if (!IPAddress.TryParse(viewModel.NetworkAddress, out IPAddress? parsedNetwork)
+            || parsedNetwork.AddressFamily != AddressFamily.InterNetwork
+            || parsedNetwork.ToString() != viewModel.NetworkAddress)
+        {
+            ModelState.AddModelError("NetworkAddress",
+                $"'{viewModel.NetworkAddress}' is not a valid IPv4 network address. " +
+                $"Use dotted-quad notation with no leading zeroes (e.g. 10.0.0.0).");
+            return false;
+        }
+
         // Check if parent subnet exists if specified
         Subnet? parentSubnet = null;
         if (viewModel.ParentSubnetId.HasValue)
