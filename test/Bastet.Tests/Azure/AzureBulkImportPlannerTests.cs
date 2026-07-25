@@ -486,6 +486,55 @@ public class AzureBulkImportPlannerTests
     }
 
     [Fact]
+    public void NamesCollidingAfterTruncation_AreDisambiguatedWithoutStalling()
+    {
+        // Azure allows 80-character subnet names, and these two share their first 50 - all that is
+        // left after truncation to Subnet.Name's limit. Suffixing the truncated name and cutting the
+        // result back to 50 reproduces the base name, so the disambiguator used to search every int
+        // for a free name it could never build, holding the global subnet lock on the commit path.
+        string nameA = "corp-westeurope-production-application-subnet-tierA";
+        string nameB = "corp-westeurope-production-application-subnet-tierB";
+        Assert.Equal(nameA[..50], nameB[..50]);
+
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-prod", "10.0.0.0/16",
+                Sub(nameA, "10.0.1.0/24"),
+                Sub(nameB, "10.0.2.0/24")));
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, [Existing(1, "Existing", "10.0.0.0", 16)]);
+
+        Assert.True(plan.CanCommit);
+        BulkImportPlanItem item = plan.Items[0];
+        Assert.Equal(2, item.ChildSubnets.Count);
+        Assert.NotEqual(item.ChildSubnets[0].Name, item.ChildSubnets[1].Name);
+        Assert.All(item.ChildSubnets, c => Assert.InRange(c.Name.Length, 1, 50));
+        // The disambiguating suffix has to survive, which is what forces the base name to be shortened.
+        Assert.Contains("vnet-prod", item.ChildSubnets[1].Name);
+    }
+
+    [Fact]
+    public void ManyNamesCollidingAfterTruncation_AreAllDistinct()
+    {
+        // Several collisions in one target exercise the numeric fallback, whose candidates must stay
+        // distinct rather than converging back onto the truncated base name.
+        string prefix = new('x', 48);
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-y", "10.0.0.0/16",
+                Sub(prefix + "aa", "10.0.1.0/24"),
+                Sub(prefix + "bb", "10.0.2.0/24"),
+                Sub(prefix + "cc", "10.0.3.0/24"),
+                Sub(prefix + "dd", "10.0.4.0/24")));
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, [Existing(1, "Existing", "10.0.0.0", 16)]);
+
+        Assert.True(plan.CanCommit);
+        List<BulkImportPlannedChildSubnet> children = plan.Items[0].ChildSubnets;
+        Assert.Equal(4, children.Count);
+        Assert.Equal(4, children.Select(c => c.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(children, c => Assert.InRange(c.Name.Length, 1, 50));
+    }
+
+    [Fact]
     public void LongAzureName_IsTruncatedTo50Chars()
     {
         string longName = new('a', 200);

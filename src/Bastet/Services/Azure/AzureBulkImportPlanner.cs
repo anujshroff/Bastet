@@ -660,24 +660,40 @@ namespace Bastet.Services.Azure
                 vnetSuffix = vnetSuffix[..20];
             }
 
-            string candidate = TruncateForName($"{baseName} ({vnetSuffix})");
+            string candidate = WithSuffix(baseName, $" ({vnetSuffix})");
             if (!usedNames.Contains(candidate))
             {
                 return candidate;
             }
 
-            // Fall back to numeric suffix
-            for (int i = 2; i < int.MaxValue; i++)
+            // Fall back to numeric suffix. Every attempt keeps its suffix, so the candidates are all
+            // distinct; with at most usedNames.Count names taken, one of these attempts is free.
+            for (int i = 2; i <= usedNames.Count + 2; i++)
             {
-                string numbered = TruncateForName($"{baseName} ({vnetSuffix} {i})");
+                string numbered = WithSuffix(baseName, $" ({vnetSuffix} {i})");
                 if (!usedNames.Contains(numbered))
                 {
                     return numbered;
                 }
             }
 
-            // Practically unreachable
-            return baseName;
+            // Unreachable by the counting argument above; keeps the method total.
+            return WithSuffix(baseName, $" ({vnetSuffix} {usedNames.Count + 3})");
+        }
+
+        /// <summary>
+        /// Appends <paramref name="suffix"/> within the name limit by shortening the base name.
+        /// Truncating the combined string instead would cut the suffix straight back off for a base
+        /// name that is already at the limit, yielding the very name the caller is disambiguating.
+        /// </summary>
+        private static string WithSuffix(string baseName, string suffix)
+        {
+            int room = MaxSubnetNameLength - suffix.Length;
+            string trimmedBase = room <= 0
+                ? string.Empty
+                : baseName.Length > room ? baseName[..room] : baseName;
+
+            return TruncateForName(trimmedBase + suffix);
         }
 
         private static string TruncateForName(string s) =>
