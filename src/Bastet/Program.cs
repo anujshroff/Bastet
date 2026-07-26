@@ -291,7 +291,21 @@ app.UseForwardedHeaders(); // Process forwarded headers early to ensure HTTPS sc
 // proxy work). Framing is configurable for hosts that legitimately embed the app; it defaults to
 // disallowing all framing (clickjacking protection). A full CSP is intentionally not added - the app
 // uses many inline <script> blocks.
-string? configuredFrameAncestors = Environment.GetEnvironmentVariable("BASTET_FRAME_ANCESTORS");
+// Trimmed and checked once here rather than per request: this value is written to a header on every
+// response, and Kestrel rejects a header containing a non-ASCII or control character - so a stray
+// character (a CRLF from an env file edited on Windows, a curly quote pasted from a document) would
+// fail every request, including the error pages, with nothing pointing at the variable. Trimming
+// rescues the common accidental case; anything still invalid stops startup with a message naming it,
+// rather than silently applying a framing policy the operator did not write.
+string? configuredFrameAncestors = Environment.GetEnvironmentVariable("BASTET_FRAME_ANCESTORS")?.Trim();
+if (!string.IsNullOrWhiteSpace(configuredFrameAncestors)
+    && !Bastet.Services.Security.HttpHeaderValue.IsValid(configuredFrameAncestors))
+{
+    throw new InvalidOperationException(
+        "BASTET_FRAME_ANCESTORS contains a character that cannot be sent in an HTTP header " +
+        "(non-ASCII or control characters). Check the value for stray line endings or smart quotes.");
+}
+
 string frameAncestors = string.IsNullOrWhiteSpace(configuredFrameAncestors) ? "'none'" : configuredFrameAncestors;
 app.Use(async (context, next) =>
 {
