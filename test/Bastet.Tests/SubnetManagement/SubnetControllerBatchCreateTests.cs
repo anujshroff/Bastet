@@ -3,6 +3,7 @@ using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
@@ -274,6 +275,68 @@ public class SubnetControllerBatchCreateTests : IDisposable
             await _context.Subnets.Where(s => s.NetworkAddress == "10.0.1.0" && s.Cidr == 24)
                 .ToListAsync(TestContext.Current.CancellationToken));
         Assert.Equal(azureName, created.Name);
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_WithOverLongAzureResourceId_IsRejectedAndStoresNothing()
+    {
+        // Sanitization trims resource IDs at 1000 while the column holds 500, so an over-long value
+        // used to reach the insert and fail it behind a generic 500. Rejected rather than truncated:
+        // reconcile matches subnets to live Azure by this ID, so a shortened one would report the
+        // subnet as deleted in Azure permanently.
+        int parentId = 2; // Parent Subnet
+        int subnetCountBefore = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "web",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                AzureResourceId = "/subscriptions/" + new string('x', 600)
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "vnet-production", isAzureImport: true,
+            sanitizationService: new InputSanitizationService());
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(subnetCountBefore, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_WithRealisticAzureResourceId_ImportsIt()
+    {
+        // A full-length ARM ID for a subnet is roughly 330 characters, comfortably inside the column.
+        int parentId = 2; // Parent Subnet
+        string resourceId =
+            "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/" + new string('r', 80) +
+            "/providers/Microsoft.Network/virtualNetworks/" + new string('v', 64) + "/subnets/" + new string('s', 80);
+        Assert.InRange(resourceId.Length, 300, 500);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "web",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                AzureResourceId = resourceId
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "vnet-production", isAzureImport: true,
+            sanitizationService: new InputSanitizationService());
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+        Subnet created = Assert.Single(
+            await _context.Subnets.Where(s => s.Name == "web").ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(resourceId, created.AzureResourceId);
     }
 
     [Fact]

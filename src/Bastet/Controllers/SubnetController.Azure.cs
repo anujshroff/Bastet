@@ -22,6 +22,26 @@ public partial class SubnetController : Controller
     private const int MaxSubnetDescriptionLength = 1000;
 
     /// <summary>
+    /// Maximum length for <see cref="Models.Subnet.AzureResourceId"/>; matches the [MaxLength(500)]
+    /// attribute on the entity.
+    /// </summary>
+    private const int MaxAzureResourceIdLength = 500;
+
+    /// <summary>
+    /// True when a client-supplied Azure resource ID is too long for the column.
+    /// </summary>
+    /// <remarks>
+    /// Sanitization only trims these at 1000, so an over-long value would reach the insert and fail it
+    /// with a generic error. Real ARM IDs run to roughly 330 characters, so anything longer is a
+    /// crafted or broken post and is rejected rather than truncated: this value is an identifier, and
+    /// reconcile matches Bastet subnets to live Azure resources by it. A truncated ID matches nothing,
+    /// which would leave the subnet permanently reported as deleted in Azure - and reconcile offers
+    /// exactly those for deletion.
+    /// </remarks>
+    private static bool IsAzureResourceIdTooLong(string? resourceId) =>
+        resourceId?.Length > MaxAzureResourceIdLength;
+
+    /// <summary>
     /// Builds the description for a subnet an Azure import has just marked fully allocated. The note
     /// is only appended when it fits: descriptions are capped, the note repeats what the
     /// IsFullyAllocated flag already records, and overflowing the column fails the insert and rolls
@@ -102,6 +122,15 @@ public partial class SubnetController : Controller
             {
                 vnetResourceId = sanitizationService.SanitizeDescription(vnetResourceId);
             }
+        }
+
+        // Checked after sanitization, since that is what sets the final length (see the remarks on
+        // IsAzureResourceIdTooLong for why these are rejected rather than trimmed to fit).
+        if (subnets.Exists(s => IsAzureResourceIdTooLong(s.AzureResourceId)) || IsAzureResourceIdTooLong(vnetResourceId))
+        {
+            ModelState.AddModelError("subnets",
+                $"An Azure resource ID is longer than {MaxAzureResourceIdLength} characters and cannot be stored.");
+            return BadRequest(ModelState);
         }
 
         try
