@@ -425,8 +425,10 @@ public class IpUtilityService : IIpUtilityService
             mergedRanges.Add(current);
         }
 
-        // Find gaps between allocated ranges
-        uint currentPosition = startIp;
+        // Find gaps between allocated ranges. This is a long because the position after the last
+        // address is one past the end of the IPv4 space: as a uint it wraps to 0, and the trailing
+        // check below then reads a fully allocated subnet as having the whole address space free.
+        long currentPosition = startIp;
 
         foreach ((uint Start, uint End) in mergedRanges)
         {
@@ -438,7 +440,7 @@ public class IpUtilityService : IIpUtilityService
                 {
                     unallocatedRanges.Add(new IPRange
                     {
-                        StartIp = UIntToIpString(currentPosition),
+                        StartIp = UIntToIpString((uint)currentPosition),
                         EndIp = UIntToIpString(Start - 1),
                         AddressCount = (Start - currentPosition > 2) ? Start - currentPosition - 1 : Start - currentPosition
                     });
@@ -447,7 +449,7 @@ public class IpUtilityService : IIpUtilityService
                 {
                     unallocatedRanges.Add(new IPRange
                     {
-                        StartIp = UIntToIpString(currentPosition),
+                        StartIp = UIntToIpString((uint)currentPosition),
                         EndIp = UIntToIpString(Start - 1),
                         AddressCount = Start - currentPosition
                     });
@@ -455,7 +457,7 @@ public class IpUtilityService : IIpUtilityService
             }
 
             // Move position to after this allocated range
-            currentPosition = End + 1;
+            currentPosition = (long)End + 1;
         }
 
         // Check if there's space after the last allocated range
@@ -476,7 +478,7 @@ public class IpUtilityService : IIpUtilityService
                 {
                     unallocatedRanges.Add(new IPRange
                     {
-                        StartIp = UIntToIpString(currentPosition),
+                        StartIp = UIntToIpString((uint)currentPosition),
                         EndIp = UIntToIpString(lastIp),
                         AddressCount = (lastIp - currentPosition > 0) ? lastIp - currentPosition : 1
                     });
@@ -485,7 +487,7 @@ public class IpUtilityService : IIpUtilityService
                 {
                     unallocatedRanges.Add(new IPRange
                     {
-                        StartIp = UIntToIpString(currentPosition),
+                        StartIp = UIntToIpString((uint)currentPosition),
                         EndIp = UIntToIpString(lastIp),
                         AddressCount = lastIp - currentPosition + 1
                     });

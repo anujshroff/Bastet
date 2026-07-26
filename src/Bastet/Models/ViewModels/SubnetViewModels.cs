@@ -6,7 +6,7 @@ namespace Bastet.Models.ViewModels;
 public class CreateSubnetViewModel
 {
     [Required(ErrorMessage = "Name is required")]
-    [StringLength(50, ErrorMessage = "Name cannot be longer than 50 characters")]
+    [StringLength(100, ErrorMessage = "Name cannot be longer than 100 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in subnet names")]
     [SafeText(ErrorMessage = "Subnet name contains invalid characters")]
     [SanitizeName] // Auto-sanitization
@@ -14,7 +14,7 @@ public class CreateSubnetViewModel
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Network address is required")]
-    [NetworkInput(ErrorMessage = "Invalid network address format")]
+    [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid network address format")]
     [SanitizeNetworkInput] // Auto-sanitization
     [Display(Name = "Network Address")]
     public string NetworkAddress { get; set; } = string.Empty;

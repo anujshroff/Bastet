@@ -13,7 +13,7 @@ public class Subnet : BaseEntity
     public int Id { get; set; }
 
     [Required]
-    [MaxLength(50)]
+    [MaxLength(100)]
     public string Name { get; set; } = string.Empty;
 
     [Required]
@@ -24,7 +24,7 @@ public class Subnet : BaseEntity
     [Range(0, 32)] // IPv4 supports up to /32
     public int Cidr { get; set; }
 
-    [MaxLength(500)]
+    [MaxLength(1000)]
     public string? Description { get; set; }
 
     [MaxLength(255)]

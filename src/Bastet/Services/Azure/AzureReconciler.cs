@@ -123,8 +123,12 @@ namespace Bastet.Services.Azure
 
             if (!liveVNets.TryGetValue(snapshot.AzureResourceId, out BulkAzureVNetViewModel? vnet))
             {
+                // The inventory only carries VNets that still have IPv4 address space, so an absent
+                // VNet means either it is gone or it has none left. Both justify removing the import,
+                // but they are not the same fact and this reason sits directly above a Delete button.
                 return Item(snapshot, AzureReconcileStatus.VNetDeleted, true,
-                    $"The VNet this subnet was imported from no longer exists in Azure.");
+                    "The VNet this subnet was imported from no longer exists in Azure, " +
+                    "or no longer has any IPv4 address space.");
             }
 
             if (!vnet.Ipv4AddressPrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))

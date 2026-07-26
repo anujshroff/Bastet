@@ -86,6 +86,15 @@ public partial class SubnetController : Controller
         // above must not run while holding it). Building the response happens after the commit, so
         // a failure there can't send us into a rollback of an already-committed transaction - which
         // would throw and mask the real error while the rows were already gone.
+        //
+        // Residual race, accepted: the staleness verdict above is fixed before the lock is taken,
+        // while each subtree is read after it. Acquiring the lock can wait behind another operation,
+        // and in that window a concurrent write can add a child to a target - which is then archived
+        // along with it, having never appeared in a reviewed plan. Left as is deliberately: Azure
+        // cannot be re-checked while holding the lock, the single-subnet delete has the same
+        // confirm-then-cascade semantics, and everything here is archived rather than destroyed.
+        // Closing it would mean comparing each subtree against stillStale[id].DescendantSubnetIds
+        // inside the lock and failing with 409 on any difference.
         try
         {
             IActionResult? failure = await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult?>(async () =>

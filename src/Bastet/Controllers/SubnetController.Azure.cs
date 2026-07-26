@@ -1,6 +1,7 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services.Security;
+using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,6 +9,62 @@ namespace Bastet.Controllers;
 
 public partial class SubnetController : Controller
 {
+    /// <summary>
+    /// Maximum length for <see cref="Models.Subnet.Name"/>; matches the [MaxLength(100)] attribute on
+    /// the entity, and the same limit the bulk import planner applies to Azure-derived names.
+    /// </summary>
+    private const int MaxSubnetNameLength = 100;
+
+    /// <summary>
+    /// Maximum length for <see cref="Models.Subnet.Description"/>; matches the [MaxLength(1000)]
+    /// attribute on the entity.
+    /// </summary>
+    private const int MaxSubnetDescriptionLength = 1000;
+
+    /// <summary>
+    /// Maximum length for <see cref="Models.Subnet.AzureResourceId"/>; matches the [MaxLength(500)]
+    /// attribute on the entity.
+    /// </summary>
+    private const int MaxAzureResourceIdLength = 500;
+
+    /// <summary>
+    /// True when a client-supplied Azure resource ID is too long for the column.
+    /// </summary>
+    /// <remarks>
+    /// Sanitization only trims these at 1000, so an over-long value would reach the insert and fail it
+    /// with a generic error. Real ARM IDs run to roughly 330 characters, so anything longer is a
+    /// crafted or broken post and is rejected rather than truncated: this value is an identifier, and
+    /// reconcile matches Bastet subnets to live Azure resources by it. A truncated ID matches nothing,
+    /// which would leave the subnet permanently reported as deleted in Azure - and reconcile offers
+    /// exactly those for deletion.
+    /// </remarks>
+    private static bool IsAzureResourceIdTooLong(string? resourceId) =>
+        resourceId?.Length > MaxAzureResourceIdLength;
+
+    /// <summary>
+    /// Builds the description for a subnet an Azure import has just marked fully allocated. The note
+    /// is only appended when it fits: descriptions are capped, the note repeats what the
+    /// IsFullyAllocated flag already records, and overflowing the column fails the insert and rolls
+    /// back the entire import behind a generic error. Existing text is never sacrificed for the note.
+    /// </summary>
+    private static string AppendFullyAllocatedNote(string? existingDescription, string? azureSubnetName)
+    {
+        string note = $"Fully allocated by Azure subnet '{azureSubnetName}' which encompasses the entire address space.";
+
+        if (string.IsNullOrEmpty(existingDescription))
+        {
+            return Truncate(note);
+        }
+
+        string combined = $"{existingDescription}\n{note}";
+        return combined.Length <= MaxSubnetDescriptionLength
+            ? combined
+            : Truncate(existingDescription);
+
+        static string Truncate(string value) =>
+            value.Length > MaxSubnetDescriptionLength ? value[..MaxSubnetDescriptionLength] : value;
+    }
+
     // POST: Subnet/BatchCreateChildSubnets
     /// <param name="isAzureImport">
     /// True when called from the Azure import wizard, which additionally renames the parent to the
@@ -21,8 +78,22 @@ public partial class SubnetController : Controller
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<AzureImportSubnetViewModel> subnets, string? vnetName = null, string? vnetResourceId = null, bool isAzureImport = false, [FromServices] IInputSanitizationService? sanitizationService = null)
     {
+        // Note on name length: the import wizard trims Azure names to Subnet.Name's limit before
+        // posting them, so the length rule inherited from CreateSubnetViewModel is never the thing
+        // that fails a real import - it is the guard for a caller posting directly. Trimming here
+        // instead would mean clearing the binder's errors for these fields, which would also drop the
+        // HTML and safe-text errors on the same field and make those rules apply only to short names.
         if (!ModelState.IsValid)
         {
+            return BadRequest(ModelState);
+        }
+
+        // Nothing bound means nothing was selected, or the post was malformed. Without this the
+        // import would fall through to the parent rename below and report "imported 0 child
+        // subnets" as a success, which reads as though the selection was honoured.
+        if (subnets is null or { Count: 0 })
+        {
+            ModelState.AddModelError("subnets", "No subnets were submitted for import.");
             return BadRequest(ModelState);
         }
 
@@ -51,6 +122,15 @@ public partial class SubnetController : Controller
             {
                 vnetResourceId = sanitizationService.SanitizeDescription(vnetResourceId);
             }
+        }
+
+        // Checked after sanitization, since that is what sets the final length (see the remarks on
+        // IsAzureResourceIdTooLong for why these are rejected rather than trimmed to fit).
+        if (subnets.Exists(s => IsAzureResourceIdTooLong(s.AzureResourceId)) || IsAzureResourceIdTooLong(vnetResourceId))
+        {
+            ModelState.AddModelError("subnets",
+                $"An Azure resource ID is longer than {MaxAzureResourceIdLength} characters and cannot be stored.");
+            return BadRequest(ModelState);
         }
 
         try
@@ -82,8 +162,7 @@ public partial class SubnetController : Controller
             }
 
             List<int> createdSubnetIds = [];
-            bool hasFullyEncompassingSubnet = false;
-            string? fullyEncompassingSubnetName = null;
+            AzureImportSubnetViewModel? fullyEncompassingSubnet = null;
 
             // Initial validation to ensure all subnets are individually valid
             foreach (AzureImportSubnetViewModel subnet in subnets)
@@ -94,9 +173,8 @@ public partial class SubnetController : Controller
                 // Check if this subnet fully encompasses a VNet address prefix
                 if (subnet.FullyEncompassesVNetPrefix)
                 {
-                    hasFullyEncompassingSubnet = true;
-                    fullyEncompassingSubnetName = subnet.Name;
-                    continue; // Skip validation for this subnet since we won't create it
+                    fullyEncompassingSubnet = subnet;
+                    continue; // Not created as a child; it marks the parent fully allocated instead
                 }
 
                 // Use the extracted validation method
@@ -108,11 +186,48 @@ public partial class SubnetController : Controller
                 }
             }
 
+            bool hasFullyEncompassingSubnet = fullyEncompassingSubnet != null;
+            string? fullyEncompassingSubnetName = fullyEncompassingSubnet?.Name;
+
+            // An encompassing entry is never created, so it skips the creation checks above - but it
+            // still drives a write to the parent, so the parent has to be validated for it. Without
+            // this, a caller could mark a parent that has children or host IPs as fully allocated (a
+            // state SetAllocationStatus and the bulk planner both forbid), or claim any unrelated
+            // prefix encompasses it.
+            if (fullyEncompassingSubnet != null)
+            {
+                if (!string.Equals(fullyEncompassingSubnet.NetworkAddress, parentSubnet.NetworkAddress, StringComparison.Ordinal)
+                    || fullyEncompassingSubnet.Cidr != parentSubnet.Cidr)
+                {
+                    ModelState.AddModelError("subnets",
+                        $"Subnet '{fullyEncompassingSubnet.Name}' ({fullyEncompassingSubnet.NetworkAddress}/{fullyEncompassingSubnet.Cidr}) " +
+                        $"does not cover the whole of {parentSubnet.NetworkAddress}/{parentSubnet.Cidr} and cannot mark it fully allocated.");
+                    await transaction.RollbackAsync();
+                    return BadRequest(ModelState);
+                }
+
+                ValidationResult allocationValidation = hostIpValidationService.ValidateSubnetCanBeFullyAllocated(parentId);
+                if (!allocationValidation.IsValid)
+                {
+                    foreach (ValidationError error in allocationValidation.Errors)
+                    {
+                        ModelState.AddModelError("subnets", error.Message);
+                    }
+
+                    await transaction.RollbackAsync();
+                    return BadRequest(ModelState);
+                }
+            }
+
             // Update parent subnet if this is an Azure import
             if (!string.IsNullOrEmpty(vnetName) && isAzureImport)
             {
-                // Update the name to match the Azure VNet name
-                parentSubnet.Name = vnetName;
+                // Update the name to match the Azure VNet name. Azure VNet names reach 64 characters
+                // and the column holds 100, so this never truncates a real Azure name - it is a guard
+                // against a hand-crafted post, since SanitizeName trims at the same 100.
+                parentSubnet.Name = vnetName.Length > MaxSubnetNameLength
+                    ? vnetName[..MaxSubnetNameLength]
+                    : vnetName;
 
                 // Stamp the VNet resource ID onto the parent so the Details page can link to Azure.
                 if (!string.IsNullOrEmpty(vnetResourceId))
@@ -126,10 +241,7 @@ public partial class SubnetController : Controller
                     parentSubnet.IsFullyAllocated = true;
 
                     // Update description, preserving existing description if present
-                    string azureImportInfo = $"Fully allocated by Azure subnet '{fullyEncompassingSubnetName}' which encompasses the entire address space.";
-                    parentSubnet.Description = string.IsNullOrEmpty(parentSubnet.Description)
-                        ? azureImportInfo
-                        : $"{parentSubnet.Description}\n{azureImportInfo}";
+                    parentSubnet.Description = AppendFullyAllocatedNote(parentSubnet.Description, fullyEncompassingSubnetName);
                 }
 
                 parentSubnet.LastModifiedAt = DateTime.UtcNow;

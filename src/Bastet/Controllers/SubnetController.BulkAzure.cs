@@ -102,6 +102,20 @@ public partial class SubnetController : Controller
                     ? null
                     : sanitizationService?.SanitizeDescription(item.VNetResourceId) ?? item.VNetResourceId;
 
+                // Sanitization trims these at 1000, the column holds 500, and a real ARM ID is around
+                // 330 - so an over-long value is crafted or broken input. Rejected rather than trimmed:
+                // reconcile matches subnets to live Azure by this ID, and a truncated one matches
+                // nothing, which reports the subnet as deleted in Azure for good.
+                if (IsAzureResourceIdTooLong(sanitizedVNetResourceId))
+                {
+                    await transaction.RollbackAsync();
+                    return BadRequest(new
+                    {
+                        success = false,
+                        error = $"The Azure resource ID for VNet '{item.VNetName}' is longer than {MaxAzureResourceIdLength} characters and cannot be stored."
+                    });
+                }
+
                 // 1) Resolve / create the target Bastet subnet for this VNet prefix
                 if (item.TargetType == BulkImportTargetType.ExactMatch)
                 {
@@ -191,10 +205,7 @@ public partial class SubnetController : Controller
                 {
                     targetSubnet.IsFullyAllocated = true;
 
-                    string azureImportInfo = $"Fully allocated by Azure subnet '{item.FullyAllocatingAzureSubnetName}' which encompasses the entire address space.";
-                    targetSubnet.Description = string.IsNullOrEmpty(targetSubnet.Description)
-                        ? azureImportInfo
-                        : $"{targetSubnet.Description}\n{azureImportInfo}";
+                    targetSubnet.Description = AppendFullyAllocatedNote(targetSubnet.Description, item.FullyAllocatingAzureSubnetName);
 
                     targetSubnet.LastModifiedAt = DateTime.UtcNow;
                     targetSubnet.ModifiedBy = userContextService.GetCurrentUsername();
@@ -211,6 +222,16 @@ public partial class SubnetController : Controller
                     string? sanitizedChildResourceId = string.IsNullOrEmpty(child.AzureResourceId)
                         ? null
                         : sanitizationService?.SanitizeDescription(child.AzureResourceId) ?? child.AzureResourceId;
+
+                    if (IsAzureResourceIdTooLong(sanitizedChildResourceId))
+                    {
+                        await transaction.RollbackAsync();
+                        return BadRequest(new
+                        {
+                            success = false,
+                            error = $"The Azure resource ID for subnet '{child.Name}' is longer than {MaxAzureResourceIdLength} characters and cannot be stored."
+                        });
+                    }
 
                     AzureImportSubnetViewModel childVm = new()
                     {

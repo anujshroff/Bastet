@@ -74,13 +74,22 @@ public class GlobalSanitizationFilter(
                     if (sanitizedValue != currentValue)
                     {
                         propInfo.Property.SetValue(obj, sanitizedValue);
-                        logger.LogDebug(
-                            "Sanitized property {PropertyName} on type {TypeName}: '{OriginalValue}' -> '{SanitizedValue}'",
-                            propInfo.Property.Name,
-                            type.Name,
-                            currentValue.Length > 50 ? string.Concat(currentValue.AsSpan(0, 50), "...") : currentValue,
-                            sanitizedValue?.Length > 50 ? string.Concat(sanitizedValue.AsSpan(0, 50), "...") : sanitizedValue
-                        );
+
+                        // The original value is logged as it arrived, and sanitization does not remove
+                        // interior line breaks - so without stripping them here a crafted value would
+                        // write extra lines into the log an operator is reading to diagnose something.
+                        // Guarded because this runs for every sanitized property on every request,
+                        // while Debug logging is off by default: no point building the strings then.
+                        if (logger.IsEnabled(LogLevel.Debug))
+                        {
+                            logger.LogDebug(
+                                "Sanitized property {PropertyName} on type {TypeName}: '{OriginalValue}' -> '{SanitizedValue}'",
+                                propInfo.Property.Name,
+                                type.Name,
+                                TruncateForLog(currentValue),
+                                TruncateForLog(sanitizedValue)
+                            );
+                        }
                     }
                 }
             }
@@ -137,6 +146,20 @@ public class GlobalSanitizationFilter(
                     type.Name);
             }
         }
+    }
+
+    /// <summary>
+    /// Makes a request-supplied value safe to log: line breaks stripped first so the length limit
+    /// applies to what is actually written, then shortened to keep one property from filling the log.
+    /// </summary>
+    private static string TruncateForLog(string? value)
+    {
+        const int maxLoggedLength = 50;
+
+        string safe = LogSanitizer.SanitizeForLog(value);
+        return safe.Length > maxLoggedLength
+            ? string.Concat(safe.AsSpan(0, maxLoggedLength), "...")
+            : safe;
     }
 
     private static PropertySanitizationInfo[] GetSanitizableProperties(Type type)

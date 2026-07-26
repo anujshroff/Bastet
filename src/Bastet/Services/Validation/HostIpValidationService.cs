@@ -62,19 +62,27 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Check if IP is the network address
-        if (ip == subnet.NetworkAddress)
+        // A /31 has no network or broadcast address - both of its addresses are usable for a
+        // point-to-point link (RFC 3021) - and a /32 is a single host. CalculateUsableIpAddresses
+        // reports 2 and 1 for them, so reserving addresses here would advertise capacity that could
+        // never be filled: every address in such a subnet is its network address, its broadcast
+        // address, or both.
+        if (subnet.Cidr < 31)
         {
-            result.AddError(NETWORK_ADDRESS_RESERVED, "Cannot assign the network address as a host IP");
-            return result;
-        }
+            // Check if IP is the network address
+            if (ip == subnet.NetworkAddress)
+            {
+                result.AddError(NETWORK_ADDRESS_RESERVED, "Cannot assign the network address as a host IP");
+                return result;
+            }
 
-        // Check if IP is the broadcast address
-        string broadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr);
-        if (ip == broadcastAddress)
-        {
-            result.AddError(BROADCAST_ADDRESS_RESERVED, "Cannot assign the broadcast address as a host IP");
-            return result;
+            // Check if IP is the broadcast address
+            string broadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr);
+            if (ip == broadcastAddress)
+            {
+                result.AddError(BROADCAST_ADDRESS_RESERVED, "Cannot assign the broadcast address as a host IP");
+                return result;
+            }
         }
 
         // Validate IP is within subnet range

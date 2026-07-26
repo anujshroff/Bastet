@@ -7,6 +7,10 @@
         let selectedSubscriptionId = "";
         let selectedSubscriptionName = "";
         let lastPlan = null;
+        // The exact subnets the confirm step was built from. The deletion posts these rather than
+        // whatever the review checkboxes hold at click time, so it can only ever delete what the
+        // confirmation screen listed.
+        let confirmedIds = null;
 
         function getAntiForgeryToken() {
             return $("input[name='__RequestVerificationToken']").first().val();
@@ -36,8 +40,19 @@
         // back into a stale result and delete the wrong subnets.
         function invalidateScan() {
             lastPlan = null;
-            $("#rec-step2-tab, #rec-step3-tab").addClass("disabled");
+            $("#rec-step2-tab").addClass("disabled");
             $("#rec-go-confirm-btn").prop("disabled", true);
+            invalidateConfirmation();
+        }
+
+        // The confirm step is built from a snapshot of the review selection, so changing that
+        // selection makes everything on it - the list, the counts, the typed approval - describe a
+        // deletion the user is no longer asking for. Re-lock the step so it can only be reached
+        // again through the button that rebuilds it, rather than through its pill, which stays
+        // clickable once visited.
+        function invalidateConfirmation() {
+            confirmedIds = null;
+            $("#rec-step3-tab").addClass("disabled");
             $("#rec-confirm-delete-btn").prop("disabled", true);
         }
 
@@ -222,6 +237,8 @@
 
             $("#rec-select-all").prop("checked", false);
             updateGoConfirmBtn();
+            // A re-scan clears the selection, so anything already confirmed refers to the old plan.
+            invalidateConfirmation();
             $("#rec-scan-content").removeClass("d-none");
         }
 
@@ -233,11 +250,15 @@
             $("#rec-go-confirm-btn").prop("disabled", selectedIds().length === 0);
         }
 
-        $(document).on("change", ".rec-item-checkbox", updateGoConfirmBtn);
+        $(document).on("change", ".rec-item-checkbox", function () {
+            updateGoConfirmBtn();
+            invalidateConfirmation();
+        });
 
         $("#rec-select-all").on("change", function () {
             $(".rec-item-checkbox").prop("checked", $(this).is(":checked"));
             updateGoConfirmBtn();
+            invalidateConfirmation();
         });
 
         $("#rec-back-to-subscription-btn").on("click", function () {
@@ -255,6 +276,9 @@
             }
 
             const chosen = (lastPlan.items || []).filter(function (i) { return ids.indexOf(i.subnetId) !== -1; });
+
+            // Everything below describes exactly these subnets, and so does the deletion.
+            confirmedIds = chosen.map(function (i) { return i.subnetId; });
 
             $("#rec-confirm-count").text(chosen.length);
 
@@ -308,7 +332,9 @@
         });
 
         $("#rec-confirm-delete-btn").on("click", function () {
-            const ids = selectedIds();
+            // Post the confirmed snapshot, not the live checkboxes: those can have moved on since
+            // the confirmation screen was built.
+            const ids = confirmedIds || [];
             if (ids.length === 0) {
                 return;
             }

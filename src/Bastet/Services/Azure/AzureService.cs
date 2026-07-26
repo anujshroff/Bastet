@@ -471,6 +471,6 @@ namespace Bastet.Services.Azure
         /// forge additional log entries (CodeQL: log entries created from user input).
         /// </summary>
         private static string SanitizeForLog(string? value) =>
-            (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            Bastet.Services.Security.LogSanitizer.SanitizeForLog(value);
     }
 }

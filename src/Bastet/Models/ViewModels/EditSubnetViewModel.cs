@@ -35,13 +35,13 @@ public class EditSubnetViewModel
     // Editable properties
 
     [Required(ErrorMessage = "Name is required")]
-    [StringLength(50, ErrorMessage = "Name cannot be longer than 50 characters")]
+    [StringLength(100, ErrorMessage = "Name cannot be longer than 100 characters")]
     [SanitizeName] // Auto-sanitization
     [Display(Name = "Subnet Name")]
     public string Name { get; set; } = string.Empty;
 
     [Display(Name = "Description")]
-    [StringLength(500, ErrorMessage = "Description cannot be longer than 500 characters")]
+    [StringLength(1000, ErrorMessage = "Description cannot be longer than 1000 characters")]
     [SanitizeDescription] // Auto-sanitization
     public string? Description { get; set; }
 

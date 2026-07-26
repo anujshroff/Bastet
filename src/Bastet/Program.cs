@@ -101,7 +101,6 @@ else
 builder.Services.AddScoped<IIpUtilityService, IpUtilityService>();
 builder.Services.AddScoped<Bastet.Services.Validation.ISubnetValidationService, Bastet.Services.Validation.SubnetValidationService>();
 builder.Services.AddScoped<Bastet.Services.Validation.IHostIpValidationService, Bastet.Services.Validation.HostIpValidationService>();
-builder.Services.AddScoped<Bastet.Services.Division.ISubnetDivisionService, Bastet.Services.Division.SubnetDivisionService>();
 builder.Services.AddSingleton<Bastet.Services.Azure.AzureArmClientProvider>();
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureService, Bastet.Services.Azure.AzureService>();
 builder.Services.AddScoped<Bastet.Services.Azure.IAzureBulkImportPlanner, Bastet.Services.Azure.AzureBulkImportPlanner>();
@@ -115,12 +114,14 @@ builder.Services.AddSingleton<IVersionService, VersionService>();
 builder.Services.AddScoped<Bastet.Services.Locking.ISubnetLockingService>(provider =>
 {
     BastetDbContext context = provider.GetRequiredService<BastetDbContext>();
+    ILogger<Bastet.Services.Locking.SqlServerSubnetLockingService> lockLogger =
+        provider.GetRequiredService<ILogger<Bastet.Services.Locking.SqlServerSubnetLockingService>>();
 
     return context.Database.ProviderName?.ToLower() switch
     {
         "microsoft.entityframeworkcore.sqlite" => new Bastet.Services.Locking.SqliteSubnetLockingService(),
-        "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context),
-        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context) // Default to SQL Server
+        "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context, lockLogger),
+        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context, lockLogger) // Default to SQL Server
     };
 });
 
@@ -289,7 +290,21 @@ app.UseForwardedHeaders(); // Process forwarded headers early to ensure HTTPS sc
 // proxy work). Framing is configurable for hosts that legitimately embed the app; it defaults to
 // disallowing all framing (clickjacking protection). A full CSP is intentionally not added - the app
 // uses many inline <script> blocks.
-string? configuredFrameAncestors = Environment.GetEnvironmentVariable("BASTET_FRAME_ANCESTORS");
+// Trimmed and checked once here rather than per request: this value is written to a header on every
+// response, and Kestrel rejects a header containing a non-ASCII or control character - so a stray
+// character (a CRLF from an env file edited on Windows, a curly quote pasted from a document) would
+// fail every request, including the error pages, with nothing pointing at the variable. Trimming
+// rescues the common accidental case; anything still invalid stops startup with a message naming it,
+// rather than silently applying a framing policy the operator did not write.
+string? configuredFrameAncestors = Environment.GetEnvironmentVariable("BASTET_FRAME_ANCESTORS")?.Trim();
+if (!string.IsNullOrWhiteSpace(configuredFrameAncestors)
+    && !Bastet.Services.Security.HttpHeaderValue.IsValid(configuredFrameAncestors))
+{
+    throw new InvalidOperationException(
+        "BASTET_FRAME_ANCESTORS contains a character that cannot be sent in an HTTP header " +
+        "(non-ASCII or control characters). Check the value for stray line endings or smart quotes.");
+}
+
 string frameAncestors = string.IsNullOrWhiteSpace(configuredFrameAncestors) ? "'none'" : configuredFrameAncestors;
 app.Use(async (context, next) =>
 {

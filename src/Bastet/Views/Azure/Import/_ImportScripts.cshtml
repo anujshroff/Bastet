@@ -253,11 +253,24 @@
                                 let networkAddress = addressParts[0];
                                 let cidr = addressParts[1];
                                 
+                                // Subnet.Name holds 100 characters, past Azure's own 80-character limit - but
+                                // trim to it anyway so that if Azure ever allows longer names this degrades the
+                                // way the bulk import does (truncate) rather than failing model binding. The
+                                // label below still shows the full Azure name.
+                                let importName = String(subnet.name || "").substring(0, 100);
+
+                                // Unchecked rows stay disabled and are never submitted, so the subnets[i] sequence
+                                // has gaps. The model binder walks subnets[0], subnets[1], ... and stops at the
+                                // first missing index, silently dropping every selection after it (and binding
+                                // nothing at all when row 0 is unchecked). The subnets.Index field below switches
+                                // the binder to explicit indices, which need not be contiguous. It enables and
+                                // disables with the row, since the handlers here toggle every hidden input in it.
                                 let subnetHtml = `
                                     <div class="form-check mb-2 border p-2 rounded">
                                         <input class="form-check-input subnet-checkbox" type="checkbox"
                                                id="${subnetId}">
-                                        <input type="hidden" name="subnets[${index}].Name" value="${escapeHtml(subnet.name)}" disabled>
+                                        <input type="hidden" name="subnets.Index" value="${index}" disabled>
+                                        <input type="hidden" name="subnets[${index}].Name" value="${escapeHtml(importName)}" disabled>
                                         <input type="hidden" name="subnets[${index}].NetworkAddress" value="${escapeHtml(networkAddress)}" disabled>
                                         <input type="hidden" name="subnets[${index}].Cidr" value="${escapeHtml(cidr)}" disabled>
                                         <input type="hidden" name="subnets[${index}].Description" value="Imported from Azure VNet: ${escapeHtml(selectedVNetName)}" disabled>

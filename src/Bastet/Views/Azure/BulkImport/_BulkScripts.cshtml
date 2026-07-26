@@ -94,6 +94,9 @@
 
         $("#bulk-subscription-select").on("change", function () {
             $("#bulk-select-subscription-btn").prop("disabled", !$(this).val());
+            // A plan belongs to the subscription it was built from, so choosing a different one
+            // re-locks the later steps rather than leaving them reachable through their pills.
+            invalidatePlan();
         });
 
         $("#bulk-select-subscription-btn").on("click", function () {
@@ -116,6 +119,10 @@
                 data: { subscriptionId: selectedSubscriptionId },
                 dataType: "json",
                 beforeSend: function () {
+                    // Invalidate here rather than on the success path: a load that fails, or that
+                    // finds no VNets, returns early, which would otherwise leave the previous
+                    // subscription's plan committable while step 2 reports the new one as empty.
+                    invalidatePlan();
                     $("#bulk-vnet-loading").removeClass("d-none");
                     $("#bulk-vnet-selection").addClass("d-none");
                     $("#bulk-vnet-error").addClass("d-none");

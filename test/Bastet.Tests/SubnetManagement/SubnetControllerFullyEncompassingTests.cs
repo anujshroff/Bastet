@@ -154,6 +154,146 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
     }
 
     [Fact]
+    public async Task BatchCreate_FullyEncompassing_NearFullDescription_KeepsItAndStillMarksAllocated()
+    {
+        // The appended note is ~100 characters. Against a description already near the column limit
+        // the combined value used to overflow, failing the insert and rolling the whole import back
+        // behind a generic 500. The existing text is the user's, so it is kept and the note - which
+        // only repeats what IsFullyAllocated records - is the part that gives way.
+        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+        string existingDescription = new('d', 990);
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        parent.Description = existingDescription;
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "Default",
+                NetworkAddress = "10.11.0.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                FullyEncompassesVNetPrefix = true
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "Azure-VNet-5", isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+
+        _context.ChangeTracker.Clear();
+        Subnet updated = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.True(updated.IsFullyAllocated);
+        Assert.Equal(existingDescription, updated.Description);
+    }
+
+    [Fact]
+    public async Task BatchCreate_FullyEncompassing_DescriptionWithRoom_GetsTheNoteAppended()
+    {
+        // With room to spare the note is still added, after the existing text.
+        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        parent.Description = "Original description";
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "Default",
+                NetworkAddress = "10.11.0.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                FullyEncompassesVNetPrefix = true
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "Azure-VNet-6", isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+
+        _context.ChangeTracker.Clear();
+        Subnet updated = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.StartsWith("Original description", updated.Description);
+        Assert.Contains("Fully allocated by Azure subnet 'Default'", updated.Description);
+        Assert.True(updated.Description!.Length <= 1000);
+    }
+
+    [Fact]
+    public async Task BatchCreate_FullyEncompassing_ParentHasChildren_IsRejectedAndParentUntouched()
+    {
+        // An encompassing entry is never created, so it skips the creation checks - but it still
+        // marks the parent fully allocated, which SetAllocationStatus forbids for a parent that has
+        // children. Marking it anyway leaves a state the rest of the app treats as impossible.
+        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 3,
+            Name = "Existing child",
+            NetworkAddress = "10.11.0.0",
+            Cidr = 25,
+            ParentSubnetId = parentId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "Default",
+                NetworkAddress = "10.11.0.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                FullyEncompassesVNetPrefix = true
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "Azure-VNet-3", isAzureImport: true);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.False(parent.IsFullyAllocated);
+        Assert.Equal("Parent Subnet", parent.Name);
+    }
+
+    [Fact]
+    public async Task BatchCreate_FullyEncompassing_PrefixDoesNotCoverParent_IsRejectedAndParentUntouched()
+    {
+        // "Fully encompasses" has to mean the parent's own prefix. Any other range says nothing about
+        // whether the parent is fully allocated.
+        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "Default",
+                NetworkAddress = "192.168.99.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                FullyEncompassesVNetPrefix = true
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "Azure-VNet-4", isAzureImport: true);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.False(parent.IsFullyAllocated);
+        Assert.Equal("Parent Subnet", parent.Name);
+    }
+
+    [Fact]
     public async Task BatchCreate_MixedSubnets_HandlesFullyEncompassingCorrectly()
     {
         // Arrange

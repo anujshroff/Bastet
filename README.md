@@ -40,7 +40,9 @@ BASTET requires a SQL Server database. Before running the application:
 #### Manual Database Migration
 If you prefer to run migrations manually:
 
-1. Execute the SQL migration script found at `Database/GeneratedMigrationScript.sql`
+1. Execute the SQL migration script for the version you are deploying, found in
+   `src/Bastet/Database/` (for example `3.3.sql`). Each script is idempotent and covers every
+   migration up to that release, so it is safe to run against a new or an existing database.
 2. Set `BASTET_AUTO_MIGRATE=false` when running the application
 
 ### Authentication Setup

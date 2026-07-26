@@ -4,13 +4,6 @@
     <h1 class="text-danger">@Model.Title</h1>
     <p class="lead">Status Code: @Model.StatusCode</p>
     
-    @if (!string.IsNullOrEmpty(Model.ErrorCode))
-    {
-        <div class="alert alert-warning">
-            <strong>Error Type:</strong> @Model.ErrorCode
-        </div>
-    }
-    
     <p>@Model.ErrorMessage</p>
     
     @* Render specific error guidance if provided *@

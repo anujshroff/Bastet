@@ -3,6 +3,7 @@ using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
@@ -175,6 +176,167 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.Equal(2, createdSubnets.Count);
         Assert.Contains(createdSubnets, s => s.Name == "Test Subnet 1" && s.NetworkAddress == "10.0.1.0" && s.Cidr == 24);
         Assert.Contains(createdSubnets, s => s.Name == "Test Subnet 2" && s.NetworkAddress == "10.0.2.0" && s.Cidr == 24);
+    }
+
+    [Theory]
+    // 54 characters: a realistic Azure VNet name, which the 100-character column keeps whole.
+    [InlineData("corporate-network-westeurope-production-environment-01", 54)]
+    // Azure's own limit is 64 characters, still comfortably inside the column.
+    [InlineData("corporate-network-westeurope-production-environment-01-secondary", 64)]
+    public async Task BatchCreateChildSubnets_WithLongVNetName_KeepsTheWholeName(string vnetName, int expectedLength)
+    {
+        int parentId = 2; // Parent Subnet
+        Assert.Equal(expectedLength, vnetName.Length);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "web",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: vnetName, isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.Equal(vnetName, parent.Name);
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_WithVNetNameBeyondTheColumn_TruncatesToColumnLength()
+    {
+        // Beyond any real Azure name, so this only guards a hand-crafted post: the value still has to
+        // fit Subnet.Name rather than fail the insert with a SQL truncation error.
+        int parentId = 2; // Parent Subnet
+        string vnetName = new('v', 150);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "web",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: vnetName, isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.Equal(100, parent.Name.Length);
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_WithLongAzureSubnetName_ImportsItWhole()
+    {
+        // Azure subnet names go up to 80 characters. While Subnet.Name held 50, the inherited
+        // [StringLength] rejected these during model binding - before the action ran - so the import
+        // returned raw ModelState JSON to a full-page form post and nothing could be imported.
+        int parentId = 2; // Parent Subnet
+        string azureName = new('s', 80);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = azureName,
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId
+            }
+        ];
+
+        // The length limit lives in a validation attribute, which only runs during model binding.
+        List<System.ComponentModel.DataAnnotations.ValidationResult> validationResults = [];
+        System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
+            subnets[0],
+            new System.ComponentModel.DataAnnotations.ValidationContext(subnets[0]),
+            validationResults,
+            validateAllProperties: true);
+        Assert.DoesNotContain(validationResults, v => v.MemberNames.Contains("Name"));
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "vnet-production", isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+        Subnet created = Assert.Single(
+            await _context.Subnets.Where(s => s.NetworkAddress == "10.0.1.0" && s.Cidr == 24)
+                .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(azureName, created.Name);
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_WithOverLongAzureResourceId_IsRejectedAndStoresNothing()
+    {
+        // Sanitization trims resource IDs at 1000 while the column holds 500, so an over-long value
+        // used to reach the insert and fail it behind a generic 500. Rejected rather than truncated:
+        // reconcile matches subnets to live Azure by this ID, so a shortened one would report the
+        // subnet as deleted in Azure permanently.
+        int parentId = 2; // Parent Subnet
+        int subnetCountBefore = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "web",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                AzureResourceId = "/subscriptions/" + new string('x', 600)
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "vnet-production", isAzureImport: true,
+            sanitizationService: new InputSanitizationService());
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(subnetCountBefore, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_WithRealisticAzureResourceId_ImportsIt()
+    {
+        // A full-length ARM ID for a subnet is roughly 330 characters, comfortably inside the column.
+        int parentId = 2; // Parent Subnet
+        string resourceId =
+            "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/" + new string('r', 80) +
+            "/providers/Microsoft.Network/virtualNetworks/" + new string('v', 64) + "/subnets/" + new string('s', 80);
+        Assert.InRange(resourceId.Length, 300, 500);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "web",
+                NetworkAddress = "10.0.1.0",
+                Cidr = 24,
+                ParentSubnetId = parentId,
+                AzureResourceId = resourceId
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: "vnet-production", isAzureImport: true,
+            sanitizationService: new InputSanitizationService());
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+        Subnet created = Assert.Single(
+            await _context.Subnets.Where(s => s.Name == "web").ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(resourceId, created.AzureResourceId);
     }
 
     [Fact]
@@ -356,17 +518,21 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_EmptyList_ReturnsValidationError()
     {
-        // Arrange
+        // An empty list means nothing was selected, or nothing bound. It used to fall through to the
+        // parent rename and report "imported 0 child subnets" as a success.
         int parentId = 2;
-        List<AzureImportSubnetViewModel> subnets = [];
+        string originalName = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!.Name;
 
-        // Act
-        // Set referer to a non-Azure URL to get a BadRequest result instead of a redirect
-        _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
-        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, [], vnetName: "vnet-production", isAzureImport: true);
 
-        // Assert - when an empty list is passed, the controller returns OkObjectResult
-        _ = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+
+        // The parent must be left exactly as it was
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
+        Assert.Equal(originalName, parent.Name);
+        Assert.Null(parent.AzureResourceId);
     }
 
     [Fact]

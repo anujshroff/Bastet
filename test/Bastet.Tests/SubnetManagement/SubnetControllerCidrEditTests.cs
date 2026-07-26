@@ -334,6 +334,59 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Equal(23, cidr);
     }
 
+    [Fact]
+    public async Task Edit_POST_DecreaseCidr_WithGrandparentAndGrandchild_ReturnsRedirectToDetails()
+    {
+        // The seeded target (10.0.2.0/24) sits under 10.0.0.0/16; give it a grandparent and a
+        // grandchild so the expansion has hierarchy on both sides of it. Neither is an overlap, but
+        // the whole-system sweep used to only exempt direct relatives and rejected the edit.
+        Subnet grandparent = new()
+        {
+            Id = 11,
+            Name = "Grandparent (10.0.0.0/8)",
+            NetworkAddress = "10.0.0.0",
+            Cidr = 8,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        };
+        _context.Subnets.Add(grandparent);
+
+        Subnet grandchild = new()
+        {
+            Id = 12,
+            Name = "Grandchild (10.0.2.0/26)",
+            NetworkAddress = "10.0.2.0",
+            Cidr = 26,
+            ParentSubnetId = 5, // Child 1 (10.0.2.0/25)
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        };
+        _context.Subnets.Add(grandchild);
+
+        Subnet parent = (await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken))!;
+        parent.ParentSubnetId = 11;
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        // 10.0.2.0/24 -> /23 covers 10.0.2.0-10.0.3.255: inside the parent, clear of both siblings.
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 4,
+            Name = "Target Subnet (10.0.2.0/24)",
+            NetworkAddress = "10.0.2.0",
+            Cidr = 23,
+            OriginalCidr = 24
+        };
+
+        IActionResult result = await _controller.Edit(4, viewModel);
+
+        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirectResult.ActionName);
+
+        Subnet? updatedSubnet = await _context.Subnets.FindAsync([4], TestContext.Current.CancellationToken);
+        Assert.NotNull(updatedSubnet);
+        Assert.Equal(23, updatedSubnet.Cidr);
+    }
+
     // POST Edit Tests - Failure Scenarios
 
     [Fact]

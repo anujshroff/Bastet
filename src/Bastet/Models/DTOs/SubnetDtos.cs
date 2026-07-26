@@ -10,7 +10,7 @@ public class SubnetDto
     public int Id { get; set; }
 
     [Required(ErrorMessage = "Name is required")]
-    [StringLength(50, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 50 characters")]
+    [StringLength(100, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 100 characters")]
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Network address is required")]
@@ -22,7 +22,7 @@ public class SubnetDto
     [Range(0, 32, ErrorMessage = "CIDR must be between 0 and 32")]
     public int Cidr { get; set; }
 
-    [StringLength(500, ErrorMessage = "Description cannot exceed 500 characters")]
+    [StringLength(1000, ErrorMessage = "Description cannot exceed 1000 characters")]
     public string? Description { get; set; }
 
     [StringLength(255, ErrorMessage = "Tags cannot exceed 255 characters")]

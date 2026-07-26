@@ -194,7 +194,10 @@
             const ipNum = ipAddressToNumber(ipAddress);
             // Create a mask based on the CIDR
             const mask = ~((1 << (32 - cidr)) - 1);
-            // Apply the mask to get the subnet boundary
+            // Apply the mask to get the subnet boundary. This is signed for addresses at or above
+            // 128.0.0.0, which is harmless here and deliberately left alone: the value is only ever
+            // handed to numberToIpAddress, whose unsigned >>> shifts render it correctly, and is
+            // never compared numerically the way findCompatibleNetworkAddress's cursor is.
             const normalizedIpNum = ipNum & mask;
             // Convert back to dotted notation
             return numberToIpAddress(normalizedIpNum);
@@ -259,8 +262,13 @@
             // Calculate the subnet bit boundary (we need to align to this)
             const cidrBitMask = ~((1 << (32 - cidr)) - 1);
             
-            // Try each possible starting address within the parent's range
-            let currentStartingNum = startingNum & cidrBitMask; // Align to subnet boundary
+            // Try each possible starting address within the parent's range.
+            // >>> 0 puts the result back in the unsigned domain: bitwise operands are coerced to
+            // signed 32-bit, so any address at or above 128.0.0.0 comes back negative, while the
+            // boundaries this is compared against below stay positive. Without it the overlap test
+            // compares a negative cursor to positive ranges, never matches, and the first aligned
+            // candidate is returned even when it sits on top of an existing child.
+            let currentStartingNum = (startingNum & cidrBitMask) >>> 0; // Align to subnet boundary
             
             debugLog(`Parent range: ${numberToIpAddress(parentBoundaries.start)}-${numberToIpAddress(parentBoundaries.end)}`);
             debugLog(`Initial aligned address: ${numberToIpAddress(currentStartingNum)}`);
