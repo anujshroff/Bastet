@@ -133,6 +133,10 @@ public class AzureReconcilerTests
         Assert.Equal(AzureReconcileStatus.VNetDeleted, item.Status);
         Assert.True(item.IsVNetLevel);
         Assert.True(plan.CanCommit);
+
+        // The inventory drops VNets with no IPv4 address space, so an absent VNet is not proof it was
+        // deleted. The reason is read straight above a Delete button and must not overstate the case.
+        Assert.Contains("no longer has any IPv4 address space", item.Reason);
     }
 
     [Fact]
