@@ -35,7 +35,6 @@ public class ErrorControllerTests
         Assert.Equal("NotFound", view.ViewName);
         ErrorViewModel model = Assert.IsType<ErrorViewModel>(view.Model);
         Assert.Equal("The resource you requested could not be found.", model.ErrorMessage);
-        Assert.Null(model.ErrorCode);
     }
 
     [Fact]

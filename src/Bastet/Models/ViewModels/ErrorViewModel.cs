@@ -7,7 +7,6 @@ public class ErrorViewModel
 
     // Base error properties
     public string? ErrorMessage { get; set; }
-    public string? ErrorCode { get; set; }
     public int StatusCode { get; set; }
     public string? Title { get; set; } // Display title
 
