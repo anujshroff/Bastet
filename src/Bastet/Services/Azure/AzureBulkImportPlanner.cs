@@ -14,9 +14,10 @@ namespace Bastet.Services.Azure
         IInputSanitizationService sanitizationService) : IAzureBulkImportPlanner
     {
         /// <summary>
-        /// Maximum length for <see cref="Models.Subnet.Name"/>; matches the [MaxLength(50)] attribute on the entity.
+        /// Maximum length for <see cref="Models.Subnet.Name"/>; matches the [MaxLength(100)] attribute
+        /// on the entity, which is wide enough for any Azure subnet name (Azure allows 80).
         /// </summary>
-        private const int MaxSubnetNameLength = 50;
+        private const int MaxSubnetNameLength = 100;
 
         /// <inheritdoc/>
         public BulkImportPlanViewModel BuildPlan(

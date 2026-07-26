@@ -6,7 +6,7 @@ namespace Bastet.Models.ViewModels;
 public class CreateSubnetViewModel
 {
     [Required(ErrorMessage = "Name is required")]
-    [StringLength(50, ErrorMessage = "Name cannot be longer than 50 characters")]
+    [StringLength(100, ErrorMessage = "Name cannot be longer than 100 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in subnet names")]
     [SafeText(ErrorMessage = "Subnet name contains invalid characters")]
     [SanitizeName] // Auto-sanitization

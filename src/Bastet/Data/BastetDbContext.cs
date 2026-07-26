@@ -42,7 +42,7 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
 
             entity.Property(s => s.Name)
                 .IsRequired()
-                .HasMaxLength(50);
+                .HasMaxLength(100);
 
             entity.Property(s => s.Cidr)
                 .IsRequired();

@@ -10,7 +10,7 @@ public class SubnetDto
     public int Id { get; set; }
 
     [Required(ErrorMessage = "Name is required")]
-    [StringLength(50, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 50 characters")]
+    [StringLength(100, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 100 characters")]
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Network address is required")]

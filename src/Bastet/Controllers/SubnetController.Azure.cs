@@ -10,10 +10,10 @@ namespace Bastet.Controllers;
 public partial class SubnetController : Controller
 {
     /// <summary>
-    /// Maximum length for <see cref="Models.Subnet.Name"/>; matches the [MaxLength(50)] attribute on
+    /// Maximum length for <see cref="Models.Subnet.Name"/>; matches the [MaxLength(100)] attribute on
     /// the entity, and the same limit the bulk import planner applies to Azure-derived names.
     /// </summary>
-    private const int MaxSubnetNameLength = 50;
+    private const int MaxSubnetNameLength = 100;
 
     // POST: Subnet/BatchCreateChildSubnets
     /// <param name="isAzureImport">
@@ -28,6 +28,11 @@ public partial class SubnetController : Controller
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> BatchCreateChildSubnets(int parentId, List<AzureImportSubnetViewModel> subnets, string? vnetName = null, string? vnetResourceId = null, bool isAzureImport = false, [FromServices] IInputSanitizationService? sanitizationService = null)
     {
+        // Note on name length: the import wizard trims Azure names to Subnet.Name's limit before
+        // posting them, so the length rule inherited from CreateSubnetViewModel is never the thing
+        // that fails a real import - it is the guard for a caller posting directly. Trimming here
+        // instead would mean clearing the binder's errors for these fields, which would also drop the
+        // HTML and safe-text errors on the same field and make those rules apply only to short names.
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
@@ -158,10 +163,9 @@ public partial class SubnetController : Controller
             // Update parent subnet if this is an Azure import
             if (!string.IsNullOrEmpty(vnetName) && isAzureImport)
             {
-                // Update the name to match the Azure VNet name. Azure allows 64-character VNet names
-                // and SanitizeName only trims at 100, so without this an over-long name reaches a
-                // column declared for 50 and fails the insert with a truncation error, rolling the
-                // whole import back behind a generic 500. The bulk path truncates in its planner.
+                // Update the name to match the Azure VNet name. Azure VNet names reach 64 characters
+                // and the column holds 100, so this never truncates a real Azure name - it is a guard
+                // against a hand-crafted post, since SanitizeName trims at the same 100.
                 parentSubnet.Name = vnetName.Length > MaxSubnetNameLength
                     ? vnetName[..MaxSubnetNameLength]
                     : vnetName;
