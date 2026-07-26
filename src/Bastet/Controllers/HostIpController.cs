@@ -33,6 +33,7 @@ public class HostIpController(
     {
         Subnet? subnet = await context.Subnets
             .Include(s => s.HostIpAssignments)
+            .Include(s => s.ChildSubnets) // Loaded for the guard below; without it that check is dead
             .FirstOrDefaultAsync(s => s.Id == subnetId);
 
         if (subnet == null)
