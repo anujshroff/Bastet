@@ -15,6 +15,36 @@ public partial class SubnetController : Controller
     /// </summary>
     private const int MaxSubnetNameLength = 100;
 
+    /// <summary>
+    /// Maximum length for <see cref="Models.Subnet.Description"/>; matches the [MaxLength(1000)]
+    /// attribute on the entity.
+    /// </summary>
+    private const int MaxSubnetDescriptionLength = 1000;
+
+    /// <summary>
+    /// Builds the description for a subnet an Azure import has just marked fully allocated. The note
+    /// is only appended when it fits: descriptions are capped, the note repeats what the
+    /// IsFullyAllocated flag already records, and overflowing the column fails the insert and rolls
+    /// back the entire import behind a generic error. Existing text is never sacrificed for the note.
+    /// </summary>
+    private static string AppendFullyAllocatedNote(string? existingDescription, string? azureSubnetName)
+    {
+        string note = $"Fully allocated by Azure subnet '{azureSubnetName}' which encompasses the entire address space.";
+
+        if (string.IsNullOrEmpty(existingDescription))
+        {
+            return Truncate(note);
+        }
+
+        string combined = $"{existingDescription}\n{note}";
+        return combined.Length <= MaxSubnetDescriptionLength
+            ? combined
+            : Truncate(existingDescription);
+
+        static string Truncate(string value) =>
+            value.Length > MaxSubnetDescriptionLength ? value[..MaxSubnetDescriptionLength] : value;
+    }
+
     // POST: Subnet/BatchCreateChildSubnets
     /// <param name="isAzureImport">
     /// True when called from the Azure import wizard, which additionally renames the parent to the
@@ -182,10 +212,7 @@ public partial class SubnetController : Controller
                     parentSubnet.IsFullyAllocated = true;
 
                     // Update description, preserving existing description if present
-                    string azureImportInfo = $"Fully allocated by Azure subnet '{fullyEncompassingSubnetName}' which encompasses the entire address space.";
-                    parentSubnet.Description = string.IsNullOrEmpty(parentSubnet.Description)
-                        ? azureImportInfo
-                        : $"{parentSubnet.Description}\n{azureImportInfo}";
+                    parentSubnet.Description = AppendFullyAllocatedNote(parentSubnet.Description, fullyEncompassingSubnetName);
                 }
 
                 parentSubnet.LastModifiedAt = DateTime.UtcNow;

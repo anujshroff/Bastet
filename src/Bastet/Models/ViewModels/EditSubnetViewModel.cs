@@ -41,7 +41,7 @@ public class EditSubnetViewModel
     public string Name { get; set; } = string.Empty;
 
     [Display(Name = "Description")]
-    [StringLength(500, ErrorMessage = "Description cannot be longer than 500 characters")]
+    [StringLength(1000, ErrorMessage = "Description cannot be longer than 1000 characters")]
     [SanitizeDescription] // Auto-sanitization
     public string? Description { get; set; }
 

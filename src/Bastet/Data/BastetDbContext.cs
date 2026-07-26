@@ -48,7 +48,7 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
                 .IsRequired();
 
             entity.Property(s => s.Description)
-                .HasMaxLength(500);
+                .HasMaxLength(1000);
 
             entity.Property(s => s.Tags)
                 .HasMaxLength(255);

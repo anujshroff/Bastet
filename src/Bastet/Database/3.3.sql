@@ -241,6 +241,47 @@ END;
 COMMIT;
 GO
 
+BEGIN TRANSACTION;
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260726003042_WidenSubnetDescriptionTo1000'
+)
+BEGIN
+    DECLARE @var2 nvarchar(max);
+    SELECT @var2 = QUOTENAME([d].[name])
+    FROM [sys].[default_constraints] [d]
+    INNER JOIN [sys].[columns] [c] ON [d].[parent_column_id] = [c].[column_id] AND [d].[parent_object_id] = [c].[object_id]
+    WHERE ([d].[parent_object_id] = OBJECT_ID(N'[Subnets]') AND [c].[name] = N'Description');
+    IF @var2 IS NOT NULL EXEC(N'ALTER TABLE [Subnets] DROP CONSTRAINT ' + @var2 + ';');
+    ALTER TABLE [Subnets] ALTER COLUMN [Description] nvarchar(1000) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260726003042_WidenSubnetDescriptionTo1000'
+)
+BEGIN
+    DECLARE @var3 nvarchar(max);
+    SELECT @var3 = QUOTENAME([d].[name])
+    FROM [sys].[default_constraints] [d]
+    INNER JOIN [sys].[columns] [c] ON [d].[parent_column_id] = [c].[column_id] AND [d].[parent_object_id] = [c].[object_id]
+    WHERE ([d].[parent_object_id] = OBJECT_ID(N'[DeletedSubnets]') AND [c].[name] = N'Description');
+    IF @var3 IS NOT NULL EXEC(N'ALTER TABLE [DeletedSubnets] DROP CONSTRAINT ' + @var3 + ';');
+    ALTER TABLE [DeletedSubnets] ALTER COLUMN [Description] nvarchar(1000) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260726003042_WidenSubnetDescriptionTo1000'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260726003042_WidenSubnetDescriptionTo1000', N'10.0.10');
+END;
+
+COMMIT;
+GO
+
 IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NULL
 BEGIN
     CREATE TABLE [__EFMigrationsHistory] (

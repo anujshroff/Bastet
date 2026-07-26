@@ -22,7 +22,7 @@ public class DeletedSubnet
     [Range(0, 32)] // IPv4 supports up to /32
     public int Cidr { get; set; }
 
-    [MaxLength(500)]
+    [MaxLength(1000)]
     public string? Description { get; set; }
 
     [MaxLength(255)]

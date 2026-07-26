@@ -20,7 +20,7 @@ public class CreateSubnetDto
     [Range(0, 32, ErrorMessage = "CIDR must be between 0 and 32")]
     public int Cidr { get; set; }
 
-    [StringLength(500, ErrorMessage = "Description cannot exceed 500 characters")]
+    [StringLength(1000, ErrorMessage = "Description cannot exceed 1000 characters")]
     public string? Description { get; set; }
 
     [StringLength(255, ErrorMessage = "Tags cannot exceed 255 characters")]

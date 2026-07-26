@@ -191,10 +191,7 @@ public partial class SubnetController : Controller
                 {
                     targetSubnet.IsFullyAllocated = true;
 
-                    string azureImportInfo = $"Fully allocated by Azure subnet '{item.FullyAllocatingAzureSubnetName}' which encompasses the entire address space.";
-                    targetSubnet.Description = string.IsNullOrEmpty(targetSubnet.Description)
-                        ? azureImportInfo
-                        : $"{targetSubnet.Description}\n{azureImportInfo}";
+                    targetSubnet.Description = AppendFullyAllocatedNote(targetSubnet.Description, item.FullyAllocatingAzureSubnetName);
 
                     targetSubnet.LastModifiedAt = DateTime.UtcNow;
                     targetSubnet.ModifiedBy = userContextService.GetCurrentUsername();
