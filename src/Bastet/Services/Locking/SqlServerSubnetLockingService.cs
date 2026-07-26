@@ -22,6 +22,9 @@ public class SqlServerSubnetLockingService(BastetDbContext context) : ISubnetLoc
     private const int DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
     private const string SUBNET_OPERATIONS_LOCK = "Bastet:SubnetOperations";
 
+    /// <summary>SQL Server's error number for a client-side command timeout.</summary>
+    private const int SQL_TIMEOUT_ERROR_NUMBER = -2;
+
     /// <inheritdoc />
     public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null)
     {
@@ -69,9 +72,32 @@ public class SqlServerSubnetLockingService(BastetDbContext context) : ISubnetLoc
             new SqlParameter("@Result", SqlDbType.Int) { Direction = ParameterDirection.Output }
         ];
 
-        await context.Database.ExecuteSqlRawAsync(
-            "EXEC @Result = sp_getapplock @Resource = @Resource, @LockMode = @LockMode, @LockOwner = @LockOwner, @LockTimeout = @LockTimeout",
-            parameters);
+        // The command has to outlive the wait it is asking the server to perform. SqlClient's default
+        // command timeout is 30s, exactly the default @LockTimeout, so the two race: when the client
+        // wins it throws SqlException instead of returning a result code, and every caller here
+        // catches TimeoutException, so a contended operation surfaces as a generic 500 rather than
+        // "another operation is in progress". Program.cs applies the same rule to the migration lock.
+        // The context is request-scoped and shared with the caller's own queries, so restore it after.
+        int? originalCommandTimeout = context.Database.GetCommandTimeout();
+        context.Database.SetCommandTimeout((timeoutMs / 1000) + 30);
+
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                "EXEC @Result = sp_getapplock @Resource = @Resource, @LockMode = @LockMode, @LockOwner = @LockOwner, @LockTimeout = @LockTimeout",
+                parameters);
+        }
+        catch (SqlException ex) when (ex.Number == SQL_TIMEOUT_ERROR_NUMBER)
+        {
+            // Unreachable while the command timeout above exceeds the lock timeout, but a timeout
+            // imposed elsewhere (connection settings, a proxy) must still reach callers as the
+            // failure this method documents rather than as an unhandled provider exception.
+            throw new TimeoutException($"Could not acquire subnet operation lock within {timeoutMs}ms (the command timed out).", ex);
+        }
+        finally
+        {
+            context.Database.SetCommandTimeout(originalCommandTimeout);
+        }
 
         return (int)parameters[4].Value;
     }
