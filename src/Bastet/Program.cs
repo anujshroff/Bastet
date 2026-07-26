@@ -115,12 +115,14 @@ builder.Services.AddSingleton<IVersionService, VersionService>();
 builder.Services.AddScoped<Bastet.Services.Locking.ISubnetLockingService>(provider =>
 {
     BastetDbContext context = provider.GetRequiredService<BastetDbContext>();
+    ILogger<Bastet.Services.Locking.SqlServerSubnetLockingService> lockLogger =
+        provider.GetRequiredService<ILogger<Bastet.Services.Locking.SqlServerSubnetLockingService>>();
 
     return context.Database.ProviderName?.ToLower() switch
     {
         "microsoft.entityframeworkcore.sqlite" => new Bastet.Services.Locking.SqliteSubnetLockingService(),
-        "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context),
-        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context) // Default to SQL Server
+        "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context, lockLogger),
+        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context, lockLogger) // Default to SQL Server
     };
 });
 

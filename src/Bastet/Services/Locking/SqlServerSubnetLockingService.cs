@@ -17,7 +17,7 @@ namespace Bastet.Services.Locking;
 /// so EF cannot return it to the pool (which would silently drop a session lock), and the lock is
 /// released in a finally; if the process dies, the lock dies with the connection.
 /// </remarks>
-public class SqlServerSubnetLockingService(BastetDbContext context) : ISubnetLockingService
+public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlServerSubnetLockingService> logger) : ISubnetLockingService
 {
     private const int DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
     private const string SUBNET_OPERATIONS_LOCK = "Bastet:SubnetOperations";
@@ -46,7 +46,21 @@ public class SqlServerSubnetLockingService(BastetDbContext context) : ISubnetLoc
             }
             finally
             {
-                await ReleaseAppLockAsync(SUBNET_OPERATIONS_LOCK);
+                // A failed release must not become the caller's error. Every guarded path commits
+                // inside operation(), so by now the work is durable: rethrowing here would report a
+                // completed operation as failed, and - because an exception raised in a finally
+                // replaces the one in flight - would also destroy the original error when the
+                // operation itself was what failed. Swallowing does not change the lock's fate: if
+                // the connection died the session died with it and SQL Server has already dropped
+                // the session-scoped lock, and if it is alive the outer finally closes it anyway.
+                try
+                {
+                    await ReleaseAppLockAsync(SUBNET_OPERATIONS_LOCK);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Failed to release the subnet operation lock after the operation completed");
+                }
             }
         }
         finally
