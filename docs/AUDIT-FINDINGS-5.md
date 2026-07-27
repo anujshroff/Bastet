@@ -236,28 +236,31 @@ _Tests 596 → 599 (+3). Build clean, 0 warnings._
 
 ## E5. Subnet Edit POST returns 500 on an out-of-range CIDR instead of redisplaying the form `[×2]`
 
-**Confidence: confirmed.** Reproduced against the real action for 33, 99, −1 and `int.MaxValue`.
+_E5 is fixed and committed, mirroring D8's guard on the Create action — the one entry point D8's
+struck paragraph explicitly scoped itself to. A `hasUsableCidr` local now gates the mask calculation
+at the tail of the Edit POST, leaving `SubnetMask` empty when the posted CIDR is outside 0–32._
 
-**Where:** [SubnetController.Edit.cs:235-238](../src/Bastet/Controllers/SubnetController.Edit.cs#L235-L238),
-which sits **after** the try/catch that closes at :215.
-[IpUtilityService.cs:16-19](../src/Bastet/Services/IpUtilityService.cs#L16-L19) is the throw;
-[EditSubnetViewModel.cs:26](../src/Bastet/Models/ViewModels/EditSubnetViewModel.cs#L26) is the `[Range(0,32)]`.
+_The posted `Cidr` is **not** clamped, following the finding's own warning. It is redisplayed in the
+form, so rewriting it would silently change what the operator typed and hide the mistake the range
+message is about to explain. `SubnetMask` is display-only on an error re-render — nothing in the Edit
+views or the POST path reads it back — so leaving it empty costs nothing._
 
-`[Range]` makes `ModelState` invalid, which skips the guarded block entirely — and then makes
-`!ModelState.IsValid` true at :235, calling `CalculateSubnetMask(99)` outside any try.
-`ArgumentOutOfRangeException` escapes to `UseExceptionHandler`, so the operator gets a 500 instead of
-the form carrying the "CIDR must be between 0 and 32" message the model already produced.
+_Four tests written first, one per boundary (33, 99, −1 and `int.MaxValue`), all four failing against
+the unfixed action with `System.ArgumentOutOfRangeException : CIDR must be between 0 and 32
+(Parameter 'cidr')` — the defect itself. They assert the action returns a view with the `Cidr` error
+intact **and** that the posted value survives unclamped, so a future "fix" that clamps would fail
+them. Values that fail model binding outright leave `Cidr` at 0, which was always handled._
 
-Reachability is narrow and worth stating plainly: `asp-for` on an int emits `type="number"` with
-`min`/`max` ([_EditForm.cshtml:20](../src/Bastet/Views/Subnet/Edit/_EditForm.cshtml#L20)), so native
-HTML5 constraint validation blocks a normal browser even with JS off. The vector is curl or devtools
-with a valid antiforgery token, by an already-authenticated Edit-role user — the same bar D8 was
-accepted under. Values that fail binding outright leave `Cidr == 0`, which is handled fine.
+_Reachability is narrower than a casual reading suggests and is worth recording so it is not
+re-raised as more serious than it is: `asp-for` on an int emits `type="number"` with `min`/`max`, so
+a normal browser blocks the submit even with JavaScript disabled. The vector is a crafted POST by an
+already-authenticated Edit-role user holding a valid antiforgery token — the same bar D8 was accepted
+under — and the blast radius is a 500 on that caller's own request. The guarded block is skipped
+entirely, so no CIDR-change validation is bypassed and nothing is written._
 
-**Fix.** Mirror D8's guard, which was scoped to the Create GET and never applied here:
-`bool hasUsableCidr = viewModel.Cidr is >= 0 and <= 32;` and compute `SubnetMask` only when it holds.
-Do not clamp — the posted `Cidr` is redisplayed and clamping would rewrite what the operator typed.
-`SubnetMask` is display-only on the error re-render, so nothing else depends on it.
+_Tests 599 → 603 (+4). Build clean, 0 warnings._
+
+---
 
 ## E6. Concurrency-conflict handler displays a Last Modified time that was never saved `[×2]`
 

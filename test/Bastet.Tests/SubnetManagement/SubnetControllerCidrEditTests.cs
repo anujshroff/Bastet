@@ -486,6 +486,40 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Contains("Cidr", _controller.ModelState.Keys);
     }
 
+    /// <summary>
+    /// The out-of-range value must survive to be redisplayed with its message. The [Range(0,32)]
+    /// failure skips the guarded block entirely, so execution falls through to the mask calculation
+    /// at the tail of the action - which sits outside any try and throws for a CIDR it cannot
+    /// compute, turning a form validation error into a 500.
+    /// </summary>
+    [Theory]
+    [InlineData(33)]
+    [InlineData(99)]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    public async Task Edit_POST_OutOfRangeCidr_ReturnsViewInsteadOfThrowing(int cidr)
+    {
+        _controller.ModelState.AddModelError("Cidr", "CIDR must be between 0 and 32");
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 4,
+            Name = "Target Subnet",
+            NetworkAddress = "10.0.2.0",
+            Cidr = cidr,
+            OriginalCidr = 24
+        };
+
+        IActionResult result = await _controller.Edit(4, viewModel);
+
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.ModelState.IsValid);
+        Assert.Contains("Cidr", _controller.ModelState.Keys);
+
+        // The value the operator typed is redisplayed rather than silently clamped.
+        Assert.Equal(cidr, viewModel.Cidr);
+    }
+
     [Fact]
     public async Task Edit_POST_IncreaseCidr_OrphansChildren_ReturnsViewWithError()
     {

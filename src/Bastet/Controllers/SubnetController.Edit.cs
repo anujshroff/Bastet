@@ -232,10 +232,21 @@ public partial class SubnetController : Controller
         // Always set original CIDR to the actual DB value to prevent validation bypass
         viewModel.OriginalCidr = origSubnet.Cidr;
 
-        // Update the subnet mask based on user's input CIDR value
+        // Update the subnet mask based on user's input CIDR value.
+        //
+        // This runs after a failed ModelState, which is exactly when Cidr can be a value
+        // CalculateSubnetMask refuses - [Range(0,32)] is what made ModelState invalid, and this code
+        // sits outside the try/catch above, so throwing here loses the whole form to an error page
+        // instead of redisplaying it with the range message. The posted value is deliberately not
+        // clamped: it is redisplayed, and rewriting what the operator typed would hide the mistake.
+        // Same guard the Create action applies to a prefilled CIDR from the query string.
+        bool hasUsableCidr = viewModel.Cidr is >= 0 and <= 32;
+
         if (!ModelState.IsValid || viewModel.Cidr != origSubnet.Cidr)
         {
-            viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
+            viewModel.SubnetMask = hasUsableCidr
+                ? ipUtilityService.CalculateSubnetMask(viewModel.Cidr)
+                : string.Empty;
         }
         else
         {
