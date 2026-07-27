@@ -315,6 +315,19 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         // If increasing CIDR (making subnet smaller), check if all host IPs still fit
         if (newCidr > originalCidr)
         {
+            // Narrowing moves the broadcast address down into what used to be ordinary host space,
+            // so an address that was legal to assign can become reserved without the operator
+            // touching it. ValidateNewHostIp refuses to assign a broadcast address, so allowing one
+            // to arrive this way would persist a state that path cannot produce: the assignment
+            // would then fail to be re-created after a delete. The network address needs no such
+            // check - a CIDR increase cannot move it, so no new collision is possible there.
+            // Only below /31: a /31 is a point-to-point pair and a /32 a single host, neither of
+            // which reserves anything (RFC 3021), yet CalculateBroadcastAddress still returns an
+            // address for them - checking those would reject a legal assignment.
+            string? newBroadcast = newCidr < 31
+                ? ipUtilityService.CalculateBroadcastAddress(networkAddress, newCidr)
+                : null;
+
             foreach (HostIpAssignment hostIp in subnet.HostIpAssignments)
             {
                 if (!ipUtilityService.IsIpInSubnet(hostIp.IP, networkAddress, newCidr))
@@ -322,6 +335,13 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
                     result.AddError(CIDR_CHANGE_INVALID,
                         $"Cannot increase CIDR to /{newCidr} as host IP {hostIp.IP} would fall outside the subnet range");
                     break; // One failure is enough to invalidate the change
+                }
+
+                if (hostIp.IP == newBroadcast)
+                {
+                    result.AddError(CIDR_CHANGE_INVALID,
+                        $"Cannot increase CIDR to /{newCidr} as host IP {hostIp.IP} would become the subnet's broadcast address");
+                    break;
                 }
             }
         }

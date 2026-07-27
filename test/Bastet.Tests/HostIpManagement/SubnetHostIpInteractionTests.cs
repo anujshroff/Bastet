@@ -504,4 +504,93 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Equal(5, archivedHostIp.OriginalSubnetId); // Child subnet ID
         Assert.Equal("Host 7", archivedHostIp.Name);
     }
+
+    // -------------------------------------------------------------------------
+    // A CIDR increase moves the broadcast address. Creation refuses to assign it, so the edit
+    // path must not be able to hand it out by the back door.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Seeds a subnet holding one host IP, so each case below starts from a legal state.
+    /// </summary>
+    private void SeedSubnetWithHostIp(int subnetId, string network, int cidr, string hostIp)
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = subnetId,
+            Name = $"Subnet {subnetId}",
+            NetworkAddress = network,
+            Cidr = cidr,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-user"
+        });
+        _context.HostIpAssignments.Add(new HostIpAssignment
+        {
+            IP = hostIp,
+            Name = "Host",
+            SubnetId = subnetId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-user"
+        });
+        _context.SaveChanges();
+    }
+
+    /// <summary>
+    /// 10.0.0.127 is an ordinary host in a /24 (broadcast is .255) but becomes the broadcast address
+    /// of a /25. It is still inside the range, which is the only thing the CIDR-edit path checked,
+    /// so the edit saved and left an assigned host IP sitting on the broadcast address - a state
+    /// ValidateNewHostIp rejects outright, and so unreachable through the validated path.
+    /// </summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_HostIpBecomesBroadcastAddress_IsRejected()
+    {
+        SeedSubnetWithHostIp(100, "10.0.0.0", 24, "10.0.0.127");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(100, "10.0.0.0", 24, 25);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Message.Contains("10.0.0.127"));
+    }
+
+    /// <summary>A host IP that is merely inside the narrowed range must still be allowed.</summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_HostIpStillOrdinary_IsAllowed()
+    {
+        SeedSubnetWithHostIp(101, "10.1.0.0", 24, "10.1.0.10");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(101, "10.1.0.0", 24, 25);
+
+        Assert.True(result.IsValid);
+    }
+
+    /// <summary>
+    /// A /31 has no reserved addresses (RFC 3021, established by round 3's C7) and
+    /// CalculateBroadcastAddress still returns a value for one - 10.2.0.1 - so a broadcast check
+    /// that forgot the cidr &lt; 31 guard would reject a perfectly legal point-to-point assignment.
+    /// </summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_NarrowingToSlash31_DoesNotReserveEitherAddress()
+    {
+        SeedSubnetWithHostIp(102, "10.2.0.0", 30, "10.2.0.1");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(102, "10.2.0.0", 30, 31);
+
+        Assert.True(result.IsValid);
+    }
+
+    /// <summary>The pre-existing out-of-range rule must keep working.</summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_HostIpFallsOutsideRange_IsStillRejected()
+    {
+        SeedSubnetWithHostIp(103, "10.3.0.0", 24, "10.3.0.200");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(103, "10.3.0.0", 24, 25);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Message.Contains("outside the subnet range"));
+    }
 }
