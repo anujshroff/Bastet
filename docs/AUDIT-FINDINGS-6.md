@@ -749,54 +749,60 @@ _Tests 627 → 627 (unchanged). Build clean, 0 warnings._
 
 ## F15. `BASTET_AUTO_MIGRATE` cannot bootstrap a catalog that does not exist `[×1]`
 
-**Confidence: confirmed.** Two finders declined to raise this on the grounds that `README.md:31-33`
-makes creating the database a prerequisite; a third raised it as medium. Adjudicated to **low**.
+_F15 is fixed and committed with the two-line change the adjudicating verifier found, not the deletion
+the finding proposed. The `Bastet:Migration` lock connection is now scoped to `master` via
+`SqlConnectionStringBuilder`, so it no longer needs the target catalog to exist before `Migrate()` can
+create it - and a 4060 on that connection is caught and rethrown naming `master`, the login's need for
+it, and `BASTET_CONNECTION_STRING`._
 
-**Where:** [Program.cs:234](../src/Bastet/Program.cs#L234) (`migrationLockConnection.Open()` against the
-*target* catalog), [:236-255](../src/Bastet/Program.cs#L236) (the `Bastet:Migration` applock),
-[:261](../src/Bastet/Program.cs#L261) and [:265](../src/Bastet/Program.cs#L265) (the two `Migrate()`
-calls — the calls that would create it). Regression from `6edef5c`.
-
-**Failure scenario.** `BASTET_AUTO_MIGRATE=true` against a connection string whose catalog does not
-exist:
+_Measured against a real SQL Server 2022 container, both directions:_
 
 ```
-Unhandled exception. SqlException: Cannot open database "vb1_a" requested by the login.
-   at Program.<Main>$(String[] args) in .../Program.cs:line 234
-Error Number:4060
+HEAD, missing catalog : Unhandled exception. SqlException: Cannot open database "bastet_f15"
+                        requested by the login.  Error Number:4060,State:1,Class:11
+fixed, missing catalog: Now listening on: http://127.0.0.1:5402
+                        sys.databases -> 1 ; __EFMigrationsHistory -> 6
 ```
 
-A binary built from `6edef5c^` creates the catalog, applies its migrations and serves. The message names
-neither the missing catalog nor `BASTET_AUTO_MIGRATE`.
+_**The finding's primary fix - delete `Program.cs:233-298` - was rejected, and the reasoning is the
+substance of this entry.** Its premise was that the custom lock is redundant now EF Core 10 takes its
+own `__EFMigrationsLock`. Half true: EF's lock does serialise two starts against an **existing**
+catalog, but it does not cover `CREATE DATABASE` and it does not wait. Deleting the lock trades a
+deterministic single-replica crash for a racy multi-replica one, and silently drops the 300-second wait
+`README.md:125` promises to ADO.NET's 30-second default with an opaque timeout message. It would also
+discard round 4's D12 fix, and - as literally written - delete both `Migrate()` calls with the lock,
+leaving no migration at all._
 
-**Why low, not medium.** The documented bootstrap is create-then-run (`README.md:31-33`, unchanged since
-the initial commit), and the Docker quickstart ships `BASTET_AUTO_MIGRATE=false`. The only in-repo
-artifact pointing at a fresh catalog with auto-migrate on is the dev-only `launchSettings.json`. What
-survives is a diagnostics defect: an unhandled `SqlException` on a connection the app itself opened.
-
-**The custom lock is not redundant** — the claim that would have made this medium. EF Core 10's
-`__EFMigrationsLock` does serialize two simultaneous starts against an *existing* catalog (measured, six
-migrations across both `DbContext` types applied once each), but it does **not** cover `CREATE DATABASE`
-and does **not** wait:
+_The master-scoped variant fixes strictly more, which is why it won: `CREATE DATABASE` now happens
+**inside** `Bastet:Migration`, so the case EF's own lock cannot protect is protected. Verified with two
+simultaneous cold starts against a missing catalog - the exact scenario that produces SQL error 1801
+with the lock removed:_
 
 ```
-lock deleted, 2 instances, missing catalog -> twin2: SqlException 1801 "Database already exists"
-lock deleted, __EFMigrationsLock held      -> exit 134 at 31s, "Execution Timeout Expired"
-HEAD, Bastet:Migration held 60s            -> waited it out, migrated, served
+5403: listening=1 unhandled=0 1801=0     __EFMigrationsHistory -> 6
+5404: listening=1 unhandled=0 1801=0     (six migrations, applied once, one shared history table)
 ```
 
-**Fix.** Scope **only the lock connection** to `master` — two lines,
-`SqlConnectionStringBuilder lockCsb = new(connectionString) { InitialCatalog = "master" }` — plus
-`catch (SqlException ex) when (ex.Number == 4060)` on the `Open()`, naming the catalog and
-`BASTET_AUTO_MIGRATE`. Measured bootstrapping a fresh catalog cleanly both single-instance and with two
-simultaneous instances, because `CREATE DATABASE` then happens inside `Bastet:Migration`.
+_The finding's stated reason for preferring deletion over this variant was also false and is recorded
+so it is not repeated: it claimed the master variant "needs the login to be able to connect to master,
+which a contained Azure SQL user cannot", while the primary fix "has no such caveat". Both have the
+same caveat - EF's own database creator opens a non-target catalog to issue `CREATE DATABASE`, so no
+login that cannot reach master can create the catalog by either route._
 
-**Do not delete `Program.cs:233-298`.** It trades a deterministic single-replica crash for a racy
-multi-replica 1801, silently downgrades the 300-second wait `README.md:125` promises to ADO.NET's 30-second
-default, discards round 4's **D12** fix, and — as literally written — would delete both `Migrate()` calls
-too, leaving no migration at all.
+_Severity was adjudicated down from the finder's medium to low, and that grade is what this fix
+reflects: the documented bootstrap is create-then-run (`README.md:31-33`, unchanged since the initial
+commit) and the Docker quickstart ships `BASTET_AUTO_MIGRATE=false`. What was really wrong was an
+unhandled `SqlException` on a connection the application opened itself, naming neither the catalog nor
+the setting that asked for it. Two of three agents declined to raise it at all; the third was right
+that a regression with a two-line fix is worth taking._
+
+_No test ships: the scenario is process startup against a real SQL Server, which the SQLite suite
+cannot reach and which no existing harness drives. The container was ephemeral and is destroyed._
+
+_Tests 630 → 630 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 ## F16. An unguarded CIDR→mask copy makes the `/0` Create modal offer a subnet from elsewhere `[×1]`
 
