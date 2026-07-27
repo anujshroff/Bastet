@@ -220,3 +220,61 @@ already carries the final state.
 
 Then report the clean-up owed: revoke any credentials supplied, remove containers
 (`docker rm -f <name>`), delete cloud test resources.
+
+## Release notes — the last thing produced
+
+Finish by writing release notes for the round and presenting them **in chat as one fenced markdown
+block the user can paste straight into a GitHub release**. Do not write them to a file and do not
+commit them — they are a deliverable, not an artefact of the repo.
+
+Derive every line from the commits actually made (`git log <base>..HEAD`), never from the findings
+file. Findings struck as refuted, and anything deliberately not done, must not appear.
+
+### Shape
+
+Three sections, in this order, each **omitted entirely when it would be empty**:
+
+```
+### New Features
+### Improvements
+### Bug Fixes
+```
+
+### Voice
+
+- Write for someone **running** Bastet, not someone reading the diff. They want to know what changes
+  for them, not which method was edited.
+- One bullet per user-visible change: `- **What changed** — what it means, or what was wrong`.
+- The bold span is the subject, not decoration. It may sit mid-sentence where that reads better.
+- Configuration keys, headers, routes and identifiers go in backticks.
+- A parenthetical is the right place for a caveat or an opt-out — typically the env var that restores
+  the previous behaviour.
+
+**New Features** — genuinely new capability: a page or workflow that did not exist before.
+**Improvements** — hardening, defaults, messaging, anything now safer or clearer.
+**Bug Fixes** — lead with the **symptom someone could have hit**, then what was actually wrong.
+"X could Y" is the usual shape. Never describe a fix in terms of the code that changed.
+
+### Judgement
+
+- **Group aggressively.** A round that deletes twenty pieces of dead code gets *one* bullet, not
+  twenty. Internal cleanup with no observable effect is worth a single summary line, or nothing.
+- **A finding that produced no user-visible change belongs in no bullet.** Leaving it out is correct,
+  not an omission.
+- Do not number bullets, cite finding IDs (`D1`, `D2`…), mention the audit process, or pad the list to
+  look substantial. Short and accurate beats long.
+
+### Example of the target register
+
+```
+### Improvements
+- **Security response headers** now ride on error responses too — the 500 page was the one response
+  class shipping without `X-Content-Type-Options`, `Referrer-Policy` and `frame-ancestors`
+- CDN scripts load with **Subresource Integrity**, so a tampered CDN cannot inject code
+
+### Bug Fixes
+- The Azure import wizard could **import subnets you had deselected** — toggling "Select All" left
+  previously-ticked rows armed, so they were submitted anyway
+- Reconcile could offer **live Azure subnets for deletion** when the credential could only see part of
+  a subscription — a filtered result was read as "deleted"
+```
