@@ -35,9 +35,17 @@ public partial class SubnetController : Controller
             viewModel.NetworkAddress = networkAddress;
         }
 
-        if (cidr.HasValue)
+        // Everything on this action is advisory pre-fill taken straight off the query string, so a
+        // value outside 0-32 leaves the field blank rather than being acted on. CalculateSubnetMask
+        // throws outside that range, and the [Range(0, 32)] that would have caught it lives on the
+        // POSTed view model, which this GET never reaches - so an out-of-range ?cidr= reached the
+        // calculation unguarded and returned a 500 instead of an empty form. Treated the way
+        // parentId already is: advice, not instruction.
+        bool hasUsableCidr = cidr is >= 0 and <= 32;
+
+        if (hasUsableCidr)
         {
-            viewModel.Cidr = cidr.Value;
+            viewModel.Cidr = cidr!.Value;
             // Calculate and set subnet mask
             viewModel.CalculatedSubnetMask = ipUtilityService.CalculateSubnetMask(cidr.Value);
         }
@@ -48,7 +56,7 @@ public partial class SubnetController : Controller
 
             // Optionally generate a default name based on the parent subnet
             Subnet? parentSubnet = await context.Subnets.FindAsync(parentId.Value);
-            if (parentSubnet != null && !string.IsNullOrEmpty(networkAddress) && cidr.HasValue)
+            if (parentSubnet != null && !string.IsNullOrEmpty(networkAddress) && hasUsableCidr)
             {
                 viewModel.Name = $"{parentSubnet.Name}-{networkAddress}/{cidr}";
             }
