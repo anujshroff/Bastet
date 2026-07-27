@@ -139,6 +139,7 @@ namespace Bastet.Services.Azure
 
             List<AzureReconcileItem> keep = [];
             List<AzureReconcileItem> notVisible = [];
+            List<AzureReconcileItem> unknown = [];
             List<AzureReconcileItem> stillLive = [];
 
             foreach (AzureReconcileItem item in plan.Items)
@@ -169,8 +170,16 @@ namespace Bastet.Services.Azure
                     case AzureResourceConfirmation.Live:
                         stillLive.Add(item);
                         break;
-                    default:
+                    case AzureResourceConfirmation.NotVisible:
                         notVisible.Add(item);
+                        break;
+                    default:
+                        // Unknown is a different fact from NotVisible and gets its own message. The
+                        // action is identical - both are withheld - but "the credential lost access"
+                        // is a guess when the truth is that Azure could not be asked, and an ARM
+                        // throttle or a transport blip mid-scan produces Unknown on a subscription
+                        // whose permissions are perfectly intact.
+                        unknown.Add(item);
                         break;
                 }
             }
@@ -180,9 +189,17 @@ namespace Bastet.Services.Azure
             if (notVisible.Count > 0)
             {
                 plan.Warnings.Add(
-                    $"{notVisible.Count} Azure-linked subnet(s) were missing from the subscription listing, but Azure would " +
-                    "not confirm they are deleted - the credential may simply have lost access to them. They have been " +
-                    $"withheld from deletion: {NameList(notVisible)}.");
+                    $"{notVisible.Count} Azure-linked subnet(s) were missing from the subscription listing, and Azure denied " +
+                    "access when asked about them directly - the credential may have lost access to their resource group. " +
+                    $"They have been withheld from deletion: {NameList(notVisible)}.");
+            }
+
+            if (unknown.Count > 0)
+            {
+                plan.Warnings.Add(
+                    $"{unknown.Count} Azure-linked subnet(s) were missing from the subscription listing, and Azure could not " +
+                    "be asked about them - the read failed rather than answering. Nothing is wrong with the subnet itself; " +
+                    $"try the scan again. They have been withheld from deletion: {NameList(unknown)}.");
             }
 
             if (stillLive.Count > 0)

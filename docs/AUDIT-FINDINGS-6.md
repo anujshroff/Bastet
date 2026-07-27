@@ -625,41 +625,40 @@ this is not a re-raise of a deliberate omission.
 
 ## F12. A row withheld for any non-403 reason is reported as a lost credential `[×1]`
 
-**Confidence: confirmed (live).**
+_F12 is fixed and committed. `Unknown` now has its own bucket and its own sentence: "Azure could not be
+asked about them - the read failed rather than answering. Nothing is wrong with the subnet itself; try
+the scan again." `NotVisible` keeps a sentence naming the credential, now sharpened to say Azure
+**denied access** when asked directly, which is what a 403 actually means. **The action is unchanged -
+both are still withheld** - only the explanation stops guessing._
 
-**Where:** [AzureReconciler.cs:154-156](../src/Bastet/Services/Azure/AzureReconciler.cs#L154) (the
-`default:` arm puts `Unknown` and `NotVisible` in one bucket) and
-[:162-167](../src/Bastet/Services/Azure/AzureReconciler.cs#L162) (the single warning sentence).
+_The split was taken over the finding's cheaper interim of widening the existing sentence to cover both,
+for the reason the verifier gives: widening makes the message vaguer for the 403 rows, where it is
+currently correct and the operator's next step - check the role assignment on that resource group - is
+the right one. A message that fits both cases helps neither._
 
-**Failure scenario.** Measured live in one run: an HTTP 400 `InvalidDoubleEncodedRequestUri` and a
-`FormatException` both map to `Unknown`, joining a genuine 403 in one warning:
+_This is where the finding understates itself and the write-up should not: **`Unknown` needs no crafted
+input at all.** An ARM throttle or a transport blip mid-scan produces it, so an operator could be sent
+auditing role assignments on a subscription whose permissions are perfectly intact. That, not the 400
+case, is why this was worth fixing._
 
-```
-3 Azure-linked subnet(s) were missing from the subscription listing, but Azure would not confirm they
-are deleted - the credential may simply have lost access to them. They have been withheld from
-deletion: 'unknown-verdict-400', 'unknown-verdict-badguid', 'notvisible-row-403'.
-```
+_Three tests, all failing against the unfixed reconciler. Two fail on the defect - the `Unknown` row's
+warning contained "lost access", and two rows withheld for different reasons produced **one** warning
+instead of two. The third fails on the reworded 403 sentence rather than on a defect, which is worth
+stating plainly: it pins the wording so a later round does not collapse the two messages back together._
 
-Two of those three rows are in a resource group the credential reads successfully in the same run. That
-sentence is the only explanation the reconcile screen and the delete-refusal 409 carry, and the real
-cause reaches the log but no UI surface.
+_Sequenced deliberately after **F3** and **F6**, as both verifiers advised. F3 routes unrecognised
+resource IDs to review rather than into this bucket, so it does not make this message more common; had
+F12 landed first, F3's rows would have arrived under the credential explanation in the interim._
 
-**`Unknown` needs no crafted input** — an ARM 429 or a transport blip mid-scan produces it, so an
-operator can be told the credential lost access on a perfectly healthy subscription.
+_The comment at `_ReconcileScripts.cshtml:428-431` - which says in as many words that this text exists
+so the operator can tell "Azure would not confirm it" from "the credential lost access" - is now
+accurate rather than aspirational. It was the strongest evidence the finding had, and it came from the
+codebase itself._
 
-**The text misses its own documented intent:** the comment at
-[_ReconcileScripts.cshtml:428-431](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L428)
-says this text exists so the operator can tell "Azure would not confirm it" from "the credential lost
-access" — the exact distinction the single sentence fails to make.
-
-**Fix.** Split `Unknown` from `NotVisible` for the message only — the action stays identical — and give it
-its own sentence naming "Azure could not be asked". **Do not** widen the existing sentence to cover both:
-that makes it vaguer for the 403 rows where it is currently correct and actionable.
-
-**Sequencing.** **F3**'s and **F6**'s fixes both push more rows into this bucket, making this message the
-standing explanation for a newly-withheld class of row. Land this *with* them.
+_Tests 624 → 627 (+3). Build clean, 0 warnings._
 
 ---
+
 
 ## F13. `BatchCreateChildSubnets` is the one Azure write path with no feature-flag guard `[×1]`
 

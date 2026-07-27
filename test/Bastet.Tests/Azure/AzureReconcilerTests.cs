@@ -254,6 +254,74 @@ public class AzureReconcilerTests
     }
 
     /// <summary>
+    /// NotVisible and Unknown are both withheld, and that is correct - but they are different facts.
+    /// Sharing one sentence told the operator "the credential may have lost access" when the truth was
+    /// that the read failed, which sends them auditing role assignments on a healthy subscription.
+    /// Unknown needs no crafted input: an ARM throttle or a transport blip mid-scan produces it.
+    /// </summary>
+    [Fact]
+    public void UnknownVerdict_IsExplainedAsAFailedRead_NotALostCredential()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "gone", "10.9.0.0", 16, VNetId("vnet-gone")));
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-gone")] = AzureResourceConfirmation.Unknown
+        });
+
+        Assert.Empty(plan.Items);
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("could not be asked", warning);
+        Assert.DoesNotContain("lost access", warning);
+    }
+
+    /// <summary>The 403 case keeps its own sentence, which is correct and actionable for it.</summary>
+    [Fact]
+    public void NotVisibleVerdict_StillNamesTheCredential()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "gone", "10.9.0.0", 16, VNetId("vnet-gone")));
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-gone")] = AzureResourceConfirmation.NotVisible
+        });
+
+        Assert.Empty(plan.Items);
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("denied access", warning);
+        Assert.Contains("lost access to their resource group", warning);
+    }
+
+    /// <summary>
+    /// Two rows withheld for different reasons must produce two sentences, not one that is wrong about
+    /// half of them. This is the shape the audit measured live: a genuine 403 and an HTTP 400 named
+    /// together under the credential explanation.
+    /// </summary>
+    [Fact]
+    public void MixedWithholdReasons_ProduceSeparateWarnings()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "hidden", "10.9.0.0", 16, VNetId("vnet-hidden")),
+            Linked(2, "unreadable", "10.8.0.0", 16, VNetId("vnet-unreadable")));
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-hidden")] = AzureResourceConfirmation.NotVisible,
+            [VNetId("vnet-unreadable")] = AzureResourceConfirmation.Unknown
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.Equal(2, plan.Warnings.Count);
+        Assert.Contains(plan.Warnings, w => w.Contains("denied access") && w.Contains("hidden"));
+        Assert.Contains(plan.Warnings, w => w.Contains("could not be asked") && w.Contains("unreadable"));
+    }
+
+    /// <summary>
     /// A stored ID that names neither a VNet nor a subnet must never be answered as a deletion. The
     /// Azure SDK builds its request from (subscription, resource group, last path segment) and
     /// discards the provider namespace and type, so reading a resource-group or storage-account ID
