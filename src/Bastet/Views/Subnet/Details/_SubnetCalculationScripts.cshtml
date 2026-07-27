@@ -199,7 +199,10 @@
         function normalizeIpToSubnetBoundary(ipAddress, cidr) {
             const ipNum = ipAddressToNumber(ipAddress);
             // Create a mask based on the CIDR
-            const mask = ~((1 << (32 - cidr)) - 1);
+            // cidr === 0 has to be special-cased: 1 << 32 is 1 in JavaScript, so the shift yields
+        // 255.255.255.255 where the server and the Create page both yield 0.0.0.0. Four of the six
+        // copies of this expression already guard it; these two did not.
+        const mask = cidr === 0 ? 0 : ~((1 << (32 - cidr)) - 1);
             // Apply the mask to get the subnet boundary. This is signed for addresses at or above
             // 128.0.0.0, which is harmless here and deliberately left alone: the value is only ever
             // handed to numberToIpAddress, whose unsigned >>> shifts render it correctly, and is
@@ -266,7 +269,9 @@
             const subnetSize = Math.pow(2, 32 - cidr);
             
             // Calculate the subnet bit boundary (we need to align to this)
-            const cidrBitMask = ~((1 << (32 - cidr)) - 1);
+            // Guarded for symmetry with the site above. Not reachable at cidr === 0 today - the only
+        // caller constrains cidr to parentCidr + 1 or more - so this one fixes no observable output.
+        const cidrBitMask = cidr === 0 ? 0 : ~((1 << (32 - cidr)) - 1);
             
             // Try each possible starting address within the parent's range.
             // >>> 0 puts the result back in the unsigned domain: bitwise operands are coerced to

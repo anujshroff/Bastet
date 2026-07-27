@@ -778,53 +778,43 @@ too, leaving no migration at all.
 
 ## F16. An unguarded CIDR→mask copy makes the `/0` Create modal offer a subnet from elsewhere `[×1]`
 
-**Confidence: confirmed.** Two agents reached opposite conclusions; the finder was right and the
-"self-corrects" reading was wrong.
+_F16 is fixed and committed. Both unguarded copies in `_SubnetCalculationScripts.cshtml` now carry the
+`cidr === 0 ? 0 : …` guard the other four copies of the same expression already had._
 
-**Where:** [_SubnetCalculationScripts.cshtml:202](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L202)
-(`const mask = ~((1 << (32 - cidr)) - 1)` inside `normalizeIpToSubnetBoundary`, reached via `:263`
-`getSubnetBoundaries(parentNetwork, parentCidr)`) and
-[:269](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L269) (`cidrBitMask`).
-
-**The expression exists six times across five functions in four files, not the three or four the finders
-counted** — four of the six are guarded:
-
-| Site | Guarded? |
-|---|---|
-| `IpUtilityService.cs:21-27`, `:469` | yes |
-| `_SubnetFormScripts.cshtml:7,10` | yes (`if (cidr === 0) return "0.0.0.0"`) |
-| `_BulkScripts.cshtml:361` | yes (`pc === 0 ? 0 : …`) |
-| `_SubnetCalculationScripts.cshtml:202`, `:269` | **no** |
-
-At `cidr === 0`, `1 << 32 === 1` in JS, so `~((1<<32)-1) === -1` and the mask reads `255.255.255.255`
-where the server and the Create page both return `0.0.0.0`.
-
-**Failure scenario.** `IsValidSubnet` explicitly permits `0.0.0.0/0`
-([IpUtilityService.cs:130-134](../src/Bastet/Services/IpUtilityService.cs#L130)), so a `/0` root is
-supported. With one child `128.0.0.0/2`, the server's own `CalculateUnallocatedRanges` returns a second
-gap starting at `192.0.0.0`, and the view renders a button for it. Click it, type `/1`:
+_Measured rather than reasoned: the shipped expression and the fixed one were lifted from the file and
+from `HEAD` respectively - not retyped - and evaluated across every CIDR 0 to 32 in chromium. Exactly
+one value differs:_
 
 ```
-                  shipped              guarded
-addressField      0.0.0.0              192.0.0.0
-cidrValid         true                 false
-createBtnDisabled false                true
-href              ...networkAddress=0.0.0.0&cidr=1    ...networkAddress=192.0.0.0&cidr=1
+cidr 0 : HEAD 255.255.255.255  ->  fixed 0.0.0.0
 ```
 
-The button is enabled with the address silently replaced by a block in a different part of the address
-space, and the server would accept it. It self-corrects only when the *lower* half is allocated, because
-then `checkForOverlap` catches the wrapped `0.0.0.0` — the shape the second agent traced, hence its wrong
-generalisation.
+_Every other CIDR is byte-identical, which is the property that made this safe to change: the fix
+cannot alter any behaviour outside the one case it exists for._
 
-**`:269` is not reachable at `cidr === 0`** (`findCompatibleNetworkAddress` is only called where
-`cidr >= parentCidr + 1 >= 1`) and produces no wrong output today. Guard it for symmetry; do not claim
-harm for it.
+_Both sites were guarded, but the write-up records what each buys, because the finding's own count was
+wrong in both reports. The expression exists **six** times across five functions in four files, four
+already guarded. Only `:202` is observably wrong - reached through `getSubnetBoundaries(parentNetwork,
+parentCidr)` on a `0.0.0.0/0` Details page, where the wrapped mask let the modal enable Create with the
+network address silently replaced by a block in a different part of the address space, and the server
+would have accepted it. `:269` is **not reachable at `cidr === 0`** - its only caller constrains the
+value to `parentCidr + 1` or more - so it is guarded for symmetry and claims no fix._
 
-**Fix.** `const mask = cidr === 0 ? 0 : ~((1 << (32 - cidr)) - 1)` at both sites. Byte-identical at CIDR
-1–32. Hoisting all six into `site.js` is a separate refactor; the guard is the fix.
+_The two agents who examined this disagreed and the verifier settled it: the "self-corrects" reading is
+true only for a tree whose lower half is allocated, because then the overlap check catches the wrapped
+address. With the lower half free and the second unallocated range clicked, it does not._
+
+_The `site.js` consolidation both reports suggest was **not** taken. Six copies across four files is a
+real duplication and it is on the watch list, but hoisting them is a refactor touching three pages to
+fix a defect that lives in one expression._
+
+_No test ships - there is no JS harness - and the guard is a client-side display path. The rig was
+ephemeral and is deleted._
+
+_Tests 624 → 624 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 ## F17. Round 5's stated reason for leaving E6 untested is false, and the fix is unpinned `[×2]`
 
