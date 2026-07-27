@@ -636,7 +636,7 @@ public class SubnetControllerCidrEditTests : IDisposable
         // Arrange - Set multiple ModelState errors
         _controller.ModelState.AddModelError("Name", "Name is required");
         _controller.ModelState.AddModelError("Cidr", "CIDR must be between 0 and 32");
-        _controller.ModelState.AddModelError("Description", "Description cannot exceed 500 characters");
+        _controller.ModelState.AddModelError("Description", "Description cannot be longer than 1000 characters");
 
         EditSubnetViewModel viewModel = new()
         {
@@ -645,7 +645,10 @@ public class SubnetControllerCidrEditTests : IDisposable
             NetworkAddress = "10.0.2.0",
             Cidr = 24, // Using valid CIDR but ModelState is invalid from our manual error
             OriginalCidr = 24,
-            Description = new string('x', 600) // Too long description
+            // Over the 1000-character limit the column and EditSubnetViewModel both carry. The value
+            // is inert here - all three errors above are hand-injected - but a fixture that says
+            // "too long" while holding a perfectly valid length is a trap for the next reader.
+            Description = new string('x', 1100)
         };
 
         // Act
