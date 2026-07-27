@@ -693,37 +693,42 @@ their scenario. What helps them is validating the stored id's shape.
 
 ## F14. The Create-Subnet modal unlocks a field nothing listens to, under a stale explanation `[×1]`
 
-**Confidence: confirmed.**
+_F14 is fixed and committed with the finding's cheaper interim, which the verifier established is the
+better fix: the field is never unlocked. `prop('readonly', false)` is gone, so the value the script
+computed is the value that gets posted._
 
-**Where:** [_SubnetCalculationScripts.cshtml:63-68](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L63)
-(clears `readonly` and sets the help text), [:78](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L78),
-[:141-147](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L141). "Nothing listens" is
-airtight: instrumenting `$.fn.on` and `addEventListener` *before* the shipped script ran captured exactly
-three bindings — `.create-subnet-btn` click, `#cidrInput` input, `#createSubnetBtn` click — **zero** on the
-address field and **zero delegated bindings anywhere**.
+_Nothing is lost by leaving it locked, and this was checked rather than assumed:
+`findCompatibleNetworkAddress` searches only within the parent's boundaries and skips every child, so
+the address it writes is always inside the parent, aligned, and clear of siblings. The verifier's
+warning against the finding's *preferred* fix was heeded - adding a listener means sharing a validator
+with the `#cidrInput` handler, which rewrites this field from `#originalNetworkAddress` on every
+`input` event and would overwrite what the operator is typing._
 
-**Failure scenario.** Open the modal on an unallocated range, then type `192.168.99.0` — outside the
-parent entirely — into the now-editable network-address field:
+_**A stale symbol was cleaned up rather than left behind.** With the unlock removed,
+`makeNetworkAddressEditable()` no longer made anything editable - a function whose name states the
+opposite of what it does is exactly the residue these rounds keep finding. It is now
+`markNetworkAddressAdjusted()`, and its single caller was updated. `makeNetworkAddressReadOnly()` keeps
+its name because it still does what it says._
 
-```
-#networkAddressHelp : "This network address has been adjusted to avoid overlaps."
-#createSubnetBtn disabled : false
-Create -> /Subnet/Create?networkAddress=192.168.99.0&cidr=25&parentId=703
-```
+_The finding's anchor was corrected, as the verifier required: the false thing on screen is
+`#networkAddressHelp` still reading "This network address has been adjusted to avoid overlaps" under a
+value the script never adjusted - not the `is-valid` class, which sits on `#cidrInput` and was
+accurate. With the field locked, that sentence is true whenever it appears._
 
-`checkForOverlap` is silently skipped. The **actually-false thing on screen is the help text**, under a
-value the script neither adjusted nor overlap-checked. (The finder's "`is-valid`" is a misattribution:
-that class is on `#cidrInput`, and the CIDR genuinely is valid.) The server holds cleanly — the POST is
-refused with the containment rule named and nothing is persisted — so this is a client-side affordance
-defect.
+_Verified in chromium: the script parses, no `readonly, false` remains, and the stale name is gone.
+**My first rig reported a syntax error that was its own fault** - a regex meant to strip the Razor
+`@foreach` swallowed part of the script and produced `Unexpected token 'var'`. Recorded because a rig
+that blames the file for its own damage is the fastest way to "fix" something that was never broken;
+re-done by replacing the Razor data literal precisely, from `@foreach` to the closing `];`, and
+asserting no `@` survived._
 
-**Fix.** Drop the `prop('readonly', false)` at `:64`. Nothing is lost:
-`findCompatibleNetworkAddress` searches only within the parent's boundaries and skips every child, so the
-address it writes is always inside the parent, aligned and non-overlapping. Prefer this over adding a
-listener — `#cidrInput`'s handler rewrites the field from `#originalNetworkAddress` on every `input`, so a
-shared validator must not reuse that branch or it will overwrite what the operator is typing.
+_No test ships; no JS harness. The server was already correct here and remains untouched - it refused
+an out-of-parent address with the containment rule named, which is why this stayed low._
+
+_Tests 627 → 627 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 ## F15. `BASTET_AUTO_MIGRATE` cannot bootstrap a catalog that does not exist `[×1]`
 

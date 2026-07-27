@@ -59,9 +59,14 @@
             $('#createSubnetBtn').prop('disabled', false);
         });
         
-        // Make network address field editable when needed
-        function makeNetworkAddressEditable() {
-            $('#networkAddressDisplay').prop('readonly', false);
+        // Flag that the address was moved off the one the button carried. The field stays read-only:
+        // nothing listens to it - instrumenting jQuery.on and addEventListener before this script runs
+        // shows three bindings, none of them on this field and none delegated - so a typed value
+        // skipped the overlap check entirely while the help text below still claimed the address had
+        // been "adjusted to avoid overlaps". Nothing is lost by leaving it locked, because
+        // findCompatibleNetworkAddress searches only within the parent's boundaries and skips every
+        // child, so the value it writes is always inside the parent, aligned and clear of siblings.
+        function markNetworkAddressAdjusted() {
             $('#networkAddressDisplay').addClass('border-warning');
             $('#networkAddressHelp').html('<span class="text-warning">This network address has been adjusted to avoid overlaps.</span>');
             $('#networkAddressHelp').removeClass('d-none');
@@ -95,7 +100,7 @@
                     // We found a compatible address, update the field
                     $('#networkAddressDisplay').val(compatibleAddress);
                     networkAddress = compatibleAddress;
-                    makeNetworkAddressEditable();
+                    markNetworkAddressAdjusted();
                     
                     $(this).removeClass('is-invalid').addClass('is-valid');
                     $('#createSubnetBtn').prop('disabled', false);
