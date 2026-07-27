@@ -106,6 +106,20 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         _context.SaveChanges();
     }
 
+    /// <summary>
+    /// The Azure import wizard posts as a full-page form, so its failures redirect to the parent's
+    /// Details page carrying the reason in TempData rather than returning a raw error body the
+    /// browser would render in place of the wizard. Asserts both halves.
+    /// </summary>
+    private void AssertImportFailureRedirect(IActionResult result, int parentId)
+    {
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirect.ActionName);
+        Assert.Equal(parentId, redirect.RouteValues?["id"]);
+        Assert.True(_controller.TempData.ContainsKey("ErrorMessage"));
+        Assert.False(string.IsNullOrWhiteSpace(_controller.TempData["ErrorMessage"] as string));
+    }
+
     [Fact]
     public async Task BatchCreate_SubnetFullyEncompassesVNetPrefix_MarksParentAsFullyAllocated()
     {
@@ -256,7 +270,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         IActionResult result = await _controller.BatchCreateChildSubnets(
             parentId, subnets, vnetName: "Azure-VNet-3", isAzureImport: true);
 
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        AssertImportFailureRedirect(result, parentId);
 
         _context.ChangeTracker.Clear();
         Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
@@ -285,7 +299,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         IActionResult result = await _controller.BatchCreateChildSubnets(
             parentId, subnets, vnetName: "Azure-VNet-4", isAzureImport: true);
 
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        AssertImportFailureRedirect(result, parentId);
 
         _context.ChangeTracker.Clear();
         Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
@@ -409,7 +423,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         IActionResult result = await _controller.BatchCreateChildSubnets(
             parentId, EncompassingEntry(parentId), vnetName: vnetName, isAzureImport: true);
 
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        AssertImportFailureRedirect(result, parentId);
 
         Subnet? parent = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parent);

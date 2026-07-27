@@ -133,6 +133,20 @@ public class SubnetControllerBatchCreateTests : IDisposable
         _context.SaveChanges();
     }
 
+    /// <summary>
+    /// The Azure import wizard posts as a full-page form, so its failures redirect to the parent's
+    /// Details page carrying the reason in TempData rather than returning a raw error body the
+    /// browser would render in place of the wizard. Asserts both halves.
+    /// </summary>
+    private void AssertImportFailureRedirect(IActionResult result, int parentId)
+    {
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirect.ActionName);
+        Assert.Equal(parentId, redirect.RouteValues?["id"]);
+        Assert.True(_controller.TempData.ContainsKey("ErrorMessage"));
+        Assert.False(string.IsNullOrWhiteSpace(_controller.TempData["ErrorMessage"] as string));
+    }
+
     [Fact]
     public async Task BatchCreateChildSubnets_ValidSubnets_CreatesSubnets()
     {
@@ -303,7 +317,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
             parentId, subnets, vnetName: "vnet-production", isAzureImport: true,
             sanitizationService: new InputSanitizationService());
 
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        AssertImportFailureRedirect(result, parentId);
         Assert.Equal(subnetCountBefore, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
     }
 
@@ -526,7 +540,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         IActionResult result = await _controller.BatchCreateChildSubnets(
             parentId, [], vnetName: "vnet-production", isAzureImport: true);
 
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        AssertImportFailureRedirect(result, parentId);
 
         // The parent must be left exactly as it was
         _context.ChangeTracker.Clear();
@@ -589,5 +603,42 @@ public class SubnetControllerBatchCreateTests : IDisposable
             .FirstOrDefaultAsync(s => s.ParentSubnetId == parentId && s.Name == "Azure Import Subnet", TestContext.Current.CancellationToken);
 
         Assert.NotNull(createdSubnet);
+    }
+
+    // -------------------------------------------------------------------------
+    // Failures must be shaped for whoever posted them
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The wizard posts a full-page form, so a raw error body would replace the wizard on screen -
+    /// UseStatusCodePagesWithReExecute skips responses that already have a body, so not even the
+    /// error page steps in. The import path redirects and carries the reason in TempData instead.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_ImportFailure_RedirectsWithTheReasonInTempData()
+    {
+        const int parentId = 2;
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, [], vnetName: "vnet-production", isAzureImport: true);
+
+        AssertImportFailureRedirect(result, parentId);
+        Assert.Contains("No subnets were submitted", _controller.TempData["ErrorMessage"] as string);
+    }
+
+    /// <summary>
+    /// The other half: a direct JSON caller must keep the status codes it relies on. Without this
+    /// the redirect could quietly be applied to every caller.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_ApiFailure_StillReturnsBadRequest()
+    {
+        const int parentId = 2;
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, [], vnetName: null, isAzureImport: false);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.False(_controller.TempData.ContainsKey("ErrorMessage"));
     }
 }
