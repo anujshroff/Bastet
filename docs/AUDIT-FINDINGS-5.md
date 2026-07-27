@@ -495,27 +495,38 @@ _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ## E14. The reconcile confirmation screen overstates the blast radius `[×1]`
 
-**Confidence: confirmed.**
+_E14 is fixed and committed. A `targets` local — `chosen.filter(i => !covered[i.subnetId])` — now
+drives both `#rec-confirm-count` and `#rec-confirm-list`, so the screen counts and names what the
+server will actually report as deleted. The cascade sum iterates `targets` directly rather than
+`chosen` with a skip, which is the same set by construction and one fewer thing to keep in step.
+`confirmedIds` still carries every selected id: the server dedupes by subtree, and narrowing what is
+posted would change behaviour rather than reporting._
 
-**Where:** [_ReconcileScripts.cshtml:306](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L306)
-(`$("#rec-confirm-count").text(chosen.length);`) and the cascade block at :310-333.
+_Verified by lifting the `covered`/`targets`/sum block **verbatim** out of the shipped file — pulled
+by offset, not retyped — wrapping it in a function and running it in chromium against the finding's
+own scenario, a deleted VNet target plus its imported child, both ticked:_
 
-**Failure scenario.** Target "prod-vnet" (id 10, a VNet resource ID, one descendant) with imported child
-"prod-web" (id 11). When the VNet is deleted in Azure, `BuildPlan` emits **both** rows — id 10 as
-`VNetDeleted`, id 11 as `SubnetDeleted` — and `renderPlan` gives each an independent checkbox. Select
-all, and the confirmation reads "You are about to delete **2** subnet(s)…" followed by "This **also**
-archives **1** child subnet(s)…". The word "also" is false: that 1 child *is* one of the 2, so the
-screen announces 3 subnets where only 2 exist. The server then reports "deleted **1** stale subnet(s),
-archiving 2 subnet(s)" — so the operator is told 2 targets before confirming and 1 afterwards. On a
-real VNet import with a dozen children it is a dozen-way discrepancy, on a destructive confirmation.
+```
+{"targets":1,"descendants":1,"hostIps":2,"names":["prod-vnet"]}
+```
 
-The defect is one-sided: `covered` correctly suppresses the child as a cascade *contributor*, while
-`chosen.length` and `#rec-confirm-list` still count it as a delete *target*.
+_So the screen now reads "1 subnet(s)… this also archives 1 child subnet(s) and 2 host IP
+assignment(s)" — three numbers describing two subnets, and agreeing with the server's "deleted 1
+stale subnet(s), archiving 2 subnet(s)". Previously it read 2 targets **plus** 1 cascaded child,
+announcing three subnets where two exist, and then contradicted itself after the delete._
 
-**Fix.** Report what the server will actually do: compute top-level targets as
-`chosen.filter(i => !covered[i.subnetId])` and use that length for the count and the list, still posting
-the full `confirmedIds` (the server dedupes by subtree anyway). The existing cascade sum then genuinely
-is "also".
+_The first run of this check reported `hostIps: 0`, which was a **fault in my fixture, not the
+code**: the plan's counts are subtree-inclusive, so a parent's `hostIpCount` already contains its
+children's. Corrected to 2 and re-run, rather than recording a number that would have misled the next
+reader._
+
+_The finding's cheaper interim — leaving the count alone and rewording the cascade sentence to a
+total — was not taken. It fixes the arithmetic by changing the prose around it while
+`#rec-confirm-list` still enumerates rows that are not separate deletions._
+
+_Whole script re-parsed in chromium after the edit: `OK`._
+
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ---
 

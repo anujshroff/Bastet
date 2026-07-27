@@ -310,10 +310,8 @@
 
             const chosen = (lastPlan.items || []).filter(function (i) { return ids.indexOf(i.subnetId) !== -1; });
 
-            // Everything below describes exactly these subnets, and so does the deletion.
+            // The deletion is submitted for every selected id; the server dedupes by subtree.
             confirmedIds = chosen.map(function (i) { return i.subnetId; });
-
-            $("#rec-confirm-count").text(chosen.length);
 
             // The counts are subtree-inclusive, so an item selected together with one of its
             // ancestors is already inside the ancestor's numbers - same rule the server applies
@@ -323,12 +321,17 @@
                 (i.descendantSubnetIds || []).forEach(function (id) { covered[id] = true; });
             });
 
+            // What the server will actually report as deleted. A selected subnet that is also a
+            // descendant of another selected subnet is archived as part of that ancestor's subtree,
+            // not as a target of its own. Counting it here as well as in the cascade below
+            // announced more subnets than exist - and disagreed with the result message afterwards.
+            const targets = chosen.filter(function (i) { return !covered[i.subnetId]; });
+
+            $("#rec-confirm-count").text(targets.length);
+
             let descendants = 0;
             let hostIps = 0;
-            chosen.forEach(function (i) {
-                if (covered[i.subnetId]) {
-                    return;
-                }
+            targets.forEach(function (i) {
                 descendants += i.descendantCount;
                 hostIps += i.hostIpCount;
             });
@@ -343,7 +346,7 @@
             }
 
             const list = $("#rec-confirm-list").empty();
-            chosen.forEach(function (i) {
+            targets.forEach(function (i) {
                 list.append($('<li class="list-group-item"></li>')
                     .text(i.name + " (" + i.networkAddress + "/" + i.cidr + ") - " + statusLabel(i.statusName).text));
             });
