@@ -265,11 +265,33 @@ if (autoMigrate)
     {
         // Closing the connection would release the session lock too; releasing explicitly keeps
         // the intent visible and covers connection-pool reuse.
-        using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
-        releaseLock.CommandType = System.Data.CommandType.StoredProcedure;
-        releaseLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
-        releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
-        releaseLock.ExecuteNonQuery();
+        //
+        // Logged rather than thrown, matching SqlServerSubnetLockingService. An exception raised in
+        // a finally replaces the one in flight, so a release that fails on a dead connection would
+        // report a lock-release error while destroying the migration failure that actually stopped
+        // startup - with nothing to say the schema was interrupted mid-flight. The reverse case is
+        // worse and was reproduced against a real SQL Server: both migrations succeed, an idle
+        // gateway drops the lock connection, and an unguarded release turns a completed migration
+        // into a hard startup crash. Swallowing does not strand the lock either way - it is
+        // session-owned, so if the connection died the server has already released it, and if it is
+        // alive the using block closes it here.
+        //
+        // Deliberately not guarded by a State != Open check: SqlClient does not poll the socket, so
+        // State still reports Open after a silent failover and the guard would not fire.
+        try
+        {
+            using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
+            releaseLock.CommandType = System.Data.CommandType.StoredProcedure;
+            releaseLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
+            releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
+            releaseLock.ExecuteNonQuery();
+        }
+        catch (Exception releaseException)
+        {
+            app.Logger.LogError(releaseException,
+                "Failed to release the 'Bastet:Migration' application lock after migration. The lock is "
+                + "session-owned and is released when the connection closes, so startup continues.");
+        }
     }
 }
 
