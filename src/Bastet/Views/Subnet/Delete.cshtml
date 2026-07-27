@@ -4,6 +4,10 @@
     ViewData["Title"] = "Delete Subnet";
 }
 
+@* Every rejected confirmation redirects back here - a mistyped word, a lock timeout, a failure.
+   Without this the page simply re-rendered unchanged, as though the button had done nothing. *@
+@await Html.PartialAsync("_TempDataAlerts")
+
 @await Html.PartialAsync("Delete/_Header", Model)
 @await Html.PartialAsync("Delete/_WarningAlert", Model)
 @await Html.PartialAsync("Delete/_SubnetToDelete", Model)

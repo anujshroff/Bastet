@@ -4,6 +4,9 @@
     ViewData["Title"] = "Subnet Hierarchy";
 }
 
+@* Where a completed delete lands: the cascade counts are reported here or nowhere. *@
+@await Html.PartialAsync("_TempDataAlerts")
+
 <div class="mb-4">
     <div class="d-flex justify-content-between align-items-center">
         <h1>Subnet Hierarchy</h1>
