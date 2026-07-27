@@ -7,68 +7,89 @@ description: Run a fresh multi-agent security and correctness audit of the Baste
 
 ## STOP. Read this before you touch anything.
 
-**You do not do the audit. Agents do the audit. You talk to the user about progress.**
+**The round runs as a single `Workflow` call. You write the script, launch it, and shut up.**
 
-That is the whole of your job. Not "mostly delegate". Not "delegate the big parts". You perform zero
-audit work yourself, including the parts that feel too small or too quick to be worth spawning an
-agent for. Those are exactly the parts that swallowed the last three rounds' foregrounds.
+This is not a preference about tidiness. Spawning workers with the `Agent` tool puts every one of
+their tool calls into the user's conversation, and a round is thirty-odd workers deep. The user does
+not want to see any of it. A `Workflow` executes its agents outside the conversation — progress is in
+`/workflows` if they choose to look, and a single notification arrives when the round lands.
+
+**Never run an audit round with the `Agent` tool.** One `Workflow` call, or nothing.
+
+**Rounds 1 through 5 ran as workflows. Rounds 6 and 7 did not, and that is why this section exists.**
+The skill described what an audit round contains but never said what executes it, so both rounds
+drifted into foreground `Agent` calls with the baseline, the git archaeology, the containers and the
+cloud fixtures scrolling through the user's terminal. Nothing about the round changed — only who ran
+it, and it was never written down. It is written down now.
 
 ### Your entire tool budget
 
 | Tool | For |
 |---|---|
-| `Agent` | Spawning workers. This is how everything happens. |
-| `SendMessage` | Correcting or re-tasking a worker that is still alive. |
-| `TaskStop` | Killing a worker. |
+| `Workflow` | The round. One call. This is how everything happens. |
+| `Write` / `Edit` | The workflow script only, into the scratchpad — never a repo file. |
 | `TodoWrite` | The phase list the user sees. |
 | `AskUserQuestion` | Phase 0 only — the one cost question. |
-| `Read` | **Only** files an agent wrote into the scratchpad for you. Never a repo file. |
+| `Read` | **Only** files the workflow wrote into the scratchpad for you. Never a repo file. |
+| `TaskStop` | Killing the run. |
 
-**Nothing else. Ever.** No `Bash`. No `Grep`, no `Glob`. No `Edit`, no `Write`. No `git`. No
-`dotnet`. No `docker`. No `curl`. No opening a controller "just to understand the finding".
+**Nothing else. Ever.** No `Bash`. No `Grep`, no `Glob`. No `git`. No `dotnet`. No `docker`. No
+`curl`. No `Agent`. No opening a controller "just to understand the finding".
 
-If you are about to reach for a tool that is not in that table, the answer is always the same: **spawn
-an agent for it.** There is no exception, no matter how trivial the command, how fast it would be, or
-how sure you are of the answer.
+If you are about to reach for a tool that is not in that table, the answer is always the same: **it
+belongs inside the workflow.** No exception, no matter how trivial the command, how fast it would be,
+or how sure you are of the answer.
 
-### Things previous rounds did in the foreground. Every one is an agent's job now.
+### Things previous rounds did in the foreground. Every one goes in the script now.
 
 Running the build. Running the tests. `git log`, `git status`, `git rev-parse`. Reading the previous
 findings file. Reading any source file. Standing up the database container. Starting the application.
 Creating cloud fixtures. Pulling the browser image. Probing credentials. Merging the two passes.
 Verifying a finding. Writing the findings file. Re-checking citations. Tearing the rig down. Making
-the commit. **All of it. Delegated.**
+the commit. **All of it. In the script.**
 
 ### What you say to the user
 
-Short status, and nothing else:
+The launch, and then nothing until it lands:
 
 ```
-Phase 2 — 16 finders away (8 beats x 2 passes).
-Phase 2 — 16 back: 34 candidates, 6 duplicate pairs.
+Round 7 away — one workflow, ~45 agents, six phases. Nothing further until it lands.
 ```
 
-One line when a phase starts, one line when it lands, with counts. No tool transcripts. No narrating
-what a worker is doing. No restating findings before the file exists. At the end: the verdict in a few
-lines and the path to the file.
+No tool transcripts. No narrating what a worker is doing. No progress guesses — you genuinely do not
+know, and the workflow will tell you. At the end: the verdict in a few lines and the path to the file.
 
-When the user asks a question mid-run, answer it **from what your workers have already reported**. If
-no report covers it, spawn an agent and tell the user you have. Do not go and look yourself.
+When the user asks a question mid-run, say the round is still running and offer `/workflows`. Do not
+go and look yourself, and do not invent progress.
 
-**Run workers in the background** (the Agent tool's default) so phases overlap and the user keeps
-their terminal. Launch every agent of a phase in a single message so they run concurrently.
+### Writing the script
+
+Give it a `meta` block whose `phases` match the `phase()` calls below. Prefer `pipeline()` so a
+candidate can be verified while another beat is still finding; use `parallel()` only where a stage
+genuinely needs every prior result at once — the merge does, the beats do not.
+
+Use `schema` on every agent whose output the script branches on: the rig's baseline verdict, each
+beat's finding list, the merge's candidate list, each verifier's survive/refute call. Prose that the
+script then has to parse is how these runs go wrong.
+
+**The baseline is a hard gate.** If the rig agent reports a dirty tree, a failing test or a build
+warning, `return` immediately with the reason. Do not audit a broken tree.
 
 ---
 
 ## Phase 0 — the one question you ask
 
-Say what the round will cost, once. Round 4 ran 88 agents; round 6 ran 32. Offer a scale choice, and —
-where the round would use a live cloud rig — a rig choice. Then stop asking and drive the rest.
+The only part that happens outside the workflow. Say what the round will cost, once. Round 4 ran 88
+agents; round 6 ran 32. Offer a scale choice, and — where the round would use a live cloud rig — a rig
+choice. The answers become the script's `args`. Then stop asking, write the script, and launch it.
 
-## Phase 1 — briefing and baseline (2 agents)
+If the user has already answered these earlier in the conversation, do not ask again.
 
-Everything later phases know comes from these two, not from you. Both write files into the scratchpad;
-every later worker is handed those paths.
+## Phase 1 — briefing and baseline (`parallel`, 2 agents)
+
+Everything later phases know comes from these two. Both write files into the scratchpad, and every
+later agent in the script is handed those paths rather than the contents — a brief pasted into
+sixteen prompts is sixteen copies to keep in step.
 
 **Briefing agent** → `BRIEF.md`. Reads `docs/AUDIT-FINDINGS-*.md` highest-number-first and every commit
 since that round's HEAD. Extracts:
@@ -101,19 +122,21 @@ git rev-parse --short HEAD ; git branch --show-current ; git status --porcelain
 ```
 
 `--no-incremental` matters: an incremental build does not re-run the analyzers and reports 0 warnings
-even when there are some. **If the build is dirty, the tests fail, or the tree is unclean, it reports
-and the round stops.** Do not audit a tree that is already broken.
+even when there are some. It returns that verdict under a `schema`, and **the script gates on it: a
+dirty tree, a failing test or a build warning ends the run with the reason.** Do not audit a tree
+that is already broken.
 
 Where the round includes a live rig, this agent also stands up the database, the application, the
 browser image and any cloud fixtures, and writes the etiquette that stops workers destroying each
 other's environment — own port, own catalog, kill only by PID. Round 6 lost two agents' applications
 to a sibling's `pkill -f "Bastet.dll"`.
 
-Do not start Phase 2 until both land and the baseline is clean.
+This phase is the one place a barrier is unarguable: nothing can start until the baseline is known
+good and the brief exists.
 
 ## Phase 2 — the beats, twice (16 agents + 1 merge)
 
-Eight beats, each an independent worker given the brief and nothing else:
+Eight beats, each an independent agent given the brief path and nothing else:
 
 1. **Security / web** — authorization coverage, antiforgery on state-changing actions, XSS, injection,
    SSRF, response headers, log forging, secrets handling.
@@ -139,7 +162,9 @@ Tag every finding **`[×2]`** (both passes found it independently) or **`[×1]`*
 corollary is the important half: **absence is weak evidence.** A `[×1]` is not weaker in truth, but it
 means one full pass missed it — so it deserves *more* scrutiny during reconciliation, not less.
 
-A **merge agent** de-duplicates the two passes into the candidate list. Not you.
+A **merge agent** de-duplicates the two passes into the candidate list and applies the tags. This is
+the round's one genuine barrier after Phase 1 — it needs every beat's output at once to tell a
+`[×2]` from a `[×1]`.
 
 ## Phase 3 — adversarial verification (1 agent per candidate)
 
@@ -161,26 +186,30 @@ spend agents rediscovering them.
 Reference: round 4's passes ran 31 survived / 1 refuted and 37 survived / 4 refuted; round 6 merged to
 25 candidates, of which 18 survived.
 
-## Phase 4 — the scribe (2 agents)
+## Phase 4 — the scribe (2 agents, sequential)
 
-**A worker writes `docs/AUDIT-FINDINGS-<N>.md`.** Give it the brief, the rig report's baseline block,
-the survivors, the refuted list, the verifiers' corrections and the clean-bill material from every beat.
+**An agent writes `docs/AUDIT-FINDINGS-<N>.md`.** Give it the brief path, the rig report's baseline
+block, the survivors, the refuted list, the verifiers' corrections and the clean-bill material from
+every beat.
 
-**A second worker re-checks every file-and-line citation** against the working tree before anything is
-committed. Round 4 re-checked all of D1–D10 plus a sample of the rest and found no invented line
-numbers; keep that record clean.
+**A second agent then re-checks every file-and-line citation** against the working tree, and fixes
+what is wrong rather than only reporting it. Round 4 re-checked all of D1–D10 plus a sample of the
+rest and found no invented line numbers; keep that record clean. Note that a findings file is
+correct only against the HEAD it was written at — round 6's citations were all pre-fix, and the
+cleanup commit moved twenty-two source files under them.
 
 ## Phase 5 — teardown and commit (1 agent)
 
-One worker tears the rig down, confirms the tree carries nothing but the findings file — no
-scaffolding, no credential, no stray edit — and **makes the commit**. It is a versioned record:
-`/audit-reconcile` then commits an updated copy alongside each fix, so the reasoning and the change
-land together.
+One agent tears the rig down — containers, processes, any cloud fixtures the round created —
+confirms the tree carries nothing but the findings file (no scaffolding, no credential, no stray
+edit) and **makes the commit**. It is a versioned record: `/audit-reconcile` then commits an updated
+copy alongside each fix, so the reasoning and the change land together.
 
 This machine has read-only access to the remote and never pushes — publishing is handled elsewhere.
 Nobody attempts it.
 
-Then you tell the user the verdict and the path. That is your last act.
+The script's return value is what you report: the counts, the verdict, and the path. Read it, say it
+in a few lines, and stop. That is your last act.
 
 ---
 
