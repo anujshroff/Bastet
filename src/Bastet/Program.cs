@@ -306,19 +306,6 @@ if (!string.IsNullOrWhiteSpace(configuredFrameAncestors)
 }
 
 string frameAncestors = string.IsNullOrWhiteSpace(configuredFrameAncestors) ? "'none'" : configuredFrameAncestors;
-app.Use(async (context, next) =>
-{
-    IHeaderDictionary headers = context.Response.Headers;
-    headers.XContentTypeOptions = "nosniff";
-    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    headers.ContentSecurityPolicy = $"frame-ancestors {frameAncestors}";
-    if (frameAncestors == "'none'")
-    {
-        headers.XFrameOptions = "DENY"; // legacy-browser parity with frame-ancestors 'none'
-    }
-
-    await next();
-});
 
 if (app.Environment.IsDevelopment())
 {
@@ -341,6 +328,28 @@ else
     app.UseHsts();
     app.UseHttpsRedirection();
 }
+
+// Registered *below* UseExceptionHandler on purpose, so it also runs on a re-executed error request.
+// When the exception handler catches, it calls Response.Clear(), which clears Response.Headers
+// outright, and then re-runs the pipeline from its own position inward - so a header middleware
+// registered above it sets these once, has them wiped, and never gets a second chance. Production
+// 500s therefore shipped with none of them. Status-code pages are unaffected either way, since that
+// re-execute does not clear the response, but keeping both below the handlers means there is only
+// one rule to remember. Nothing here depends on the request having reached routing, so running
+// later costs nothing.
+app.Use(async (context, next) =>
+{
+    IHeaderDictionary headers = context.Response.Headers;
+    headers.XContentTypeOptions = "nosniff";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers.ContentSecurityPolicy = $"frame-ancestors {frameAncestors}";
+    if (frameAncestors == "'none'")
+    {
+        headers.XFrameOptions = "DENY"; // legacy-browser parity with frame-ancestors 'none'
+    }
+
+    await next();
+});
 
 // Enable static files
 app.UseStaticFiles();
