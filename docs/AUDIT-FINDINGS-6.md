@@ -472,49 +472,45 @@ _Tests 619 → 622 (+3). Build clean, 0 warnings._
 
 ## F8. Two bulk-commit failures render a red panel reading only "Commit failed:" `[×2]`
 
-**Confidence: confirmed.**
+_F8 is fixed and committed at both ends, which the finding is right to insist on. The two
+`BadRequest(ModelState)` returns now answer with the wizard's own contract - `error`, `globalErrors`,
+`itemErrors` - carrying `ModelStateMessage(...)`, so the operator sees the validator's own sentence.
+And `showCommitError` gained the `|| "The import failed."` floor its reconcile sibling always had,
+which is the only protection against a body this handler does not recognise._
 
-**Where:** [BulkAzure.cs:183](../src/Bastet/Controllers/SubnetController.BulkAzure.cs#L183) (target
-path) and [:251](../src/Bastet/Controllers/SubnetController.BulkAzure.cs#L251) (child path) return
-`BadRequest(ModelState)`, a `SerializableError` carrying none of the three fields
-[_BulkScripts.cshtml:593-610](../src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml#L593) reads. The
-sibling reconcile handler at
-[_ReconcileScripts.cshtml:421](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L421) has the
-`|| "The deletion failed."` fallback this one lacks.
-
-**Failure scenario.** Two inputs are needed, one per line — a prefix must be non-canonical *and*
-CIDR-aligned:
-
-- `:183` — target prefix `10.0.0/24`. Previews with `canCommit:true`; commit answers
-  `400 {"NetworkAddress":["'10.0.0' is not a valid IPv4 network address…"]}`.
-- `:251` — child prefix `10.50.256/24` (or `0x0A.50.1.0/24`, `10.50.0x0100/24`) under a canonical
-  `10.50.0.0/16` VNet prefix.
-
-Fed the byte-exact live bodies through the shipped handler:
+_Both halves were needed and neither substitutes for the other: the contract fix handles the two known
+returns, the fallback handles every unknown one. Verified in chromium with the shipped script read
+from the repo, its four `@Url.Action` expressions substituted programmatically, and `showCommitError`
+lifted by brace-matching rather than retyped:_
 
 ```
-whole panel text  = "Commit failed:"
-message span      = ""
-error list <li>   = 0
-confirm btn armed = true
+parses      : OK
+fixed shape : "'10.0.0' is not a valid IPv4 network address. Use dotted-quad notation with no
+               leading zeroes (e.g. 10.0.0.0)."
+unknown body: "The import failed."          <- was "" before
 ```
 
-**Note for whoever fixes this:** `10.50.1/24` does **not** reproduce it — it is caught earlier by the
-planner's alignment check and renders correctly as a `globalErrors` entry.
+_The finding's preferred source for the message was taken - `ModelStateMessage`, the server's own
+words - over reflecting `item.VNetPrefix` back. That value is raw caller-controlled text the
+`GlobalSanitizationFilter` never descends into; it is rendered with `.text()` so there was no XSS, but
+echoing the validator is both safer and more useful._
 
-**Reachability:** crafted POST by an authenticated Admin, the bar round 5 accepted E5, E9 and D22 under,
-with the blast radius confined to the crafter's own screen. The `!plan.CanCommit` 400 at `:66` is the
-milder, non-crafted half of the same mismatch — blank headline, populated bullet list.
+_**My first rig was wrong twice and had to be redone**, recorded because it is the sort of failure that
+quietly produces a green result: it first sliced the function by searching for the next `function`
+keyword, which cut mid-body and threw `Illegal return statement`, and the run before that swallowed
+the error entirely and printed nothing at all. Only after adding the error handler and switching to
+brace-matching did it measure anything._
 
-**Fix.** Return `ModelStateMessage(...)`
-([SubnetController.Azure.cs:56-63](../src/Bastet/Controllers/SubnetController.Azure.cs#L56)) at both
-sites, echoing the server's own message — **and** add the `|| "The deletion failed."`-style fallback at
-`_BulkScripts.cshtml:594`, which is the only floor under an unexpected body. Prefer this over reflecting
-`item.VNetPrefix`: that is raw caller-controlled text the `GlobalSanitizationFilter` never descends into
-(no XSS, since it is rendered with `.text()`, but the server's message is the better source). No test
-asserts on the `SerializableError` shape.
+_No test ships. The two returns sit inside `BulkCreateFromAzurePlanCore`, which needs a database and
+the subnet lock to reach, and the panel itself has no JS harness; the verifier confirmed no existing
+test asserts the old `SerializableError` shape, so nothing had to be rewritten. Reachability is a
+crafted admin POST - a non-canonical but parseable prefix such as `10.0.0/24` for the target path, and
+`10.50.256/24` for the child path - with the blast radius confined to the crafter's own screen._
+
+_Tests 622 → 622 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 ## F9. The prefilled subnet name always contains a `/`, which `[SafeText]` forbids `[×1]`
 

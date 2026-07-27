@@ -591,7 +591,10 @@
         }
 
         function showCommitError(payload) {
-            $("#bulk-commit-error-message").text(payload && payload.error ? payload.error : "");
+            // The fallback is the floor under a body this handler does not recognise - without it an
+            // unexpected shape renders the panel with no text at all. The reconcile wizard's
+            // equivalent has always had one.
+            $("#bulk-commit-error-message").text(payload && payload.error ? payload.error : "The import failed.");
             const $list = $("#bulk-commit-error-list").empty();
             if (payload && payload.globalErrors && payload.globalErrors.length > 0) {
                 $.each(payload.globalErrors, function (i, e) { $list.append($('<li></li>').text(e)); });
