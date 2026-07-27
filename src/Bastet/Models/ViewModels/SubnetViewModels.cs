@@ -76,10 +76,8 @@ public class SubnetTreeViewModel : SubnetViewModel
 {
     public string? Description { get; set; }
     public string SubnetMask { get; set; } = string.Empty;
-    public long TotalIpAddresses { get; set; }
     public long UsableIpAddresses { get; set; }
     public int? ParentSubnetId { get; set; }
-    public bool IsFullyAllocated { get; set; }
     public List<SubnetTreeViewModel> ChildSubnets { get; set; } = [];
 }
 
@@ -112,7 +110,6 @@ public class SubnetDetailsViewModel
     public bool IsFullyAllocated { get; set; }
 
     // Helper properties for UI logic
-    public int HostIpCount => HostIpAssignments.Count;
     public bool CanAddHostIp => ChildSubnets.Count == 0 && !IsFullyAllocated;
     public bool CanAddChildSubnet => HostIpAssignments.Count == 0 && !IsFullyAllocated;
 

@@ -1,5 +1,4 @@
 using Bastet.Models;
-using Bastet.Models.DTOs;
 
 namespace Bastet.Services.Validation;
 
@@ -13,117 +12,12 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
     private const string INVALID_NETWORK_FORMAT = "INVALID_NETWORK_FORMAT";
     private const string INVALID_CIDR_VALUE = "INVALID_CIDR_VALUE";
     private const string NETWORK_CIDR_MISMATCH = "NETWORK_CIDR_MISMATCH";
-    private const string PARENT_NOT_FOUND = "PARENT_NOT_FOUND";
     private const string INVALID_CIDR_HIERARCHY = "INVALID_CIDR_HIERARCHY";
     private const string NOT_IN_PARENT_RANGE = "NOT_IN_PARENT_RANGE";
     private const string SUBNET_OVERLAP = "SUBNET_OVERLAP";
-    private const string SUBNET_HAS_CHILDREN = "SUBNET_HAS_CHILDREN";
-    private const string REQUIRED_FIELD_MISSING = "REQUIRED_FIELD_MISSING";
     private const string CHILD_SUBNET_OUTSIDE_RANGE = "CHILD_SUBNET_OUTSIDE_RANGE";
     private const string INVALID_CIDR_CHANGE = "INVALID_CIDR_CHANGE";
     private const string PARENT_HAS_HOST_IPS = "PARENT_HAS_HOST_IPS";
-
-    /// <inheritdoc />
-    public ValidationResult ValidateNewSubnet(CreateSubnetDto subnetDto, Subnet? parentSubnet = null, IEnumerable<Subnet>? siblings = null)
-    {
-        ValidationResult result = new();
-
-        // Basic field validation
-        if (string.IsNullOrWhiteSpace(subnetDto.Name))
-        {
-            result.AddError(REQUIRED_FIELD_MISSING, "Name is required");
-        }
-
-        if (string.IsNullOrWhiteSpace(subnetDto.NetworkAddress))
-        {
-            result.AddError(REQUIRED_FIELD_MISSING, "Network address is required");
-            return result; // Early return since other validations depend on network address
-        }
-
-        // Network and CIDR format validation
-        ValidationResult formatResult = ValidateSubnetFormat(subnetDto.NetworkAddress, subnetDto.Cidr);
-        if (!formatResult.IsValid)
-        {
-            foreach (ValidationError error in formatResult.Errors)
-            {
-                result.AddError(error.Code, error.Message);
-            }
-
-            return result; // Early return since other validations depend on valid format
-        }
-
-        // Parent-child relationship validation
-        if (parentSubnet != null)
-        {
-            // CIDR hierarchy validation
-            if (subnetDto.Cidr <= parentSubnet.Cidr)
-            {
-                result.AddError(INVALID_CIDR_HIERARCHY,
-                    "Child subnet CIDR must be larger than parent subnet CIDR (representing a smaller subnet)");
-            }
-
-            // Containment validation
-            ValidationResult containmentResult = ValidateSubnetContainment(
-                subnetDto.NetworkAddress, subnetDto.Cidr,
-                parentSubnet.NetworkAddress, parentSubnet.Cidr);
-
-            if (!containmentResult.IsValid)
-            {
-                foreach (ValidationError error in containmentResult.Errors)
-                {
-                    result.AddError(error.Code, error.Message);
-                }
-            }
-
-            // Sibling overlap validation
-            if (siblings != null && siblings.Any())
-            {
-                ValidationResult overlapResult = ValidateSiblingOverlap(
-                    subnetDto.NetworkAddress, subnetDto.Cidr, siblings);
-
-                if (!overlapResult.IsValid)
-                {
-                    foreach (ValidationError error in overlapResult.Errors)
-                    {
-                        result.AddError(error.Code, error.Message);
-                    }
-                }
-            }
-        }
-
-        return result;
-    }
-
-    /// <inheritdoc />
-    public ValidationResult ValidateSubnetUpdate(Subnet existingSubnet, UpdateSubnetDto updateDto)
-    {
-        ValidationResult result = new();
-
-        // Basic field validation
-        if (string.IsNullOrWhiteSpace(updateDto.Name))
-        {
-            result.AddError(REQUIRED_FIELD_MISSING, "Name is required");
-        }
-
-        // We don't validate network properties as they cannot be changed in an update
-
-        return result;
-    }
-
-    /// <inheritdoc />
-    public ValidationResult ValidateSubnetDeletion(Subnet subnet)
-    {
-        ValidationResult result = new();
-
-        // Prevent deletion if subnet has children
-        if (subnet.ChildSubnets != null && subnet.ChildSubnets.Count != 0)
-        {
-            result.AddError(SUBNET_HAS_CHILDREN,
-                "Cannot delete a subnet that has child subnets. Delete the children first.");
-        }
-
-        return result;
-    }
 
     /// <inheritdoc />
     public ValidationResult ValidateSubnetContainment(string childNetwork, int childCidr, string parentNetwork, int parentCidr)

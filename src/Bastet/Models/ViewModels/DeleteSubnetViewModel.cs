@@ -40,13 +40,4 @@ public class DeleteSubnetViewModel
     /// </summary>
     public int HostIpCount { get; set; }
 
-    /// <summary>
-    /// Indicates if the subnet is fully allocated
-    /// </summary>
-    public bool IsFullyAllocated { get; set; }
-
-    /// <summary>
-    /// Confirmation text (should be "approved")
-    /// </summary>
-    public string? Confirmation { get; set; }
 }

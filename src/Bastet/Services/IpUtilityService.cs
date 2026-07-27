@@ -219,74 +219,6 @@ public class IpUtilityService : IIpUtilityService
     }
 
     /// <summary>
-    /// Calculates possible subnets when dividing a network with a specific CIDR into smaller subnets
-    /// </summary>
-    public IEnumerable<SubnetCalculation> CalculatePossibleSubnets(string networkAddress, int currentCidr, int targetCidr)
-    {
-        if (string.IsNullOrEmpty(networkAddress))
-        {
-            throw new ArgumentNullException(nameof(networkAddress));
-        }
-
-        if (currentCidr is < 0 or > 32)
-        {
-            throw new ArgumentOutOfRangeException(nameof(currentCidr), "CIDR must be between 0 and 32");
-        }
-
-        if (targetCidr is < 0 or > 32)
-        {
-            throw new ArgumentOutOfRangeException(nameof(targetCidr), "CIDR must be between 0 and 32");
-        }
-
-        // Target CIDR must be larger than current CIDR for subnetting
-        if (targetCidr <= currentCidr)
-        {
-            throw new ArgumentException("Target CIDR must be larger than current CIDR", nameof(targetCidr));
-        }
-
-        List<SubnetCalculation> results = [];
-        IPAddress network = IPAddress.Parse(networkAddress);
-        byte[] networkBytes = network.GetAddressBytes();
-
-        // Verify this is an IPv4 address
-        if (networkBytes.Length != 4)
-        {
-            throw new ArgumentException("Only IPv4 addresses are supported", nameof(networkAddress));
-        }
-
-        // Calculate the number of subnets
-        int subnetCount = 1 << (targetCidr - currentCidr);
-
-        // Convert network address to integer for easier calculation
-        uint networkInt = BitConverter.ToUInt32([.. networkBytes.Reverse()], 0);
-
-        // Calculate the size of each subnet
-        uint subnetSize = 1u << (32 - targetCidr);
-
-        // Generate all possible subnets
-        for (int i = 0; i < subnetCount; i++)
-        {
-            uint newNetworkInt = networkInt + (subnetSize * (uint)i);
-
-            // Convert to byte array
-            byte[] newNetworkBytes = [.. BitConverter.GetBytes(newNetworkInt).Reverse()];
-            string newNetworkAddress = new IPAddress(newNetworkBytes).ToString();
-
-            results.Add(new SubnetCalculation
-            {
-                NetworkAddress = newNetworkAddress,
-                Cidr = targetCidr,
-                SubnetMask = CalculateSubnetMask(targetCidr),
-                BroadcastAddress = CalculateBroadcastAddress(newNetworkAddress, targetCidr),
-                TotalIpAddresses = CalculateTotalIpAddresses(targetCidr),
-                UsableIpAddresses = CalculateUsableIpAddresses(targetCidr)
-            });
-        }
-
-        return results;
-    }
-
-    /// <summary>
     /// Calculates unallocated IP ranges within a subnet, taking into account child subnets
     /// </summary>
     public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets) =>
@@ -438,11 +370,20 @@ public class IpUtilityService : IIpUtilityService
                 // For the first gap that starts at the network address, adjust the address count to show usable IPs
                 if (currentPosition == startIp && cidr < 31)
                 {
+                    // This branch runs only when the gap begins at the network address, which is
+                    // never assignable - so exactly one address is always unusable, whatever the
+                    // gap's size. The threshold this replaces applied that subtraction only above
+                    // two, so a gap of two reported both addresses as usable and a gap of one
+                    // reported the network address itself as a usable address. The enclosing
+                    // Start > currentPosition guarantees at least one address, so this cannot go
+                    // negative. A zero-usable row is still emitted rather than suppressed: StartIp
+                    // is the network address, and _UnallocatedRanges.cshtml offers it as a place to
+                    // create a child subnet, which remains valid even with no assignable host IP.
                     unallocatedRanges.Add(new IPRange
                     {
                         StartIp = UIntToIpString((uint)currentPosition),
                         EndIp = UIntToIpString(Start - 1),
-                        AddressCount = (Start - currentPosition > 2) ? Start - currentPosition - 1 : Start - currentPosition
+                        AddressCount = Start - currentPosition - 1
                     });
                 }
                 else
@@ -473,25 +414,17 @@ public class IpUtilityService : IIpUtilityService
 
             if (currentPosition <= lastIp)
             {
-                // For the last range that ends at the broadcast address, calculate the address count correctly
-                if (lastIp == endIp - 1 && cidr < 31)
+                // lastIp already excludes the broadcast address above, so the range is simply
+                // inclusive of both ends. The special case this replaces subtracted the broadcast a
+                // second time, reporting one address too few for every trailing gap of two or more
+                // while the middle gaps above counted correctly - two rows on the same page
+                // disagreeing about how to count.
+                unallocatedRanges.Add(new IPRange
                 {
-                    unallocatedRanges.Add(new IPRange
-                    {
-                        StartIp = UIntToIpString((uint)currentPosition),
-                        EndIp = UIntToIpString(lastIp),
-                        AddressCount = (lastIp - currentPosition > 0) ? lastIp - currentPosition : 1
-                    });
-                }
-                else
-                {
-                    unallocatedRanges.Add(new IPRange
-                    {
-                        StartIp = UIntToIpString((uint)currentPosition),
-                        EndIp = UIntToIpString(lastIp),
-                        AddressCount = lastIp - currentPosition + 1
-                    });
-                }
+                    StartIp = UIntToIpString((uint)currentPosition),
+                    EndIp = UIntToIpString(lastIp),
+                    AddressCount = lastIp - currentPosition + 1
+                });
             }
         }
 

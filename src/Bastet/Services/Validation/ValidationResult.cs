@@ -21,20 +21,6 @@ public class ValidationResult
     public void AddError(string code, string message) =>
         Errors.Add(new ValidationError(code, message));
 
-    /// <summary>
-    /// Creates a new successful validation result
-    /// </summary>
-    public static ValidationResult Success() => new();
-
-    /// <summary>
-    /// Creates a new validation result with a single error
-    /// </summary>
-    public static ValidationResult Error(string code, string message)
-    {
-        ValidationResult result = new();
-        result.AddError(code, message);
-        return result;
-    }
 }
 
 /// <summary>

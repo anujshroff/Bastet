@@ -105,10 +105,10 @@ public class InputSanitizationServiceTests
     }
 
     [Theory]
-    [InlineData("tag1,tag2,tag3", "tag1, tag2, tag3")]
-    [InlineData("tag1, tag2, tag3", "tag1, tag2, tag3")]
-    [InlineData("<script>evil</script>,goodtag", "evil, goodtag")]
-    [InlineData("a,b,c,d,e,f,g,h,i,j,k,l", "a, b, c, d, e, f, g, h, i, j")] // Max 10 tags
+    [InlineData("tag1,tag2,tag3", "tag1,tag2,tag3")]
+    [InlineData("tag1, tag2, tag3", "tag1,tag2,tag3")]
+    [InlineData("<script>evil</script>,goodtag", "evil,goodtag")]
+    [InlineData("a,b,c,d,e,f,g,h,i,j,k,l", "a,b,c,d,e,f,g,h,i,j")] // Max 10 tags
     [InlineData("", "")]
     [InlineData(null, "")]
     public void SanitizeTags_SanitizesCorrectly(string? input, string expected)
@@ -118,6 +118,39 @@ public class InputSanitizationServiceTests
 
         // Assert
         Assert.Equal(expected, result);
+    }
+
+    /// <summary>
+    /// Sanitization runs after model validation, so a value that satisfied [StringLength(255)] must
+    /// not come back out longer than the column. Ten 24-character tags comma-joined is 249
+    /// characters - legal input, and previously rewritten to 258.
+    /// </summary>
+    [Fact]
+    public void SanitizeTags_TenMaximumLengthTags_DoesNotGrowPastTheColumn()
+    {
+        string[] tags = [.. Enumerable.Range(0, 10).Select(i => new string((char)('a' + i), 24))];
+        string input = string.Join(",", tags);
+
+        Assert.Equal(249, input.Length);
+
+        string result = _sanitizationService.SanitizeTags(input);
+
+        Assert.True(result.Length <= 255, $"sanitized tags grew to {result.Length} characters");
+        Assert.Equal(input, result);          // every tag survives intact
+    }
+
+    /// <summary>Sanitizing must never lengthen a tag list, whatever the separators look like.</summary>
+    [Theory]
+    [InlineData("a,b,c")]
+    [InlineData("a, b, c")]
+    [InlineData("a ,  b ,   c")]
+    [InlineData("singletag")]
+    public void SanitizeTags_IsNeverExpanding(string input)
+    {
+        string result = _sanitizationService.SanitizeTags(input);
+
+        Assert.True(result.Length <= input.Length,
+            $"'{input}' ({input.Length}) became '{result}' ({result.Length})");
     }
 
     [Theory]

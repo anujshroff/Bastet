@@ -14,12 +14,7 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
     /// has just failed an authorization check.
     /// </summary>
     [AllowAnonymous]
-    public IActionResult AccessDenied(string returnUrl = "/")
-    {
-        // Store the return URL in ViewData to potentially use it in the view
-        ViewData["ReturnUrl"] = returnUrl;
-        return View();
-    }
+    public IActionResult AccessDenied() => View();
 
     /// <summary>
     /// Anonymous so that signing out still works once the session is already gone.

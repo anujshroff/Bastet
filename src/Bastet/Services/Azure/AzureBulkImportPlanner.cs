@@ -408,8 +408,37 @@ namespace Bastet.Services.Azure
             ParsedSubnetSelection? fullyEncompassing = p.Subnets.FirstOrDefault(s => s.FullyEncompasses);
             if (fullyEncompassing is not null)
             {
+                // The commit treats "marks the target fully allocated" and "creates children" as
+                // mutually exclusive - it marks the target and then `continue`s past child creation.
+                // The planner used to populate both independently, so a selection carrying an
+                // encompassing subnet *and* siblings previewed a list of children that the commit
+                // then silently refused to create, reported success, and left the target flagged
+                // fully allocated so they could never be added later without clearing the flag.
+                //
+                // Rejected rather than silently emptying the child list, because Azure cannot
+                // produce this selection: subnets within a VNet may not overlap, so a subnet
+                // covering the whole VNet prefix leaves no room for siblings. Reaching here means
+                // the post was crafted or corrupted, and quietly dropping part of it would hide
+                // that.
+                if (p.Subnets.Count > 1)
+                {
+                    item.Errors.Add(
+                        $"Azure subnet '{TruncateAndSanitizeName(fullyEncompassing.Source.Name)}' covers the whole of "
+                        + $"{p.PrefixNetwork}/{p.PrefixCidr}, so nothing can be created inside it, but "
+                        + $"{p.Subnets.Count - 1} other subnet(s) were selected from the same prefix. "
+                        + "Azure does not allow overlapping subnets in a VNet, so this selection cannot be applied.");
+                    return item;
+                }
+
                 item.WillMarkFullyAllocated = true;
-                item.FullyAllocatingAzureSubnetName = fullyEncompassing.Source.Name;
+
+                // Sanitized like every other Azure-derived name here. This one lands in the target's
+                // Description via AppendFullyAllocatedNote, and every other write to that column in
+                // the commit guarantees it is HTML-stripped - this was the single assignment that
+                // skipped it, quietly making that invariant false. The value arrives raw because
+                // GlobalSanitizationFilter does not descend into the nested selection list, so the
+                // planner is where it has to be handled.
+                item.FullyAllocatingAzureSubnetName = TruncateAndSanitizeName(fullyEncompassing.Source.Name);
             }
 
             // 4) Build planned child subnets (excluding the fully-encompassing one)
@@ -453,7 +482,6 @@ namespace Bastet.Services.Azure
                     Name = finalName,
                     NetworkAddress = sub.Network,
                     Cidr = sub.Cidr,
-                    FullyEncompassesTarget = false,
                     AzureResourceId = sub.Source.AzureResourceId
                 });
             }
@@ -644,8 +672,8 @@ namespace Bastet.Services.Azure
 
         /// <summary>
         /// If <paramref name="baseName"/> is already used, append a VNet suffix to disambiguate,
-        /// preserving the 50-character limit. Falls back to numeric suffixes if even the suffixed
-        /// name collides.
+        /// staying within <see cref="MaxSubnetNameLength"/>. Falls back to numeric suffixes if even
+        /// the suffixed name collides.
         /// </summary>
         private static string DisambiguateName(string baseName, HashSet<string> usedNames, string vnetName)
         {
@@ -684,18 +712,10 @@ namespace Bastet.Services.Azure
 
         /// <summary>
         /// Appends <paramref name="suffix"/> within the name limit by shortening the base name.
-        /// Truncating the combined string instead would cut the suffix straight back off for a base
-        /// name that is already at the limit, yielding the very name the caller is disambiguating.
+        /// Shared with the Create form's generated name so the two cannot drift apart.
         /// </summary>
-        private static string WithSuffix(string baseName, string suffix)
-        {
-            int room = MaxSubnetNameLength - suffix.Length;
-            string trimmedBase = room <= 0
-                ? string.Empty
-                : baseName.Length > room ? baseName[..room] : baseName;
-
-            return TruncateForName(trimmedBase + suffix);
-        }
+        private static string WithSuffix(string baseName, string suffix) =>
+            SubnetNaming.WithSuffix(baseName, suffix, MaxSubnetNameLength);
 
         private static string TruncateForName(string s) =>
             s.Length > MaxSubnetNameLength ? s[..MaxSubnetNameLength] : s;

@@ -21,5 +21,24 @@ namespace Bastet.Services.Azure
             string? subscriptionName,
             AzureVNetInventory inventory,
             IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets);
+
+        /// <summary>
+        /// Removes from <see cref="AzureReconcilePlanViewModel.Items"/> everything whose absence
+        /// from the inventory has not been individually confirmed as a deletion, and explains why.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="BuildPlan"/> can only see what a list operation returned, and those are
+        /// RBAC-filtered - so it cannot tell a deleted resource from one this credential can no
+        /// longer see. It therefore proposes; this disposes. Kept pure and separate so the caller
+        /// owns the Azure round-trips and only pays for the items actually being proposed.
+        /// </remarks>
+        /// <param name="plan">The plan to filter. Mutated in place.</param>
+        /// <param name="confirmations">
+        /// What a direct read said about each resource ID. An ID missing from this map is treated as
+        /// <see cref="AzureResourceConfirmation.Unknown"/>.
+        /// </param>
+        void ApplyConfirmations(
+            AzureReconcilePlanViewModel plan,
+            IReadOnlyDictionary<string, AzureResourceConfirmation> confirmations);
     }
 }

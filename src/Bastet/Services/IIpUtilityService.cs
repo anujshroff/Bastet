@@ -43,11 +43,6 @@ public interface IIpUtilityService
     bool IsIpInSubnet(string ip, string networkAddress, int cidr);
 
     /// <summary>
-    /// Calculates possible subnets when dividing a network with a specific CIDR into smaller subnets
-    /// </summary>
-    IEnumerable<SubnetCalculation> CalculatePossibleSubnets(string networkAddress, int currentCidr, int targetCidr);
-
-    /// <summary>
     /// Calculates unallocated IP ranges within a subnet, taking into account child subnets
     /// </summary>
     IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets);

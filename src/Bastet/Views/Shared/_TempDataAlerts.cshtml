@@ -1,0 +1,27 @@
+@* Renders the TempData messages a redirecting action leaves behind.
+
+   Every guard that redirects rather than re-rendering has to have its message picked up somewhere,
+   and the failure is silent when it is not: the page reloads looking exactly as it did, with no hint
+   that anything was rejected. Worse, ASP.NET Core only removes a TempData entry when it is *read*,
+   so an unrendered message survives into the next request and can surface later on an unrelated
+   page.
+
+   Kept as one partial so a new redirect target cannot be given the alert block by hand and get it
+   subtly wrong, or be forgotten entirely - which is exactly what happened to the subnet delete flow.
+   HostIp/Delete/_Header.cshtml deliberately keeps its own heavier treatment and is not this. *@
+
+@if (TempData["SuccessMessage"] != null)
+{
+    <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+        @TempData["SuccessMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+        @TempData["ErrorMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}

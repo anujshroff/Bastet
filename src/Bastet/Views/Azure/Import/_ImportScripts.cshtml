@@ -342,7 +342,13 @@
                 $("#vnet-name").val(selectedVNetName);
             }
 
-            // Enable all fields for selected subnets
+            // The disabled attribute decides which rows are posted, and "Select All" flips the
+            // checkboxes with .prop(), which fires no change event - so a row unticked that way keeps
+            // the enabled inputs an earlier individual tick gave it. Disable every row first, then
+            // enable only what is checked right now, so the payload is a function of the current
+            // checkbox state rather than of the order the user clicked things in. Scoped to
+            // #subnet-list so the vnetName / vnetResourceId fields outside it are left alone.
+            $("#subnet-list input[type=hidden]").prop("disabled", true);
             $(".subnet-checkbox:checked").each(function() {
                 $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", false);
             });
@@ -354,6 +360,21 @@
 
             // Allow form submission to continue
             return true;
+        });
+
+        // Coming Back to this page restores it from the bfcache exactly as it was left - which is
+        // mid-submit, with the button disabled and still reading "Importing...", and importSubmitting
+        // still true so a retry is blocked outright. Reset that state on restore so returning here
+        // leaves a usable wizard rather than one that needs a manual reload.
+        $(window).on("pageshow", function (event) {
+            if (!event.originalEvent || !event.originalEvent.persisted) {
+                return;
+            }
+
+            importSubmitting = false;
+            $("#import-subnets-btn")
+                .html('<i class="bi bi-cloud-download"></i> Import Selected Subnets');
+            updateImportButton();
         });
     });
 </script>

@@ -155,7 +155,10 @@ if (builder.Environment.IsDevelopment())
         options.DefaultScheme = "DevAuthScheme";
         options.DefaultChallengeScheme = "DevAuthScheme";
     })
-    .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", options => options.AccessDeniedPath = "/Account/AccessDenied");
+    // No options to configure: DevAuthHandler authenticates unconditionally. The cookie handler
+    // below sets a genuine AccessDeniedPath - the two lines look interchangeable, but only that
+    // one has any effect.
+    .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", _ => { });
 }
 else
 {
@@ -265,11 +268,33 @@ if (autoMigrate)
     {
         // Closing the connection would release the session lock too; releasing explicitly keeps
         // the intent visible and covers connection-pool reuse.
-        using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
-        releaseLock.CommandType = System.Data.CommandType.StoredProcedure;
-        releaseLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
-        releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
-        releaseLock.ExecuteNonQuery();
+        //
+        // Logged rather than thrown, matching SqlServerSubnetLockingService. An exception raised in
+        // a finally replaces the one in flight, so a release that fails on a dead connection would
+        // report a lock-release error while destroying the migration failure that actually stopped
+        // startup - with nothing to say the schema was interrupted mid-flight. The reverse case is
+        // worse and was reproduced against a real SQL Server: both migrations succeed, an idle
+        // gateway drops the lock connection, and an unguarded release turns a completed migration
+        // into a hard startup crash. Swallowing does not strand the lock either way - it is
+        // session-owned, so if the connection died the server has already released it, and if it is
+        // alive the using block closes it here.
+        //
+        // Deliberately not guarded by a State != Open check: SqlClient does not poll the socket, so
+        // State still reports Open after a silent failover and the guard would not fire.
+        try
+        {
+            using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
+            releaseLock.CommandType = System.Data.CommandType.StoredProcedure;
+            releaseLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
+            releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
+            releaseLock.ExecuteNonQuery();
+        }
+        catch (Exception releaseException)
+        {
+            app.Logger.LogError(releaseException,
+                "Failed to release the 'Bastet:Migration' application lock after migration. The lock is "
+                + "session-owned and is released when the connection closes, so startup continues.");
+        }
     }
 }
 
@@ -306,19 +331,6 @@ if (!string.IsNullOrWhiteSpace(configuredFrameAncestors)
 }
 
 string frameAncestors = string.IsNullOrWhiteSpace(configuredFrameAncestors) ? "'none'" : configuredFrameAncestors;
-app.Use(async (context, next) =>
-{
-    IHeaderDictionary headers = context.Response.Headers;
-    headers.XContentTypeOptions = "nosniff";
-    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    headers.ContentSecurityPolicy = $"frame-ancestors {frameAncestors}";
-    if (frameAncestors == "'none'")
-    {
-        headers.XFrameOptions = "DENY"; // legacy-browser parity with frame-ancestors 'none'
-    }
-
-    await next();
-});
 
 if (app.Environment.IsDevelopment())
 {
@@ -341,6 +353,28 @@ else
     app.UseHsts();
     app.UseHttpsRedirection();
 }
+
+// Registered *below* UseExceptionHandler on purpose, so it also runs on a re-executed error request.
+// When the exception handler catches, it calls Response.Clear(), which clears Response.Headers
+// outright, and then re-runs the pipeline from its own position inward - so a header middleware
+// registered above it sets these once, has them wiped, and never gets a second chance. Production
+// 500s therefore shipped with none of them. Status-code pages are unaffected either way, since that
+// re-execute does not clear the response, but keeping both below the handlers means there is only
+// one rule to remember. Nothing here depends on the request having reached routing, so running
+// later costs nothing.
+app.Use(async (context, next) =>
+{
+    IHeaderDictionary headers = context.Response.Headers;
+    headers.XContentTypeOptions = "nosniff";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers.ContentSecurityPolicy = $"frame-ancestors {frameAncestors}";
+    if (frameAncestors == "'none'")
+    {
+        headers.XFrameOptions = "DENY"; // legacy-browser parity with frame-ancestors 'none'
+    }
+
+    await next();
+});
 
 // Enable static files
 app.UseStaticFiles();

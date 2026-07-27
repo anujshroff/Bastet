@@ -264,12 +264,6 @@ namespace Bastet.Models.ViewModels
         public int Cidr { get; set; }
 
         /// <summary>
-        /// True when this Azure subnet's prefix exactly equals its VNet prefix.
-        /// In that case we do NOT create the child; instead the target is marked IsFullyAllocated.
-        /// </summary>
-        public bool FullyEncompassesTarget { get; set; }
-
-        /// <summary>
         /// The Azure resource ID of the source subnet (forwarded from the selection
         /// so the commit step can persist it onto the new Bastet subnet).
         /// </summary>

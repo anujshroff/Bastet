@@ -28,6 +28,41 @@ public partial class SubnetController : Controller
     private const int MaxAzureResourceIdLength = 500;
 
     /// <summary>
+    /// Shapes a batch-create failure for whoever actually posted it.
+    /// </summary>
+    /// <remarks>
+    /// The Azure import wizard submits <c>#import-form</c> as an ordinary full-page POST, unlike the
+    /// bulk and reconcile wizards which post via AJAX and render errors inline. Returning
+    /// <c>BadRequest(ModelState)</c> or a bare status code to a full-page navigation replaces the
+    /// wizard with a serialized error body - and because UseStatusCodePagesWithReExecute skips
+    /// responses that already have a body or content type, not even the error page steps in. The
+    /// admin is left on a URL showing raw JSON, and Back restores the wizard from bfcache with its
+    /// button still reading "Importing...". So an import redirects to the parent's Details page
+    /// carrying the message, which is a proper PRG and matches the success path. Direct callers
+    /// using this as a JSON API keep the status codes they already rely on.
+    /// </remarks>
+    private IActionResult BatchCreateFailure(bool isAzureImport, int parentId, string message, IActionResult apiResult)
+    {
+        if (!isAzureImport)
+        {
+            return apiResult;
+        }
+
+        TempData["ErrorMessage"] = message;
+        return RedirectToAction("Details", new { id = parentId });
+    }
+
+    /// <summary>Every current ModelState error, flattened for a TempData message.</summary>
+    private string ModelStateMessage(string fallback) =>
+        ModelState.Values
+            .SelectMany(v => v.Errors)
+            .Select(e => e.ErrorMessage)
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .ToList() is { Count: > 0 } messages
+                ? string.Join(" ", messages)
+                : fallback;
+
+    /// <summary>
     /// True when a client-supplied Azure resource ID is too long for the column.
     /// </summary>
     /// <remarks>
@@ -85,7 +120,8 @@ public partial class SubnetController : Controller
         // HTML and safe-text errors on the same field and make those rules apply only to short names.
         if (!ModelState.IsValid)
         {
-            return BadRequest(ModelState);
+            return BatchCreateFailure(isAzureImport, parentId,
+                ModelStateMessage("The submitted subnets were not valid."), BadRequest(ModelState));
         }
 
         // Nothing bound means nothing was selected, or the post was malformed. Without this the
@@ -94,7 +130,8 @@ public partial class SubnetController : Controller
         if (subnets is null or { Count: 0 })
         {
             ModelState.AddModelError("subnets", "No subnets were submitted for import.");
-            return BadRequest(ModelState);
+            return BatchCreateFailure(isAzureImport, parentId,
+                "No subnets were submitted for import.", BadRequest(ModelState));
         }
 
         // Sanitize user inputs before processing
@@ -128,9 +165,27 @@ public partial class SubnetController : Controller
         // IsAzureResourceIdTooLong for why these are rejected rather than trimmed to fit).
         if (subnets.Exists(s => IsAzureResourceIdTooLong(s.AzureResourceId)) || IsAzureResourceIdTooLong(vnetResourceId))
         {
+            string tooLong = $"An Azure resource ID is longer than {MaxAzureResourceIdLength} characters and cannot be stored.";
+            ModelState.AddModelError("subnets", tooLong);
+            return BatchCreateFailure(isAzureImport, parentId, tooLong, BadRequest(ModelState));
+        }
+
+        // A fully-encompassing entry is never created as a child - its whole purpose is to rename the
+        // parent and mark it fully allocated, and both of those writes live behind the Azure-import
+        // guard. Without an import context there is nothing left for such an entry to do: child
+        // creation is skipped because the entry exists, the parent writes are skipped because the
+        // import flags are absent, and the transaction commits having written nothing while the
+        // success message still announces a rename that never happened. Refuse the combination
+        // instead of committing a no-op. Checked after sanitization, which is what decides whether
+        // vnetName is really empty.
+        if (subnets.Exists(s => s.FullyEncompassesVNetPrefix) && (!isAzureImport || string.IsNullOrEmpty(vnetName)))
+        {
             ModelState.AddModelError("subnets",
-                $"An Azure resource ID is longer than {MaxAzureResourceIdLength} characters and cannot be stored.");
-            return BadRequest(ModelState);
+                "A subnet marked as fully encompassing the VNet prefix can only be submitted as part of an Azure "
+                + "import, which requires isAzureImport to be set and a vnetName to be supplied. It marks the parent "
+                + "fully allocated rather than being created as a child, so on its own it would import nothing.");
+            return BatchCreateFailure(isAzureImport, parentId,
+                ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
         }
 
         try
@@ -142,7 +197,8 @@ public partial class SubnetController : Controller
         }
         catch (TimeoutException)
         {
-            return StatusCode(503, "The operation timed out because another subnet operation is in progress. Please try again.");
+            const string busy = "The operation timed out because another subnet operation is in progress. Please try again.";
+            return BatchCreateFailure(isAzureImport, parentId, busy, StatusCode(503, busy));
         }
     }
 
@@ -158,7 +214,16 @@ public partial class SubnetController : Controller
             if (parentSubnet == null)
             {
                 await transaction.RollbackAsync();
-                return NotFound($"Parent subnet with ID {parentId} not found");
+                string missing = $"Parent subnet with ID {parentId} not found";
+                if (isAzureImport)
+                {
+                    // Details of a parent that does not exist would 404 in its own right, so the
+                    // one failure that cannot redirect there goes to the subnet list instead.
+                    TempData["ErrorMessage"] = missing;
+                    return RedirectToAction("Index");
+                }
+
+                return NotFound(missing);
             }
 
             List<int> createdSubnetIds = [];
@@ -182,7 +247,8 @@ public partial class SubnetController : Controller
                 {
                     // Validation failed, rollback and return errors
                     await transaction.RollbackAsync();
-                    return BadRequest(ModelState);
+                    return BatchCreateFailure(isAzureImport, parentId,
+                        ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
                 }
             }
 
@@ -203,7 +269,8 @@ public partial class SubnetController : Controller
                         $"Subnet '{fullyEncompassingSubnet.Name}' ({fullyEncompassingSubnet.NetworkAddress}/{fullyEncompassingSubnet.Cidr}) " +
                         $"does not cover the whole of {parentSubnet.NetworkAddress}/{parentSubnet.Cidr} and cannot mark it fully allocated.");
                     await transaction.RollbackAsync();
-                    return BadRequest(ModelState);
+                    return BatchCreateFailure(isAzureImport, parentId,
+                        ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
                 }
 
                 ValidationResult allocationValidation = hostIpValidationService.ValidateSubnetCanBeFullyAllocated(parentId);
@@ -215,7 +282,8 @@ public partial class SubnetController : Controller
                     }
 
                     await transaction.RollbackAsync();
-                    return BadRequest(ModelState);
+                    return BatchCreateFailure(isAzureImport, parentId,
+                        ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
                 }
             }
 
@@ -267,7 +335,8 @@ public partial class SubnetController : Controller
                     {
                         // Validation failed, rollback and return errors
                         await transaction.RollbackAsync();
-                        return BadRequest(ModelState);
+                        return BatchCreateFailure(isAzureImport, parentId,
+                            ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
                     }
 
                     // Create the subnet entity
@@ -313,7 +382,8 @@ public partial class SubnetController : Controller
         {
             await transaction.RollbackAsync();
             logger.LogError(ex, "Batch create of child subnets under parent {ParentId} failed", parentId);
-            return StatusCode(500, "An unexpected error occurred while creating subnets. Details have been logged.");
+            const string unexpected = "An unexpected error occurred while creating subnets. Details have been logged.";
+            return BatchCreateFailure(isAzureImport, parentId, unexpected, StatusCode(500, unexpected));
         }
     }
 }

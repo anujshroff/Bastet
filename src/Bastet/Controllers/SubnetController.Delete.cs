@@ -40,8 +40,7 @@ public partial class SubnetController : Controller
             Cidr = subnet.Cidr,
             Description = subnet.Description,
             ChildSubnetCount = descendantCount,
-            HostIpCount = hostIpCount,
-            IsFullyAllocated = subnet.IsFullyAllocated
+            HostIpCount = hostIpCount
         };
 
         return View(viewModel);

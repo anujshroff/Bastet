@@ -58,6 +58,24 @@ namespace Bastet.Services.Azure
         /// </remarks>
         /// <param name="subscriptionId">The Azure subscription ID</param>
         Task<AzureVNetInventory> GetVNetInventory(string subscriptionId);
+
+        /// <summary>
+        /// Reads each resource ID directly and reports what Azure said about it individually.
+        /// </summary>
+        /// <remarks>
+        /// Absence from <see cref="GetVNetInventory"/> is not evidence of deletion: ARM list
+        /// operations are RBAC-filtered, so a credential that has lost access to a resource group
+        /// receives HTTP 200 with those resources missing rather than a 403, and every one of them
+        /// then looks deleted. A direct read distinguishes the two - 404 for gone, 403 for not
+        /// visible - so anything about to be archived because it was missing from a list must be
+        /// confirmed here first. IDs that cannot be checked come back as
+        /// <see cref="AzureResourceConfirmation.Unknown"/> rather than throwing, so one bad entry
+        /// cannot abort the whole reconcile.
+        /// </remarks>
+        /// <param name="resourceIds">VNet or Azure-subnet resource IDs to check.</param>
+        /// <returns>One entry per distinct ID supplied.</returns>
+        Task<IReadOnlyDictionary<string, AzureResourceConfirmation>> ConfirmResourcesAsync(
+            IEnumerable<string> resourceIds);
     }
 }
 

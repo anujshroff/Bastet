@@ -106,6 +106,20 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         _context.SaveChanges();
     }
 
+    /// <summary>
+    /// The Azure import wizard posts as a full-page form, so its failures redirect to the parent's
+    /// Details page carrying the reason in TempData rather than returning a raw error body the
+    /// browser would render in place of the wizard. Asserts both halves.
+    /// </summary>
+    private void AssertImportFailureRedirect(IActionResult result, int parentId)
+    {
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirect.ActionName);
+        Assert.Equal(parentId, redirect.RouteValues?["id"]);
+        Assert.True(_controller.TempData.ContainsKey("ErrorMessage"));
+        Assert.False(string.IsNullOrWhiteSpace(_controller.TempData["ErrorMessage"] as string));
+    }
+
     [Fact]
     public async Task BatchCreate_SubnetFullyEncompassesVNetPrefix_MarksParentAsFullyAllocated()
     {
@@ -256,7 +270,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         IActionResult result = await _controller.BatchCreateChildSubnets(
             parentId, subnets, vnetName: "Azure-VNet-3", isAzureImport: true);
 
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        AssertImportFailureRedirect(result, parentId);
 
         _context.ChangeTracker.Clear();
         Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
@@ -285,7 +299,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         IActionResult result = await _controller.BatchCreateChildSubnets(
             parentId, subnets, vnetName: "Azure-VNet-4", isAzureImport: true);
 
-        _ = Assert.IsType<BadRequestObjectResult>(result);
+        AssertImportFailureRedirect(result, parentId);
 
         _context.ChangeTracker.Clear();
         Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
@@ -355,5 +369,92 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .CountAsync(TestContext.Current.CancellationToken);
         Assert.Equal(0, childSubnetCount);
+    }
+
+    // -------------------------------------------------------------------------
+    // A fully-encompassing entry outside an Azure import writes nothing at all
+    // -------------------------------------------------------------------------
+
+    private static List<AzureImportSubnetViewModel> EncompassingEntry(int parentId) =>
+    [
+        new()
+        {
+            Name = "Default",
+            NetworkAddress = "10.11.0.0",
+            Cidr = 24,
+            ParentSubnetId = parentId,
+            FullyEncompassesVNetPrefix = true
+        }
+    ];
+
+    /// <summary>
+    /// Such an entry is never created as a child - it exists to rename the parent and mark it fully
+    /// allocated, and both writes sit behind the Azure-import guard. With isAzureImport omitted (its
+    /// default, and a documented calling convention for using this as a plain batch-create API) both
+    /// halves were skipped, the transaction committed nothing, and the success message still claimed
+    /// a rename. It must be refused instead.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreate_FullyEncompassing_WithoutAzureImportFlag_IsRejected()
+    {
+        const int parentId = 2;
+        string? originalName = (await _context.Subnets
+            .FindAsync([parentId], TestContext.Current.CancellationToken))?.Name;
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, EncompassingEntry(parentId), vnetName: "Azure-VNet-1", isAzureImport: false);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+
+        Subnet? parent = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
+        Assert.NotNull(parent);
+        Assert.Equal(originalName, parent.Name);
+        Assert.False(parent.IsFullyAllocated);
+    }
+
+    /// <summary>The same holds when the import flag is set but no VNet name came with it.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task BatchCreate_FullyEncompassing_WithoutVNetName_IsRejected(string? vnetName)
+    {
+        const int parentId = 2;
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, EncompassingEntry(parentId), vnetName: vnetName, isAzureImport: true);
+
+        AssertImportFailureRedirect(result, parentId);
+
+        Subnet? parent = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
+        Assert.NotNull(parent);
+        Assert.False(parent.IsFullyAllocated);
+    }
+
+    /// <summary>
+    /// Ordinary children must still be importable as a plain batch create, so the new guard has to
+    /// key on the encompassing flag rather than on isAzureImport alone.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreate_OrdinaryChildren_WithoutAzureImportFlag_StillWorks()
+    {
+        const int parentId = 2;
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "Child",
+                NetworkAddress = "10.11.0.0",
+                Cidr = 25,
+                ParentSubnetId = parentId,
+                FullyEncompassesVNetPrefix = false
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            parentId, subnets, vnetName: null, isAzureImport: false);
+
+        _ = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(1, await _context.Subnets
+            .CountAsync(s => s.ParentSubnetId == parentId, TestContext.Current.CancellationToken));
     }
 }

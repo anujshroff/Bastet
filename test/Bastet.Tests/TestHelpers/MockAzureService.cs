@@ -213,6 +213,38 @@ public class MockAzureService : IAzureService
     }
 
     /// <summary>
+    /// Confirmations to hand back from <see cref="ConfirmResourcesAsync"/>, keyed by resource ID.
+    /// Anything not listed falls back to <see cref="DefaultConfirmation"/>.
+    /// </summary>
+    public Dictionary<string, AzureResourceConfirmation> Confirmations { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What to report for resource IDs not named in <see cref="Confirmations"/>. Defaults to
+    /// Deleted so existing tests, which expect absence from the inventory to mean deletion, keep
+    /// describing the same scenario.
+    /// </summary>
+    public AzureResourceConfirmation DefaultConfirmation { get; set; } = AzureResourceConfirmation.Deleted;
+
+    /// <summary>
+    /// Mock individual confirmation. Reports failure as Unknown when the mock is configured with
+    /// invalid credentials, matching the real service's "an unanswered question is not a deletion".
+    /// </summary>
+    public Task<IReadOnlyDictionary<string, AzureResourceConfirmation>> ConfirmResourcesAsync(
+        IEnumerable<string> resourceIds)
+    {
+        Dictionary<string, AzureResourceConfirmation> result = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string id in resourceIds.Where(i => !string.IsNullOrWhiteSpace(i)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            result[id] = !_credentialValid
+                ? AzureResourceConfirmation.Unknown
+                : Confirmations.TryGetValue(id, out AzureResourceConfirmation c) ? c : DefaultConfirmation;
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, AzureResourceConfirmation>>(result);
+    }
+
+    /// <summary>
     /// Helper method to check if an address prefix is compatible with parent network
     /// </summary>
     private bool IsAddressCompatible(string addressPrefix, string parentAddress, int parentCidr)

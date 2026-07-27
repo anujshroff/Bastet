@@ -3,39 +3,6 @@ using System.ComponentModel.DataAnnotations;
 namespace Bastet.Services.Security;
 
 /// <summary>
-/// Validation attribute that sanitizes string input to prevent XSS attacks
-/// </summary>
-public class SanitizedStringAttribute : ValidationAttribute
-{
-    public bool AllowHtml { get; set; } = false;
-    public bool StrictSafeText { get; set; } = false;
-
-    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
-    {
-        if (value is not string stringValue)
-        {
-            return ValidationResult.Success;
-        }
-
-        IInputSanitizationService? sanitizationService = validationContext.GetService<IInputSanitizationService>();
-        if (sanitizationService == null)
-        {
-            return new ValidationResult("Input sanitization service not available");
-        }
-
-        // If StrictSafeText is enabled, check if the input contains only safe characters
-        if (StrictSafeText && !sanitizationService.IsSafeText(stringValue))
-        {
-            return new ValidationResult(ErrorMessage ?? "Input contains invalid characters");
-        }
-
-        // The actual sanitization will be handled in the controller or model binding
-        // This attribute primarily serves as a marker and validator
-        return ValidationResult.Success;
-    }
-}
-
-/// <summary>
 /// Validation attribute that ensures input contains no HTML tags
 /// </summary>
 public class NoHtmlAttribute : ValidationAttribute
