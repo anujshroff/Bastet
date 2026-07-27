@@ -514,41 +514,40 @@ _Tests 622 → 622 (unchanged). Build clean, 0 warnings._
 
 ## F9. The prefilled subnet name always contains a `/`, which `[SafeText]` forbids `[×1]`
 
-**Confidence: confirmed.** Independently rediscovered by a verifier working an unrelated finding, so
-three agents reached it.
+_F9 is fixed and committed: the generated suffix is now `-{networkAddress}-{cidr}` rather than
+`-{networkAddress}/{cidr}`, so the name the app fills in survives the validation the very next POST
+applies to it._
 
-**Where:** [SubnetController.Create.cs:67](../src/Bastet/Controllers/SubnetController.Create.cs#L67)
-(`SubnetNaming.WithSuffix`, suffix `-{networkAddress}/{cidr}`) against
-[SubnetViewModels.cs:11](../src/Bastet/Models/ViewModels/SubnetViewModels.cs#L11) (`[SafeText]`), whose
-class `^[a-zA-Z0-9\s\-_.,!?@#$%&()+=]*$`
-([InputSanitizationService.cs:14](../src/Bastet/Services/Security/InputSanitizationService.cs#L14))
-contains no `/`. Pinned by `SubnetCreateGetPrefillTests.cs:116` and `:142`.
+_The separator was changed rather than the rule, as the finding directs. `[SafeText]` guards three
+properties and round 5's E2 deliberately declined to widen it; loosening a character class to
+accommodate a string the app generates would be fixing the wrong end. `SubnetNaming.WithSuffix` was
+left alone - it has two callers, and the planner's own suffixes are already inside the class._
 
-**Failure scenario.** Every "Create Subnet from an unallocated range" flow that accepts the default:
+_A new theory test pins the real contract rather than the literal string: **the prefilled name must
+pass the rule its own POST applies.** It resolves `SafeTextAttribute` against a real
+`InputSanitizationService`, because the attribute reads that service from the validation context and
+without one every rule fails with "Input sanitization service not available" and the test would pass
+vacuously - the trap round 5's E2 fell into. Reverting the separator makes it fail with the message
+that names the defect:_
 
 ```
-GET  /Subnet/Create?networkAddress=10.0.1.0&cidr=24&parentId=1
-     value="prod-vnet-10.0.1.0/24"
-POST it unchanged -> 200, "Subnet name contains invalid characters", nothing created
-POST with "-24" instead of "/24" -> 302 /Subnet/Details/2
+the prefilled name 'Parent-10.0.1.0/24' is refused by the rule its own POST applies
 ```
 
-Nothing saves the operator: `SafeTextAttribute` is not an `IClientModelValidator`, so no client rule
-fires; `[SanitizeName]` runs after validation and would not strip `/` anyway; and the message names no
-character, so the operator must guess which one. On a `/32` parent the Name error also *masks* the CIDR
-error, so two different rejections arrive in sequence (see **F10**).
+_The `/32` case is included as a second theory row, because that page prefills a name too and the
+finding records that there the Name error **masks** the CIDR error - so an operator got two rejections
+in sequence. With F10 also fixed, neither fires._
 
-**Two rounds stood on this line.** Round 4's D8 struck paragraph explicitly reasons about the generated
-name — "would have stopped the 500 while still offering the operator a pre-filled name reading
-`Parent-10.0.0.0/33`, which the POST then rejects" — and fixed the CIDR-in-the-name case while walking
-past the `/` that is in *every* generated name. D19 fixed its *length*.
+_Two existing assertions pinned the unusable value and were updated, not deleted:
+`SubnetCreateGetPrefillTests.cs:116` and `:142`. They were the reason two rounds walked past this -
+round 4's D19 fixed this string's **length** and D8's struck paragraph explicitly reasoned about the
+generated name, quoting `Parent-10.0.0.0/33` as a name "which the POST then rejects", while fixing
+only the CIDR in it._
 
-**Fix.** Change the controller's interpolation to a character inside the SafeText class (`-` or `_`).
-`SubnetNaming.WithSuffix` has exactly two callers and the planner's own suffixes are already inside the
-class, so changing only `Create.cs:67` is safe. Update both pinning assertions. **Do not widen
-`[SafeText]`** — it guards three properties and round 5's E2 deliberately declined to extend it.
+_Tests 622 → 624 (+2). Build clean, 0 warnings._
 
 ---
+
 
 ## F10. A `/32` subnet offers a Create Subnet button whose POST can never succeed `[×1]`
 
