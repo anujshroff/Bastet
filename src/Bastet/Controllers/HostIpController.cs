@@ -86,11 +86,11 @@ public class HostIpController(
         ValidationResult validationResult = hostIpValidationService.ValidateSubnetCanContainHostIp(subnetId);
         if (!validationResult.IsValid)
         {
-            foreach (ValidationError error in validationResult.Errors)
-            {
-                ModelState.AddModelError("", error.Message);
-            }
-
+            // Carried in TempData, not ModelState: a redirect starts a new request and ModelState
+            // does not survive it, so the errors were being collected and then thrown away. Subnet
+            // Details reads only TempData, so the page simply reloaded with nothing to say - while
+            // the structurally identical guard on Index ten lines above reported itself properly.
+            TempData["ErrorMessage"] = string.Join(" ", validationResult.Errors.Select(e => e.Message));
             return RedirectToAction("Details", "Subnet", new { id = subnetId });
         }
 

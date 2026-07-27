@@ -92,4 +92,50 @@ public class HostIpIndexGuardTests : IDisposable
         ViewResult view = Assert.IsType<ViewResult>(result);
         Assert.Equal(3, view.ViewData["SubnetId"]);
     }
+
+    // -------------------------------------------------------------------------
+    // The same guard on Create. A redirect starts a new request, so anything put in ModelState is
+    // gone by the time Details renders - and Details reads only TempData.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The reachable route is the one the tag helper emits: GET /HostIp/Create?subnetId=1. A
+    /// hand-typed /HostIp/Create/1 binds id, leaves subnetId at 0 and returns NotFound before the
+    /// guard is ever reached.
+    /// </summary>
+    [Fact]
+    public async Task Create_SubnetWithChildSubnets_RedirectsWithExplanation()
+    {
+        _context.ChangeTracker.Clear();
+
+        IActionResult result = await _controller.Create(1);
+
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirect.ActionName);
+        Assert.Equal("Subnet", redirect.ControllerName);
+        Assert.Equal(1, redirect.RouteValues?["id"]);
+        Assert.False(string.IsNullOrWhiteSpace(_controller.TempData["ErrorMessage"] as string));
+    }
+
+    [Fact]
+    public async Task Create_FullyAllocatedSubnet_RedirectsWithExplanation()
+    {
+        _context.ChangeTracker.Clear();
+
+        IActionResult result = await _controller.Create(4);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+        Assert.False(string.IsNullOrWhiteSpace(_controller.TempData["ErrorMessage"] as string));
+    }
+
+    [Fact]
+    public async Task Create_LeafSubnet_ShowsTheForm()
+    {
+        _context.ChangeTracker.Clear();
+
+        IActionResult result = await _controller.Create(3);
+
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.TempData.ContainsKey("ErrorMessage"));
+    }
 }
