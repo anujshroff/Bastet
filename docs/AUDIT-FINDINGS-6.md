@@ -551,32 +551,38 @@ _Tests 622 → 624 (+2). Build clean, 0 warnings._
 
 ## F10. A `/32` subnet offers a Create Subnet button whose POST can never succeed `[×1]`
 
-**Confidence: confirmed.** Found by three pass-2 beats and none in pass 1.
+_F10 is fixed and committed with the view gate the finding recommends: the button is now conditioned
+on `Model.Cidr < 32` alongside the existing role and host-IP checks. That removes the impossible state
+rather than rendering it more politely - a `/32` has no room for a child at all, so there is nothing
+for the modal to offer._
 
-**Where:** [_UnallocatedRanges.cshtml:30-38](../src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml#L30)
-(renders the button without considering the parent's CIDR),
-[_SubnetCalculationScripts.cshtml:39-41](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L39)
-(`findOptimalCidr`'s `while (cidr <= 32)` entered at 33, so the body never runs and it returns its
-"everything overlapped" fallback), [:59](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L59)
-(the unconditional `prop('disabled', false)` — this is the loose line, not the input handler).
+_The gate was chosen over correcting `findOptimalCidr`'s loop bound, which the verifier established
+has exactly one observable case and this is it: the body cannot fail to run for any parent CIDR below
+32, and its "everything overlapped" fallback is otherwise unreachable because the button only appears
+on an unallocated range, where a `/32` at the start address cannot overlap anything. Fixing the loop
+would leave the button rendered and the modal computing a range of 33-32._
 
-**Failure scenario.** A childless `/32` — reachable through Bastet's own Create form, as a root or a
-child — has one unallocated range and a live button. The modal renders `min="33" max="32"`, "Valid range:
-**33 - 32** (recommended: 32)", size 1, Create enabled. `#createSubnetBtn` is `type="button"` outside any
-submit, so no HTML5 constraint validation intervenes. The POST is refused with the *containment* message
-("Child subnet must be contained within the parent subnet range. Parent subnet is 10.0.9.9/32") because
-`IsSubnetContainedInParent` returns false at `childCidr <= parentCidr`, which runs before the CIDR check.
-`/31` is correct and a `/32` child under a `/31` parent really is created.
+_Being a `[×1]` the premise was re-checked rather than trusted, and it holds - but the reachability is
+narrower than the three reports imply and that is worth recording: the button is already gated on the
+`/32` having no host IPs, so the window is a `/32` created and not yet assigned its address. An
+ordinary state, but a transient one._
 
-The dead end is reached by the click-click path only: touching the CIDR field marks it `is-invalid` and
-disables Create. The window is a `/32` created but not yet assigned its host IP — the button is gated on
-having none.
+_`/31` is deliberately untouched. Two of the three finders confirmed it is correct - the modal offers
+32-32 and a `/32` child under a `/31` parent really is created - so widening the gate to `<= 31` would
+break a legitimate operation._
 
-**Fix.** Add `Model.Cidr < 32` to the view gate at `_UnallocatedRanges.cshtml:30`, which removes the
-impossible state rather than rendering it better. Optionally have `findOptimalCidr` return `null` instead
-of an untested `maxCidr` — hygiene, but it fixes nothing on its own.
+_This also removes the second of two rejections F9 describes: on the `/32` page the prefilled name
+error used to fire before the containment error, so an operator got two different refusals in
+sequence. With both fixed, neither does._
+
+_No test ships: the gate is a Razor condition on a view, and the repo has no view-rendering harness.
+The final sweep requests a `/32` Details page against the running application, which is where this is
+actually observable._
+
+_Tests 624 → 624 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 ## F11. "Hide already imported" turns blocked prefixes into a green success banner `[×2]`
 

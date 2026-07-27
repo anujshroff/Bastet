@@ -27,7 +27,11 @@
                                 <td>@range.AddressCount.ToString("N0") IP addresses</td>
                                 <td>
                                     @inject Bastet.Services.IUserContextService SubnetUserContext
-                                    @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.HostIpAssignments.Count == 0)
+                                    @* Model.Cidr < 32 because a /32 has no room for a child at all: the
+                                       modal computes a range of 33-32, leaves Create enabled, and the
+                                       POST can only ever be refused. Gating here removes the
+                                       impossible state rather than rendering it more politely. *@
+                                    @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.HostIpAssignments.Count == 0 && Model.Cidr < 32)
                                     {
                                         <button type="button" class="btn btn-sm btn-success create-subnet-btn" 
                                                 data-network="@range.StartIp" 
