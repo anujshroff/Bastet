@@ -6,9 +6,13 @@ using System.Text.Encodings.Web;
 
 namespace Bastet.Services;
 
+/// <summary>
+/// Options for the development authentication scheme. Deliberately empty: the handler below
+/// authenticates unconditionally and reads nothing, so anything added here would be write-only.
+/// AuthenticationHandler still requires an options type, which is why the class remains.
+/// </summary>
 public class DevAuthOptions : AuthenticationSchemeOptions
 {
-    public string AccessDeniedPath { get; set; } = "/Account/AccessDenied";
 }
 
 public class DevAuthHandler(

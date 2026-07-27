@@ -155,7 +155,10 @@ if (builder.Environment.IsDevelopment())
         options.DefaultScheme = "DevAuthScheme";
         options.DefaultChallengeScheme = "DevAuthScheme";
     })
-    .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", options => options.AccessDeniedPath = "/Account/AccessDenied");
+    // No options to configure: DevAuthHandler authenticates unconditionally. The cookie handler
+    // below sets a genuine AccessDeniedPath - the two lines look interchangeable, but only that
+    // one has any effect.
+    .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", _ => { });
 }
 else
 {
