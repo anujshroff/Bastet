@@ -17,7 +17,6 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
     private const string INVALID_CIDR_HIERARCHY = "INVALID_CIDR_HIERARCHY";
     private const string NOT_IN_PARENT_RANGE = "NOT_IN_PARENT_RANGE";
     private const string SUBNET_OVERLAP = "SUBNET_OVERLAP";
-    private const string SUBNET_HAS_CHILDREN = "SUBNET_HAS_CHILDREN";
     private const string REQUIRED_FIELD_MISSING = "REQUIRED_FIELD_MISSING";
     private const string CHILD_SUBNET_OUTSIDE_RANGE = "CHILD_SUBNET_OUTSIDE_RANGE";
     private const string INVALID_CIDR_CHANGE = "INVALID_CIDR_CHANGE";
@@ -106,21 +105,6 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
         }
 
         // We don't validate network properties as they cannot be changed in an update
-
-        return result;
-    }
-
-    /// <inheritdoc />
-    public ValidationResult ValidateSubnetDeletion(Subnet subnet)
-    {
-        ValidationResult result = new();
-
-        // Prevent deletion if subnet has children
-        if (subnet.ChildSubnets != null && subnet.ChildSubnets.Count != 0)
-        {
-            result.AddError(SUBNET_HAS_CHILDREN,
-                "Cannot delete a subnet that has child subnets. Delete the children first.");
-        }
 
         return result;
     }

@@ -23,13 +23,7 @@ public interface ISubnetValidationService
     /// <param name="updateDto">The update data</param>
     ValidationResult ValidateSubnetUpdate(Subnet existingSubnet, UpdateSubnetDto updateDto);
 
-    /// <summary>
-    /// Validates subnet deletion
-    /// </summary>
-    /// <param name="subnet">The subnet to delete</param>
-    ValidationResult ValidateSubnetDeletion(Subnet subnet);
-
-    /// <summary>
+        /// <summary>
     /// Validates that a subnet is properly contained within a parent subnet
     /// </summary>
     /// <param name="childNetwork">The child network address</param>

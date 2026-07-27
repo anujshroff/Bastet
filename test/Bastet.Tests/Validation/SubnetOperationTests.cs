@@ -232,59 +232,6 @@ public class SubnetOperationTests
         Assert.Contains(result.Errors, e => e.Code == "SUBNET_OVERLAP");
     }
 
-    // Deletion tests
-
-    [Fact]
-    public void ValidateSubnetDeletion_NoChildren_ReturnsValid()
-    {
-        // Arrange
-        Subnet subnet = new()
-        {
-            Id = 1,
-            Name = "Test Subnet",
-            NetworkAddress = "192.168.1.0",
-            Cidr = 24,
-            ChildSubnets = [] // Empty list, no children
-        };
-
-        // Act
-        ValidationResult result = _validationService.ValidateSubnetDeletion(subnet);
-
-        // Assert
-        Assert.True(result.IsValid);
-        Assert.Empty(result.Errors);
-    }
-
-    [Fact]
-    public void ValidateSubnetDeletion_WithChildren_ReturnsInvalid()
-    {
-        // Arrange
-        Subnet childSubnet = new()
-        {
-            Id = 2,
-            Name = "Child Subnet",
-            NetworkAddress = "192.168.1.0",
-            Cidr = 25,
-            ParentSubnetId = 1
-        };
-
-        Subnet subnet = new()
-        {
-            Id = 1,
-            Name = "Parent Subnet",
-            NetworkAddress = "192.168.1.0",
-            Cidr = 24,
-            ChildSubnets = [childSubnet]
-        };
-
-        // Act
-        ValidationResult result = _validationService.ValidateSubnetDeletion(subnet);
-
-        // Assert
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, e => e.Code == "SUBNET_HAS_CHILDREN");
-    }
-
     // Update tests
 
     [Fact]
