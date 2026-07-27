@@ -465,26 +465,33 @@ _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ## E13. The Details page's Create-Subnet modal reports "0 IP addresses" for /31 and /32 `[×1]`
 
-**Confidence: confirmed.**
+_E13 is fixed and committed. `updateSubnetSize` now carries the RFC 3021 special case the server and
+the Create page's copy both already had, and clamps the ordinary branch with `Math.max(0, size - 2)`._
 
-**Where:** [_SubnetCalculationScripts.cshtml:150-154](../src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml#L150-L154)
-— `const usableSize = size > 2 ? size - 2 : 0;`.
-The correct sibling implementation is
-[Create/_SubnetFormScripts.cshtml:28-38](../src/Bastet/Views/Subnet/Create/_SubnetFormScripts.cshtml#L28-L38),
-and the server's is [IpUtilityService.cs:98-113](../src/Bastet/Services/IpUtilityService.cs#L98-L113);
-both special-case RFC 3021.
+_Verified by extracting the shipped function **verbatim** — no retyping, only the jQuery line swapped
+for a `return` — running it in chromium, and comparing every value against
+`IpUtilityService.CalculateUsableIpAddresses` executed directly from the real assembly:_
 
-**Failure scenario.** On a `/30` with no children, `findOptimalCidr` returns 31 and writes it into the
-modal, which then displays "Resulting subnet size: 0 IP addresses" with the Create button enabled.
-Typing 32 gives the same. The server says 2 and 1 respectively — round 4's D4 turns on exactly that —
-and the very next page shows "Usable IPs: 2" for the same /31 the modal just called 0.
+```
+cidr | modal JS | server | match          cidr | modal JS | server | match
+/0   | 4294967294 | 4294967294 | yes      /30  |        2 |      2 | yes
+/8   |   16777214 |   16777214 | yes      /31  |        2 |      2 | yes
+/24  |        254 |        254 | yes      /32  |        1 |      1 | yes
+/29  |          6 |          6 | yes
+```
 
-The wider trigger is not the /30 edge case but any parent with CIDR ≤ 30 where the operator types 31 or
-32, which is reachable from every Details page with an unallocated range.
+_Checking the whole range rather than only the two reported CIDRs was the point: `/0` confirms the
+clamp did not introduce a precision or sign problem at the other extreme, where the count exceeds
+what a 32-bit int holds. Before the fix, `size > 2 ? size - 2 : 0` returned 0 for `/31` (size 2) and
+`/32` (size 1) — the two cases where the subtraction should not happen at all._
 
-**Fix.** Add the same special case: `const usableSize = cidr >= 31 ? (cidr === 31 ? 2 : 1) : Math.max(0, size - 2);`.
-This is the third copy of this calculation; lifting one shared implementation into `site.js` would stop
-a fourth from drifting, but the load-bearing change is the special case alone.
+_The finding's optional suggestion — hoisting this into `site.js` so all three copies share one
+implementation — was **not** taken. It is the right instinct and is recorded on the watch list, but
+it touches two pages plus the shared script to fix a defect that lives in one function, and an
+unrequested refactor riding along in a fix commit is exactly the residue these rounds keep finding._
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
+
+---
 
 ## E14. The reconcile confirmation screen overstates the blast radius `[×1]`
 
