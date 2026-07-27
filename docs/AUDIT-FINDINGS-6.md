@@ -4,6 +4,79 @@
 **Test baseline:** 603 passing, 0 failed. `dotnet build --no-incremental` clean, 0 warnings.
 **Date:** 2026-07-26
 
+## Reconciliation — complete
+
+**All 18 findings fixed, none refuted on re-verification**, plus the E8 restoration as step 0. One
+commit each, on `task/audit-6`.
+
+**Final state:** 635 passing (603 → 635, +32), 0 failed. Clean rebuild from deleted `bin`/`obj`,
+0 warnings. Working tree clean, no scaffolding committed, no credential in any commit.
+
+**Closing sweep.** Every major area was requested from the real application running against a real SQL
+Server 2022 container, asserting titles and content rather than status codes: home, subnet hierarchy,
+create, details, edit, deleted subnets, all-deleted-host-IPs, both Azure wizards, the reconcile wizard,
+and the 404 page. Security headers ride on both a normal 200 and the 404 (`X-Content-Type-Options`,
+`Referrer-Policy`, `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options`). One classified
+rather than glossed: `/HostIp` 404s because there is no index action — host IPs are reached through a
+subnet.
+
+**Six fixes were confirmed live through HTTP, not just by test:**
+
+| | |
+|---|---|
+| F1 | a crafted CIDR change on an Azure-linked row is refused with the new message; the stored CIDR stays 16 |
+| F1 | the Edit form renders `Cidr` as a hidden input plus the "Imported from Azure" note |
+| F5 | the `parseJSON` shim is served between jQuery 4.0.0 and the two validation scripts |
+| F6 | **the sanitizing formatter is actually selected at runtime** — the thing the unit tests could not prove |
+| F9 | the prefilled name `prod-10.0.5.0-24` posts verbatim and succeeds (302) |
+| F10 | a `/32` Details page renders **0** Create Subnet buttons; the `/16` renders 2 |
+
+**F2's plumbing confirmed against real ARM:** every subnet in the inventory carries a populated
+`ipv4AddressPrefixes`, deduplicated, and the IPv6-only VNet is still filtered out.
+
+**The Azure surface was driven end to end against live ARM**, with the discrimination check that
+matters — a reconciler that blocks everything is as broken as one that deletes everything. Two service
+principals with disjoint scope, probed rather than assumed: SP_A sees `bastet`, SP_B sees
+`bastet-hidden`.
+
+| Linked row | Azure reality | Result |
+|---|---|---|
+| `invisible-link` | 403, resource group not visible | **withheld**, warning names it; force-through refused 409, nothing deleted |
+| `really-gone` | 404, genuinely absent | **offered** `VNetDeleted`, committed and archived (1 archived) |
+
+Afterwards `invisible-link` is still live and only `really-gone` is in `DeletedSubnets`. The 409's
+warning carries **F12's new wording** — "Azure denied access when asked about them directly" — so that
+fix is confirmed live too.
+
+**Log:** 2,255 lines, **zero `crit:`, zero ESC bytes**, one `fail:` and six `warn:`, every one
+classified. The `fail:` is my own deliberate log-forging probe, and its rendering *is* F6's evidence:
+the crafted escape sequence appears as literal text in both the message and the exception line. Three
+`warn:` are `Azure denied access to …vnet-hidden (403), so it cannot be reported as deleted` — the
+deliberate permission probe working, logged by design. The other three are environmental and
+pre-existing, both recorded by round 5: DataProtection has no XML encryptor for a local run, and EF
+advises on `QuerySplittingBehavior` for a multi-`Include` query.
+
+**Coverage was not re-run.** This round deleted no code — F14 renamed a function and F18 added a
+helper — so there is no dead-code delta to compare against a reference sweep.
+
+**Deliberately not done**, each argued in the struck entry that owns it:
+
+- the ARM-based prefix-equality check at `SubnetController.Azure.cs:320` (F1) — it needs a network
+  round-trip inside a transactional write, far more invasive than a crafted-post-only defect warrants;
+- `Guid.TryParse` before the ARM calls (F6) — the parsing is cheap but the failure semantics differ per
+  method, and conflating "bad identifier" with "no VNets" is the distinction round 5's E-series was
+  about;
+- the bulk import still reads only a multi-prefix subnet's **first** prefix (F2) — closing that means
+  creating several Bastet subnets from one Azure subnet, a feature change;
+- `findOptimalCidr`'s loop bound (F10), the `site.js` consolidation of six mask copies (F16), and the
+  per-prefix "already imported" sentence (F11), which is correct for its one reachable case;
+- the reconcile badge colour for `VNetPrefixRemoved` (F4) — a UI preference once the reason is rendered.
+
+**Two round-5 entries were corrected** where this round disproved them: E5's reachability claim (a
+normal browser does *not* block the submit — the library sets `novalidate`) and E6's claim that a SQLite
+test was impossible. Both are appended as corrections rather than rewrites, so the original reasoning
+stays readable.
+
 ## Verdict
 
 **No critical findings. Two high, three medium, twelve low, one info.** 18 survived verification, 7
