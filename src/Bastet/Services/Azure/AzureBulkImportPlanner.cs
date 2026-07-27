@@ -34,7 +34,7 @@ namespace Bastet.Services.Azure
                 RenameMatchedBastetSubnets = selection.RenameMatchedBastetSubnets
             };
 
-            if (selection.VNetPrefixes.Count == 0)
+            if (selection.VNetPrefixes is null or { Count: 0 })
             {
                 plan.GlobalErrors.Add("No VNet address prefixes were selected.");
                 return plan;
@@ -46,6 +46,13 @@ namespace Bastet.Services.Azure
             List<ParsedPrefixSelection> parsed = [];
             foreach (BulkImportSelectedVNetPrefixDto sel in selection.VNetPrefixes)
             {
+                // A null entry in the list is as reachable as a null list: both come from the body.
+                if (sel is null)
+                {
+                    plan.GlobalErrors.Add("A selected VNet prefix was empty.");
+                    continue;
+                }
+
                 if (!TryParseCidr(sel.AddressPrefix, out string prefixNetwork, out int prefixCidr))
                 {
                     plan.GlobalErrors.Add($"VNet '{sel.VNetName}' has an invalid address prefix '{sel.AddressPrefix}'.");
@@ -66,8 +73,14 @@ namespace Bastet.Services.Azure
                     PrefixCidr = prefixCidr
                 };
 
-                foreach (BulkImportSelectedSubnetDto sub in sel.Subnets)
+                foreach (BulkImportSelectedSubnetDto sub in sel.Subnets ?? [])
                 {
+                    if (sub is null)
+                    {
+                        plan.GlobalErrors.Add($"A selected subnet under VNet '{sel.VNetName}' was empty.");
+                        continue;
+                    }
+
                     if (!TryParseCidr(sub.AddressPrefix, out string subNet, out int subCidr))
                     {
                         plan.GlobalErrors.Add(

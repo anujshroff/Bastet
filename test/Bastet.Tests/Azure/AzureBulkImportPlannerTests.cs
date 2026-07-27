@@ -45,6 +45,54 @@ public class AzureBulkImportPlannerTests
             VNetPrefixes = [.. prefixes]
         };
 
+    /// <summary>
+    /// System.Text.Json overwrites a collection initialiser when the body carries an explicit null,
+    /// so `= []` on the DTO is not a guarantee. Dereferencing produced an unhandled
+    /// NullReferenceException - and on the commit path that happens inside the subnet lock and
+    /// outside the action's only catch, so the caller got an HTML 500 where every other malformed
+    /// body returns modelled JSON.
+    /// </summary>
+    [Fact]
+    public void NullVNetPrefixes_ReportsAnError_DoesNotThrow()
+    {
+        BulkImportSelectionDto selection = new()
+        {
+            SubscriptionId = "sub-1",
+            SubscriptionName = "Test Sub",
+            VNetPrefixes = null!
+        };
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(selection, []);
+
+        Assert.False(plan.CanCommit);
+        Assert.Contains(plan.GlobalErrors, e => e.Contains("No VNet address prefixes were selected."));
+    }
+
+    [Fact]
+    public void NullEntryInVNetPrefixes_ReportsAnError_DoesNotThrow()
+    {
+        BulkImportSelectionDto selection = Sel(false, Pref("vnet-a", "10.0.0.0/16"));
+        selection.VNetPrefixes.Add(null!);
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(selection, []);
+
+        Assert.Contains(plan.GlobalErrors, e => e.Contains("was empty"));
+    }
+
+    [Fact]
+    public void NullSubnetsCollection_ReportsNothingAndDoesNotThrow()
+    {
+        BulkImportSelectedVNetPrefixDto prefix = Pref("vnet-a", "10.0.0.0/16");
+        prefix.Subnets = null!;
+        BulkImportSelectionDto selection = Sel(false, prefix);
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(selection, []);
+
+        // A VNet prefix with no subnets is a legitimate selection - the target is still created.
+        Assert.Empty(plan.GlobalErrors);
+        Assert.Single(plan.Items);
+    }
+
     private static ExistingSubnetSnapshot Existing(
         int id, string name, string network, int cidr,
         bool hasChildren = false, bool hasHostIps = false, bool fullyAllocated = false,

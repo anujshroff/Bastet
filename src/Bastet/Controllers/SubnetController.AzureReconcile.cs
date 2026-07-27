@@ -42,7 +42,11 @@ public partial class SubnetController : Controller
             return BadRequest(new { success = false, error = "You must type 'approved' to confirm deletion." });
         }
 
-        if (request.SubnetIds.Count == 0)
+        // System.Text.Json overwrites the DTO's collection initialiser with null when the body
+        // carries an explicit null, so the initialiser is not a guarantee. Same shape the batch
+        // create path uses, and the difference matters: this path answers with modelled JSON, and
+        // dereferencing instead produces an HTML 500 the wizard cannot read.
+        if (request.SubnetIds is null or { Count: 0 })
         {
             return BadRequest(new { success = false, error = "No subnets were selected for deletion." });
         }

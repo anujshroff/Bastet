@@ -437,38 +437,38 @@ _Tests 615 → 619 (+4). Build clean, 0 warnings._
 
 ## F7. A JSON `null` for a collection returns an unhandled 500 past the subnet lock `[×2]`
 
-**Confidence: confirmed.**
+_F7 is fixed and committed at all four sites the two finders listed between them. The reconcile
+commit now tests `request.SubnetIds is null or { Count: 0 }`, the same pattern
+`SubnetController.Azure.cs:130` already used, and the planner guards its list, its entries and each
+entry's `Subnets` collection. Entries are guarded as well as collections because a null **element**
+arrives from the body exactly as easily as a null list._
 
-**Where:** [AzureBulkImportPlanner.cs:37](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L37)
-(`"vNetPrefixes":null`), [:49](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L49)
-(`"vNetPrefixes":[null]`), [:69](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L69)
-(`"subnets":null`), reached via
-[BulkAzure.cs:62](../src/Bastet/Controllers/SubnetController.BulkAzure.cs#L62) inside
-`ExecuteWithSubnetLockAsync` and outside the try at
-[:81](../src/Bastet/Controllers/SubnetController.BulkAzure.cs#L81), whose only `catch` is
-`TimeoutException`; and
-[SubnetController.AzureReconcile.cs:45](../src/Bastet/Controllers/SubnetController.AzureReconcile.cs#L45)
-(`"subnetIds":null`) — which fires **before** any lock is taken.
+_A null `Subnets` collection is treated as "no subnets", not as an error: a VNet prefix selected with
+no Azure subnets under it is a legitimate selection and the target is still created. A null list or a
+null entry is reported through `GlobalErrors`, which is the channel the wizard already renders._
 
-**Failure scenario.** `System.Text.Json` overwrites the DTO's `= []` initializer with `null`. Both bulk
-endpoints answer 500 with a non-JSON body (a `text/plain` stack trace in Development, the `text/html`
-error page in Production), where the field *omitted* correctly yields
-`400 {"success":false,"globalErrors":["No VNet address prefixes were selected."]}`. The sibling
-`/Azure/BulkImportPreview` handles the same body correctly. Reachable as a scripted mistake, not only a
-crafted one: an empty shell variable in the documented `jpost '{"subnetIds":[...]}'` idiom produces
-exactly `"subnetIds":null`.
+_Three tests, and they fail against the unfixed planner with `System.NullReferenceException : Object
+reference not set to an instance of an object.` - the defect verbatim. Proven by reverting the guards
+in place and re-running rather than by reasoning about them._
 
-**The lock is correctly released** — zero `APPLICATION` rows in `sys.dm_tran_locks` afterwards, 19
-acquires and 19 releases, next request served in 16 ms.
+_**One consequence to state rather than let a reader discover.** Fixing this in the planner also
+changes `/Azure/BulkImportPreview`'s answer to the same body: it used to return HTTP 200 with
+`{"success":false,"error":"Failed to build the import preview…"}` because the exception was caught
+there, and now returns `success:true` with a plan carrying `globalErrors`. That is the better shape -
+the operator is told which selection was empty rather than that the preview failed - but it is a
+behaviour change on a second endpoint and it should not be a surprise._
 
-**Fix.** Guard the three planner sites and add `is null or { Count: 0 }` at `AzureReconcile.cs:45`,
-matching `SubnetController.Azure.cs:130`. **State the side effect in the commit:** fixing it in the
-planner changes `/Azure/BulkImportPreview`'s answer to the same body from
-`{"success":false,"error":"Failed to build the import preview…"}` to `success:true` with a `globalErrors`
-plan. That is the better shape, but it is a behaviour change on a second endpoint. Do **not** merely
-widen the `catch` to `Exception` — that leaves the request classified as a server fault.
+_The finding's cheaper interim - widening the action's `catch (TimeoutException)` to `Exception` - was
+not taken, as both finders recommended: it would leave the request classified as a server fault when
+it is a malformed request._
+
+_The lock was already correct and is untouched. Both finders measured zero lingering `APPLICATION`
+locks after the failing request, with 19 acquires and 19 releases in the log._
+
+_Tests 619 → 622 (+3). Build clean, 0 warnings._
 
 ---
+
 
 ## F8. Two bulk-commit failures render a red panel reading only "Commit failed:" `[×2]`
 
