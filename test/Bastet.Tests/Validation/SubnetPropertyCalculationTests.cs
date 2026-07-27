@@ -230,7 +230,35 @@ public class SubnetPropertyCalculationTests
         // Gap from 10.0.0.128 to 10.0.0.254 (Excluding broadcast address)
         Assert.Equal("10.0.0.128", result[0].StartIp);
         Assert.Equal("10.0.0.254", result[0].EndIp);
-        Assert.Equal(126, result[0].AddressCount); // Implementation returns 126
+        // 10.0.0.128-10.0.0.254 inclusive is 127 addresses. The broadcast (.255) is already
+        // excluded by EndIp; it must not be subtracted a second time from the count.
+        Assert.Equal(127, result[0].AddressCount);
+    }
+
+    /// <summary>
+    /// A trailing gap of exactly one address. The removed special case got this right via a
+    /// hard-coded fallback, so it is pinned here to prove the general formula also does.
+    /// 10.0.0.0/24 with .0-.253 consumed leaves only .254, the last usable address.
+    /// </summary>
+    [Fact]
+    public void CalculateUnallocatedRanges_TrailingGapOfOne_ReportsOneAddress()
+    {
+        List<Subnet> childSubnets = [
+            new() { NetworkAddress = "10.0.0.0", Cidr = 25 },    // .0   - .127
+            new() { NetworkAddress = "10.0.0.128", Cidr = 26 },  // .128 - .191
+            new() { NetworkAddress = "10.0.0.192", Cidr = 27 },  // .192 - .223
+            new() { NetworkAddress = "10.0.0.224", Cidr = 28 },  // .224 - .239
+            new() { NetworkAddress = "10.0.0.240", Cidr = 29 },  // .240 - .247
+            new() { NetworkAddress = "10.0.0.248", Cidr = 30 },  // .248 - .251
+            new() { NetworkAddress = "10.0.0.252", Cidr = 31 },  // .252 - .253
+        ];
+
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 24, childSubnets)];
+
+        IPRange last = Assert.Single(result);
+        Assert.Equal("10.0.0.254", last.StartIp);
+        Assert.Equal("10.0.0.254", last.EndIp);
+        Assert.Equal(1, last.AddressCount);
     }
 
     [Fact]
@@ -259,7 +287,8 @@ public class SubnetPropertyCalculationTests
         // Second gap: 10.0.0.192 - 10.0.0.254 (Excluding broadcast address)
         Assert.Equal("10.0.0.192", result[1].StartIp);
         Assert.Equal("10.0.0.254", result[1].EndIp);
-        Assert.Equal(62, result[1].AddressCount); // Implementation returns 62
+        // 10.0.0.192-10.0.0.254 inclusive is 63 - counted the same way as the 64 above.
+        Assert.Equal(63, result[1].AddressCount);
     }
 
     [Fact]

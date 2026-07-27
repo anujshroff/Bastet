@@ -473,25 +473,17 @@ public class IpUtilityService : IIpUtilityService
 
             if (currentPosition <= lastIp)
             {
-                // For the last range that ends at the broadcast address, calculate the address count correctly
-                if (lastIp == endIp - 1 && cidr < 31)
+                // lastIp already excludes the broadcast address above, so the range is simply
+                // inclusive of both ends. The special case this replaces subtracted the broadcast a
+                // second time, reporting one address too few for every trailing gap of two or more
+                // while the middle gaps above counted correctly - two rows on the same page
+                // disagreeing about how to count.
+                unallocatedRanges.Add(new IPRange
                 {
-                    unallocatedRanges.Add(new IPRange
-                    {
-                        StartIp = UIntToIpString((uint)currentPosition),
-                        EndIp = UIntToIpString(lastIp),
-                        AddressCount = (lastIp - currentPosition > 0) ? lastIp - currentPosition : 1
-                    });
-                }
-                else
-                {
-                    unallocatedRanges.Add(new IPRange
-                    {
-                        StartIp = UIntToIpString((uint)currentPosition),
-                        EndIp = UIntToIpString(lastIp),
-                        AddressCount = lastIp - currentPosition + 1
-                    });
-                }
+                    StartIp = UIntToIpString((uint)currentPosition),
+                    EndIp = UIntToIpString(lastIp),
+                    AddressCount = lastIp - currentPosition + 1
+                });
             }
         }
 
