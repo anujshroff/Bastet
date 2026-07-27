@@ -20,9 +20,6 @@ public partial class InputSanitizationService : IInputSanitizationService
     [GeneratedRegex(@"javascript:|vbscript:|onload|onerror|onclick|onmouseover|onkeydown|onkeyup|onchange|onsubmit|data:", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex DangerousScriptPattern();
 
-    [GeneratedRegex(@"^[a-zA-Z0-9\.\-_:]*$", RegexOptions.Compiled)]
-    private static partial Regex NetworkInputPattern();
-
     // Maximum lengths for different input types
     private const int MaxStringLength = 500;
     private const int MaxNameLength = 100;
