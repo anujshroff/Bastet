@@ -45,22 +45,26 @@ Read in this order: **F1**, **F2**, **F3**, then **F5**.
 
 ## Reconcile step 0 — restore the E8 entry to `docs/AUDIT-FINDINGS-5.md`
 
-**Do this first, in its own commit, before `F1`.** The shipped round-5 findings file has no `E8`
-section. It was present through `8a2223a` and deleted by `3c805c1` (the E7 fix), whose replacement
-hunk swallowed the whole neighbouring entry — `-62/+32` on a file that should only ever have grown.
-E8 is still referenced twice in the surviving text, so the file cites an entry it does not contain.
+_Done and committed. The 28-line `E8` section was recovered from `8a2223a` and reinserted into
+`docs/AUDIT-FINDINGS-5.md`, which now carries 14 `E` entries again and no longer cites a section it
+does not contain. The restored range is byte-identical to `8a2223a`'s copy, verified by `diff`, and
+the change is `28 insertions, 0 deletions` — purely additive, nothing else in the file touched._
 
-Recover it with `git show 8a2223a:docs/AUDIT-FINDINGS-5.md` (the section is around lines 351–372) and
-reinsert it **immediately ahead of `## E7`**, its original position, not in numeric order: the entry's
-own second paragraph explains why it sits there ("Taken out of numeric order, ahead of E7… E7 is a
-client-side jQuery defect needing a browser rig, and this one needed nothing but a grep"), and moving
-it would make a committed struck entry false. Nothing else in the file changes.
+_**This entry's own instruction was wrong and was not followed.** It said to reinsert the section
+"immediately ahead of `## E7`, its original position, not in numeric order", reasoning from the
+entry's own sentence "Taken out of numeric order, ahead of E7… E7 follows immediately". That sentence
+describes the order the **fixes** were done, not where the text sat: at `8a2223a` the E8 heading is
+at line 330 and E7's at 306, so E8 was always **after** E7, in ordinary numeric order. E7 was still
+an unstruck finding at that point and E8 a struck one, which is what "E7 follows immediately" refers
+to — the next thing to be worked, not the next section. Restoring it ahead of E7 would have moved it
+somewhere it never was. It is back between E7 and E9, where `3c805c1` deleted it from._
 
-Verify the restored range is byte-identical to `8a2223a`'s copy and that
-`grep -c '^## E' docs/AUDIT-FINDINGS-5.md` returns 14.
+_The deletion mechanism is worth keeping: `3c805c1` replaced E7's finding text with its struck
+paragraph, and the replacement hunk ran on past E7's own text and swallowed the whole neighbouring
+entry — `-62/+32` on a file that should only ever grow. **A fix commit that also edits the findings
+file must diff its own hunk before committing.**_
 
-It carries no `F` number: the `F` series is for code defects. The process lesson is worth keeping —
-**a fix commit that also edits the findings file must diff its own hunk before committing.**
+_No `F` number, no code change, no test delta: 603 → 603._
 
 ## How this audit ran
 

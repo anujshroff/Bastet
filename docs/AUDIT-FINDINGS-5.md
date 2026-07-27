@@ -377,6 +377,34 @@ _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ---
 
+## E8. The Create form calls `/api/subnets/calculate-mask`, a route that has never existed `[×1]`
+
+_E8 is fixed and committed. The `$.get(...).fail(...)` wrapper is deleted and `updateSubnetInfo` now
+calls the local `calculateSubnetMask(cidrValue)` directly — which is what the `.fail` handler already
+did on every single keystroke, since the request could never succeed._
+
+_**Taken out of numeric order, ahead of E7**, which is recorded here rather than left implicit: E7 is
+a client-side jQuery defect needing a browser rig, and this one needed nothing but a grep. E7 follows
+immediately._
+
+_Verified the route genuinely does not exist rather than trusting the finding: a repo-wide grep for
+`api/subnets` and `calculate-mask` across `.cs`, `.cshtml` and `.js` returned exactly one line — the
+call itself — and the only `[Route]` attributes in the entire application are `ErrorController`'s two.
+After the fix the only remaining mention anywhere is the comment explaining what used to be there._
+
+_No fallback behaviour is lost. The guard immediately above the call already constrains the value to
+0–32, so `calculateSubnetMask` is never handed anything it reports as invalid, and the server renders
+the initial value into the span independently. Being a `[×1]` this was re-derived rather than assumed;
+it was found twice within pass 1 (by both the UI and dead-code beats) and missed entirely by pass 2._
+
+_No test ships: there is no JS harness in the repo, and the change removes a network call rather than
+altering a computed value. The definitive check is the absence of a 404 for that URL when the Create
+page is exercised, which is folded into the closing sweep._
+
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
+
+---
+
 ## E9. `BatchCreateChildSubnets` discards every selected child when an encompassing entry is present `[×2]`
 
 _E9 is fixed and committed. A second guard now sits beside D9's: an encompassing entry submitted with
