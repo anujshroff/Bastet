@@ -401,3 +401,7 @@ FodyWeavers.xsd
 
 # Cline (Custom)
 cline/
+
+# Claude Code local settings. Machine-specific permission grants and scratch paths — the skills
+# under .claude/skills/ are tracked, this is not.
+.claude/settings.local.json
