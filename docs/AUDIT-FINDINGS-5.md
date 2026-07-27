@@ -329,26 +329,31 @@ affordance is the icon only, not the cursor.
 
 ## E8. The Create form calls `/api/subnets/calculate-mask`, a route that has never existed `[×1]`
 
-**Confidence: confirmed.** Found twice in pass 1 (UI and dead-code beats), by neither beat in pass 2 —
-so treat the absence as weak, per the tagging rule.
+_E8 is fixed and committed. The `$.get(...).fail(...)` wrapper is deleted and `updateSubnetInfo` now
+calls the local `calculateSubnetMask(cidrValue)` directly — which is what the `.fail` handler already
+did on every single keystroke, since the request could never succeed._
 
-**Where:** [_SubnetFormScripts.cshtml:46](../src/Bastet/Views/Subnet/Create/_SubnetFormScripts.cshtml#L46).
+_**Taken out of numeric order, ahead of E7**, which is recorded here rather than left implicit: E7 is
+a client-side jQuery defect needing a browser rig, and this one needed nothing but a grep. E7 follows
+immediately._
 
-A repo-wide grep for `calculate-mask` returns exactly one line: this one. There is no `Api` controller
-and the only `[Route]` attributes in the tree are `ErrorController.cs:16` and `:61`. So the request
-404s, is re-executed through `UseStatusCodePagesWithReExecute("/Error/{0}")` — registered in both the
-dev and non-dev branches — and renders a full server-side Razor error page that jQuery then discards,
-because a 404 sends it to `.fail()`, which computes the mask locally anyway.
+_Verified the route genuinely does not exist rather than trusting the finding: a repo-wide grep for
+`api/subnets` and `calculate-mask` across `.cs`, `.cshtml` and `.js` returned exactly one line — the
+call itself — and the only `[Route]` attributes in the entire application are `ErrorController`'s two.
+After the fix the only remaining mention anywhere is the comment explaining what used to be there._
 
-**Failure scenario.** Every keystroke in the CIDR field costs a wasted round-trip plus a discarded
-multi-KB error render. And because `CreateSubnetViewModel.Cidr` is a non-nullable int, `asp-for` renders
-`value="0"` and `initializeForm()` fires one on **every** page load before the user types anything.
+_No fallback behaviour is lost. The guard immediately above the call already constrains the value to
+0–32, so `calculateSubnetMask` is never handed anything it reports as invalid, and the server renders
+the initial value into the span independently. Being a `[×1]` this was re-derived rather than assumed;
+it was found twice within pass 1 (by both the UI and dead-code beats) and missed entirely by pass 2._
 
-The success callback at line 47 is unreachable code that has never executed.
+_No test ships: there is no JS harness in the repo, and the change removes a network call rather than
+altering a computed value. The definitive check is the absence of a 404 for that URL when the Create
+page is exercised, which is folded into the closing sweep._
 
-**Fix.** Delete the `$.get`/`.fail` wrapper and call the local helper directly:
-`$('#subnetMaskDisplay').text(calculateSubnetMask(cidrValue));`. It is already the fallback, already
-covers /0 through /32, and being synchronous removes the ordering hazard between concurrent responses.
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
+
+---
 
 ## E9. `BatchCreateChildSubnets` discards every selected child when an encompassing entry is present `[×2]`
 
