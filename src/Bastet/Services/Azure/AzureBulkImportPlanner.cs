@@ -673,8 +673,8 @@ namespace Bastet.Services.Azure
 
         /// <summary>
         /// If <paramref name="baseName"/> is already used, append a VNet suffix to disambiguate,
-        /// preserving the 50-character limit. Falls back to numeric suffixes if even the suffixed
-        /// name collides.
+        /// staying within <see cref="MaxSubnetNameLength"/>. Falls back to numeric suffixes if even
+        /// the suffixed name collides.
         /// </summary>
         private static string DisambiguateName(string baseName, HashSet<string> usedNames, string vnetName)
         {
