@@ -380,8 +380,8 @@ public partial class SubnetController : Controller
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
             logger.LogError(ex, "Batch create of child subnets under parent {ParentId} failed", parentId);
+            await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
             const string unexpected = "An unexpected error occurred while creating subnets. Details have been logged.";
             return BatchCreateFailure(isAzureImport, parentId, unexpected, StatusCode(500, unexpected));
         }

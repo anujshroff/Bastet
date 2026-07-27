@@ -421,9 +421,9 @@ public class HostIpController(
                 }
                 catch (Exception ex)
                 {
-                    // Rollback transaction on error
-                    await transaction.RollbackAsync();
+                    // Log before rolling back - see TransactionCleanup.RollbackQuietlyAsync.
                     logger.LogError(ex, "Host IP delete failed");
+                    await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
                     TempData["ErrorMessage"] = "Error deleting host IP. Details have been logged.";
                     return RedirectToAction(nameof(Delete), new { ip });
                 }

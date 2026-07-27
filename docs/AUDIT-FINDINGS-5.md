@@ -191,53 +191,48 @@ _Tests 590 → 596 (+6). Build clean, 0 warnings._
 
 ## E4. Every transaction catch block rolls back before logging, destroying the original exception `[×2]`
 
-**Confidence: confirmed.** Proven against a real SQL Server 2022 with the pinned driver versions.
+_E4 is fixed and committed at all five sites. Each catch block now logs first and then calls a shared
+`TransactionCleanup.RollbackQuietlyAsync`, which rolls back and logs rather than throws if the
+rollback itself fails._
 
-**Where — five identical sites:**
-[SubnetController.Delete.cs:152-153](../src/Bastet/Controllers/SubnetController.Delete.cs#L152-L153),
-[SubnetController.Azure.cs:383-384](../src/Bastet/Controllers/SubnetController.Azure.cs#L383-L384),
-[SubnetController.BulkAzure.cs:292-293](../src/Bastet/Controllers/SubnetController.BulkAzure.cs#L292-L293),
-[SubnetController.AzureReconcile.cs:160-161](../src/Bastet/Controllers/SubnetController.AzureReconcile.cs#L160-L161),
-[HostIpController.cs:425-426](../src/Bastet/Controllers/HostIpController.cs#L425-L426).
-
-Every one is `await transaction.RollbackAsync();` followed by `logger.LogError(ex, …)`.
-
-**Failure scenario.** A bulk Azure import of 40 subnets; the writes succeed and the connection drops
-during `CommitAsync()`. Measured against real SQL Server (session killed from a second connection):
+_Reproduced independently against a real SQL Server 2022 container with the pinned
+Microsoft.Data.SqlClient 6.1.1, rather than trusting the audit's recorded measurement. Killing the
+session mid-transaction and then replaying the shipped catch-block order gives:_
 
 ```
-commit after KILL          -> SqlException: transport-level error
-rollback after that commit -> InvalidOperationException: This SqlTransaction has completed; it is no longer usable.
-rollback after a SUCCESSFUL commit -> InvalidOperationException (same)
-DisposeAsync after the failed rollback -> no exception
+A1 commit threw   -> SqlException: A transport-level error has occurred when receiving results from the server.
+A2 rollback threw -> InvalidOperationException: This SqlTransaction has completed; it is no longer usable.
+   => the logger.LogError(ex, ...) on the NEXT line never runs.
+B  rollback after successful commit threw -> InvalidOperationException: This SqlTransaction has completed.
+C1 write threw    -> SqlException: Conversion failed when converting the varchar value ...
+C2 rollback: succeeded - so the common case is NOT affected by the fix
 ```
 
-The `InvalidOperationException` replaces the `SqlException` *before* the next line runs, so the
-controller's contextual message ("Bulk Azure import commit failed") is never written and the intended
-`500 {"success":false,…}` JSON never returned — the AJAX wizard receives the HTML `/Error` page instead.
+_Case C is the one that mattered to get right. An ordinary failure — a constraint violation, a bad
+conversion — leaves the transaction usable and still rolls back exactly as before, so the fix changes
+nothing on the path that actually runs most often. Case B shows the provider has no guard at all:
+rollback after a **successful** commit throws identically._
 
-**Scope, corrected from the finder's claim:** the underlying fault is *not* invisible. EF Core still
-logs `Database.Transaction[20205]` at Error with the exception attached, and `ExceptionHandlerMiddleware`
-logs the escaping one. What is lost is the controller's context and correlation, plus the intended
-response shape. That is why this is low, not medium: no data-integrity consequence — SQL Server rolls
-back server-side regardless — and the trigger is an infrastructure fault in a narrow window.
+_A shared helper was chosen over five copies of the same try/catch, following the precedent the
+migration-lock release already set. It is a new file, `Controllers/TransactionCleanup.cs`, which is
+more structure than a five-line finding usually earns — the alternative was the same six lines
+written out five times, which is exactly the kind of residue these rounds keep finding. The class is
+`public` rather than `internal` so the test project can reach it: the repo has no `InternalsVisibleTo`
+and no convention of testing internals, and Bastet ships as an application rather than a library, so
+widening it costs nothing real._
 
-**Fix.** The rule D12 already applied to the migration-lock release, applied here:
+_Three tests pin the helper, and their value was checked by removing the swallow in a scratch copy —
+two of the three fail. The remaining one is the guard: a rollback that succeeds must log nothing._
 
-```csharp
-catch (Exception ex)
-{
-    logger.LogError(ex, "…");
-    try { await transaction.RollbackAsync(); }
-    catch (Exception rollbackEx) { logger.LogError(rollbackEx, "Rollback failed after the error above"); }
-    return …;
-}
-```
+_The audit's severity reasoning was carried over unchanged and is worth keeping: the underlying fault
+is **not** invisible without this fix. EF Core still logs `Database.Transaction[20205]` with the
+exception attached, and the exception-handler middleware logs the escaping one. What was lost is the
+controller's own contextual message and correlation, and the action's intended response shape — an
+AJAX caller receiving an HTML error page where it parses JSON._
 
-The `using` declaration already disposes (and rolls back) any transaction still live, so swallowing the
-explicit rollback strands nothing — confirmed by the `DisposeAsync` probe above.
+_Tests 596 → 599 (+3). Build clean, 0 warnings._
 
-**Cheaper interim:** move the existing `logger.LogError(ex, …)` above the rollback at all five sites.
+---
 
 ## E5. Subnet Edit POST returns 500 on an out-of-range CIDR instead of redisplaying the form `[×2]`
 

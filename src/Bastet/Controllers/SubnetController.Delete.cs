@@ -148,9 +148,11 @@ public partial class SubnetController : Controller
         }
         catch (Exception ex)
         {
-            // Rollback the transaction on error
-            await transaction.RollbackAsync();
+            // Log before rolling back. If the commit itself is what failed, the transaction is
+            // already complete and RollbackAsync throws, which would replace this exception before
+            // it was ever recorded - the message the user is about to be shown promises otherwise.
             logger.LogError(ex, "Subnet delete failed for subnet {SubnetId}", id);
+            await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
             TempData["ErrorMessage"] = "Error deleting subnet. Details have been logged.";
             return RedirectToAction(nameof(Delete), new { id });
         }

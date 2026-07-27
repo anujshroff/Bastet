@@ -289,8 +289,8 @@ public partial class SubnetController : Controller
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
             logger.LogError(ex, "Bulk Azure import commit failed");
+            await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
             return StatusCode(500, new { success = false, error = "The bulk import failed and no changes were saved. Details have been logged." });
         }
     }
