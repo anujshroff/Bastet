@@ -7,7 +7,7 @@ namespace Bastet.Services.Validation;
 /// </summary>
 public interface ISubnetValidationService
 {
-        /// <summary>
+    /// <summary>
     /// Validates that a subnet is properly contained within a parent subnet
     /// </summary>
     /// <param name="childNetwork">The child network address</param>
