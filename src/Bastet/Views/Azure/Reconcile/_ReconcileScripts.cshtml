@@ -222,6 +222,9 @@
             $("#rec-scan-warnings").toggleClass("d-none", warnings.length === 0);
 
             const items = plan.items || [];
+            // Declared here rather than below because the "nothing to clean up" banner is gated on
+            // it as well as on items.
+            const reviewItems = plan.reviewItems || [];
             const rows = $("#rec-stale-rows").empty();
 
             items.forEach(function (item) {
@@ -245,9 +248,16 @@
             });
 
             $("#rec-stale-section").toggleClass("d-none", items.length === 0);
-            $("#rec-nothing-stale").toggleClass("d-none", items.length > 0);
 
-            const reviewItems = plan.reviewItems || [];
+            // "Everything still exists in Azure. There is nothing to clean up." is a statement of
+            // fact, so it may only appear when the scan actually established that. Rows withheld
+            // because Azure could not be asked produce a warning and no items, and subnets needing
+            // review produce reviewItems and no items - in both cases there is something to report,
+            // and claiming a clean bill over the top of it is the same fail-open assertion in prose
+            // that the deletion path is careful never to make.
+            const nothingToReport = items.length === 0 && warnings.length === 0 && reviewItems.length === 0;
+            $("#rec-nothing-stale").toggleClass("d-none", !nothingToReport);
+
             const reviewRows = $("#rec-review-rows").empty();
             reviewItems.forEach(function (item) {
                 const tr = $("<tr></tr>");

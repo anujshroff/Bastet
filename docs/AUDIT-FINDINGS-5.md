@@ -400,23 +400,35 @@ _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ## E11. The green "nothing to clean up" banner shows even when rows were withheld `[×1]`
 
-**Confidence: confirmed.**
+_E11 is fixed and committed. The success banner is now gated on a `nothingToReport` local —
+`items.length === 0 && warnings.length === 0 && reviewItems.length === 0` — so it only appears when
+the scan genuinely established that there is nothing to say._
 
-**Where:** [_ReconcileScripts.cshtml:247-248](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L247-L248)
-— both toggles key on `items.length` alone.
-[_StepReview.cshtml:30-33](../src/Bastet/Views/Azure/Reconcile/_StepReview.cshtml#L30-L33) is the banner.
+_The finding's own correction was applied: `reviewItems` was declared **after** the toggle it now
+participates in, so the declaration is hoisted to sit beside `items`. Dropping the suggested
+one-liner in as written would not have compiled meaningfully — it would have referenced a `const` in
+its temporal dead zone. The finding caught this itself; it is recorded because it is the kind of
+detail that turns a two-line fix into a broken page._
 
-**Failure scenario.** The credential loses access to a resource group. Every affected row is withheld,
-so `items` is empty and the success banner renders — directly beneath the yellow warning saying rows
-were withheld because Azure would not confirm their state. The page asserts as fact
-("Everything imported from this subscription still exists in Azure") the very thing Bastet just recorded
-it could not establish. It also renders beneath E1's factually wrong warning.
+_The alternative of adding a neutral "nothing can be offered for deletion from this scan" message was
+not taken. It needs new markup, and the warnings block sitting directly above already says precisely
+why nothing is offered — a second message would restate it less specifically. Hiding the false claim
+is the whole of the defect._
 
-**Fix.** Gate on there being nothing to report at all, not nothing deletable. `warnings` is already in
-scope at :219; `reviewItems` is declared at :250 and must be hoisted above the toggle if included:
-`items.length > 0 || warnings.length > 0 || reviewItems.length > 0`. Better: when `items` is empty but
-something was reported, render a neutral "Nothing can be offered for deletion from this scan" so the
-page never claims a clean bill it did not earn.
+_Verified the edited script still parses, by extracting the `<script>` body with the four
+`@Url.Action` expressions substituted (not retyped) and running it through `new Function(src)` in
+chromium: `OK`. Worth doing because a syntax error in a `.cshtml` is invisible to the C# compiler and
+to the test suite — it would surface only when the page is requested. This also covers E10's edit to
+the same file. The banner's rendered behaviour is exercised in the closing sweep._
+
+_Being a `[×1]` the premise was re-checked rather than assumed: both toggles at that point keyed on
+`items` alone, so a scan with zero deletable rows and a non-empty warnings array did assert
+"Everything imported from this subscription still exists in Azure" directly beneath a warning saying
+otherwise._
+
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
+
+---
 
 ## E12. Collapsing a subtree leaves the toggle showing the expanded icon `[×1]`
 
