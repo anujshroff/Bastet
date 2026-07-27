@@ -50,12 +50,6 @@ public class EditSubnetViewModel
     [SanitizeTags] // Auto-sanitization
     public string? Tags { get; set; }
 
-    /// <summary>
-    /// Indicates if the subnet is fully allocated (no IPs available)
-    /// </summary>
-    [Display(Name = "Fully Allocated")]
-    public bool IsFullyAllocated { get; set; }
-
     // Additional display-only properties
     [Display(Name = "Subnet Mask")]
     public string SubnetMask { get; set; } = string.Empty;

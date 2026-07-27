@@ -294,7 +294,6 @@ public partial class SubnetController : Controller
             Cidr = subnet.Cidr,
             Description = subnet.Description,
             SubnetMask = ipUtilityService.CalculateSubnetMask(subnet.Cidr),
-            TotalIpAddresses = ipUtilityService.CalculateTotalIpAddresses(subnet.Cidr),
             UsableIpAddresses = ipUtilityService.CalculateUsableIpAddresses(subnet.Cidr),
             ParentSubnetId = subnet.ParentSubnetId,
             ChildSubnets = []
