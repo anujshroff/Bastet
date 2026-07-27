@@ -62,72 +62,50 @@ was off, it is corrected here and noted.
 
 ## E1. Reconcile silently discards every prefix-drift row, and explains it with a false statement `[×2]`
 
-**Confidence: confirmed (live).** Reproduced end to end against a real Azure subscription.
+_E1 is fixed and committed, and it is the finding this round turned on. The fix partitions on what a
+row **claims** rather than applying one rule to every proposed row: a confirmation answers "is the
+resource gone?", which is a question only `VNetDeleted` and `SubnetDeleted` ask. A drift row exists
+precisely because the resource **was** found in the listing, so reading it back can only ever answer
+`Live`._
 
-**Where:** [AzureReconciler.cs:126-148](../src/Bastet/Services/Azure/AzureReconciler.cs#L126-L148) —
-the `switch` at 134-145 and `plan.Items = keep` at 148.
-Also [AzureReconciler.cs:197](../src/Bastet/Services/Azure/AzureReconciler.cs#L197) (`VNetPrefixRemoved`),
-[:233](../src/Bastet/Services/Azure/AzureReconciler.cs#L233) (`SubnetPrefixChanged`),
-[:87-94](../src/Bastet/Services/Azure/AzureReconciler.cs#L87-L94) (only `FullyAllocatingSubnetDeleted`
-is diverted to `ReviewItems`; every other status lands in the deletable `Items`),
-[:162-164](../src/Bastet/Services/Azure/AzureReconciler.cs#L162-L164) (the false warning),
-[AzureController.cs:382](../src/Bastet/Controllers/AzureController.cs#L382) (submits every row, no
-status filter), [SubnetController.AzureReconcile.cs:70](../src/Bastet/Controllers/SubnetController.AzureReconcile.cs#L70)
-(the commit path applies the same filter).
+_Both halves of the audit's suggested fix were applied — the guard in `ApplyConfirmations` and the
+filter in `ConfirmProposedDeletionsAsync` — but **not as the audit worded them**. Writing the status
+list out at both call sites would have created exactly the drift-prone duplication these rounds keep
+finding, so the rule is extracted once as `AzureReconciler.IsAbsenceStatus` and both sites call it.
+The controller now reads back only absence rows, so a scan whose drift is healthy makes **no ARM
+calls at all** rather than one per row._
 
-`ApplyConfirmations` partitions purely on the ARM verdict with no reference to `item.Status`. But
-`VNetPrefixRemoved` and `SubnetPrefixChanged` are produced *only* when the resource was found in the
-listing — their reason strings literally say "still exists". So `ConfirmOneAsync` returns `Live` for
-them by construction, every time, and they are routed to `stillLive` and stripped from `plan.Items`.
+_Proven before it was fixed, in that order. Eight regression tests were written first and all eight
+failed against the unfixed code with `Assert.Single() Failure: The collection was empty` — the drift
+row being dropped, which is the defect itself and not an unrelated failure. They cover both drift
+statuses against all three non-`Deleted` verdicts, a drift row absent from the map entirely (the
+shape the new controller filter actually produces), and a mixed plan where an absence row and a drift
+row must be judged differently in the same pass._
 
-**Failure scenario, run for real.** Against resource group `bastet`, `vnet-visible` genuinely exists at
-`10.10.0.0/16` and its subnet `snet-vnet-visible-a` at `10.10.1.0/24`. Feeding the reconciler linked
-rows recording `10.10.0.0/17` and `10.10.5.0/24` — i.e. prefix drift — produced:
+_Then re-measured against live ARM, both directions, because a unit test cannot prove ARM's answers.
+With the drifted prefixes recorded against resources that genuinely exist, the plan now reports
+`PROPOSED FOR DELETION: 2  CanCommit=True` carrying `VNetPrefixRemoved` and `SubnetPrefixChanged`,
+where before the fix it reported `0  CanCommit=False`. The counter-test matters as much and was run
+on the same build: a credential that cannot see the other resource group still withholds all 10 rows
+with the warning naming each one. The reconciler discriminates rather than merely blocking — checking
+only the first of those two would have let an over-blocking regression pass silently. Note the rig
+feeds `ApplyConfirmations` **unfiltered** input, so it proves the guard holds even without the
+controller's filter, which is a superset of the shipped path._
 
-```
---- BuildPlan (listing only) ---
-PROPOSED FOR DELETION: 2
-  #4 vnet-visible 10.10.0.0/17  [VNetPrefixRemoved]  VNet 'vnet-visible' still exists but no longer has the address prefix 10.10.0.0/17.
-  #5 snet-vnet-visible-a 10.10.5.0/24  [SubnetPrefixChanged]  ... its address prefix is now 10.10.1.0/24, not 10.10.5.0/24.
+_The audit's second complaint — that the withheld warning states rows "were missing from the
+subscription listing" when they were not — needed **no text change** and was deliberately not given
+one. After the fix, `stillLive` can only hold absence rows, for which that sentence is exactly
+accurate: they really were missing from the listing and a direct read really did find them. The
+sentence was only ever wrong about the drift rows, which no longer reach it._
 
---- ConfirmResourcesAsync (2 ids read directly from ARM) ---
-  Live  .../virtualNetworks/vnet-visible
-  Live  .../virtualNetworks/vnet-visible/subnets/snet-vnet-visible-a
+_Left alone deliberately, as the finding itself scoped: the `VNetDeleted` status is overloaded and
+also fires for "VNet exists but has no IPv4 address space left", where the direct read answers `Live`
+and the row is withheld. That withhold is defensible rather than clearly wrong — the VNet does still
+exist — and changing it means re-labelling the row, not archiving it. Untouched._
 
---- FINAL PLAN ---
-PROPOSED FOR DELETION: 0   CanCommit=False
-  WARN 2 Azure-linked subnet(s) were missing from the subscription listing but still exist in Azure,
-       so they have been withheld from deletion: 'vnet-visible', 'snet-vnet-visible-a'.
-```
+_Tests 576 → 584 (+8). Build clean, 0 warnings._
 
-The operator sees zero actionable rows, the green "nothing to clean up" banner (E11), and a warning
-asserting the rows were *missing from the listing* — which is false; they were present and matched.
-Both statuses render "Prefix removed" / "Prefix changed" badges with checkboxes in
-[_ReconcileScripts.cshtml:186-188](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L186-L188),
-so they are actionable by design. Every re-scan repeats it: the drift can never be cleaned up here.
-
-No test catches it because `MockAzureService.DefaultConfirmation` is `Deleted`
-([MockAzureService.cs:226](../test/Bastet.Tests/TestHelpers/MockAzureService.cs#L226)), and
-`VNetLiveButPrefixRemoved_Flagged` / `SubnetPrefixChanged_Flagged` exercise `BuildPlan` only, never the
-controller's confirmation step.
-
-**Fix.** Confirmation is only meaningful for statuses that assert *absence*. In
-`ConfirmProposedDeletionsAsync`, submit only
-`plan.Items.Where(i => i.Status is AzureReconcileStatus.VNetDeleted or AzureReconcileStatus.SubnetDeleted)`,
-and have `ApplyConfirmations` leave any item it was given no verdict for untouched rather than treating
-absence as `Unknown`. A healthy drift scan then makes no extra ARM calls at all.
-
-**Cheaper interim:** at the top of the `foreach`, `if (item.Status is not (VNetDeleted or SubnetDeleted)) { keep.Add(item); continue; }`.
-That restores pre-D3 behaviour for exactly those rows and leaves D3's protection intact everywhere else.
-
-Any regression test **must** set `MockAzureService.Confirmations[id] = AzureResourceConfirmation.Live`
-explicitly; the mock's `Deleted` default hides this defect.
-
-*Not in scope of this finding:* the `VNetDeleted` status is overloaded — it also fires for "VNet exists
-but has no IPv4 address space left", where `GetVNetInventory` drops the VNet
-([AzureService.cs:337-341](../src/Bastet/Services/Azure/AzureService.cs#L337-L341)) and the direct read
-then answers `Live`. Withholding there is defensible rather than clearly wrong, so it is left alone.
-If it is ever addressed, the answer is to re-label the row, not to archive it.
+---
 
 ## E2. Subnet Edit silently destroys names, descriptions and tags that Create rejects `[×2]`
 

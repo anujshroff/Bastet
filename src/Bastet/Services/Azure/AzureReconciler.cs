@@ -125,6 +125,18 @@ namespace Bastet.Services.Azure
 
             foreach (AzureReconcileItem item in plan.Items)
             {
+                // A confirmation answers one question: is the resource gone? Only the absence
+                // statuses ask it. A drift row was produced *because* the resource was found in the
+                // listing with a different prefix, so Live is the expected answer for it and says
+                // nothing about the drift - and a NotVisible or Unknown answer says nothing either,
+                // because the prefix comparison already came from a successful read of that VNet.
+                // Judging drift rows on this verdict withholds every one of them, permanently.
+                if (!IsAbsenceStatus(item.Status))
+                {
+                    keep.Add(item);
+                    continue;
+                }
+
                 // Absent from the map counts as unconfirmed. Only an explicit 404 survives.
                 AzureResourceConfirmation verdict =
                     confirmations.TryGetValue(item.AzureResourceId, out AzureResourceConfirmation c)
@@ -164,6 +176,15 @@ namespace Bastet.Services.Azure
                     $"in Azure, so they have been withheld from deletion: {NameList(stillLive)}.");
             }
         }
+
+        /// <summary>
+        /// True for the statuses that assert the Azure resource no longer exists, and so are the only
+        /// ones a direct read can confirm or contradict. Public so the caller that decides which IDs
+        /// to read applies exactly the same rule <see cref="ApplyConfirmations"/> does, rather than
+        /// restating it and letting the two drift apart.
+        /// </summary>
+        public static bool IsAbsenceStatus(AzureReconcileStatus status) =>
+            status is AzureReconcileStatus.VNetDeleted or AzureReconcileStatus.SubnetDeleted;
 
         /// <summary>Comma-separated subnet names, capped so a warning stays readable.</summary>
         private static string NameList(List<AzureReconcileItem> items)
