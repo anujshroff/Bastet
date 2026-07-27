@@ -75,16 +75,34 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
-                AzureReconcileItem? item = AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)
-                    ? EvaluateSubnetLevel(snapshot, liveSubnetPrefixes)
-                    : EvaluateVNetLevel(snapshot, liveVNets);
+                // Three-way, not two. An ID that is neither a VNet nor a subnet used to fall down
+                // the VNet branch, where absence from the listing reads as VNetDeleted - a claim
+                // nothing established, on the one path that removes data. It is reported for review
+                // instead, so the operator can correct the row rather than have it silently offered
+                // for archival.
+                AzureReconcileItem? item;
+                if (AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId))
+                {
+                    item = EvaluateSubnetLevel(snapshot, liveSubnetPrefixes);
+                }
+                else if (AzureResourceIdentity.IsAzureVNet(snapshot.AzureResourceId))
+                {
+                    item = EvaluateVNetLevel(snapshot, liveVNets);
+                }
+                else
+                {
+                    item = Item(snapshot, AzureReconcileStatus.UnrecognisedResourceId, true,
+                        "The recorded Azure resource ID names neither a VNet nor a subnet, so nothing "
+                        + "can be established about it. Correct or clear the link on this subnet.");
+                }
 
                 if (item is null)
                 {
                     continue;
                 }
 
-                if (item.Status == AzureReconcileStatus.FullyAllocatingSubnetDeleted)
+                if (item.Status is AzureReconcileStatus.FullyAllocatingSubnetDeleted
+                    or AzureReconcileStatus.UnrecognisedResourceId)
                 {
                     plan.ReviewItems.Add(item);
                 }

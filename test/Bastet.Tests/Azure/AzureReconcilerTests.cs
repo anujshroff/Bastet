@@ -253,6 +253,48 @@ public class AzureReconcilerTests
         Assert.Contains("10.0.9.0/24", item.Reason);
     }
 
+    /// <summary>
+    /// A stored ID that names neither a VNet nor a subnet must never be answered as a deletion. The
+    /// Azure SDK builds its request from (subscription, resource group, last path segment) and
+    /// discards the provider namespace and type, so reading a resource-group or storage-account ID
+    /// through the VNet accessor asks about a *different* resource - and its 404 used to read as
+    /// "Azure confirms this is gone", offering the row and its whole subtree for archival.
+    /// </summary>
+    [Theory]
+    [InlineData("/subscriptions/" + SubId + "/resourceGroups/rg")]
+    [InlineData("/subscriptions/" + SubId + "/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/acct")]
+    // Last segment deliberately matches a live VNet: this is the shape that answered "Live" against
+    // real ARM, because the SDK asks for virtualNetworks/<last segment> whatever the type says.
+    [InlineData("/subscriptions/" + SubId + "/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vnet-a")]
+    public void UnrecognisedResourceId_IsReviewedNotOfferedForDeletion(string resourceId)
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "mystery", "10.0.0.0", 16, resourceId));
+
+        Assert.Empty(plan.Items);
+
+        AzureReconcileItem item = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, item.Status);
+        Assert.DoesNotContain("no longer exists", item.Reason);
+    }
+
+    /// <summary>
+    /// The guard: a real VNet ID that is genuinely absent from the listing must still be offered.
+    /// A fix that routed anything unfamiliar to review would stop the reconciler doing its job.
+    /// </summary>
+    [Fact]
+    public void GenuinelyAbsentVNet_StillOfferedForDeletion()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "gone", "10.9.0.0", 16, VNetId("vnet-gone")));
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.VNetDeleted, item.Status);
+        Assert.Empty(plan.ReviewItems);
+    }
+
     [Fact]
     public void SubnetLive_NotFlagged()
     {

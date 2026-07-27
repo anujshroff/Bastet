@@ -117,7 +117,15 @@ namespace Bastet.Models.ViewModels
         /// Reported for review only: nothing here should be deleted, and the flag is never cleared
         /// automatically because it may have been set by hand.
         /// </summary>
-        FullyAllocatingSubnetDeleted
+        FullyAllocatingSubnetDeleted,
+
+        /// <summary>
+        /// The stored resource ID names neither a VNet nor a subnet, so nothing can be established
+        /// about it. Reported for review only: the Azure SDK builds its request from the resource
+        /// group and the last path segment alone, so reading such an ID asks about a different
+        /// resource entirely and its 404 would otherwise read as a confirmed deletion.
+        /// </summary>
+        UnrecognisedResourceId
     }
 
     /// <summary>

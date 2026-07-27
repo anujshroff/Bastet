@@ -569,21 +569,33 @@ namespace Bastet.Services.Azure
         /// </remarks>
         private async Task<AzureResourceConfirmation> ConfirmOneAsync(string resourceId)
         {
-            ResourceIdentifier identifier;
-            try
+            // Free text on the entity, so a malformed value is possible. TryParse rather than the
+            // constructor: it returns false instead of throwing, and it throws for exactly one input
+            // anyway (the empty string), which the caller already filters - so the catch this
+            // replaces could never run.
+            if (!ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? identifier) || identifier is null)
             {
-                identifier = new ResourceIdentifier(resourceId);
+                _logger.LogWarning("Could not parse the Azure resource ID {ResourceId}", SanitizeForLog(resourceId));
+                return AzureResourceConfirmation.Unknown;
             }
-            catch (Exception ex)
+
+            // The type has to be established before reading, not assumed. The SDK's accessors build
+            // their request from (subscription, resource group, last path segment) and discard the
+            // provider namespace and type without validating them, so reading an ID of some other
+            // type asks about a different resource - and its 404 would come back here as a confirmed
+            // deletion. Unknown is the only honest answer for anything else.
+            bool isSubnet = AzureResourceIdentity.IsAzureSubnet(resourceId);
+            if (!isSubnet && !AzureResourceIdentity.IsAzureVNet(resourceId))
             {
-                // Free text on the entity, so a malformed value is possible. Unknown, never Deleted.
-                _logger.LogWarning(ex, "Could not parse the Azure resource ID {ResourceId}", SanitizeForLog(resourceId));
+                _logger.LogWarning(
+                    "The stored Azure resource ID {ResourceId} names neither a VNet nor a subnet, so it cannot be confirmed",
+                    SanitizeForLog(resourceId));
                 return AzureResourceConfirmation.Unknown;
             }
 
             try
             {
-                if (AzureResourceIdentity.IsAzureSubnet(resourceId))
+                if (isSubnet)
                 {
                     await _armClient.GetSubnetResource(identifier).GetAsync();
                 }

@@ -221,68 +221,59 @@ _Tests 608 → 611 (+3). Build clean, 0 warnings._
 
 ## F3. `ConfirmOneAsync` reads a different Azure resource, and its 404 reads as "confirmed deleted" `[×1]`
 
-**Confidence: confirmed (live).** **Verifier split on severity — recorded rather than hidden.** One
-verifier held `high` (the wrong answer is silent and plausible, and the operator misled later need not
-be the one who wrote the id); one argued `medium` (every route requires a deliberate off-contract Admin
-write, and every *accidental* malformation fails closed). Resolved **medium** on reachability.
+_F3 is fixed and committed, at both ends. `AzureResourceIdentity` gained `IsAzureVNet`, so the
+question "is this a VNet?" can now be asked instead of inferred from "not a subnet".
+`ConfirmOneAsync` establishes the type **before** reading and returns `Unknown` for anything that is
+neither, without issuing an ARM call at all. And `BuildPlan`'s routing is three-way rather than
+two-way: an unrecognised ID no longer falls down the VNet branch, where absence from the listing
+reads as `VNetDeleted`. It becomes a new review-only status, `UnrecognisedResourceId`, telling the
+operator to correct or clear the link._
 
-**Where:** [AzureService.cs:560](../src/Bastet/Services/Azure/AzureService.cs#L560)
-(`GetVirtualNetworkResource(identifier).GetAsync()`),
-[:554-561](../src/Bastet/Services/Azure/AzureService.cs#L554),
-[:565-567](../src/Bastet/Services/Azure/AzureService.cs#L565) (404 → `Deleted`),
-[AzureResourceIdentity.cs:19,24-34](../src/Bastet/Services/Azure/AzureResourceIdentity.cs#L19) (a
-`SubnetResourceType` constant and no VNet equivalent; everything unrecognised routes to the VNet
-branch), [AzureReconciler.cs:197-199](../src/Bastet/Services/Azure/AzureReconciler.cs#L197)
-(`EvaluateVNetLevel`'s own summary: "A row whose recorded resource ID **is a VNet**" — the precondition
-the router never establishes), [AzureService.cs:496-498](../src/Bastet/Services/Azure/AzureService.cs#L496)
-("an unanswered question must never read as a deletion").
+_Both halves were applied deliberately, and the reconciler half is the load-bearing one: it means
+such a row never reaches the confirmation path, so the `ConfirmOneAsync` guard is defence in depth
+rather than the only barrier. That also answers the verifiers' sequencing worry - because the row is
+routed to review rather than withheld, it never reaches the credential-blaming warning that **F12**
+is about, so this fix does not make that message more common in the interim._
 
-**Mechanism.** The Azure SDK builds its request from only *(subscription, resource group, last path
-segment)* and discards the provider namespace and type — captured off the wire:
+_Three theory cases plus a guard, all reconciler-level against existing fixtures. The three failed
+against the unfixed code with `Assert.Empty() Failure: Collection was not empty` - the resource-group
+ID, the storage-account ID and the VM ID whose last segment matches a live VNet were each **offered
+for deletion**. The guard passed throughout and is the one that stops this over-correcting: a real
+VNet ID that is genuinely absent from the listing must still be offered as `VNetDeleted`, or the
+reconciler stops doing its job._
 
-```
-stored : /subscriptions/<SUB>/resourceGroups/bastet/providers/Microsoft.Compute/virtualMachines/vnet-visible
-WIRE   : GET .../resourceGroups/bastet/providers/Microsoft.Network/virtualNetworks/vnet-visible
-```
+_**The first version of those tests was wrong and had to be redone**, which is worth recording
+because it would have proved nothing. They used a fabricated subscription ID, so `BelongsToSubscription`
+skipped every row as out-of-scope and the tests failed with an empty **`ReviewItems`** rather than a
+non-empty `Items` - a pass-looking failure for an unrelated reason. Rewritten against the fixture's
+own subscription constant, they fail where the defect actually is._
 
-The generated `ValidateResourceId` is compiled out of the release package, so nothing throws.
+_**No badge case was added to the client-side `statusLabel` switch**, deliberately. That switch only
+renders rows in the deletable table, and `UnrecognisedResourceId` can never appear there; the review
+table renders each row's reason instead. Adding an unreachable case is precisely the residue these
+rounds keep finding._
 
-**Failure scenario.** Measured against live ARM through the shipped service:
+_The review section's banner was reworded because this widens what `ReviewItems` can hold: it said
+"These subnets still exist in Azure", which is established for `FullyAllocatingSubnetDeleted` and
+**not** for an unrecognised ID. It now says nothing here can be fixed by deleting anything and points
+at the reason column, which each row already renders._
 
-| Stored id | Answer | Reality |
-|---|---|---|
-| a resource-group id | `Deleted` | the group exists |
-| a `Microsoft.Storage` id | `Deleted` | — |
-| a subnet id with two junk segments | `Deleted` | the subnet exists |
-| a `Microsoft.Compute/virtualMachines` id whose last segment matches a live VNet | **`Live`** | **the VM does not exist** |
+_**The refuted parse-guard finding's tidy-up was folded in here**, as its refutation recommended. The
+`try`/`catch` around `new ResourceIdentifier` is gone in favour of `ResourceIdentifier.TryParse`,
+which returns false rather than throwing: the catch could never run, because the constructor throws
+only for the empty string and `ConfirmResourcesAsync` already filters that. The two comments stating
+the false premise - that the constructor throws on malformed input - are corrected rather than left
+to mislead the next reader. This also removes one unsanitized `ex` from a log statement, which
+overlaps with **F6** and does not replace it._
 
-Driven end to end through the real endpoints as Admin, two such rows were offered with
-`CanCommit=true`, no warning, and the commit archived 3 subnets and 2 host IPs. The reverse direction
-emits a *false sentence*: "1 Azure-linked subnet(s) were missing from the subscription listing but
-still exist in Azure, so they have been withheld from deletion: 'vm-id-live'" — about a resource that
-does not exist.
+_Not re-measured against live ARM: the audit's measurement stands, the classifier change was checked
+offline against every ID shape the wizards write, and this round's credential was read-only and has
+since been revoked._
 
-**Scope correction.** The defect is exactly the **parseable-but-wrong-type** class, not "every
-unrecognised id". Unparseable ids are handled correctly: the constructor throws first, giving `Unknown`
-→ withheld.
-
-**Reachability, which is why this is medium.** Both genuine wizards were driven against live ARM and
-**every legitimately-stored id is a VNet id or a subnet id** — the correct side of the classifier. The
-three plausible *accidental* wrong ids (portal-URL fragments) all fail closed to withheld. The residual
-trigger is an Admin deliberately writing a well-formed id of another resource type via
-`/Subnet/BatchCreateChildSubnets` (no type check — see **F13**),
-`/Subnet/BulkCreateFromAzurePlan` (re-plans with no ARM read), or
-[BulkAzure.cs:99-103](../src/Bastet/Controllers/SubnetController.BulkAzure.cs#L99) — an actor who
-already holds unrestricted delete rights. The over-length truncation worry is **dead**: over-length
-ids are rejected, not trimmed.
-
-**Fix.** Add an `IsAzureVNet` predicate to `AzureResourceIdentity`, return `Unknown` for anything
-unclassified, and route such rows to `ReviewItems` rather than asserting `VNetDeleted`. The predicate
-was checked offline against every id shape the wizards write: no legitimate stored id changes verdict.
-
-**Sequencing.** This pushes rows into the withheld bucket whose message is **F12**. Land them together.
+_Tests 611 → 615 (+4). Build clean, 0 warnings._
 
 ---
+
 
 ## F4. The reconcile screens state that drift rows no longer exist in Azure `[×2]`
 
