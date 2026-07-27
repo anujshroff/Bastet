@@ -380,4 +380,67 @@ public class AzureReconcilerTests
         Assert.Empty(plan.GlobalErrors);
         Assert.False(plan.CanCommit);
     }
+
+    // -------------------------------------------------------------------------
+    // VNet-vs-subnet routing. Every builder above hard-codes "resourceGroups/rg", so a resource
+    // group whose own name collides with the "/subnets/" segment was never covered.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// A VNet living in a resource group named "subnets" has "/subnets/" in its own resource ID.
+    /// Routing on that substring sends a live VNet down the subnet branch, where it matches no
+    /// Azure subnet and is reported deleted - offering a healthy VNet and its children for archival.
+    /// </summary>
+    [Fact]
+    public void VNetInResourceGroupNamedSubnets_IsNotMistakenForAnAzureSubnet()
+    {
+        const string rgNamedSubnets =
+            $"/subscriptions/{SubId}/resourceGroups/subnets/providers/Microsoft.Network/virtualNetworks/vnet-core";
+
+        BulkAzureVNetViewModel live = new()
+        {
+            ResourceId = rgNamedSubnets,
+            Name = "vnet-core",
+            Ipv4AddressPrefixes = ["10.20.0.0/16"]
+        };
+
+        AzureReconcilePlanViewModel plan = Build(
+            Live(live),
+            Linked(1, "core", "10.20.0.0", 16, rgNamedSubnets, descendants: 2));
+
+        Assert.True(plan.ScanSucceeded);
+        Assert.Empty(plan.Items);      // nothing offered for archival - the VNet is live
+        Assert.False(plan.CanCommit);
+    }
+
+    /// <summary>A genuine subnet ID must still route to the subnet branch.</summary>
+    [Fact]
+    public void GenuineSubnetId_StillRoutesToTheSubnetBranch()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),                     // VNet live, but no subnets
+            Linked(1, "child", "10.0.1.0", 24, SubnetId("vnet-a", "snet-a")));
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.SubnetDeleted, item.Status);
+        Assert.False(item.IsVNetLevel);
+    }
+
+    /// <summary>
+    /// AzureResourceId is free text and can be hand-edited. ResourceIdentifier throws on malformed
+    /// input, so an unparseable value must be absorbed rather than aborting the whole scan.
+    /// </summary>
+    [Theory]
+    [InlineData("not-an-arm-id")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void MalformedResourceId_DoesNotThrow(string malformed)
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "odd", "10.0.1.0", 24, malformed));
+
+        Assert.True(plan.ScanSucceeded);
+        Assert.Empty(plan.GlobalErrors);
+    }
 }

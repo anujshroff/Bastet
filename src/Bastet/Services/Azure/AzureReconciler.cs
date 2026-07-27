@@ -9,12 +9,6 @@ namespace Bastet.Services.Azure
     /// </summary>
     public class AzureReconciler : IAzureReconciler
     {
-        /// <summary>
-        /// Segment that distinguishes an Azure subnet's resource ID from its VNet's. Same test the
-        /// subnet Details view uses to decide how to build its Azure portal link.
-        /// </summary>
-        private const string SubnetSegment = "/subnets/";
-
         /// <inheritdoc/>
         public AzureReconcilePlanViewModel BuildPlan(
             string subscriptionId,
@@ -81,7 +75,7 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
-                AzureReconcileItem? item = snapshot.AzureResourceId.Contains(SubnetSegment, StringComparison.OrdinalIgnoreCase)
+                AzureReconcileItem? item = AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)
                     ? EvaluateSubnetLevel(snapshot, liveSubnetPrefixes)
                     : EvaluateVNetLevel(snapshot, liveVNets);
 
