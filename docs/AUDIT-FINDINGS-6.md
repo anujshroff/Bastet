@@ -586,42 +586,43 @@ _Tests 624 → 624 (unchanged). Build clean, 0 warnings._
 
 ## F11. "Hide already imported" turns blocked prefixes into a green success banner `[×2]`
 
-**Confidence: confirmed.**
+_F11 is fixed and committed. The empty-tree message is now an **info** alert that counts what was
+suppressed and says how to see it - "N VNet prefix(es) in this subscription cannot be selected, and are
+hidden. Untick \"Hide unavailable\" to see why." - and falls back to "This subscription has no VNet
+prefixes to import." when nothing was hidden. The switch is relabelled **Hide unavailable**, which is
+what it does._
 
-**Where:** [_BulkScripts.cshtml:184-186](../src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml#L184)
-(the filter drops every `!isSelectable` prefix),
-[:255-258](../src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml#L255) (the success alert),
-[_StepSelection.cshtml:44-47](../src/Bastet/Views/Azure/BulkImport/_StepSelection.cshtml#L44),
-[AzureBulkImportPlanner.cs:165-223](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L165)
-(`AnnotatePrefix`). `AlreadyImported` is never returned — established by running the real planner over
-4,046 brute-forced input combinations: `Available 1113 | Blocked 2903 | WillUpdateExisting 30 |
-AlreadyImported 0`.
+_Pass 2's fix was taken over pass 1's, on the verifier's reasoning. Pass 1 proposed filtering on
+`statusName === "AlreadyImported"`, which `AnnotatePrefix` never returns - that would have made the
+switch a no-op, deleting the declutter it exists for and making the banner unreachable rather than
+truthful._
 
-**Failure scenario.** A subscription whose prefixes are `Blocked` by conflicts with hand-made subnets,
-with the switch on:
+_**The correction that explains why three rounds walked past this** is worth carrying: the banner was
+*right* in the ordinary re-scan case, and neither finder saw why. `AzureSubnetSnapshotService` sets
+`HasChildSubnets` from the tree, so a target that really was imported comes back
+`Blocked("… already has child subnets. Already imported?")` - the **same bucket**, hidden by the same
+filter, and there the sentence was true. The defect is that one `Blocked` bucket carries both the
+intended case and the conflict cases, so the wording is now about availability rather than history and
+cannot be wrong either way._
 
-```
-switch OFF: "Cannot import — Would contain existing Bastet subnet 'legacy' (10.0.1.0/24) …"
-switch ON : "Everything in this subscription has already been imported. Nothing left to select."
-            alert-success = true, reason text on screen = false
-```
+_Pass 1's second half was **dropped, not fixed**: the per-prefix "All subnets in this prefix are already
+imported." at `:240` survives untouched, because the verifier could not construct a selectable prefix
+holding a `Blocked` subnet, and for the reachable case - an `AlreadyImported` subnet - the sentence is
+true. Changing a correct message on the strength of an unreachable scenario would be the wrong trade._
 
-Nothing was imported, and the only explanation is hidden rather than shown.
+_Verified in chromium with the shipped script and its four `@Url.Action` expressions substituted
+programmatically: `parses: OK`, the success-alert-asserting-a-prior-import is gone, the suppressed
+counter is wired, and the "untick to see why" instruction is present. The alert level changed from
+`alert-success` to `alert-info` deliberately - nothing succeeded, so nothing should be green._
 
-**The correction all three reports missed, and it is why nobody noticed:** the banner *is* right in the
-ordinary re-scan case. `AzureSubnetSnapshotService.cs:27` sets `HasChildSubnets` from the tree, so a
-genuinely imported target comes back `Blocked("Bastet subnet 'X' already has child subnets. Already
-imported?")` — **the same bucket**, hidden by the same filter, and there the sentence is true. The defect
-is that one `Blocked` bucket carries both the intended case and the conflict cases.
+_No test ships; no JS harness. `AnnotatePrefix`'s inability to return `AlreadyImported` was established
+by the verifier over 4,046 brute-forced planner outcomes and is recorded on the watch list rather than
+pinned here, since it is the planner's behaviour and not this fix's._
 
-**Fix.** Count the suppressed prefixes and say so, relabelling the switch "Hide unavailable" — reserving
-the "already imported" wording for when every suppressed prefix carries the `HasChildSubnets` reason, or
-simply always naming the count with "untick to see why". **Do not** filter on
-`statusName === "AlreadyImported"`: that makes the switch a no-op and deletes the declutter it exists
-for. Round 5's E11 fixed this class in the *reconcile* wizard and never touched `_BulkScripts.cshtml`, so
-this is not a re-raise of a deliberate omission.
+_Tests 627 → 627 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 ## F12. A row withheld for any non-403 reason is reported as a lost credential `[×1]`
 

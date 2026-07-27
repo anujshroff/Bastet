@@ -177,11 +177,13 @@
                 const $card = $('<div class="card mb-2"></div>');
                 const $body = $('<div class="card-body p-2"></div>');
                 let visiblePrefixes = 0;
+                let suppressedPrefixes = 0;
 
                 $.each(vnet.prefixes, function (pIdx, prefixInfo) {
                     const prefix = prefixInfo.addressPrefix;
 
                     if (hideImported && !prefixInfo.isSelectable) {
+                        suppressedPrefixes++;
                         return; // continue
                     }
                     visiblePrefixes++;
@@ -253,8 +255,21 @@
             });
 
             if ($tree.children().length === 0) {
-                $tree.append('<div class="alert alert-success mb-0"><i class="bi bi-check-circle"></i> '
-                    + 'Everything in this subscription has already been imported. Nothing left to select.</div>');
+                // AnnotatePrefix never returns AlreadyImported - a target that really was imported
+                // comes back Blocked with "already has child subnets", the same bucket as a prefix
+                // blocked by a conflict with a hand-made subnet. So "already imported" was asserted
+                // over rows that had never been imported at all, with the red explanation hidden
+                // rather than shown. Say how many were suppressed and how to see why.
+                const $empty = $('<div class="alert alert-info mb-0"></div>');
+                if (suppressedPrefixes > 0) {
+                    $empty.append($('<span></span>').text(
+                        suppressedPrefixes + ' VNet prefix(es) in this subscription cannot be selected, '
+                        + 'and are hidden. Untick "Hide unavailable" to see why.'));
+                } else {
+                    $empty.append($('<span></span>').text(
+                        'This subscription has no VNet prefixes to import.'));
+                }
+                $tree.append($empty);
             }
 
             // Subnet checked → check its prefix (never force a disabled prefix on; a blocked target
