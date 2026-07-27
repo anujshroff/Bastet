@@ -36,8 +36,19 @@ public class AzureReconcilerTests
             Subnets = [.. subnets]
         };
 
-    private static BulkAzureSubnetViewModel AzSubnet(string vnetName, string name, string prefix) =>
-        new() { ResourceId = SubnetId(vnetName, name), Name = name, AddressPrefix = prefix };
+    /// <summary>
+    /// Mirrors what GetVNetInventory builds: AddressPrefix is the first IPv4 prefix, and
+    /// Ipv4AddressPrefixes carries all of them. Passing more than one models an Azure subnet with
+    /// multiple address prefixes, GA since September 2025.
+    /// </summary>
+    private static BulkAzureSubnetViewModel AzSubnet(string vnetName, string name, params string[] prefixes) =>
+        new()
+        {
+            ResourceId = SubnetId(vnetName, name),
+            Name = name,
+            AddressPrefix = prefixes[0],
+            Ipv4AddressPrefixes = [.. prefixes]
+        };
 
     private static AzureVNetInventory Live(params BulkAzureVNetViewModel[] vnets) =>
         new() { Success = true, VNets = [.. vnets] };
@@ -205,6 +216,43 @@ public class AzureReconcilerTests
         Assert.Contains("10.0.9.0/24", item.Reason);
     }
 
+    /// <summary>
+    /// The subnet still owns the prefix Bastet recorded; it simply has another one listed first.
+    /// Reading only the first prefix reports drift that has not happened, and a drift row is
+    /// offered for deletion with no direct Azure read behind it. The VNet-level check ten lines
+    /// above has always tested membership, which is why the same shape never bit there.
+    /// </summary>
+    [Fact]
+    public void SubnetWithSecondIpv4Prefix_StillOwningBastetsPrefix_NotFlagged()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"], AzSubnet("vnet-a", "snet-a", "10.0.0.0/24", "10.0.1.0/24"))),
+            Linked(1, "snet-a", "10.0.1.0", 24, SubnetId("vnet-a", "snet-a")));
+
+        Assert.Empty(plan.Items);
+    }
+
+    /// <summary>
+    /// The other direction, and the one that matters after E1: a genuine prefix change must still be
+    /// reported. A fix that merely stopped flagging multi-prefix subnets would pass the test above
+    /// and re-create the over-blocking E1 was about.
+    /// </summary>
+    [Fact]
+    public void SubnetWithSeveralPrefixes_NoneMatchingBastet_StillFlagged()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"], AzSubnet("vnet-a", "snet-a", "10.0.8.0/24", "10.0.9.0/24"))),
+            Linked(1, "snet-a", "10.0.1.0", 24, SubnetId("vnet-a", "snet-a")));
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, item.Status);
+
+        // Both live prefixes are named: telling the operator only the first would be the same
+        // half-truth that produced the defect.
+        Assert.Contains("10.0.8.0/24", item.Reason);
+        Assert.Contains("10.0.9.0/24", item.Reason);
+    }
+
     [Fact]
     public void SubnetLive_NotFlagged()
     {
@@ -226,6 +274,24 @@ public class AzureReconcilerTests
         // subnet gets no row of its own. Nothing has drifted here.
         AzureReconcilePlanViewModel plan = Build(
             Live(VNet("vnet-e", ["10.11.0.0/24"], AzSubnet("vnet-e", "default", "10.11.0.0/24"))),
+            Linked(1, "vnet-e", "10.11.0.0", 24, VNetId("vnet-e"), fullyAllocated: true));
+
+        Assert.Empty(plan.Items);
+        Assert.Empty(plan.ReviewItems);
+    }
+
+    /// <summary>
+    /// The same collapsed-prefix read one check earlier: the fully-allocated marker is justified by
+    /// an Azure subnet covering the target's whole prefix, and that search compared only each
+    /// subnet's first prefix. A covering subnet that lists another prefix first was reported as
+    /// having lost its cause. Review-only, so it can never delete anything - but it is the same
+    /// defect at its second site, and the prefix list is already to hand once the first is fixed.
+    /// </summary>
+    [Fact]
+    public void FullyEncompassedVNet_CoveringSubnetListsAnotherPrefixFirst_NotFlagged()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-e", ["10.11.0.0/24"], AzSubnet("vnet-e", "default", "10.99.0.0/24", "10.11.0.0/24"))),
             Linked(1, "vnet-e", "10.11.0.0", 24, VNetId("vnet-e"), fullyAllocated: true));
 
         Assert.Empty(plan.Items);

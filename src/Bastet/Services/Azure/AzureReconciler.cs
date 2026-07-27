@@ -43,7 +43,7 @@ namespace Bastet.Services.Azure
 
             // ARM resource IDs are case-insensitive.
             Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, string> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
 
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
@@ -56,7 +56,7 @@ namespace Bastet.Services.Azure
                 {
                     if (!string.IsNullOrEmpty(subnet.ResourceId))
                     {
-                        liveSubnetPrefixes[subnet.ResourceId] = subnet.AddressPrefix;
+                        liveSubnetPrefixes[subnet.ResourceId] = Ipv4PrefixesOf(subnet);
                     }
                 }
             }
@@ -224,7 +224,7 @@ namespace Bastet.Services.Azure
             // target's whole prefix, so if no such subnet remains, whatever justified it is gone.
             // Report only - the flag can also be set by hand, so we must not act on it.
             if (snapshot.IsFullyAllocated
-                && !vnet.Subnets.Any(s => string.Equals(s.AddressPrefix, prefix, StringComparison.OrdinalIgnoreCase)))
+                && !vnet.Subnets.Any(s => Ipv4PrefixesOf(s).Contains(prefix, StringComparer.OrdinalIgnoreCase)))
             {
                 return Item(snapshot, AzureReconcileStatus.FullyAllocatingSubnetDeleted, true,
                     $"Marked fully allocated, but no Azure subnet in VNet '{vnet.Name}' covers {prefix} any more. " +
@@ -239,24 +239,40 @@ namespace Bastet.Services.Azure
         /// </summary>
         private static AzureReconcileItem? EvaluateSubnetLevel(
             AzureLinkedSubnetSnapshot snapshot,
-            Dictionary<string, string> liveSubnetPrefixes)
+            Dictionary<string, List<string>> liveSubnetPrefixes)
         {
             string prefix = $"{snapshot.NetworkAddress}/{snapshot.Cidr}";
 
-            if (!liveSubnetPrefixes.TryGetValue(snapshot.AzureResourceId, out string? livePrefix))
+            if (!liveSubnetPrefixes.TryGetValue(snapshot.AzureResourceId, out List<string>? livePrefixes))
             {
                 return Item(snapshot, AzureReconcileStatus.SubnetDeleted, false,
                     "The Azure subnet this was imported from no longer exists.");
             }
 
-            if (!string.Equals(livePrefix, prefix, StringComparison.OrdinalIgnoreCase))
+            // Membership, not equality, and for the same reason the VNet-level check above uses it:
+            // an Azure subnet may own several IPv4 prefixes, and the one Bastet recorded need not be
+            // the first. Comparing against a single collapsed value reports drift on a subnet that
+            // still owns the prefix - and a drift row is offered for deletion with no Azure read
+            // behind it.
+            if (!livePrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
             {
+                string live = livePrefixes.Count == 0 ? "none" : string.Join(", ", livePrefixes);
                 return Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged, false,
-                    $"The Azure subnet still exists but its address prefix is now {livePrefix}, not {prefix}.");
+                    $"The Azure subnet still exists but its address prefix is now {live}, not {prefix}.");
             }
 
             return null;
         }
+
+        /// <summary>
+        /// Every IPv4 prefix an inventory subnet owns. GetVNetInventory populates the list, but a
+        /// caller that only sets the scalar must not silently compare against an empty set, so the
+        /// scalar is the fallback.
+        /// </summary>
+        private static List<string> Ipv4PrefixesOf(BulkAzureSubnetViewModel subnet) =>
+            subnet.Ipv4AddressPrefixes.Count > 0
+                ? subnet.Ipv4AddressPrefixes
+                : string.IsNullOrEmpty(subnet.AddressPrefix) ? [] : [subnet.AddressPrefix];
 
         private static AzureReconcileItem Item(
             AzureLinkedSubnetSnapshot snapshot,

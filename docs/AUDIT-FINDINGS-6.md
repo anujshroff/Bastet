@@ -171,53 +171,51 @@ _Tests 603 → 608 (+5). Build clean, 0 warnings._
 
 ## F2. The subnet-level prefix check tests equality where the VNet-level check tests membership `[×1]`
 
-**Confidence: plausible.** The unestablished step: which index ARM assigns a newly-added prefix in a
-subnet's `addressPrefixes` array. Settling it needs an ARM write, which this audit forbade. Everything
-either side of it is measured, and the defect is reachable under **both** plausible ordering policies.
+_F2 is fixed and committed. `EvaluateSubnetLevel` now tests membership over every IPv4 prefix the
+Azure subnet owns, exactly as the VNet-level check ten lines above always did, and the reason text
+names all of them rather than the first. `GetVNetInventory` populates a new
+`BulkAzureSubnetViewModel.Ipv4AddressPrefixes` from a new `ExtractIpv4Prefixes`, deduplicated because
+ARM may report a single prefix in both the singular property and the collection._
 
-**Where:** [AzureReconciler.cs:216](../src/Bastet/Services/Azure/AzureReconciler.cs#L216)
-(`!vnet.Ipv4AddressPrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase)` — membership, correct)
-against [:252](../src/Bastet/Services/Azure/AzureReconciler.cs#L252)
-(`!string.Equals(livePrefix, prefix, …)` — equality against one collapsed value),
-[AzureService.cs:380-401](../src/Bastet/Services/Azure/AzureService.cs#L380) (`ExtractIpv4Prefix`
-collapses `IList<string> AddressPrefixes` to its first IPv4 entry; doc comment at `:376-379`),
-[:239-277](../src/Bastet/Services/Azure/AzureService.cs#L239) (`GetCompatibleSubnets` takes the first
-IPv4 prefix and `break`s, so Bastet can only ever store index 0).
+_**The finding's plumbing instruction was wrong** and was not followed. It says the list must be
+carried "through `AzureLinkedSubnetSnapshot`" — that is Bastet's own row, which has exactly one
+prefix and is correct as it stands. The collapse is on the **live** side, so the list belongs on the
+inventory view model. `AddressPrefix` was left in place and unchanged rather than replaced: about
+twenty planner sites read it, and the import path genuinely can carry only one prefix because it
+creates one Bastet subnet per Azure subnet._
 
-**Reachability.** Two IPv4 prefixes on one subnet is the "Multiple Address Prefixes on Subnet"
-feature, **GA 2025-09-04**; Microsoft's how-to creates it with
-`az network vnet subnet create --address-prefixes 10.0.0.0/24 10.0.1.0/24`. No feature registration is
-required — blogs describing `Register-AzProviderFeature` predate GA. This is **not** the dual-stack
-case: `ExtractIpv4Prefix` picks the first *IPv4* entry, so an IPv6 sibling does not trigger it.
+_**A second site was fixed that the finding does not mention.** The `FullyAllocatingSubnetDeleted`
+check at `AzureReconciler.cs:227` reads the same collapsed value to decide whether any Azure subnet
+still covers the target's prefix, so a covering subnet listing another prefix first was reported as
+having lost its cause. It is review-only and can never delete anything, which is why it is a footnote
+rather than its own finding — but it is the same defect at its second site and the prefix list was
+already to hand. Leaving a known-wrong sibling behind is the residue these rounds keep finding._
 
-**Failure scenario.** Bastet holds subnet `web` at `10.0.1.0/24`. An operator adds a second prefix to
-that Azure subnet so ARM reports `addressPrefixes = [10.0.0.0/24, 10.0.1.0/24]`. Measured: with two
-IPv4 prefixes ARM returns the singular `addressPrefix` as **null**, so `ExtractIpv4Prefix`'s first case
-does not rescue it and the second returns `10.0.0.0/24`. Then:
+_**The finding's "second consequence" is not fixed and its "same fix" claim is wrong.**
+`GetVNetInventory` still offers a multi-prefix Azure subnet to the bulk import wizard as though it
+owned only its first prefix. Closing that means creating several Bastet subnets from one Azure
+subnet, which is a feature change, not a bug fix, and is out of scope here. What this change does buy
+is the data: the prefixes are now carried on the inventory model, so whoever takes it does not have
+to re-plumb ARM. Recorded on the watch list._
 
-```
-S2  addressPrefixes=[10.0.0.0/24, 10.0.1.0/24], Bastet holds the second
-    OFFERED FOR DELETION  web 10.0.1.0/24  SubnetPrefixChanged  descendants=2 hostIps=9
-    reason: The Azure subnet still exists but its address prefix is now 10.0.0.0/24, not 10.0.1.0/24.
-S3  same data, order flipped                    -> Items=0
-S4  CONTRAST at VNet level (membership test)     -> Items=0
-```
+_Three tests written first; all three failed against the unfixed reconciler for the defect's own
+reasons — two with `Assert.Empty() Failure: Collection was not empty` (a row flagged for a subnet
+that still owns Bastet's prefix, and the review row at the second site), one with
+`Assert.Contains() Failure: Sub-string not found` because the reason named only the first live
+prefix. The middle test is the guard against over-correcting, and it is the one that matters after
+E1: a genuine prefix change, where **none** of the live prefixes match, must still be flagged
+`SubnetPrefixChanged`. A fix that merely stopped flagging multi-prefix subnets would pass the first
+test and re-create exactly the over-blocking E1 was about._
 
-The subnet still owns Bastet's prefix. Being a drift status it gets no direct-read guard, and the
-commit path accepts anything in `plan.Items`.
+_Still `plausible` on one point, unchanged by the fix and not claimable: nobody has established which
+index ARM assigns a newly-added prefix, because settling it needs an ARM write and this round's
+credential was read-only. The fix does not depend on the answer — membership is correct whatever the
+order — which is the argument for making it regardless._
 
-**Second consequence, same root cause and same fix:** `GetVNetInventory` under-reports address space,
-so a multi-prefix Azure subnet is offered to the bulk import wizard as though it owned only its first
-prefix, and the rest is silently invisible to Bastet.
-
-**Fix.** Make `:252` a membership test over the subnet's full IPv4 prefix list, mirroring `:216`.
-Requires plumbing the list rather than the collapsed value through `AzureLinkedSubnetSnapshot`.
-
-**Do not** add `SubnetPrefixChanged` to `IsAbsenceStatus` as a stopgap — a live subnet answers `Live`,
-so that withholds every genuine prefix change and re-creates E1 exactly. The membership fix does not
-touch that partition.
+_Tests 608 → 611 (+3). Build clean, 0 warnings._
 
 ---
+
 
 # Medium
 

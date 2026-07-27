@@ -40,9 +40,21 @@ namespace Bastet.Models.ViewModels
         public string Name { get; set; } = string.Empty;
 
         /// <summary>
-        /// The IPv4 address prefix in CIDR notation (e.g. "10.0.1.0/24")
+        /// The IPv4 address prefix in CIDR notation (e.g. "10.0.1.0/24"). The first one when the
+        /// subnet has several - the import path creates one Bastet subnet per Azure subnet, so it
+        /// can only carry one. Comparisons against what Azure currently holds must use
+        /// <see cref="Ipv4AddressPrefixes"/> instead.
         /// </summary>
         public string AddressPrefix { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Every IPv4 prefix the Azure subnet owns. Azure has allowed multiple prefixes on a single
+        /// subnet since September 2025, and it reports the singular <c>addressPrefix</c> as null
+        /// once there is more than one - so a subnet that still owns the prefix Bastet recorded can
+        /// have a different one first. Mirrors <see cref="BulkAzureVNetViewModel.Ipv4AddressPrefixes"/>,
+        /// which is why the VNet-level reconcile check was already correct and this one was not.
+        /// </summary>
+        public List<string> Ipv4AddressPrefixes { get; set; } = [];
 
         /// <summary>
         /// Whether this subnet can be imported. Populated by

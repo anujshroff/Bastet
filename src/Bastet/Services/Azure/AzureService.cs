@@ -353,7 +353,11 @@ namespace Bastet.Services.Azure
                         {
                             ResourceId = subnet.Id.ToString(),
                             Name = subnet.Data.Name ?? string.Empty,
-                            AddressPrefix = ipv4Prefix
+                            AddressPrefix = ipv4Prefix,
+                            // Distinct because ARM may report a single prefix in both the singular
+                            // property and the collection; a duplicate would reach the operator in
+                            // the reconcile reason text.
+                            Ipv4AddressPrefixes = [.. ExtractIpv4Prefixes(subnet).Distinct(StringComparer.OrdinalIgnoreCase)]
                         });
                     }
 
@@ -377,6 +381,34 @@ namespace Bastet.Services.Azure
         /// Returns the first IPv4 prefix associated with the given Azure subnet, or null if none exists.
         /// Handles both single-prefix subnets and dual-stack subnets.
         /// </summary>
+        /// <summary>
+        /// Every IPv4 prefix the subnet owns, in the order ARM reports them. Azure has allowed
+        /// several prefixes on one subnet since September 2025 and reports the singular
+        /// <c>AddressPrefix</c> as null once there is more than one, so anything comparing what
+        /// Bastet recorded against what Azure holds has to look at all of them - the recorded
+        /// prefix need not be the first.
+        /// </summary>
+        private static IEnumerable<string> ExtractIpv4Prefixes(SubnetResource subnet)
+        {
+            if (subnet.Data.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.Data.AddressPrefix))
+            {
+                yield return subnet.Data.AddressPrefix;
+            }
+
+            if (subnet.Data.AddressPrefixes is null)
+            {
+                yield break;
+            }
+
+            foreach (string? prefix in subnet.Data.AddressPrefixes)
+            {
+                if (!string.IsNullOrEmpty(prefix) && IsIpv4AddressPrefix(prefix))
+                {
+                    yield return prefix;
+                }
+            }
+        }
+
         private static string? ExtractIpv4Prefix(SubnetResource subnet)
         {
             // Case 1: Single address prefix
