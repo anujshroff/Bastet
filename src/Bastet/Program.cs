@@ -1,6 +1,7 @@
 using Bastet.Data;
 using Bastet.Filters;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Console;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +21,14 @@ if (!builder.Environment.IsDevelopment())
     builder.Logging.AddFilter("Microsoft.AspNetCore", Enum.TryParse(Environment.GetEnvironmentVariable("BASTET_LOG_LEVEL_ASPNETCORE") ?? "Warning", true, out LogLevel aspNetLevel) ? aspNetLevel : LogLevel.Warning);
     builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", Enum.TryParse(Environment.GetEnvironmentVariable("BASTET_LOG_LEVEL_ENTITYFRAMEWORK") ?? "Warning", true, out LogLevel efLevel) ? efLevel : LogLevel.Warning);
 }
+
+// Deliberately outside the block above, which only runs outside Development. The console sink writes
+// the exception itself, and an exception can carry a request-supplied value verbatim - so without a
+// sanitizing formatter a crafted identifier reaches the terminal with its control characters intact
+// and can erase a real log line to print a fabricated one. A developer's console deserves the same
+// protection as a production one, so this is registered unconditionally.
+builder.Logging.AddConsoleFormatter<SanitizingConsoleFormatter, ConsoleFormatterOptions>();
+builder.Logging.AddConsole(options => options.FormatterName = SanitizingConsoleFormatter.FormatterName);
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi

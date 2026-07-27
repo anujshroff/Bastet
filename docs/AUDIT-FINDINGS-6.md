@@ -379,78 +379,61 @@ _Tests 615 → 615 (unchanged). Build clean, 0 warnings._
 
 ## F6. Every `LogError(ex, …)` on the Azure request paths logs the exception unsanitized `[×2]`
 
-**Confidence: confirmed.** **This resolves the three open CodeQL alerts #10/#11/#12 — they are true
-positives. Do not dismiss them, do not suppress them in code.**
+_F6 is fixed and committed with the systemic fix: a new `SanitizingConsoleFormatter` runs every line
+it writes - the rendered message **and** `exception.ToString()` - through `LogSanitizer`. It is
+registered **unconditionally**, deliberately outside the `if (!builder.Environment.IsDevelopment())`
+block, because that block is the only place the console sink was configured and a developer's console
+deserves the same protection as a production one._
 
-**Where:** the throwing statements are
-[AzureService.cs:106](../src/Bastet/Services/Azure/AzureService.cs#L106) (alert #10, **not** `:105` —
-`CreateResourceIdentifier` does not throw), [:167](../src/Bastet/Services/Azure/AzureService.cs#L167)
-(#11, **not** `:166` — neither `new ResourceIdentifier` nor `GetVirtualNetworkResource` throws), and
-[:315](../src/Bastet/Services/Azure/AzureService.cs#L315) (#12, **not** `:314`). The logging sites are
-`:147`, `:288`, `:367` plus **two the alerts do not flag** —
-[AzureController.cs:130](../src/Bastet/Controllers/AzureController.cs#L130) and
-[:168](../src/Bastet/Controllers/AzureController.cs#L168), which log the *same* exception a second time
-and are invisible to CodeQL because their template arguments are ints. Sink:
-[Program.cs:14-21](../src/Bastet/Program.cs#L14). Sanitizer:
-[LogSanitizer.cs:29-39](../src/Bastet/Services/Security/LogSanitizer.cs#L29).
+_The sink was chosen over the alternatives for the reason the finding gives: it covers all 28
+`LogX(ex, …)` sites at once, including the two at `AzureController.cs:130` and `:168` that log the
+same exception a second time and which **no static analyser flags**, because their template arguments
+are integers. Sanitizing `ex` at each call site was rejected - 28 sites to keep in step, and it
+destroys the structured exception that round 5's E4 fix went to trouble to preserve._
 
-**Failure scenario.** `SanitizeForLog` protects the template argument. `LogError(ex, …)` writes
-`ex.ToString()`, and the ARM SDK's purely *local* id validation echoes the caller's string verbatim into
-`ex.Message`. `new DefaultAzureCredential()` and `new ArmClient(cred)` both succeed with **no `AZURE_*`
-variable set**, so no Azure credential and no network call are needed. One authenticated-Admin GET to
-`/Azure/BulkGetVNets` with a percent-encoded `%1B` (ESC) sequence in `subscriptionId` produces a log
-stream that, rendered through an independent VT100 emulator, erases the genuine line and substitutes:
+_**The load-bearing design detail: lines are split before they are sanitized, never after.** A
+newline is a control character, so running an exception through the sanitizer as one string would
+collapse its stack trace onto a single line. Splitting first means legitimate structure comes from
+the formatter and only the content is scrubbed. A test pins exactly that - a real caught exception
+with an inner exception must still arrive as four or more lines with its `at …` frames intact._
 
-```
-fail: Bastet.Services.Azure.AzureService[0]
-warn: Bastet.Services.Azure.AzureReconciler[0]
-      Archived 42 stale subnet(s) for operator 'admin'.
-```
+_The formatter emits no ANSI colour, unlike the default simple formatter it replaces. That is a small
+deliberate behaviour change and it is the consistent choice: a formatter whose purpose is to keep
+escape sequences out of the log has no business writing its own._
 
-Every byte survives in a persisted log (`cat -v` recovers it); what is corrupted is the rendering. The
-precise one-line erasure is terminal-width dependent, but `ESC[2J` + `ESC[H` wipes the visible screen
-independent of width.
+_Four tests ship, against existing xUnit infrastructure - this is a plain class, so unlike most of
+this round's client-side findings it can be pinned properly. They could not "fail first" in the usual
+way because the class is new, so the sanitization was **reverted in place and the suite re-run**:
+`EscapeSequenceInTheMessage_IsStripped` and `EscapeSequenceInTheException_IsStripped` both fail, while
+the multi-line and tab tests keep passing - which is the point of having them, since they are the
+guards against a fix that sanitizes so hard it destroys the log's structure._
 
-**`char.IsControl` is the right predicate for this sink** — measured, `U+2028`/`U+2029`/`U+202E` emit
-as-is, one physical line each, no forged entry. Latent only if a JSON or file sink is added.
+_**The finding's secondary leg - `Guid.TryParse` before the ARM calls - was deliberately not taken**,
+and this is a departure worth stating. It is described as cheap, and the parsing half is; the
+semantics are not. `GetVNetInventory` reports failure as `Success=false` with a message, but
+`GetCompatibleVNets` **throws** and returns `[]` only for an empty id - so rejecting a malformed id
+there means choosing between throwing a different exception type and returning an empty list, and the
+empty list would conflate "you gave me a bad identifier" with "this subscription has no VNets". That
+is precisely the distinction round 5's E-series was about, and picking it while nominally fixing a
+log-forging defect is the kind of unrequested behaviour change that rides along in a fix commit.
+Recorded on the watch list. The security defect is closed regardless: it is the sink that was
+vulnerable, not the parser._
 
-**Why these three alerts and not the four other `SanitizeForLog` sites:** taint-source reachability. The
-flagged three take an MVC action parameter; `:548`, `:573`, `:578` take a value read from EF, which
-`cs/log-forging` does not treat as a source. So sanitization was never what CodeQL was tracking — but a
-suppression is still wrong, because the unsanitized exception is a live wrong output on those lines.
+_**Operational note for the three CodeQL alerts, which are open on `main`.** Expect them to stay open
+after this commit. CodeQL's flagged flow is action parameter → `SanitizeForLog(x)` → `LogError`
+argument, and it does not model `LogSanitizer.SanitizeForLog` as a sanitizer - which is why they are
+open today despite the sanitizer already existing. Comment them with this commit, leave them open,
+and dismiss only after shipping a CodeQL sanitizer model. Dismissing them now would put an untrue
+statement in the security record: the wrong output was real._
 
-**Severity.** Low, and the disagreement is recorded: one finder said medium. The console log is not
-Bastet's system of record — destructive operations are recorded in the database with
-`CreatedBy`/`ModifiedBy` and archive rows the forgery cannot touch — and the forger must already hold
-Admin. It stays at low rather than info because it defeats a control written specifically to prevent it
-(`LogSanitizer.cs:20-28` describes this exact attack), one GET is enough, and it fires twice per request.
+_Still to confirm in the closing sweep: that the console provider actually **selects** this formatter
+at runtime. The unit tests prove the formatter sanitizes; they do not prove the wiring, which only a
+running application shows._
 
-This is residue of round 4's **D16**, whose close-out note claims "every log statement carrying a user-
-or Azure-controlled string routes through `LogSanitizer`" — true of the structured arguments, false of
-`ex`. That sentence is why three rounds did not see it.
-
-**Fix, in this order.**
-
-1. **Primary, systemic:** a `ConsoleFormatter` running `LogSanitizer.SanitizeForLog` over the rendered
-   message **and** `exception.ToString()`, selected via `AddConsole(o => o.FormatterName = …)` +
-   `AddConsoleFormatter<,>`. The only fix covering all 29 `LogX(ex, …)` sites, the two unflagged
-   duplicates, the persisted variant at `:578`, and anything added later. **Register it
-   unconditionally** — `Program.cs:14-21` sits inside `if (!builder.Environment.IsDevelopment())`, so a
-   formatter registered there leaves the Development sink raw.
-2. **Secondary, cheap:** reject the identifier before calling ARM — `Guid.TryParse` before `:105` and
-   `:314` (and the early-out at `:96`). Note **`ResourceIdentifier.TryParse` does not filter control
-   characters** — measured, it returns `true` with the ESC still in the parsed identifier — so it is not
-   sufficient on its own for #11.
-3. **Rejected:** sanitizing `ex` at each `LogError`. 29 sites to keep in step, and it destroys the
-   structured exception that round 5's E4 fix went to trouble to preserve.
-
-**Fixing this will not close the alerts, and that is not a reason to skip it.** CodeQL's flagged flow is
-action parameter → `SanitizeForLog(x)` → `LogError` argument, and it does not model `SanitizeForLog` as a
-sanitizer — which is why they are open today *despite* the sanitizer. Land the fix, comment the alerts
-with the fix commit, leave them open, then ship a CodeQL sanitizer model for
-`LogSanitizer.SanitizeForLog` and dismiss truthfully.
+_Tests 615 → 619 (+4). Build clean, 0 warnings._
 
 ---
+
 
 ## F7. A JSON `null` for a collection returns an unhandled 500 past the subnet lock `[×2]`
 
