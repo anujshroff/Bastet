@@ -115,4 +115,30 @@ public class SubnetCreateGetPrefillTests : IDisposable
 
         Assert.Equal("Parent-10.0.1.0/24", ModelOf(result).Name);
     }
+
+    /// <summary>
+    /// The suffix runs to 13 characters, so a long parent name used to compose a value the very next
+    /// POST rejected against [StringLength(100)]. The parent name is what gives way - the address
+    /// and CIDR are the part that makes the generated name mean anything.
+    /// </summary>
+    [Fact]
+    public async Task Create_LongParentName_ComposesANameThatFitsTheLimit()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 2,
+            Name = new string('p', 95),
+            NetworkAddress = "10.5.0.0",
+            Cidr = 16,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-user"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IActionResult result = await _controller.Create(networkAddress: "10.5.1.0", cidr: 24, parentId: 2);
+
+        string name = ModelOf(result).Name;
+        Assert.True(name.Length <= 100, $"generated name was {name.Length} characters");
+        Assert.EndsWith("-10.5.1.0/24", name);   // the suffix survives intact
+    }
 }

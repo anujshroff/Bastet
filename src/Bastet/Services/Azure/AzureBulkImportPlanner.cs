@@ -684,18 +684,10 @@ namespace Bastet.Services.Azure
 
         /// <summary>
         /// Appends <paramref name="suffix"/> within the name limit by shortening the base name.
-        /// Truncating the combined string instead would cut the suffix straight back off for a base
-        /// name that is already at the limit, yielding the very name the caller is disambiguating.
+        /// Shared with the Create form's generated name so the two cannot drift apart.
         /// </summary>
-        private static string WithSuffix(string baseName, string suffix)
-        {
-            int room = MaxSubnetNameLength - suffix.Length;
-            string trimmedBase = room <= 0
-                ? string.Empty
-                : baseName.Length > room ? baseName[..room] : baseName;
-
-            return TruncateForName(trimmedBase + suffix);
-        }
+        private static string WithSuffix(string baseName, string suffix) =>
+            SubnetNaming.WithSuffix(baseName, suffix, MaxSubnetNameLength);
 
         private static string TruncateForName(string s) =>
             s.Length > MaxSubnetNameLength ? s[..MaxSubnetNameLength] : s;

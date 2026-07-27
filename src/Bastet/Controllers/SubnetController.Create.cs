@@ -1,4 +1,5 @@
 using Bastet.Models;
+using Bastet.Services;
 using Bastet.Models.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -58,7 +59,13 @@ public partial class SubnetController : Controller
             Subnet? parentSubnet = await context.Subnets.FindAsync(parentId.Value);
             if (parentSubnet != null && !string.IsNullOrEmpty(networkAddress) && hasUsableCidr)
             {
-                viewModel.Name = $"{parentSubnet.Name}-{networkAddress}/{cidr}";
+                // The suffix is 10-13 characters, so any parent named 88 or more produced a
+                // pre-filled name the very next POST rejected against [StringLength(100)] - and this
+                // combination is reachable straight from the UI, since the unallocated-range button
+                // navigates here with all three values. The parent name gives way rather than the
+                // address, which is the part that makes the name mean anything.
+                viewModel.Name = SubnetNaming.WithSuffix(
+                    parentSubnet.Name, $"-{networkAddress}/{cidr}", MaxSubnetNameLength);
             }
         }
 
