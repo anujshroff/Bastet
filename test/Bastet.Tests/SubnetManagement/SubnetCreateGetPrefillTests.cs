@@ -2,14 +2,14 @@ using Bastet.Controllers;
 using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
-using Bastet.Services.Security;
-using System.ComponentModel.DataAnnotations;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Tests.SubnetManagement;
 
