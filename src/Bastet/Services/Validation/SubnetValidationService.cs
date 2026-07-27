@@ -12,11 +12,9 @@ public class SubnetValidationService(IIpUtilityService ipUtilityService) : ISubn
     private const string INVALID_NETWORK_FORMAT = "INVALID_NETWORK_FORMAT";
     private const string INVALID_CIDR_VALUE = "INVALID_CIDR_VALUE";
     private const string NETWORK_CIDR_MISMATCH = "NETWORK_CIDR_MISMATCH";
-    private const string PARENT_NOT_FOUND = "PARENT_NOT_FOUND";
     private const string INVALID_CIDR_HIERARCHY = "INVALID_CIDR_HIERARCHY";
     private const string NOT_IN_PARENT_RANGE = "NOT_IN_PARENT_RANGE";
     private const string SUBNET_OVERLAP = "SUBNET_OVERLAP";
-    private const string REQUIRED_FIELD_MISSING = "REQUIRED_FIELD_MISSING";
     private const string CHILD_SUBNET_OUTSIDE_RANGE = "CHILD_SUBNET_OUTSIDE_RANGE";
     private const string INVALID_CIDR_CHANGE = "INVALID_CIDR_CHANGE";
     private const string PARENT_HAS_HOST_IPS = "PARENT_HAS_HOST_IPS";
