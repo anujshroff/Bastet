@@ -9,10 +9,12 @@ $(document).ready(function () {
     // Toggle subnet children visibility
     $('.subnet-toggle').on('click', function () {
         var $children = $(this).closest('.subnet-item').children('.subnet-children');
-        $children.slideToggle(200);
-        
-        // Update the toggle icon
-        updateToggleIcons();
+
+        // Update the icon when the animation finishes, not before it starts. jQuery applies
+        // display:none for a hide only in the completion callback (a show sets display up front),
+        // so reading :visible on the next statement reports the state we are animating away from
+        // and paints "expanded" on a subtree that is closing. Nothing revisits it afterwards.
+        $children.slideToggle(200, updateToggleIcons);
     });
     
     // Expand all subnets
@@ -25,7 +27,10 @@ $(document).ready(function () {
     $('#collapse-all').on('click', function () {
         // Keep the first level visible
         $('.subnet-tree > .subnet-item > .subnet-children').show();
-        $('.subnet-tree .subnet-item .subnet-item > .subnet-children').slideUp(200);
+        // Both calls are needed. The callback corrects the deeper levels once they are actually
+        // hidden; the bare call keeps the first level right even when the tree is only one level
+        // deep, in which case the selector above matches nothing and the callback never fires.
+        $('.subnet-tree .subnet-item .subnet-item > .subnet-children').slideUp(200, updateToggleIcons);
         updateToggleIcons();
     });
     

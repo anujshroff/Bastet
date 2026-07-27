@@ -432,23 +432,36 @@ _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ## E12. Collapsing a subtree leaves the toggle showing the expanded icon `[×1]`
 
-**Confidence: confirmed.**
+_E12 is fixed and committed. The toggle handler now passes `updateToggleIcons` as `slideToggle`'s
+completion callback, so the icon is chosen from the settled state instead of the one being animated
+away._
 
-**Where:** [site.js:12](../src/Bastet/wwwroot/js/site.js#L12) (`slideToggle(200)`) and
-[site.js:15](../src/Bastet/wwwroot/js/site.js#L15) (`updateToggleIcons()` on the next line);
-same shape at [site.js:28-29](../src/Bastet/wwwroot/js/site.js#L28-L29) for Collapse All.
+_The verifier's correction was applied rather than the finder's original: for `#collapse-all` the
+bare `updateToggleIcons()` call is **kept in addition to** the callback. Replacing it would break a
+one-level tree, where the deeper-levels selector matches nothing, the callback never fires, and the
+first level would never be refreshed. `#expand-all` was left alone — `slideDown` sets `display` up
+front, so its existing bare call already reads the correct state._
 
-jQuery applies `display: none` for a *hide* in the animation's completion callback, but sets `display`
-up front for a *show*. So the icon update on the next synchronous line reads the pre-animation state:
-on collapse, `:visible` is still true and the glyph is rewritten to minus. 200 ms later the children are
-gone and the icon still reads "expanded". Nothing revisits it, so after the first collapse the plus
-glyph is unreachable for that node. Expanding hides the bug because `slideDown` sets display first.
+_Reproduced and then re-verified in a real browser with the pinned jQuery 4.0.0, using the same rig as
+E7:_
 
-**Fix.** Prefer computing the target state *before* animating and setting the glyph from that boolean.
-Passing `updateToggleIcons` as the `slideToggle` completion callback works for the toggle handler, but
-for `#collapse-all` it is not sufficient on its own: line 27's synchronous `.show()` can change state,
-and when the tree has no second-level `.subnet-children` the animated selector matches nothing and the
-callback never fires — so keep the bare call there in addition.
+```
+before:  children actually visible? False   parent icon: bi-dash-square   <- claims expanded
+after:   children actually visible? False   parent icon: bi-plus-square
+```
+
+_The round trip was checked too, since changing **when** the icon updates could easily break the
+other direction: re-expanding restores visible children and the minus icon, and Collapse All followed
+by Expand All leaves every parent on minus and every leaf on its flat dash. That last check also
+confirms E7's fix still holds through the animated paths._
+
+_As a `[×1]` the mechanism was confirmed directly rather than accepted: jQuery defers `display:none`
+for a hide into the animation's completion, which is why only the collapse direction was ever wrong
+and why the bug survived unnoticed — expanding happened to produce the right icon by accident._
+
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
+
+---
 
 ## E13. The Details page's Create-Subnet modal reports "0 IP addresses" for /31 and /32 `[×1]`
 
