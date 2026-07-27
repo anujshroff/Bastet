@@ -466,6 +466,109 @@ namespace Bastet.Services.Azure
             return parts.Length > 1 && int.TryParse(parts[1], out int cidr) ? cidr : 0;
         }
 
+        /// <inheritdoc/>
+        public async Task<IReadOnlyDictionary<string, AzureResourceConfirmation>> ConfirmResourcesAsync(
+            IEnumerable<string> resourceIds)
+        {
+            ArgumentNullException.ThrowIfNull(resourceIds);
+
+            List<string> distinct = [.. resourceIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
+
+            if (distinct.Count == 0)
+            {
+                return new Dictionary<string, AzureResourceConfirmation>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            if (_armClient == null)
+            {
+                // No credential means no answers, and an unanswered question must never read as a
+                // deletion. Report every ID as unknown rather than leaving it absent from the map.
+                return distinct.ToDictionary(
+                    id => id, _ => AzureResourceConfirmation.Unknown, StringComparer.OrdinalIgnoreCase);
+            }
+
+            // Bounded concurrency: reconcile can be asked about a lot of subnets at once, and a
+            // serial pass would make the delete path's latency the sum of every check. The cap keeps
+            // us well clear of ARM throttling, which would come back as Unknown and block deletions
+            // the operator legitimately wants.
+            using SemaphoreSlim gate = new(MaxConcurrentResourceChecks);
+
+            IEnumerable<Task<KeyValuePair<string, AzureResourceConfirmation>>> checks = distinct.Select(async id =>
+            {
+                await gate.WaitAsync();
+                try
+                {
+                    return new KeyValuePair<string, AzureResourceConfirmation>(id, await ConfirmOneAsync(id));
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
+
+            KeyValuePair<string, AzureResourceConfirmation>[] results = await Task.WhenAll(checks);
+            return new Dictionary<string, AzureResourceConfirmation>(results, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>How many resource checks to have in flight at once.</summary>
+        private const int MaxConcurrentResourceChecks = 8;
+
+        /// <summary>
+        /// Reads one resource and maps Azure's answer onto <see cref="AzureResourceConfirmation"/>.
+        /// </summary>
+        /// <remarks>
+        /// The status code carries the meaning, not the error code string: a missing VNet reports
+        /// "ResourceNotFound" while a missing subnet reports "NotFound", and both are 404. Subnets
+        /// are child resources, so they need the subnet accessor - the generic resource API rejects
+        /// their IDs outright.
+        /// </remarks>
+        private async Task<AzureResourceConfirmation> ConfirmOneAsync(string resourceId)
+        {
+            ResourceIdentifier identifier;
+            try
+            {
+                identifier = new ResourceIdentifier(resourceId);
+            }
+            catch (Exception ex)
+            {
+                // Free text on the entity, so a malformed value is possible. Unknown, never Deleted.
+                _logger.LogWarning(ex, "Could not parse the Azure resource ID {ResourceId}", SanitizeForLog(resourceId));
+                return AzureResourceConfirmation.Unknown;
+            }
+
+            try
+            {
+                if (AzureResourceIdentity.IsAzureSubnet(resourceId))
+                {
+                    await _armClient.GetSubnetResource(identifier).GetAsync();
+                }
+                else
+                {
+                    await _armClient.GetVirtualNetworkResource(identifier).GetAsync();
+                }
+
+                return AzureResourceConfirmation.Live;
+            }
+            catch (global::Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                return AzureResourceConfirmation.Deleted;
+            }
+            catch (global::Azure.RequestFailedException ex) when (ex.Status is 401 or 403)
+            {
+                _logger.LogWarning(
+                    "Azure denied access to {ResourceId} ({Status}), so it cannot be reported as deleted",
+                    SanitizeForLog(resourceId), ex.Status);
+                return AzureResourceConfirmation.NotVisible;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not confirm the Azure resource {ResourceId}", SanitizeForLog(resourceId));
+                return AzureResourceConfirmation.Unknown;
+            }
+        }
+
         /// <summary>
         /// Strips line breaks from request-supplied values before logging, so crafted input can't
         /// forge additional log entries (CodeQL: log entries created from user input).

@@ -106,6 +106,73 @@ namespace Bastet.Services.Azure
             return plan;
         }
 
+        /// <inheritdoc/>
+        public void ApplyConfirmations(
+            AzureReconcilePlanViewModel plan,
+            IReadOnlyDictionary<string, AzureResourceConfirmation> confirmations)
+        {
+            ArgumentNullException.ThrowIfNull(plan);
+            ArgumentNullException.ThrowIfNull(confirmations);
+
+            if (plan.Items.Count == 0)
+            {
+                return;
+            }
+
+            List<AzureReconcileItem> keep = [];
+            List<AzureReconcileItem> notVisible = [];
+            List<AzureReconcileItem> stillLive = [];
+
+            foreach (AzureReconcileItem item in plan.Items)
+            {
+                // Absent from the map counts as unconfirmed. Only an explicit 404 survives.
+                AzureResourceConfirmation verdict =
+                    confirmations.TryGetValue(item.AzureResourceId, out AzureResourceConfirmation c)
+                        ? c
+                        : AzureResourceConfirmation.Unknown;
+
+                switch (verdict)
+                {
+                    case AzureResourceConfirmation.Deleted:
+                        keep.Add(item);
+                        break;
+                    case AzureResourceConfirmation.Live:
+                        stillLive.Add(item);
+                        break;
+                    default:
+                        notVisible.Add(item);
+                        break;
+                }
+            }
+
+            plan.Items = keep;
+
+            if (notVisible.Count > 0)
+            {
+                plan.Warnings.Add(
+                    $"{notVisible.Count} Azure-linked subnet(s) were missing from the subscription listing, but Azure would " +
+                    "not confirm they are deleted - the credential may simply have lost access to them. They have been " +
+                    $"withheld from deletion: {NameList(notVisible)}.");
+            }
+
+            if (stillLive.Count > 0)
+            {
+                // The listing and a direct read disagreed - most likely the resource was filtered
+                // out of the list rather than removed. Either way it exists, so it is not deletable.
+                plan.Warnings.Add(
+                    $"{stillLive.Count} Azure-linked subnet(s) were missing from the subscription listing but still exist " +
+                    $"in Azure, so they have been withheld from deletion: {NameList(stillLive)}.");
+            }
+        }
+
+        /// <summary>Comma-separated subnet names, capped so a warning stays readable.</summary>
+        private static string NameList(List<AzureReconcileItem> items)
+        {
+            const int Max = 10;
+            string names = string.Join(", ", items.Take(Max).Select(i => $"'{i.Name}'"));
+            return items.Count > Max ? $"{names} and {items.Count - Max} more" : names;
+        }
+
         /// <summary>
         /// A row whose recorded resource ID is a VNet: the target a VNet address prefix was imported into.
         /// </summary>

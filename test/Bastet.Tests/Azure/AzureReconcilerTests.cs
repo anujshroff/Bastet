@@ -382,6 +382,72 @@ public class AzureReconcilerTests
     }
 
     // -------------------------------------------------------------------------
+    // ApplyConfirmations: only a confirmed 404 may be archived
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// A non-empty but incomplete inventory: another VNet is visible, the linked one is not. This is
+    /// D3's actual shape - an RBAC-filtered listing - and unlike a wholly empty one it carries no
+    /// pre-existing warning, so the warnings asserted below are only the ones under test.
+    /// </summary>
+    private AzureReconcilePlanViewModel PlanWithOneDeletedItem(out string resourceId)
+    {
+        resourceId = VNetId("vnet-a");
+        return Build(
+            Live(VNet("vnet-visible-to-me", ["10.9.0.0/16"])),
+            Linked(1, "a", "10.0.0.0", 16, resourceId));
+    }
+
+    [Fact]
+    public void ApplyConfirmations_Deleted_KeepsTheItem()
+    {
+        AzureReconcilePlanViewModel plan = PlanWithOneDeletedItem(out string id);
+        _ = Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [id] = AzureResourceConfirmation.Deleted
+        });
+
+        _ = Assert.Single(plan.Items);
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Theory]
+    [InlineData(AzureResourceConfirmation.NotVisible)]
+    [InlineData(AzureResourceConfirmation.Unknown)]
+    [InlineData(AzureResourceConfirmation.Live)]
+    public void ApplyConfirmations_AnythingButDeleted_WithholdsTheItemAndExplains(
+        AzureResourceConfirmation verdict)
+    {
+        AzureReconcilePlanViewModel plan = PlanWithOneDeletedItem(out string id);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [id] = verdict
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.False(plan.CanCommit);
+        _ = Assert.Single(plan.Warnings);
+        Assert.Contains("'a'", plan.Warnings[0]);
+    }
+
+    /// <summary>
+    /// A resource ID missing from the map was never answered for, which is not permission to delete.
+    /// </summary>
+    [Fact]
+    public void ApplyConfirmations_IdAbsentFromTheMap_WithholdsTheItem()
+    {
+        AzureReconcilePlanViewModel plan = PlanWithOneDeletedItem(out _);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>());
+
+        Assert.Empty(plan.Items);
+        _ = Assert.Single(plan.Warnings);
+    }
+
+    // -------------------------------------------------------------------------
     // VNet-vs-subnet routing. Every builder above hard-codes "resourceGroups/rg", so a resource
     // group whose own name collides with the "/subnets/" segment was never covered.
     // -------------------------------------------------------------------------

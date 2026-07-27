@@ -63,6 +63,12 @@ public partial class SubnetController : Controller
             });
         }
 
+        // Read every proposed row from Azure directly before archiving anything: the plan above is
+        // built from an RBAC-filtered listing, in which a resource this credential can no longer see
+        // is indistinguishable from one that was deleted. Rows Azure will not confirm as gone are
+        // dropped from plan.Items here, so the staleness check below refuses them for free.
+        await AzureController.ConfirmProposedDeletionsAsync(plan, azureService, reconciler);
+
         // Only delete what the fresh scan still considers stale
         Dictionary<int, AzureReconcileItem> stillStale = plan.Items.ToDictionary(i => i.SubnetId);
         List<int> noLongerStale = [.. request.SubnetIds.Where(id => !stillStale.ContainsKey(id))];
@@ -74,7 +80,10 @@ public partial class SubnetController : Controller
                 success = false,
                 error = $"{noLongerStale.Count} of the selected subnet(s) are no longer reported as deleted in Azure. " +
                         "Nothing was deleted. Re-run the scan and review the results.",
-                subnetIds = noLongerStale
+                subnetIds = noLongerStale,
+                // Carries the reason a row was withheld - most usefully "Azure would not confirm it
+                // is deleted", which otherwise looks indistinguishable from an out-of-date scan.
+                warnings = plan.Warnings
             });
         }
 

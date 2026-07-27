@@ -170,6 +170,59 @@ public class SubnetControllerAzureReconcileTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // Absence from an RBAC-filtered listing is not a deletion
+    // -------------------------------------------------------------------------
+
+    private const string VNetGoneId =
+        $"/subscriptions/{SubId}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-gone";
+
+    /// <summary>
+    /// ARM list operations are RBAC-filtered: a credential that loses access to a resource group
+    /// gets HTTP 200 with those resources simply absent, which the scan cannot tell apart from
+    /// deletion. A direct read can (403 versus 404), so a subnet Azure will not confirm is gone
+    /// must never be archived - however "stale" the listing made it look.
+    /// </summary>
+    [Fact]
+    public async Task BulkDeleteStaleAzureSubnets_ResourceNotVisibleRatherThanDeleted_DeletesNothing()
+    {
+        MockAzureService azure = new();                            // empty inventory => looks stale
+        azure.Confirmations[VNetGoneId] = AzureResourceConfirmation.NotVisible;
+
+        IActionResult result = await Delete(Request("approved", 1), azure);
+
+        _ = Assert.IsType<ConflictObjectResult>(result);
+        Assert.NotNull(await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>An unanswered question is not a deletion either.</summary>
+    [Fact]
+    public async Task BulkDeleteStaleAzureSubnets_ConfirmationUnknown_DeletesNothing()
+    {
+        MockAzureService azure = new();
+        azure.Confirmations[VNetGoneId] = AzureResourceConfirmation.Unknown;
+
+        IActionResult result = await Delete(Request("approved", 1), azure);
+
+        _ = Assert.IsType<ConflictObjectResult>(result);
+        Assert.NotNull(await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// The listing said gone, the direct read says it is still there. Trust the direct read.
+    /// </summary>
+    [Fact]
+    public async Task BulkDeleteStaleAzureSubnets_ResourceStillLive_DeletesNothing()
+    {
+        MockAzureService azure = new();
+        azure.Confirmations[VNetGoneId] = AzureResourceConfirmation.Live;
+
+        IActionResult result = await Delete(Request("approved", 1), azure);
+
+        _ = Assert.IsType<ConflictObjectResult>(result);
+        Assert.NotNull(await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken));
+    }
+
+    // -------------------------------------------------------------------------
     // Feature flag
     // -------------------------------------------------------------------------
 

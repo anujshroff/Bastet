@@ -64,6 +64,37 @@ namespace Bastet.Models.ViewModels
     }
 
     /// <summary>
+    /// What an individual check of one ARM resource established.
+    /// </summary>
+    /// <remarks>
+    /// A subscription-scoped list is RBAC-filtered: a principal that cannot see a resource group
+    /// gets HTTP 200 with those resources simply missing, not a 403. So absence from an inventory
+    /// cannot distinguish "deleted" from "not visible to this credential", and only a direct read of
+    /// the resource itself can. 404 and 403 are distinct on that read, which is what makes this
+    /// possible.
+    /// </remarks>
+    public enum AzureResourceConfirmation
+    {
+        /// <summary>The resource still exists and is readable. Nothing to delete.</summary>
+        Live,
+
+        /// <summary>Azure returned 404. The resource is genuinely gone.</summary>
+        Deleted,
+
+        /// <summary>
+        /// Azure returned 403. The resource may well exist - this credential just cannot see it.
+        /// Never a reason to archive anything.
+        /// </summary>
+        NotVisible,
+
+        /// <summary>
+        /// The check could not be completed - throttling, a transport error, an unparseable ID.
+        /// Treated exactly like <see cref="NotVisible"/>: an unanswered question is not a deletion.
+        /// </summary>
+        Unknown
+    }
+
+    /// <summary>
     /// Why a Bastet subnet no longer lines up with Azure.
     /// </summary>
     public enum AzureReconcileStatus

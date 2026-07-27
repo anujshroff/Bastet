@@ -342,6 +342,11 @@ namespace Bastet.Controllers
                 IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
                 AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked);
 
+                // The inventory is a list result and ARM filters those by RBAC, so "missing" is not
+                // the same fact as "deleted". Read each proposed row directly before offering it for
+                // archival. Only the proposed rows are checked, so a healthy scan costs nothing.
+                await ConfirmProposedDeletionsAsync(plan, azureService, reconciler);
+
                 return Json(new { success = true, plan });
             }
             catch (Exception ex)
@@ -349,6 +354,34 @@ namespace Bastet.Controllers
                 logger.LogError(ex, "Reconcile scan failed");
                 return Json(new { success = false, error = "The reconcile scan failed. Details have been logged." });
             }
+        }
+
+        /// <summary>
+        /// Confirms every row a reconcile plan proposes for deletion by reading it from Azure
+        /// directly, and drops any that Azure will not confirm is gone.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="IAzureReconciler.BuildPlan"/> can only work from a subscription listing, and
+        /// ARM filters those by RBAC: a credential that has lost access to a resource group gets
+        /// HTTP 200 with those resources simply absent, which is indistinguishable from deletion. A
+        /// direct read tells them apart (404 versus 403). Only the proposed rows are read, so a scan
+        /// with nothing to delete makes no extra calls at all.
+        /// Shared by the scan and the delete paths so the two cannot diverge on what is deletable.
+        /// </remarks>
+        internal static async Task ConfirmProposedDeletionsAsync(
+            AzureReconcilePlanViewModel plan,
+            IAzureService azureService,
+            IAzureReconciler reconciler)
+        {
+            if (plan.Items.Count == 0)
+            {
+                return;
+            }
+
+            IReadOnlyDictionary<string, AzureResourceConfirmation> confirmations =
+                await azureService.ConfirmResourcesAsync(plan.Items.Select(i => i.AzureResourceId));
+
+            reconciler.ApplyConfirmations(plan, confirmations);
         }
 
         // Helper method to check Azure Import environment variable
