@@ -53,7 +53,26 @@
         function invalidateConfirmation() {
             confirmedIds = null;
             $("#rec-step3-tab").addClass("disabled");
-            $("#rec-confirm-delete-btn").prop("disabled", true);
+            refreshDeleteButton();
+
+            // Disabling the pill is not enough when step 3 is the pane the user is looking at: it
+            // stays on screen showing a confirmation that no longer describes anything, and the
+            // typed word alone used to be enough to bring its button back. Send them back to the
+            // review step, which is where the snapshot has to be rebuilt.
+            if ($("#rec-step3").hasClass("active")) {
+                activateTab("rec-step2");
+            }
+        }
+
+        // The delete button is only ever live when there is a confirmed snapshot to post AND the
+        // operator has typed the confirmation word. Both conditions live here so the two places that
+        // re-enable the button cannot drift apart: gating on the typed text alone left the button
+        // clickable after the snapshot had been dropped, and clicking it hit a bare `return` in the
+        // click handler - no message, no spinner, no state change. A permanently live, inert button.
+        function refreshDeleteButton() {
+            const hasSnapshot = Array.isArray(confirmedIds) && confirmedIds.length > 0;
+            const confirmed = $("#rec-confirmation").val() === "approved";
+            $("#rec-confirm-delete-btn").prop("disabled", !hasSnapshot || !confirmed);
         }
 
         // ------------------------------------------------------------------
@@ -114,6 +133,10 @@
             const selected = $("#rec-subscription-select").find("option:selected");
             selectedSubscriptionId = selected.val();
             selectedSubscriptionName = selected.attr("data-name") || "";
+            // Drop the previous plan before re-scanning, not after it returns: for the whole
+            // duration of the scan the later steps were otherwise still reachable through their
+            // pills, carrying a confirmation built from results that are being replaced.
+            invalidateScan();
             activateTab("rec-step2");
             runScan();
         });
@@ -323,9 +346,7 @@
             activateTab("rec-step3");
         });
 
-        $("#rec-confirmation").on("input", function () {
-            $("#rec-confirm-delete-btn").prop("disabled", $(this).val() !== "approved");
-        });
+        $("#rec-confirmation").on("input", refreshDeleteButton);
 
         $("#rec-back-to-review-btn").on("click", function () {
             activateTab("rec-step2");
@@ -393,7 +414,9 @@
 
             $("#rec-commit-error").removeClass("d-none");
             // Let the user retry: the commit is transactional, so nothing was partially applied.
-            $("#rec-confirm-delete-btn").prop("disabled", $("#rec-confirmation").val() !== "approved");
+            // Still snapshot-aware - a failure that invalidated the snapshot must not leave a live
+            // button behind.
+            refreshDeleteButton();
         }
 
         loadSubscriptions();
