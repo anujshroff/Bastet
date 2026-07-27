@@ -409,7 +409,14 @@ namespace Bastet.Services.Azure
             if (fullyEncompassing is not null)
             {
                 item.WillMarkFullyAllocated = true;
-                item.FullyAllocatingAzureSubnetName = fullyEncompassing.Source.Name;
+
+                // Sanitized like every other Azure-derived name here. This one lands in the target's
+                // Description via AppendFullyAllocatedNote, and every other write to that column in
+                // the commit guarantees it is HTML-stripped - this was the single assignment that
+                // skipped it, quietly making that invariant false. The value arrives raw because
+                // GlobalSanitizationFilter does not descend into the nested selection list, so the
+                // planner is where it has to be handled.
+                item.FullyAllocatingAzureSubnetName = TruncateAndSanitizeName(fullyEncompassing.Source.Name);
             }
 
             // 4) Build planned child subnets (excluding the fully-encompassing one)

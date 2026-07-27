@@ -421,6 +421,27 @@ public class AzureBulkImportPlannerTests
         Assert.Empty(item.ChildSubnets);
     }
 
+    /// <summary>
+    /// This name is the one Azure-derived value in BuildPlanItem that used to skip sanitization, and
+    /// it lands in the target's Description via AppendFullyAllocatedNote - a column every other write
+    /// in the commit guarantees is HTML-stripped. GlobalSanitizationFilter does not descend into the
+    /// nested selection list, so the planner is the only place this can be handled.
+    /// </summary>
+    [Fact]
+    public void AzureSubnetEqualsVNetPrefix_SanitizesTheNameThatReachesTheDescription()
+    {
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-full", "10.0.0.0/16",
+                Sub("<script>alert(1)</script>everything", "10.0.0.0/16")));
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, []);
+
+        string? name = plan.Items[0].FullyAllocatingAzureSubnetName;
+        Assert.NotNull(name);
+        Assert.DoesNotContain("<", name);
+        Assert.DoesNotContain(">", name);
+    }
+
     [Fact]
     public void AzureSubnetEqualsVNetPrefix_OnExactMatchTarget_MarksFullyAllocated()
     {
