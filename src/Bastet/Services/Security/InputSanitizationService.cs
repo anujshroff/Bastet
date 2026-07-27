@@ -28,6 +28,11 @@ public partial class InputSanitizationService : IInputSanitizationService
     private const int MaxNameLength = 100;
     private const int MaxDescriptionLength = 1000;
 
+    /// <summary>
+    /// Width of the Tags column, and the ceiling this service's own output must respect.
+    /// </summary>
+    private const int MaxTagsLength = 255;
+
     public string SanitizeString(string? input, bool allowHtml = false)
     {
         if (string.IsNullOrWhiteSpace(input))
@@ -207,6 +212,29 @@ public partial class InputSanitizationService : IInputSanitizationService
             .Where(tag => !string.IsNullOrWhiteSpace(tag) && tag.Length <= 50)
             .Take(10)];
 
-        return string.Join(", ", tags);
+        // Joined with a bare comma, not ", ". Sanitization runs in an action filter, which MVC
+        // executes *after* model validation - so [StringLength(255)] has already passed by the time
+        // this rewrites the value, and any separator wider than the one it replaces makes the result
+        // longer than the value that was validated. Ten tags gained nine characters that way, enough
+        // to push a legal 249-character value past the 255-wide column and fail the insert with a
+        // generic error naming nothing. Every other step here only removes, so a single-character
+        // separator makes the whole method non-expanding by construction.
+        string joined = string.Join(",", tags);
+
+        // Belt and braces. Unreachable while the input respected its own length limit, but this
+        // method's output lands directly in a fixed-width column and should not depend on a caller
+        // elsewhere having validated first.
+        return joined.Length <= MaxTagsLength ? joined : TrimToWholeTags(joined);
+    }
+
+    /// <summary>
+    /// Cuts an over-long tag list back to <see cref="MaxTagsLength"/> on a tag boundary, so the
+    /// result never ends in a half-written tag.
+    /// </summary>
+    private static string TrimToWholeTags(string joined)
+    {
+        string clipped = joined[..MaxTagsLength];
+        int lastSeparator = clipped.LastIndexOf(',');
+        return lastSeparator > 0 ? clipped[..lastSeparator] : clipped;
     }
 }
