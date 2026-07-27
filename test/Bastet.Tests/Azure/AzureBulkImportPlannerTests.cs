@@ -442,6 +442,45 @@ public class AzureBulkImportPlannerTests
         Assert.DoesNotContain(">", name);
     }
 
+    /// <summary>
+    /// The commit treats "mark fully allocated" and "create children" as mutually exclusive, so a
+    /// selection carrying both previewed children that were then silently not created, while the
+    /// target came back flagged fully allocated - a state in which they can never be added later.
+    /// Azure cannot produce this selection (subnets in a VNet may not overlap, so a subnet covering
+    /// the whole prefix leaves no room for siblings), so it is refused rather than partly applied.
+    /// </summary>
+    [Fact]
+    public void AzureSubnetEqualsVNetPrefix_AlongsideSiblings_IsRejectedRatherThanPartlyApplied()
+    {
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-full", "10.40.0.0/16",
+                Sub("everything", "10.40.0.0/16"),
+                Sub("web", "10.40.1.0/24"),
+                Sub("app", "10.40.2.0/24")));
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, []);
+
+        Assert.False(plan.CanCommit);
+        BulkImportPlanItem item = plan.Items[0];
+        Assert.NotEmpty(item.Errors);
+        Assert.False(item.WillMarkFullyAllocated);   // nothing half-planned
+        Assert.Empty(item.ChildSubnets);
+    }
+
+    /// <summary>An encompassing subnet on its own is still the supported case.</summary>
+    [Fact]
+    public void AzureSubnetEqualsVNetPrefix_OnItsOwn_IsStillAccepted()
+    {
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-full", "10.41.0.0/16",
+                Sub("everything", "10.41.0.0/16")));
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, []);
+
+        Assert.True(plan.CanCommit);
+        Assert.True(plan.Items[0].WillMarkFullyAllocated);
+    }
+
     [Fact]
     public void AzureSubnetEqualsVNetPrefix_OnExactMatchTarget_MarksFullyAllocated()
     {
