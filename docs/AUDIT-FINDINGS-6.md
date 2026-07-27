@@ -663,33 +663,50 @@ _Tests 624 → 627 (+3). Build clean, 0 warnings._
 
 ## F13. `BatchCreateChildSubnets` is the one Azure write path with no feature-flag guard `[×1]`
 
-**Confidence: confirmed.**
+_F13 is fixed and committed - **not** with the guard the finding proposed, because the verifier proved
+that one does not close the gap. Gating on `isAzureImport` would leave the child stamp at `:367`
+untouched, and it is behind no flag at all: measured, with `isAzureImport` absent entirely and the
+feature off, `{"success":true,"subnetIds":[3]}` and the row carried a ghost subnet id. So the guard
+tests **the Azure state being written**, not the caller's claim about it: `isAzureImport`, a non-empty
+`vnetResourceId`, or any non-empty `subnets[].AzureResourceId`._
 
-**Where:** [SubnetController.Azure.cs:114](../src/Bastet/Controllers/SubnetController.Azure.cs#L114) (no
-`IsAzureImportEnabled()` check), against **eleven** guarded siblings — all nine `AzureController` actions
-plus `SubnetController.AzureReconcile.cs:29` and `SubnetController.BulkAzure.cs:31`. Stamps at
-[:320](../src/Bastet/Controllers/SubnetController.Azure.cs#L320) (gated on `isAzureImport`) and
-[:367](../src/Bastet/Controllers/SubnetController.Azure.cs#L367) (**gated on nothing**). Immediate
-consequence at
-[_SubnetDetails.cshtml:21-26](../src/Bastet/Views/Subnet/Details/_SubnetDetails.cshtml#L21).
+_**This narrows the documented non-Azure JSON API, and the commit says so out loud** rather than
+leaving it to be discovered: a caller using this endpoint as a plain batch-create may no longer send
+`AzureResourceId` or `vnetResourceId` while `BASTET_AZURE_IMPORT` is off. Sending them was never
+meaningful in that configuration - the reconcile that would act on such a row cannot run - so what is
+lost is the ability to create a row that is inert until someone enables the feature and it arms itself._
 
-**Failure scenario.** With `BASTET_AZURE_IMPORT` unset, all eleven siblings refuse (403 / "Azure Import
-feature is not enabled" / redirect to `/Error/403`). The unguarded one accepts an Admin POST with
-`isAzureImport=true`: 302, parent renamed and stamped with `AzureResourceId`, child created and stamped.
-The Details page then renders a live "View in Azure Portal" link built from that id **with Azure entirely
-off** — the one immediate wrong output. The rest is latent: it arms itself if the flag is later enabled.
+_Three tests, and the middle one is the important one: it posts a child `AzureResourceId` with
+`isAzureImport` **absent**, which is exactly the path the finding's own proposed fix would have missed.
+Both refusal tests fail against the unfixed action; the third passes throughout and is the guard
+against over-correcting - a plain batch create carrying no Azure state must still work with the feature
+off, or the fix costs more than the defect._
 
-**Fix, and the finding's own proposal does not work.** A branch-scoped
-`if (isAzureImport && !IsAzureImportEnabled())` leaves `:367` open — measured, with `isAzureImport`
-absent and the flag unset, `{"success":true,"subnetIds":[3]}` and the row carries a ghost subnet id. The
-guard must reject a non-empty `subnets[].AzureResourceId` **or** `vnetResourceId` whenever the flag is
-off, independent of `isAzureImport`. **Say out loud in the commit** that this changes the documented
-non-Azure JSON API's contract.
+_**Twelve existing tests had to be moved behind the flag**, which is worth recording because it is
+evidence of the defect rather than collateral: `SubnetControllerBatchCreateTests` and
+`SubnetControllerFullyEncompassingTests` drove the Azure import path without ever setting
+`BASTET_AZURE_IMPORT`, and passed - they were relying on the missing guard. Both classes now set it in
+their constructor, clear it on dispose, and join `AzureFeatureFlagCollection`, whose whole purpose is
+to serialise classes that flip this process-global variable. Any future test touching the flag belongs
+there too._
 
-**Do not credit this with closing F3 or F2** — those require the flag *on*, so the guard never fires in
-their scenario. What helps them is validating the stored id's shape.
+_**My first version of the new tests was wrong and had to be corrected**: they asserted against parent
+subnet 1, which the fixture seeds with two children already, so one failed with `Expected: 0 Actual: 2`
+- a fixture error, not a code result. Repointed at parent 2, the childless `10.0.0.0/16` the file's
+other tests use._
+
+_The immediate wrong output the finding names is closed as a consequence rather than addressed
+directly: with no Azure state written while the feature is off, `_SubnetDetails.cshtml` has no stamped
+id to build a "View in Azure Portal" link from._
+
+_This finding is **not** credited with closing F2 or F3, as the verifier insisted: both need the flag
+**on**, so this guard never fires in their scenario. What helps them is validating the id's shape,
+which F3 did._
+
+_Tests 627 → 630 (+3). Build clean, 0 warnings._
 
 ---
+
 
 ## F14. The Create-Subnet modal unlocks a field nothing listens to, under a stale explanation `[×1]`
 

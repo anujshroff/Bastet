@@ -16,6 +16,7 @@ namespace Bastet.Tests.SubnetManagement;
 /// <summary>
 /// Integration tests for batch subnet creation functionality in the SubnetController
 /// </summary>
+[Collection(Bastet.Tests.Azure.AzureFeatureFlagCollection.Name)]
 public class SubnetControllerBatchCreateTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -27,6 +28,10 @@ public class SubnetControllerBatchCreateTests : IDisposable
 
     public SubnetControllerBatchCreateTests()
     {
+        // These tests drive the Azure import path, which is now behind the feature flag the
+        // other eleven Azure write paths were always behind.
+        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "true");
+
         // Use SQLite in-memory database for tests
         DbContextOptions<BastetDbContext> options = new DbContextOptionsBuilder<BastetDbContext>()
             .UseSqlite("DataSource=:memory:")
@@ -69,6 +74,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", null);
         _context.Database.CloseConnection();
         _context.Dispose();
         GC.SuppressFinalize(this);
@@ -640,5 +646,82 @@ public class SubnetControllerBatchCreateTests : IDisposable
 
         _ = Assert.IsType<BadRequestObjectResult>(result);
         Assert.False(_controller.TempData.ContainsKey("ErrorMessage"));
+    }
+
+    /// <summary>
+    /// This was the one Azure write path with no feature-flag guard while its eleven siblings all had
+    /// one, so an Admin could stamp AzureResourceId in a deployment with Azure deliberately off - a
+    /// column no other write path exposes and no UI can clear. The Details page then renders a live
+    /// "View in Azure Portal" link from it, and the row arms itself if the flag is later enabled.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_AzureImportWithFeatureDisabled_IsRefused()
+    {
+        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "false");
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "web", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = 2 }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            2, subnets, vnetName: "prod-vnet",
+            vnetResourceId: "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/prod-vnet",
+            isAzureImport: true);
+
+        Assert.Empty(await _context.Subnets.Where(s => s.Name == "web").ToListAsync(TestContext.Current.CancellationToken));
+        Subnet? parent = await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken);
+        Assert.NotNull(parent);
+        Assert.Null(parent.AzureResourceId);
+        Assert.Equal("Parent Subnet", parent.Name);   // not renamed to the VNet name
+        _ = result;
+    }
+
+    /// <summary>
+    /// The gap the finding's own proposed fix would have left: the child stamp is behind no
+    /// isAzureImport test at all, so gating on that flag alone still let an Admin create Azure-linked
+    /// rows with the feature off. The guard is on the Azure state being written, not on the claim.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_ChildAzureIdWithFeatureDisabled_IsRefused()
+    {
+        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "false");
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "smuggled", NetworkAddress = "10.0.2.0", Cidr = 24, ParentSubnetId = 2,
+                AzureResourceId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/ghost/subnets/smuggled"
+            }
+        ];
+
+        // isAzureImport deliberately absent - this is the path the flag-only guard would have missed.
+        IActionResult result = await _controller.BatchCreateChildSubnets(2, subnets);
+
+        Assert.Empty(await _context.Subnets.Where(s => s.Name == "smuggled").ToListAsync(TestContext.Current.CancellationToken));
+        _ = result;
+    }
+
+    /// <summary>
+    /// The guard must not break the documented non-Azure use of this endpoint: a plain batch create,
+    /// carrying no Azure state, still works with the feature off.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_PlainBatchWithFeatureDisabled_StillCreates()
+    {
+        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "false");
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "local", NetworkAddress = "10.0.3.0", Cidr = 24, ParentSubnetId = 2 }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(2, subnets);
+
+        Subnet? created = await _context.Subnets.FirstOrDefaultAsync(s => s.Name == "local", TestContext.Current.CancellationToken);
+        Assert.NotNull(created);
+        Assert.Null(created.AzureResourceId);
+        _ = result;
     }
 }
