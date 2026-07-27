@@ -1,5 +1,4 @@
 using Bastet.Models;
-using Bastet.Models.DTOs;
 using Bastet.Services;
 using Bastet.Services.Validation;
 
