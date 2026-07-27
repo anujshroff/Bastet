@@ -133,6 +133,23 @@ public partial class SubnetController : Controller
             return BadRequest(ModelState);
         }
 
+        // A fully-encompassing entry is never created as a child - its whole purpose is to rename the
+        // parent and mark it fully allocated, and both of those writes live behind the Azure-import
+        // guard. Without an import context there is nothing left for such an entry to do: child
+        // creation is skipped because the entry exists, the parent writes are skipped because the
+        // import flags are absent, and the transaction commits having written nothing while the
+        // success message still announces a rename that never happened. Refuse the combination
+        // instead of committing a no-op. Checked after sanitization, which is what decides whether
+        // vnetName is really empty.
+        if (subnets.Exists(s => s.FullyEncompassesVNetPrefix) && (!isAzureImport || string.IsNullOrEmpty(vnetName)))
+        {
+            ModelState.AddModelError("subnets",
+                "A subnet marked as fully encompassing the VNet prefix can only be submitted as part of an Azure "
+                + "import, which requires isAzureImport to be set and a vnetName to be supplied. It marks the parent "
+                + "fully allocated rather than being created as a child, so on its own it would import nothing.");
+            return BadRequest(ModelState);
+        }
+
         try
         {
             // Validation reads and writes must happen under the global lock, or a concurrent
