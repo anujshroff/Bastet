@@ -307,8 +307,20 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         Assert.Equal("Parent Subnet", parent.Name);
     }
 
+    /// <summary>
+    /// An encompassing entry and ordinary children cannot both be honoured: the encompassing entry
+    /// renames the parent and marks it fully allocated, and the creation loop is skipped wholesale
+    /// when one is present. This test previously asserted that outcome - parent flagged, zero
+    /// children created, success reported - which is the defect, not the contract. The two
+    /// submitted /25s were discarded silently and could never be added afterwards, because a
+    /// fully-allocated parent refuses children.
+    ///
+    /// The combination cannot arise from Azure or the wizard (subnets within a VNet may not
+    /// overlap), so reaching it means a crafted or corrupted post. Refusing it is the same answer
+    /// the bulk planner already gives for the same shape.
+    /// </summary>
     [Fact]
-    public async Task BatchCreate_MixedSubnets_HandlesFullyEncompassingCorrectly()
+    public async Task BatchCreate_EncompassingEntryWithSiblings_IsRefusedAndWritesNothing()
     {
         // Arrange
         int parentId = 2; // Parent Subnet (10.11.0.0/24)
@@ -352,19 +364,18 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName, isAzureImport: true);
 
-        // Assert
-        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
+        // Assert - the whole post is refused, with a message rather than a silent partial success.
+        AssertImportFailureRedirect(result, parentId);
 
-        // Verify parent subnet is renamed and marked as fully allocated
+        _context.ChangeTracker.Clear();
+
+        // The parent is untouched: not renamed, not flagged.
         Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
-        Assert.Equal(vnetName, parentSubnet.Name);
-        Assert.True(parentSubnet.IsFullyAllocated);
+        Assert.NotEqual(vnetName, parentSubnet.Name);
+        Assert.False(parentSubnet.IsFullyAllocated);
 
-        // Verify description contains information about the encompassing subnet
-        Assert.Contains("Default", parentSubnet.Description);
-
-        // Verify no child subnets were created - since the first subnet fully encompasses the VNet prefix
+        // And nothing was created - the /25s are not silently dropped, they are refused with the post.
         int childSubnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .CountAsync(TestContext.Current.CancellationToken);

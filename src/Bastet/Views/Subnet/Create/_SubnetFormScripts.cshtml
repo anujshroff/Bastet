@@ -42,14 +42,10 @@
         const cidrValue = parseInt($('#cidrInput').val(), 10);
         
         if (!isNaN(cidrValue) && cidrValue >= 0 && cidrValue <= 32) {
-            // Do AJAX call to get the subnet mask
-            $.get(`/api/subnets/calculate-mask?cidr=${cidrValue}`, function(data) {
-                $('#subnetMaskDisplay').text(data.subnetMask);
-            }).fail(function() {
-                // Fallback calculation for all IPv4 CIDRs
-                const mask = calculateSubnetMask(cidrValue);
-                $('#subnetMaskDisplay').text(mask);
-            });
+            // Computed locally. This used to GET /api/subnets/calculate-mask, a route that has never
+            // existed in this application - so every keystroke 404'd, was re-executed into a full
+            // server-rendered error page, and then fell back to exactly this call anyway.
+            $('#subnetMaskDisplay').text(calculateSubnetMask(cidrValue));
             
             // Calculate and display IP counts
             const totalIPs = calculateTotalIPs(cidrValue);

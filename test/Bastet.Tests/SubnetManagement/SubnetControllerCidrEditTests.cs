@@ -334,6 +334,55 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Equal(23, cidr);
     }
 
+    /// <summary>
+    /// Pins the controller half of the /31-widening fix. The host-IP validator is only reached when
+    /// the CIDR-change gate lets a decrease through, so a gate that skips decreases leaves the
+    /// service rule unreachable and every service-level test still green. 10.20.0.0 is a legal
+    /// assignment in a /31 and becomes the network address of the /30.
+    /// </summary>
+    [Fact]
+    public async Task Edit_POST_DecreaseCidrFromSlash31_HostIpOnNetworkAddress_ReturnsViewWithError()
+    {
+        Subnet pointToPoint = new()
+        {
+            Id = 20,
+            Name = "P2P link",
+            NetworkAddress = "10.20.0.0",
+            Cidr = 31,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        };
+        _context.Subnets.Add(pointToPoint);
+        _context.HostIpAssignments.Add(new HostIpAssignment
+        {
+            IP = "10.20.0.0",
+            Name = "link-a",
+            SubnetId = 20,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 20,
+            Name = "P2P link",
+            NetworkAddress = "10.20.0.0",
+            Cidr = 30,
+            OriginalCidr = 31
+        };
+
+        IActionResult result = await _controller.Edit(20, viewModel);
+
+        // The form comes back rather than redirecting, and nothing was written.
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.ModelState.IsValid);
+
+        Subnet? unchanged = await _context.Subnets.FindAsync([20], TestContext.Current.CancellationToken);
+        Assert.NotNull(unchanged);
+        Assert.Equal(31, unchanged.Cidr);
+    }
+
     [Fact]
     public async Task Edit_POST_DecreaseCidr_WithGrandparentAndGrandchild_ReturnsRedirectToDetails()
     {
@@ -435,6 +484,40 @@ public class SubnetControllerCidrEditTests : IDisposable
         _ = Assert.IsType<ViewResult>(result);
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("Cidr", _controller.ModelState.Keys);
+    }
+
+    /// <summary>
+    /// The out-of-range value must survive to be redisplayed with its message. The [Range(0,32)]
+    /// failure skips the guarded block entirely, so execution falls through to the mask calculation
+    /// at the tail of the action - which sits outside any try and throws for a CIDR it cannot
+    /// compute, turning a form validation error into a 500.
+    /// </summary>
+    [Theory]
+    [InlineData(33)]
+    [InlineData(99)]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    public async Task Edit_POST_OutOfRangeCidr_ReturnsViewInsteadOfThrowing(int cidr)
+    {
+        _controller.ModelState.AddModelError("Cidr", "CIDR must be between 0 and 32");
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 4,
+            Name = "Target Subnet",
+            NetworkAddress = "10.0.2.0",
+            Cidr = cidr,
+            OriginalCidr = 24
+        };
+
+        IActionResult result = await _controller.Edit(4, viewModel);
+
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.ModelState.IsValid);
+        Assert.Contains("Cidr", _controller.ModelState.Keys);
+
+        // The value the operator typed is redisplayed rather than silently clamped.
+        Assert.Equal(cidr, viewModel.Cidr);
     }
 
     [Fact]

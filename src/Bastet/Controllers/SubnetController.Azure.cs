@@ -188,6 +188,23 @@ public partial class SubnetController : Controller
                 ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
         }
 
+        // The same entry cannot coexist with ordinary children either. It marks the parent fully
+        // allocated, and the creation loop is skipped wholesale whenever one is present - so every
+        // other subnet in the post is discarded, silently, under a success message. They cannot be
+        // added afterwards either, because a fully-allocated parent refuses children. Azure cannot
+        // produce this selection (subnets within a VNet may not overlap), so reaching it means a
+        // crafted or corrupted post; refusing it matches what the bulk import planner already does
+        // with the same shape.
+        if (subnets.Count > 1 && subnets.Exists(s => s.FullyEncompassesVNetPrefix))
+        {
+            ModelState.AddModelError("subnets",
+                $"A subnet marked as fully encompassing the VNet prefix covers the whole of the parent, so nothing "
+                + $"can be created inside it, but {subnets.Count - 1} other subnet(s) were submitted with it. "
+                + "Submit the encompassing subnet on its own, or submit the others without it.");
+            return BatchCreateFailure(isAzureImport, parentId,
+                ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
+        }
+
         try
         {
             // Validation reads and writes must happen under the global lock, or a concurrent
@@ -380,8 +397,8 @@ public partial class SubnetController : Controller
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync();
             logger.LogError(ex, "Batch create of child subnets under parent {ParentId} failed", parentId);
+            await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
             const string unexpected = "An unexpected error occurred while creating subnets. Details have been logged.";
             return BatchCreateFailure(isAzureImport, parentId, unexpected, StatusCode(500, unexpected));
         }

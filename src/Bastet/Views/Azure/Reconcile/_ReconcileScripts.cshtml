@@ -222,6 +222,9 @@
             $("#rec-scan-warnings").toggleClass("d-none", warnings.length === 0);
 
             const items = plan.items || [];
+            // Declared here rather than below because the "nothing to clean up" banner is gated on
+            // it as well as on items.
+            const reviewItems = plan.reviewItems || [];
             const rows = $("#rec-stale-rows").empty();
 
             items.forEach(function (item) {
@@ -245,9 +248,16 @@
             });
 
             $("#rec-stale-section").toggleClass("d-none", items.length === 0);
-            $("#rec-nothing-stale").toggleClass("d-none", items.length > 0);
 
-            const reviewItems = plan.reviewItems || [];
+            // "Everything still exists in Azure. There is nothing to clean up." is a statement of
+            // fact, so it may only appear when the scan actually established that. Rows withheld
+            // because Azure could not be asked produce a warning and no items, and subnets needing
+            // review produce reviewItems and no items - in both cases there is something to report,
+            // and claiming a clean bill over the top of it is the same fail-open assertion in prose
+            // that the deletion path is careful never to make.
+            const nothingToReport = items.length === 0 && warnings.length === 0 && reviewItems.length === 0;
+            $("#rec-nothing-stale").toggleClass("d-none", !nothingToReport);
+
             const reviewRows = $("#rec-review-rows").empty();
             reviewItems.forEach(function (item) {
                 const tr = $("<tr></tr>");
@@ -300,10 +310,8 @@
 
             const chosen = (lastPlan.items || []).filter(function (i) { return ids.indexOf(i.subnetId) !== -1; });
 
-            // Everything below describes exactly these subnets, and so does the deletion.
+            // The deletion is submitted for every selected id; the server dedupes by subtree.
             confirmedIds = chosen.map(function (i) { return i.subnetId; });
-
-            $("#rec-confirm-count").text(chosen.length);
 
             // The counts are subtree-inclusive, so an item selected together with one of its
             // ancestors is already inside the ancestor's numbers - same rule the server applies
@@ -313,12 +321,17 @@
                 (i.descendantSubnetIds || []).forEach(function (id) { covered[id] = true; });
             });
 
+            // What the server will actually report as deleted. A selected subnet that is also a
+            // descendant of another selected subnet is archived as part of that ancestor's subtree,
+            // not as a target of its own. Counting it here as well as in the cascade below
+            // announced more subnets than exist - and disagreed with the result message afterwards.
+            const targets = chosen.filter(function (i) { return !covered[i.subnetId]; });
+
+            $("#rec-confirm-count").text(targets.length);
+
             let descendants = 0;
             let hostIps = 0;
-            chosen.forEach(function (i) {
-                if (covered[i.subnetId]) {
-                    return;
-                }
+            targets.forEach(function (i) {
                 descendants += i.descendantCount;
                 hostIps += i.hostIpCount;
             });
@@ -333,7 +346,7 @@
             }
 
             const list = $("#rec-confirm-list").empty();
-            chosen.forEach(function (i) {
+            targets.forEach(function (i) {
                 list.append($('<li class="list-group-item"></li>')
                     .text(i.name + " (" + i.networkAddress + "/" + i.cidr + ") - " + statusLabel(i.statusName).text));
             });
@@ -410,6 +423,15 @@
             const list = $("#rec-commit-error-list").empty();
             (payload.globalErrors || []).forEach(function (e) {
                 list.append($("<li></li>").text(e));
+            });
+
+            // The 409 carries no globalErrors - the reason a row was withheld travels in warnings,
+            // and without this the operator sees only "no longer reported as deleted", which reads
+            // like a stale browser view rather than "Azure would not confirm it" or "the credential
+            // lost access". Re-running the scan shows the same text, but only while the condition
+            // persists: a throttle that has cleared by then explains nothing.
+            (payload.warnings || []).forEach(function (w) {
+                list.append($("<li></li>").text(w));
             });
 
             $("#rec-commit-error").removeClass("d-none");

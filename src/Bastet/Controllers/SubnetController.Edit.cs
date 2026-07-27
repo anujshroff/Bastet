@@ -117,8 +117,11 @@ public partial class SubnetController : Controller
                             throw new ValidationException($"CIDR validation failed: {errorMessage}");
                         }
 
-                        // Only validate host IPs when CIDR is increasing (making subnet smaller)
-                        if (viewModel.Cidr > subnet.Cidr)
+                        // Validate host IPs on any CIDR change. An increase can move the broadcast
+                        // address onto an assigned IP; a decrease from a /31 or /32 can reinstate
+                        // the network address reservation under one. Both leave a row the create
+                        // path refuses to produce, so neither direction can be skipped.
+                        if (viewModel.Cidr != subnet.Cidr)
                         {
                             // Validate that all host IPs are still within the subnet range after CIDR change
                             ValidationResult hostIpValidationResult = hostIpValidationService.ValidateSubnetCidrChangeWithHostIps(
@@ -133,8 +136,6 @@ public partial class SubnetController : Controller
                                 throw new ValidationException($"Host IP validation failed: {errorMessage}");
                             }
                         }
-                        // For CIDR decreases (subnet expansion), no host IP validation is needed
-                        // since making a subnet larger cannot cause host IPs to fall outside its range
                     }
 
                     // Update all editable properties including CIDR now
@@ -175,8 +176,15 @@ public partial class SubnetController : Controller
                     return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
                 }
 
-                // Handle concurrency conflict - reload current data and show user-friendly message
+                // Handle concurrency conflict - reload current data and show user-friendly message.
+                //
+                // AsNoTracking is load-bearing, not a performance tweak. The failed save left this
+                // subnet tracked and Modified, and UpdateAuditFields already re-stamped its
+                // LastModifiedAt, so an ordinary tracking query resolves to that same dirty instance
+                // and returns the caller's own rejected values as "current database values" - the
+                // exact opposite of what the message below tells the user they are looking at.
                 Subnet? currentSubnet = await context.Subnets
+                    .AsNoTracking()
                     .Include(s => s.ParentSubnet)
                     .FirstOrDefaultAsync(s => s.Id == id);
 
@@ -214,8 +222,12 @@ public partial class SubnetController : Controller
             }
         }
 
-        // If we got this far, something failed - repopulate the view model and return to the form
+        // If we got this far, something failed - repopulate the view model and return to the form.
+        // AsNoTracking for the same reason as the concurrency handler above: this runs last and is
+        // what actually reaches the view, so fixing only that one would change nothing on screen.
+        // Nothing here is saved - every field below is display or the concurrency token.
         Subnet? origSubnet = await context.Subnets
+            .AsNoTracking()
             .Include(s => s.ParentSubnet)
             .FirstOrDefaultAsync(s => s.Id == id);
 
@@ -231,10 +243,21 @@ public partial class SubnetController : Controller
         // Always set original CIDR to the actual DB value to prevent validation bypass
         viewModel.OriginalCidr = origSubnet.Cidr;
 
-        // Update the subnet mask based on user's input CIDR value
+        // Update the subnet mask based on user's input CIDR value.
+        //
+        // This runs after a failed ModelState, which is exactly when Cidr can be a value
+        // CalculateSubnetMask refuses - [Range(0,32)] is what made ModelState invalid, and this code
+        // sits outside the try/catch above, so throwing here loses the whole form to an error page
+        // instead of redisplaying it with the range message. The posted value is deliberately not
+        // clamped: it is redisplayed, and rewriting what the operator typed would hide the mistake.
+        // Same guard the Create action applies to a prefilled CIDR from the query string.
+        bool hasUsableCidr = viewModel.Cidr is >= 0 and <= 32;
+
         if (!ModelState.IsValid || viewModel.Cidr != origSubnet.Cidr)
         {
-            viewModel.SubnetMask = ipUtilityService.CalculateSubnetMask(viewModel.Cidr);
+            viewModel.SubnetMask = hasUsableCidr
+                ? ipUtilityService.CalculateSubnetMask(viewModel.Cidr)
+                : string.Empty;
         }
         else
         {

@@ -364,8 +364,9 @@ namespace Bastet.Controllers
         /// <see cref="IAzureReconciler.BuildPlan"/> can only work from a subscription listing, and
         /// ARM filters those by RBAC: a credential that has lost access to a resource group gets
         /// HTTP 200 with those resources simply absent, which is indistinguishable from deletion. A
-        /// direct read tells them apart (404 versus 403). Only the proposed rows are read, so a scan
-        /// with nothing to delete makes no extra calls at all.
+        /// direct read tells them apart (404 versus 403). Only the rows that claim the resource is
+        /// gone are read: a drift row was built from a listing that contained the resource, so
+        /// reading it back can only ever answer Live and would withhold the row for no reason.
         /// Shared by the scan and the delete paths so the two cannot diverge on what is deletable.
         /// </remarks>
         internal static async Task ConfirmProposedDeletionsAsync(
@@ -373,13 +374,17 @@ namespace Bastet.Controllers
             IAzureService azureService,
             IAzureReconciler reconciler)
         {
-            if (plan.Items.Count == 0)
+            string[] absenceClaims = [.. plan.Items
+                .Where(i => AzureReconciler.IsAbsenceStatus(i.Status))
+                .Select(i => i.AzureResourceId)];
+
+            if (absenceClaims.Length == 0)
             {
                 return;
             }
 
             IReadOnlyDictionary<string, AzureResourceConfirmation> confirmations =
-                await azureService.ConfirmResourcesAsync(plan.Items.Select(i => i.AzureResourceId));
+                await azureService.ConfirmResourcesAsync(absenceClaims);
 
             reconciler.ApplyConfirmations(plan, confirmations);
         }

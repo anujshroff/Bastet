@@ -448,6 +448,112 @@ public class AzureReconcilerTests
     }
 
     // -------------------------------------------------------------------------
+    // ApplyConfirmations and the drift statuses. A confirmation answers "is it gone?", which is a
+    // question only the absence statuses ask. VNetPrefixRemoved and SubnetPrefixChanged are built
+    // from a listing that contained the resource, so Live is the expected answer for them and is
+    // not evidence against the drift.
+    // -------------------------------------------------------------------------
+
+    /// <summary>The VNet is live and listed; only the prefix Bastet recorded is gone.</summary>
+    private AzureReconcilePlanViewModel PlanWithOnePrefixRemovedItem(out string resourceId)
+    {
+        resourceId = VNetId("vnet-a");
+        return Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "second prefix", "10.1.0.0", 16, resourceId));
+    }
+
+    /// <summary>The Azure subnet is live and listed; it has simply been re-addressed.</summary>
+    private AzureReconcilePlanViewModel PlanWithOnePrefixChangedItem(out string resourceId)
+    {
+        resourceId = SubnetId("vnet-a", "snet-a");
+        return Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"], AzSubnet("vnet-a", "snet-a", "10.0.9.0/24"))),
+            Linked(1, "snet-a", "10.0.1.0", 24, resourceId));
+    }
+
+    [Theory]
+    [InlineData(AzureResourceConfirmation.Live)]
+    [InlineData(AzureResourceConfirmation.NotVisible)]
+    [InlineData(AzureResourceConfirmation.Unknown)]
+    public void ApplyConfirmations_VNetPrefixRemoved_SurvivesEveryVerdict(
+        AzureResourceConfirmation verdict)
+    {
+        AzureReconcilePlanViewModel plan = PlanWithOnePrefixRemovedItem(out string id);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [id] = verdict
+        });
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.VNetPrefixRemoved, item.Status);
+        Assert.True(plan.CanCommit);
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Theory]
+    [InlineData(AzureResourceConfirmation.Live)]
+    [InlineData(AzureResourceConfirmation.NotVisible)]
+    [InlineData(AzureResourceConfirmation.Unknown)]
+    public void ApplyConfirmations_SubnetPrefixChanged_SurvivesEveryVerdict(
+        AzureResourceConfirmation verdict)
+    {
+        AzureReconcilePlanViewModel plan = PlanWithOnePrefixChangedItem(out string id);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [id] = verdict
+        });
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, item.Status);
+        Assert.True(plan.CanCommit);
+        Assert.Empty(plan.Warnings);
+    }
+
+    /// <summary>
+    /// The drift rows are not submitted for confirmation at all, so they arrive with no verdict.
+    /// Absence from the map must not be read as "unanswered, therefore withhold" for them.
+    /// </summary>
+    [Fact]
+    public void ApplyConfirmations_DriftRowsAbsentFromTheMap_AreKept()
+    {
+        AzureReconcilePlanViewModel plan = PlanWithOnePrefixRemovedItem(out _);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>());
+
+        _ = Assert.Single(plan.Items);
+        Assert.Empty(plan.Warnings);
+    }
+
+    /// <summary>
+    /// A mixed plan: the absence row is still governed by the 404-only rule while the drift row
+    /// passes through untouched. Both halves must hold at once.
+    /// </summary>
+    [Fact]
+    public void ApplyConfirmations_DriftAndAbsenceTogether_JudgedSeparately()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "drifted", "10.1.0.0", 16, VNetId("vnet-a")),
+            Linked(2, "gone", "10.5.0.0", 16, VNetId("vnet-gone")));
+
+        Assert.Equal(2, plan.Items.Count);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-gone")] = AzureResourceConfirmation.NotVisible
+        });
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.VNetPrefixRemoved, item.Status);
+        _ = Assert.Single(plan.Warnings);
+        Assert.Contains("'gone'", plan.Warnings[0]);
+        Assert.DoesNotContain("'drifted'", plan.Warnings[0]);
+    }
+
+    // -------------------------------------------------------------------------
     // VNet-vs-subnet routing. Every builder above hard-codes "resourceGroups/rg", so a resource
     // group whose own name collides with the "/subnets/" segment was never covered.
     // -------------------------------------------------------------------------

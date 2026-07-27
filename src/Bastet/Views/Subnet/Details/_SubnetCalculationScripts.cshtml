@@ -149,7 +149,13 @@
         // Function to calculate subnet size based on CIDR
         function updateSubnetSize(cidr) {
             const size = Math.pow(2, 32 - cidr);
-            const usableSize = size > 2 ? size - 2 : 0; // Adjust for network & broadcast addresses
+            // A /31 is a point-to-point pair and a /32 a single host: neither reserves a network or
+            // broadcast address (RFC 3021), so both are usable. Subtracting two there reported "0
+            // IP addresses" for a subnet the server, and the Create page's own copy of this
+            // calculation, both count as usable.
+            const usableSize = cidr >= 31
+                ? (cidr === 31 ? 2 : 1)
+                : Math.max(0, size - 2);
             $('#subnetSizeDisplay').text(usableSize.toLocaleString());
         }
         
