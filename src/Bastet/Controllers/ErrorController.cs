@@ -1,6 +1,5 @@
 using Bastet.Models.ViewModels;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 
@@ -17,8 +16,6 @@ public class ErrorController : Controller
     [Route("/Error/{statusCode}")]
     public IActionResult HttpStatusCodeHandler(int statusCode)
     {
-        IStatusCodeReExecuteFeature? statusCodeResult = HttpContext.Features.Get<IStatusCodeReExecuteFeature>();
-
         // The message is read from TempData (set server-side by the redirecting action), never from
         // the query string - otherwise anyone could craft /Error/400?errorMessage=... and show
         // arbitrary text under this origin. Falls back to the per-status default below.
@@ -28,7 +25,6 @@ public class ErrorController : Controller
         {
             RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier,
             StatusCode = statusCode,
-            OriginalPath = statusCodeResult?.OriginalPath,
             ErrorMessage = errorMessage
         };
 
@@ -65,14 +61,12 @@ public class ErrorController : Controller
     [Route("Error")]
     public IActionResult Error()
     {
-        IExceptionHandlerPathFeature? exceptionDetails = HttpContext.Features.Get<IExceptionHandlerPathFeature>();
         ErrorViewModel viewModel = new()
         {
             RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier,
             StatusCode = 500,
             Title = "Server Error",
-            ErrorMessage = "An unexpected error occurred on the server.",
-            OriginalPath = exceptionDetails?.Path
+            ErrorMessage = "An unexpected error occurred on the server."
         };
 
         return View("ServerError", viewModel);

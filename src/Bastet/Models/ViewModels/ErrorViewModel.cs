@@ -9,8 +9,4 @@ public class ErrorViewModel
     public string? ErrorMessage { get; set; }
     public int StatusCode { get; set; }
     public string? Title { get; set; } // Display title
-
-    // Context information
-    public string? OriginalPath { get; set; }
-    public IDictionary<string, object> AdditionalData { get; set; } = new Dictionary<string, object>();
 }
