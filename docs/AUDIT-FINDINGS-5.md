@@ -372,33 +372,31 @@ _Tests 603 → 603 (unchanged; one test rewritten, none added or removed). Build
 
 ## E10. The reconcile 409's `warnings` payload is never rendered `[×2]` — **verifier split**
 
-**Confidence: confirmed as to mechanism; contested as to harm.** This is the most interesting
-disagreement in the round and is recorded rather than resolved.
+_E10 is fixed and committed. `showCommitError` now renders `payload.warnings` into the same
+`#rec-commit-error-list` the `globalErrors` loop already fills, mirroring the line directly above it._
 
-**Where:** [_ReconcileScripts.cshtml:407-419](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L407-L419)
-(`showCommitError` reads only `payload.error` and `payload.globalErrors`),
-[SubnetController.AzureReconcile.cs:78-87](../src/Bastet/Controllers/SubnetController.AzureReconcile.cs#L78-L87)
-(the Conflict body, `warnings = plan.Warnings` at :86).
+_**The split was resolved in favour of fixing**, and the reasoning is recorded because the file left
+it open. Neither side disputed the mechanism: a grep of the 424-line script confirms `warnings` is
+read at lines 219–222 only, inside `renderPlan`, which runs for the scan response and never for a
+commit — so the 409's explanation was parsed and dropped. The refuters argued the harm is nil because
+re-running the scan, which the error message itself instructs, regenerates the identical text. That
+holds for a **persistent** cause such as a lost RBAC assignment. It does not hold for a **transient**
+one: an ARM throttle that has cleared by the time the operator re-scans produces a clean scan and no
+explanation at all, leaving them with a message that reads like a stale browser view. Against a
+two-line fix mirroring adjacent code, that residual case is worth closing._
 
-The mechanism is not in dispute and was verified by every agent that looked: the 409 carries no
-`globalErrors` key, so the list renders empty and both `warnings` **and** `subnetIds` are parsed and
-thrown away. D3's struck paragraph claims "plan.Warnings now rides along in that Conflict response" —
-it does, and nothing reads it.
+_No rig was used and none was warranted: the defect is the absence of a reader, which grep settles
+outright, and the fix is a copy of the loop above it against an element that already exists in
+`_StepConfirm.cshtml`. Recording that plainly rather than implying a browser run that did not happen._
 
-**Five finders reported it; three verifiers confirmed it and three refuted it.** The refutation:
-`ReconcileScan` runs the same `ConfirmProposedDeletionsAsync`, so re-running the scan — which the 409's
-own message explicitly instructs — regenerates the identical text into `#rec-scan-warnings`. The
-explanation is deferred by one click along the route the error prescribes, not lost. The confirmation:
-that argument holds for a persistent RBAC loss but not for a transient throttle, where the explanation
-is lost outright, and the operator meanwhile sees a message pointing at a stale browser view.
+_Left undone deliberately: `subnetIds` in the same 409 body is likewise never read, so the operator
+still is not told *which* rows were withheld by name in the error panel — though the warning text the
+fix now renders does name them. Adding a second unrendered field to the panel is a UI decision beyond
+this finding, and the warning covers the practical need._
 
-I have kept it because the mechanism is real and the fix is two lines; reconciliation may reasonably
-decide the deferred path is good enough and close it as won't-fix.
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
-**Fix.** In `showCommitError`, after the `globalErrors` loop:
-`(payload.warnings || []).forEach(function (w) { list.append($("<li></li>").text(w)); });`.
-They share `#rec-commit-error-list`, so no markup change is needed. Note `subnetIds` is likewise unread,
-so the operator is not told *which* rows were withheld either.
+---
 
 ## E11. The green "nothing to clean up" banner shows even when rows were withheld `[×1]`
 

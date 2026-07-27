@@ -412,6 +412,15 @@
                 list.append($("<li></li>").text(e));
             });
 
+            // The 409 carries no globalErrors - the reason a row was withheld travels in warnings,
+            // and without this the operator sees only "no longer reported as deleted", which reads
+            // like a stale browser view rather than "Azure would not confirm it" or "the credential
+            // lost access". Re-running the scan shows the same text, but only while the condition
+            // persists: a throttle that has cleared by then explains nothing.
+            (payload.warnings || []).forEach(function (w) {
+                list.append($("<li></li>").text(w));
+            });
+
             $("#rec-commit-error").removeClass("d-none");
             // Let the user retry: the commit is transactional, so nothing was partially applied.
             // Still snapshot-aware - a failure that invalidated the snapshot must not leave a live
