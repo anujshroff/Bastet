@@ -183,6 +183,12 @@ lock for F15 (trades a deterministic crash for a racy one and silently drops a 3
 also corrected the provenance of F1 and F4, downgraded four severities, upgraded one, and found the
 privilege escalation in F1 that no finder saw.
 
+> **Correction (v3.3.1).** One of those four killed fixes should not be counted as a win: the
+> replacement verification chose for F15 broke production. Verification measured the bootstrap case
+> it cared about and never measured the steady-state one, while explicitly overruling the finder's
+> warning about it. See the correction block on F15. Measurement beats reading only where the
+> measurement covers the path that matters.
+
 **Every finding was measured, not read.** Rigs included a recording `HttpMessageHandler` capturing the
 Azure SDK's real wire requests, `pyte` as an independent VT100 emulator for F6, a role matrix built
 with the dev-auth stub as the only changed file (verified by per-file `cmp`), instrumentation of
@@ -822,6 +828,37 @@ _Tests 627 → 627 (unchanged). Build clean, 0 warnings._
 
 ## F15. `BASTET_AUTO_MIGRATE` cannot bootstrap a catalog that does not exist `[×1]`
 
+> **CORRECTION - the fix recorded below shipped in v3.3.0 and broke production. Read this first.**
+>
+> Scoping the lock connection to `master` unconditionally made every `BASTET_AUTO_MIGRATE=true`
+> startup open `master`. The production managed identity is a contained user in the application
+> catalog with no login in `master`, so v3.3.0 died on startup before serving a request:
+>
+> ```
+> Unhandled exception. Microsoft.Data.SqlClient.SqlException (0x80131904):
+> Login failed for user '<token-identified principal>'.
+>    at Program.<Main>$(String[] args) in .../src/Bastet/Program.cs:line 259
+> Error Number:18456,State:1,Class:14
+> ```
+>
+> **The finder was right and the adjudication below is wrong.** See the struck paragraph at the end
+> of this entry. The rebuttal collapsed two distinct cases: EF's database creator opens a non-target
+> catalog *only when the catalog is missing*. When the catalog already exists - every steady-state
+> deployment - `Migrate()` never touches `master`, so the pre-fix code worked for a contained user
+> and the fixed code did not. "Both have the same caveat" is true only of the bootstrap case, which
+> is the one case F15 was actually about.
+>
+> Also note the 4060 filter never fired in production: a contained user hitting `master` gets 18456,
+> not 4060, so the friendly rethrow this entry credits itself with was unreachable on the path that
+> actually failed.
+>
+> Amended in v3.3.1: the lock now opens the **configured catalog first** and falls back to `master`
+> only on SQL 4060, so the bootstrap behaviour verified below is retained while managed-identity
+> deployments stop needing `master`. The catalog choice moved to `Bastet.Data.MigrationLockConnectionString`
+> and now has unit tests - this entry's "no test ships" is what let the regression ship green.
+>
+> **Do not re-apply an unconditional `master` scope.** That is this finding's second incarnation.
+
 _F15 is fixed and committed with the two-line change the adjudicating verifier found, not the deletion
 the finding proposed. The `Bastet:Migration` lock connection is now scoped to `master` via
 `SqlConnectionStringBuilder`, so it no longer needs the target catalog to exist before `Migrate()` can
@@ -856,11 +893,19 @@ with the lock removed:_
 5404: listening=1 unhandled=0 1801=0     (six migrations, applied once, one shared history table)
 ```
 
-_The finding's stated reason for preferring deletion over this variant was also false and is recorded
+~~_The finding's stated reason for preferring deletion over this variant was also false and is recorded
 so it is not repeated: it claimed the master variant "needs the login to be able to connect to master,
 which a contained Azure SQL user cannot", while the primary fix "has no such caveat". Both have the
 same caveat - EF's own database creator opens a non-target catalog to issue `CREATE DATABASE`, so no
-login that cannot reach master can create the catalog by either route._
+login that cannot reach master can create the catalog by either route._~~
+
+> **Struck - this paragraph is the defect.** The finder's objection was correct as stated and the
+> rebuttal is not. The caveats are not the same: the primary fix needs `master` only when creating a
+> catalog, the master-scoped variant needs it on every startup. Dismissing the objection is what put
+> an 18456 crash into v3.3.0. What should have been recorded here is the opposite conclusion - that a
+> contained Azure SQL user is the documented deployment model (`README.md`, "Database Setup", which
+> asks only for database-level roles and never mentions `master`), so any fix requiring a `master`
+> login on the steady-state path is disqualified regardless of what it does for bootstrap.
 
 _Severity was adjudicated down from the finder's medium to low, and that grade is what this fix
 reflects: the documented bootstrap is create-then-run (`README.md:31-33`, unchanged since the initial

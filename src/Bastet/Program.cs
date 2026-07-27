@@ -240,32 +240,70 @@ if (autoMigrate)
     // lock held on a dedicated connection for the duration of both Migrate() calls. A replica
     // that cannot get the lock within the timeout fails startup loudly; on restart it finds the
     // migrations applied and Migrate() no-ops.
-    // Scoped to master, not the target catalog. Migrate() below is what creates the database on a
-    // first run, and opening the lock connection against a catalog that does not exist yet fails
-    // first with SQL error 4060 - so BASTET_AUTO_MIGRATE could never bootstrap an empty server, a
-    // regression from when Migrate() ran before any lock existed. Holding the lock on master also
-    // means CREATE DATABASE happens inside it, which EF Core's own __EFMigrationsLock never covers:
-    // two simultaneous cold starts against a missing catalog otherwise race and one dies with
-    // "Database already exists".
-    SqlConnectionStringBuilder migrationLockConnectionString = new(connectionString)
-    {
-        InitialCatalog = "master"
-    };
+    // The lock is taken on the configured catalog, and only falls back to master when that catalog
+    // does not exist yet. The order matters and is not cosmetic: the documented deployment model
+    // (README, "Database Setup") is a user inside the application database, which on Azure SQL is a
+    // contained user with no login in master at all. Opening master unconditionally - as this did
+    // in v3.3.0 - fails every managed-identity deployment with SQL 18456 before a request is served.
+    //
+    // The fallback still exists because Migrate() is what creates the database on a first run, and
+    // opening the lock connection against a catalog that does not exist fails first with SQL 4060 -
+    // so without it BASTET_AUTO_MIGRATE could never bootstrap an empty server. Holding the lock on
+    // master for that case also means CREATE DATABASE happens inside it, which EF Core's own
+    // __EFMigrationsLock never covers: two simultaneous cold starts against a missing catalog
+    // otherwise race and one dies with "Database already exists".
+    //
+    // Accepted narrow window: a replica that finds the catalog missing locks on master while a peer
+    // that finds it present locks on the catalog, so the two are in different scopes. That is
+    // reachable only mid-bootstrap, and EF Core's __EFMigrationsLock still serialises the half that
+    // applies migrations.
+    using SqlConnection migrationLockConnection = OpenMigrationLockConnection();
 
-    using SqlConnection migrationLockConnection = new(migrationLockConnectionString.ConnectionString);
+    SqlConnection OpenMigrationLockConnection()
+    {
+        try
+        {
+            return Open(MigrationLockConnectionString.Configured(connectionString));
+        }
+        catch (SqlException ex) when (ex.Number == 4060)
+        {
+            // 4060 is "cannot open database" - the catalog is not there yet, so this is the
+            // bootstrap path. Every other failure, a bad credential included, is left to surface as
+            // itself rather than being reinterpreted as a missing database.
+            try
+            {
+                return Open(MigrationLockConnectionString.MasterBootstrap(connectionString));
+            }
+            catch (SqlException bootstrapException)
+            {
+                // Unhandled, this arrives as a bare stack trace naming neither catalog nor the
+                // setting that asked for it, and the login failure on master reads as the whole
+                // problem when the actual problem is the missing database behind it.
+                throw new InvalidOperationException(
+                    "BASTET_AUTO_MIGRATE is enabled, but the configured database does not exist and the "
+                    + $"login could not open '{MigrationLockConnectionString.BootstrapCatalog}' to create it. "
+                    + "Either create the database first and grant the login db_owner inside it, or grant the "
+                    + $"login access to '{MigrationLockConnectionString.BootstrapCatalog}'. "
+                    + "See BASTET_CONNECTION_STRING and BASTET_AUTO_MIGRATE.", bootstrapException);
+            }
+        }
 
-    try
-    {
-        migrationLockConnection.Open();
-    }
-    catch (SqlException ex) when (ex.Number == 4060)
-    {
-        // 4060 is "cannot open database". Unhandled, this arrives as a bare stack trace naming
-        // neither the catalog nor the setting that asked for it.
-        throw new InvalidOperationException(
-            "BASTET_AUTO_MIGRATE is enabled, but the migration lock could not open a connection to "
-            + "'master' on the configured server. The login needs access to master so migrations can "
-            + "be serialised across replicas. See BASTET_CONNECTION_STRING.", ex);
+        // Disposes on any failed open, so neither attempt above can leak a connection.
+        static SqlConnection Open(string? lockConnectionString)
+        {
+            SqlConnection connection = new(lockConnectionString);
+
+            try
+            {
+                connection.Open();
+                return connection;
+            }
+            catch
+            {
+                connection.Dispose();
+                throw;
+            }
+        }
     }
 
     using (SqlCommand getLock = new("sp_getapplock", migrationLockConnection))
