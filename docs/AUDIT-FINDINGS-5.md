@@ -339,35 +339,36 @@ _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ## E9. `BatchCreateChildSubnets` discards every selected child when an encompassing entry is present `[×2]`
 
-**Confidence: confirmed.** An existing passing test asserts the buggy outcome.
+_E9 is fixed and committed. A second guard now sits beside D9's: an encompassing entry submitted with
+any other subnet is refused outright, naming how many others were sent. The message tells the caller
+how to proceed — submit the encompassing entry alone, or the others without it — rather than leaving
+them to work out why a "successful" import created nothing._
 
-**Where:** [SubnetController.Azure.cs:322](../src/Bastet/Controllers/SubnetController.Azure.cs#L322)
-(`if (!hasFullyEncompassingSubnet)` — skips the creation loop wholesale),
-[:181](../src/Bastet/Controllers/SubnetController.Azure.cs#L181) (D9's guard, which does not check the
-count), [:366](../src/Bastet/Controllers/SubnetController.Azure.cs#L366) (the unconditional success
-message).
+_Rejecting was chosen over the alternative of hoisting the creation loop above the fully-allocated
+write, and the finding is right that the alternative is worse: it would produce a parent that is both
+marked fully allocated **and** has children, a state `ValidateSubnetCanBeFullyAllocated` and
+`SetAllocationStatus` each forbid. Trading a silent drop for a corrupt one is no trade._
 
-**Failure scenario.** POST with `parentId=1`, `isAzureImport=true`, `vnetName="prod-vnet"` and three
-entries: one `FullyEncompassesVNetPrefix=true` covering `10.0.0.0/24`, plus `web 10.0.0.0/25` and
-`app 10.0.0.128/25`. D9's guard passes, both /25s validate, and then the creation loop is skipped
-entirely. Result: parent renamed and marked `IsFullyAllocated=true`, two submitted subnets never
-created, and "Successfully renamed parent subnet… and marked it as fully allocated." Because
-`ValidateSubnetCreation` refuses children under a fully-allocated parent, they can never be added later
-without an operator clearing the flag by hand.
+_**An existing test asserted the defect** and had to be rewritten, which is the part worth flagging
+for future rounds. `BatchCreate_MixedSubnets_HandlesFullyEncompassingCorrectly` asserted the parent
+was renamed, marked fully allocated, and that `childSubnetCount == 0` — i.e. it pinned "the two
+submitted /25s vanish and we call that success" as the contract. It is now
+`BatchCreate_EncompassingEntryWithSiblings_IsRefusedAndWritesNothing`, asserting the post is refused
+and that the parent is neither renamed nor flagged. Rewritten first, and it failed against the
+unfixed action at `AssertImportFailureRedirect` — no error was reported because the action had
+happily returned success._
 
-`SubnetControllerFullyEncompassingTests.cs:311` asserts exactly this, including
-`Assert.Equal(0, childSubnetCount)` — a test pinning the defect.
+_The guard is `subnets.Count > 1`, so the legitimate case D9 protects — a single encompassing entry
+inside a real Azure import — is untouched, and its test still passes._
 
-**Severity, corrected down from the finder's medium** to match where its twin D22 was filed: the
-selection cannot arise from real Azure or the wizard. `GetCompatibleSubnets` sets the flag only when the
-prefix equals a VNet prefix *and* matches the chosen parent, and Azure forbids overlapping subnets
-within a VNet, so the two cannot coexist in one result list. The trigger is a crafted or corrupted POST
-from an authenticated admin behind antiforgery — D22's reachability exactly.
+_Severity was recorded as low rather than the finder's medium, and that holds: the combination cannot
+come from Azure or the wizard, since subnets within a VNet may not overlap and the flag is only set
+when the prefix matches the chosen parent exactly. The vector is a crafted post from an authenticated
+admin behind antiforgery — the same reachability D22 was accepted under._
 
-**Fix.** Extend the D9 guard at :181 with a count clause and reject the combination outright, mirroring
-the planner's wording. **Do not** instead hoist the creation loop above the fully-allocated write — that
-would produce a parent that is both fully allocated and has children, a state
-`ValidateSubnetCanBeFullyAllocated` and `SetAllocationStatus` both forbid.
+_Tests 603 → 603 (unchanged; one test rewritten, none added or removed). Build clean, 0 warnings._
+
+---
 
 ## E10. The reconcile 409's `warnings` payload is never rendered `[×2]` — **verifier split**
 
