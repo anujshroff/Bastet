@@ -147,43 +147,43 @@ _Tests 584 → 590 (+6). Build clean, 0 warnings._
 
 ## E3. A CIDR decrease from /31 or /32 strands a host IP on the new network address `[×1]`
 
-**Confidence: confirmed.** Reproduced by a verifier driving the real controller and services.
+_E3 is fixed and committed, and being a `[×1]` it was re-derived from scratch rather than taken on
+trust. It holds. Both halves of the finding's fix were needed and both were applied: the controller
+gate now reads `viewModel.Cidr != subnet.Cidr` so a decrease reaches the validator at all, and
+`ValidateSubnetCidrChangeWithHostIps` gained a decrease arm rejecting an assignment that equals the
+network address when the new CIDR is below /31. Verified that the controller change alone is
+insufficient, exactly as the finding warned — the service's own `newCidr > originalCidr` gate would
+still have skipped it._
 
-**Where:** [SubnetController.Edit.cs:121](../src/Bastet/Controllers/SubnetController.Edit.cs#L121)
-(`if (viewModel.Cidr > subnet.Cidr)`, with the justifying comment at
-[:136-137](../src/Bastet/Controllers/SubnetController.Edit.cs#L136-L137)),
-[HostIpValidationService.cs:316](../src/Bastet/Services/Validation/HostIpValidationService.cs#L316)
-(`if (newCidr > originalCidr)` — the second gate),
-[HostIpValidationService.cs:70](../src/Bastet/Services/Validation/HostIpValidationService.cs#L70)
-(`if (subnet.Cidr < 31)` — what permits the assignment in the first place).
+_One refinement the finding did not have. It compares the host IP against the recorded
+`networkAddress` directly, which silently assumes the subnet is aligned to the new CIDR. It is not
+always: widening `10.0.0.2/31` to `/30` moves the network address down to `10.0.0.0`, so `10.0.0.2`
+becomes an ordinary host and there is no collision. The arm is therefore guarded with
+`ipUtilityService.IsValidSubnet(networkAddress, newCidr)`, which establishes that the recorded
+address really is the new network address before comparing. An unaligned decrease is rejected before
+it reaches here, so this is belt-and-braces rather than a behaviour change — but it means the rule
+is stated in terms of what is true rather than what happens to be true._
 
-The comment says a CIDR decrease needs no host-IP validation "since making a subnet larger cannot cause
-host IPs to fall outside its range". That is true about the *range* and false about *reservation*.
+_The comment at the old call site — "For CIDR decreases (subnet expansion), no host IP validation is
+needed since making a subnet larger cannot cause host IPs to fall outside its range" — was deleted
+rather than amended. It is the reasoning that produced the bug: true about the *range* and silent
+about *reservation*._
 
-**Failure scenario.** Parent `10.0.0.0/24`, child `10.0.0.0/31`. Assign host IP `10.0.0.0` — accepted,
-correctly, because RFC 3021 exempts /31 from the network/broadcast reservation. Now edit the child to
-`/30`. Host-IP validation is skipped entirely on both gates. Result:
+_Six tests written first. The two defect cases (`/31`→`/30` and `/32`→`/24`, host IP on the network
+address) failed against the unfixed code; the three guards passed throughout, which is the point of
+them — the other address of a `/31` must stay assignable once widened, an ordinary widening between
+two CIDRs that both already reserve the network address cannot create a new collision, and
+**widening a `/32` to a `/31` must reserve nothing**, since RFC 3021 applies to the destination too.
+That last one is what a fix written without the `newCidr < 31` guard would break._
 
-```
-PERSISTED: 10.0.0.0/30 with host IPs: 10.0.0.0
-ValidateNewHostIp('10.0.0.0', subnet) valid=False :: NETWORK_ADDRESS_RESERVED
-unallocated row: 10.0.0.1 - 10.0.0.2 count=2
-```
+_The sixth test is a controller test, added because the service tests do not pin the gate: reverting
+`!=` back to `>` leaves all five service tests green. Proven by doing exactly that in a scratch copy
+— and the first attempt at that probe was **wrong and had to be redone**, because a careless `sed`
+rewrote both `!=` comparisons in the file rather than the one under test, including a pre-existing
+and correct one ten lines above. Re-run against line 124 alone, the controller test is the single
+failure._
 
-The row now in the database is one the validated create path refuses — delete it and it cannot be
-re-created. The Details page simultaneously lists `10.0.0.0` as assigned and shows 2 free addresses, so
-it accounts for 3 addresses in a subnet whose `UsableIpAddresses` is 2. Same from `/32` → `/24`.
-
-**Fix.** Change the controller gate to `if (viewModel.Cidr != subnet.Cidr)` **and** add a decrease arm
-to `ValidateSubnetCidrChangeWithHostIps`: when `newCidr < originalCidr && newCidr < 31`, reject any
-assignment whose IP equals the network address. Both halves are required — the service's own
-`newCidr > originalCidr` gate at :316 means relaxing the controller alone changes nothing.
-
-Only the network address needs checking on a decrease: widening leaves it fixed and moves the broadcast
-strictly upward past every address the old range held, which is why only a /31 or /32 origin collides.
-
-This is the mirror image of D4, the broadcast-side defect at the same call site, which round 4 filed
-medium and fixed.
+_Tests 590 → 596 (+6). Build clean, 0 warnings._
 
 ---
 

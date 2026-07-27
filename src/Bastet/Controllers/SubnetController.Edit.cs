@@ -117,8 +117,11 @@ public partial class SubnetController : Controller
                             throw new ValidationException($"CIDR validation failed: {errorMessage}");
                         }
 
-                        // Only validate host IPs when CIDR is increasing (making subnet smaller)
-                        if (viewModel.Cidr > subnet.Cidr)
+                        // Validate host IPs on any CIDR change. An increase can move the broadcast
+                        // address onto an assigned IP; a decrease from a /31 or /32 can reinstate
+                        // the network address reservation under one. Both leave a row the create
+                        // path refuses to produce, so neither direction can be skipped.
+                        if (viewModel.Cidr != subnet.Cidr)
                         {
                             // Validate that all host IPs are still within the subnet range after CIDR change
                             ValidationResult hostIpValidationResult = hostIpValidationService.ValidateSubnetCidrChangeWithHostIps(
@@ -133,8 +136,6 @@ public partial class SubnetController : Controller
                                 throw new ValidationException($"Host IP validation failed: {errorMessage}");
                             }
                         }
-                        // For CIDR decreases (subnet expansion), no host IP validation is needed
-                        // since making a subnet larger cannot cause host IPs to fall outside its range
                     }
 
                     // Update all editable properties including CIDR now

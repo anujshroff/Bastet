@@ -345,6 +345,30 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
                 }
             }
         }
+        else if (newCidr < originalCidr
+            && newCidr < 31
+            && ipUtilityService.IsValidSubnet(networkAddress, newCidr))
+        {
+            // The mirror of the case above. Widening cannot push a host IP out of range, and it
+            // moves the broadcast address strictly upward - past every address the old range held -
+            // so neither check above can fire on a decrease. What it can do is reinstate the network
+            // address reservation: a /31 is a point-to-point pair and a /32 a single host, neither
+            // of which reserves anything (RFC 3021), so the network address is a legal assignment
+            // there. Dropping below /31 makes that same address reserved without the operator
+            // touching it, leaving a row ValidateNewHostIp refuses to create - so it could not be
+            // re-added after a delete. The network address itself never moves when the subnet is
+            // aligned to the new CIDR, which IsValidSubnet establishes; an unaligned decrease is
+            // rejected before it reaches here.
+            foreach (HostIpAssignment hostIp in subnet.HostIpAssignments)
+            {
+                if (hostIp.IP == networkAddress)
+                {
+                    result.AddError(CIDR_CHANGE_INVALID,
+                        $"Cannot decrease CIDR to /{newCidr} as host IP {hostIp.IP} would become the subnet's network address");
+                    break;
+                }
+            }
+        }
 
         return result;
     }

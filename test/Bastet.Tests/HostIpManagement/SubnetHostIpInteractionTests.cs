@@ -593,4 +593,88 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.Message.Contains("outside the subnet range"));
     }
+
+    // -------------------------------------------------------------------------
+    // The mirror image: a CIDR *decrease* cannot move the network address, but dropping below /31
+    // makes it reserved for the first time. A /31 or /32 is allowed to hand out its network address
+    // (RFC 3021), so widening one is the only way an assigned host IP can become the network
+    // address without the operator touching it.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 10.4.0.0 is a legal assignment in a /31, where nothing is reserved. Widening to /30 keeps the
+    /// same network address but reinstates the reservation, so the row becomes one ValidateNewHostIp
+    /// refuses to create - delete it and it cannot be re-added.
+    /// </summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_WideningFromSlash31_HostIpBecomesNetworkAddress_IsRejected()
+    {
+        SeedSubnetWithHostIp(104, "10.4.0.0", 31, "10.4.0.0");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(104, "10.4.0.0", 31, 30);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Message.Contains("10.4.0.0"));
+        Assert.Contains(result.Errors, e => e.Message.Contains("network address"));
+    }
+
+    /// <summary>The same from a /32, whose single address is also its network address.</summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_WideningFromSlash32_HostIpBecomesNetworkAddress_IsRejected()
+    {
+        SeedSubnetWithHostIp(105, "10.5.0.0", 32, "10.5.0.0");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(105, "10.5.0.0", 32, 24);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Message.Contains("10.5.0.0"));
+    }
+
+    /// <summary>
+    /// The other half of a /31 is an ordinary host once widened - 10.6.0.1 sits between the /30's
+    /// network and broadcast addresses - so widening must still be allowed.
+    /// </summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_WideningFromSlash31_OtherAddress_IsAllowed()
+    {
+        SeedSubnetWithHostIp(106, "10.6.0.0", 31, "10.6.0.1");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(106, "10.6.0.0", 31, 30);
+
+        Assert.True(result.IsValid);
+    }
+
+    /// <summary>
+    /// The boundary that matters: widening a /32 to a /31 lands on a CIDR that still reserves
+    /// nothing, so the host IP sitting on the network address stays legal. Checking the network
+    /// address without the newCidr &lt; 31 guard would wrongly reject this.
+    /// </summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_WideningToSlash31_ReservesNothing()
+    {
+        SeedSubnetWithHostIp(107, "10.7.0.0", 32, "10.7.0.0");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(107, "10.7.0.0", 32, 31);
+
+        Assert.True(result.IsValid);
+    }
+
+    /// <summary>
+    /// An ordinary widening between two CIDRs that both reserve the network address cannot create a
+    /// new collision, because the address was already reserved before the change.
+    /// </summary>
+    [Fact]
+    public void ValidateSubnetCidrChangeWithHostIps_OrdinaryWidening_IsAllowed()
+    {
+        SeedSubnetWithHostIp(108, "10.8.0.0", 30, "10.8.0.1");
+
+        ValidationResult result = _hostIpValidationService
+            .ValidateSubnetCidrChangeWithHostIps(108, "10.8.0.0", 30, 29);
+
+        Assert.True(result.IsValid);
+    }
 }
