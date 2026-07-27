@@ -73,12 +73,13 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
         });
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        // What did SQLite actually store for the concurrency token?
+        // The provider caveat above, made executable: SQLite stores no token, so the posted one
+        // below conflicts by being non-null rather than by differing in value.
         byte[]? stored = await _context.Subnets.AsNoTracking()
             .Where(s => s.Id == 50).Select(s => s.RowVersion)
             .FirstAsync(TestContext.Current.CancellationToken);
-        File.AppendAllText("/tmp/claude-1000/-home-anuj-code-Bastet/929bd7e2-c2c2-42a4-b6dd-e0e98161c7e0/scratchpad/p2-beat7/e6probe.log", "\n" + ($"stored RowVersion = {(stored is null ? "NULL" : Convert.ToHexString(stored))}"));
-        File.AppendAllText("/tmp/claude-1000/-home-anuj-code-Bastet/929bd7e2-c2c2-42a4-b6dd-e0e98161c7e0/scratchpad/p2-beat7/e6probe.log", "\n" + ($"stored LastModifiedAt = {OtherUsersSave:HH:mm}"));
+        Assert.Null(stored);
+
         _context.ChangeTracker.Clear();
 
         // Act: the operator posts an edit carrying a stale/foreign concurrency token.
@@ -97,8 +98,6 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
         // The concurrency handler must have been the one that ran.
         ViewResult view = Assert.IsType<ViewResult>(result);
         EditSubnetViewModel shown = Assert.IsType<EditSubnetViewModel>(view.Model);
-        File.AppendAllText("/tmp/claude-1000/-home-anuj-code-Bastet/929bd7e2-c2c2-42a4-b6dd-e0e98161c7e0/scratchpad/p2-beat7/e6probe.log", "\n" + ($"ModelState errors: {string.Join(" | ", _controller.ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage))}"));
-        File.AppendAllText("/tmp/claude-1000/-home-anuj-code-Bastet/929bd7e2-c2c2-42a4-b6dd-e0e98161c7e0/scratchpad/p2-beat7/e6probe.log", "\n" + ($"shown LastModifiedAt = {shown.LastModifiedAt:HH:mm:ss}"));
         Assert.Contains(_controller.ModelState.Values.SelectMany(v => v.Errors),
             e => e.ErrorMessage.Contains("modified by another user"));
 
