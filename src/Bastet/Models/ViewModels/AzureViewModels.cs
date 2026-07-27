@@ -93,35 +93,5 @@ namespace Bastet.Models.ViewModels
         /// The CIDR of the Bastet subnet
         /// </summary>
         public int Cidr { get; set; }
-
-        /// <summary>
-        /// Available Azure subscriptions
-        /// </summary>
-        public List<AzureSubscriptionViewModel> Subscriptions { get; set; } = [];
-
-        /// <summary>
-        /// The selected subscription ID
-        /// </summary>
-        public string SelectedSubscriptionId { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Available Virtual Networks that match the Bastet subnet
-        /// </summary>
-        public List<AzureVNetViewModel> VNets { get; set; } = [];
-
-        /// <summary>
-        /// The selected VNet resource ID
-        /// </summary>
-        public string SelectedVNetResourceId { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Azure subnets that can be imported as child subnets
-        /// </summary>
-        public List<AzureSubnetViewModel> AzureSubnets { get; set; } = [];
-
-        /// <summary>
-        /// Whether to update the Bastet subnet name to match the Azure VNet name
-        /// </summary>
-        public bool UpdateBastetSubnetName { get; set; }
     }
 }
