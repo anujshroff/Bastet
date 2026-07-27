@@ -34,19 +34,27 @@ public class EditSubnetViewModel
 
     // Editable properties
 
+    // The [NoHtml] and [Tags] rules below are not decoration: sanitization runs *after* validation,
+    // so without them the sanitizer silently rewrites a value this model has already accepted.
+    // StripHtml can empty a name outright, defeating [Required], and SanitizeTags drops over-long
+    // tags and everything past the tenth - all reported to the user as a successful update. These
+    // must stay in step with CreateSubnetViewModel, which writes the same three columns.
     [Required(ErrorMessage = "Name is required")]
     [StringLength(100, ErrorMessage = "Name cannot be longer than 100 characters")]
+    [NoHtml(ErrorMessage = "HTML tags are not allowed in subnet names")]
     [SanitizeName] // Auto-sanitization
     [Display(Name = "Subnet Name")]
     public string Name { get; set; } = string.Empty;
 
     [Display(Name = "Description")]
     [StringLength(1000, ErrorMessage = "Description cannot be longer than 1000 characters")]
+    [NoHtml(ErrorMessage = "HTML tags are not allowed in descriptions")]
     [SanitizeDescription] // Auto-sanitization
     public string? Description { get; set; }
 
     [Display(Name = "Tags")]
     [StringLength(255, ErrorMessage = "Tags cannot be longer than 255 characters")]
+    [Bastet.Services.Security.Tags(MaxTags = 10, MaxTagLength = 50, ErrorMessage = "Invalid tags format")]
     [SanitizeTags] // Auto-sanitization
     public string? Tags { get; set; }
 

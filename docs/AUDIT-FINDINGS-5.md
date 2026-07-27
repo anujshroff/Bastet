@@ -109,47 +109,41 @@ _Tests 576 → 584 (+8). Build clean, 0 warnings._
 
 ## E2. Subnet Edit silently destroys names, descriptions and tags that Create rejects `[×2]`
 
-**Confidence: confirmed.** A verifier reproduced all four cases through the real filter and action.
+_E2 is fixed and committed. `EditSubnetViewModel` now carries `[NoHtml]` on `Name` and `Description`
+and `[Bastet.Services.Security.Tags(MaxTags = 10, MaxTagLength = 50)]` on `Tags`, matching the
+`CreateSubnetViewModel` rules for the same three columns. The form now refuses the input instead of
+accepting it and letting the sanitizer rewrite it afterwards, which restores `[Required]` on `Name`
+as a real constraint._
 
-**Where:** [EditSubnetViewModel.cs:37-51](../src/Bastet/Models/ViewModels/EditSubnetViewModel.cs#L37-L51)
-against [SubnetViewModels.cs:8-14](../src/Bastet/Models/ViewModels/SubnetViewModels.cs#L8-L14),
-[:27-31](../src/Bastet/Models/ViewModels/SubnetViewModels.cs#L27-L31),
-[:36-40](../src/Bastet/Models/ViewModels/SubnetViewModels.cs#L36-L40).
-Also [InputSanitizationService.cs:207-210](../src/Bastet/Services/Security/InputSanitizationService.cs#L207-L210),
-[GlobalSanitizationFilter.cs:19-32](../src/Bastet/Filters/GlobalSanitizationFilter.cs#L19-L32),
-[SubnetController.Edit.cs:141-143](../src/Bastet/Controllers/SubnetController.Edit.cs#L141-L143).
+_**`[SafeText]` was deliberately not added**, which is where this departs from simple parity with
+Create. The reason was checked rather than assumed: `[SafeText]` appears on exactly three properties
+in the tree — `CreateSubnetViewModel.Name` and the two HostIp models — and **no Azure import path
+applies it**. Imported names go through `SanitizeName` only, which strips markup and trims but does
+not enforce the `^[a-zA-Z0-9\s\-_.,!?@#$%&()+=]*$` character class. So a stored name outside that
+class is reachable, and adding `[SafeText]` to the edit model would make those rows uneditable until
+renamed — a migration hazard well beyond the four defects reported. The three attributes above close
+all four._
 
-`CreateSubnetViewModel` carries `[NoHtml]`, `[SafeText]` and `[Tags(MaxTags = 10, MaxTagLength = 50)]`.
-`EditSubnetViewModel` carries none of them — only the `[Sanitize*]` markers. `GlobalSanitizationFilter`
-runs **after** model binding and validation, so on Edit the sanitizer silently rewrites values that
-validation already accepted, instead of the form refusing them.
+_Six parity tests were written first, as a new `SubnetViewModelValidationParityTests`, asserting that
+Create and Edit refuse the same input. **The first version of them was wrong and passed for the wrong
+reason**, which is worth recording: `NoHtmlAttribute` and `TagsAttribute` both return a
+`ValidationResult` carrying **no member names**, so the helper's `MemberNames.Contains(...)` match
+never hit and the failures it produced were on the Create side, not the Edit side. Rewritten to
+validate one property at a time with `Validator.TryValidateProperty` and an explicit `MemberName`,
+which attributes the failure exactly. Both attributes also resolve `IInputSanitizationService` from
+the validation context, so the tests supply one — without it every rule fails with "Input
+sanitization service not available" and the whole suite would pass vacuously._
 
-**Failure scenarios**, all reproduced against the real `GlobalSanitizationFilter` + real Edit action:
+_Proven by reverting only `EditSubnetViewModel.cs` in a scratch copy and re-running: five failures,
+each reading `EditSubnetViewModel.<property> was accepted but should have been rejected`. Against the
+fix all six pass. The sixth is a guard against over-correcting — ordinary values, including a tag
+sitting exactly on the 50-character limit and exactly ten of them, must still be accepted by both
+models. It caught a bug in its own fixture first: ten 50-character tags exceed the 255-character
+`[StringLength]` that governs the field as a whole, which both models correctly reject._
 
-| Posted to /Subnet/Edit | Stored | Create's response to the same input |
-|---|---|---|
-| `Name = "<b></b>"` | `Name = ""` — an **empty required field** | "HTML tags are not allowed in subnet names" |
-| a single 60-char tag | `Tags = ""` — dropped entirely | "Each tag must be 50 characters or less" |
-| 11 tags | first 10 only | "Maximum 10 tags allowed" |
-| `Description = "temp < 5 and load > 3"` | `"temp  3"` | "HTML tags are not allowed in descriptions" |
+_Tests 584 → 590 (+6). Build clean, 0 warnings._
 
-Each redirects with "Subnet '…' was updated successfully." The empty-name case is the load-bearing one:
-`[Required]` passes on the submitted value, then `StripHtml` empties it, and EF does not re-run
-DataAnnotations on `SaveChanges`, so `''` is persisted into a `NOT NULL` column and the tree renders a
-nameless row.
-
-**Fix.** Add `[NoHtml]` to `Name` and `Description`, and
-`[Bastet.Services.Security.Tags(MaxTags = 10, MaxTagLength = 50)]` to `Tags`. The user then gets a field
-error instead of silent loss, and `[Required]` on `Name` becomes load-bearing again.
-
-**Do not add `[SafeText]` to `Name` without checking existing data first.** Bulk Azure import passes
-names through `SanitizeName` only, never `IsSafeText`
-([AzureBulkImportPlanner.cs:663-671](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L663-L671)),
-so rows containing characters `SafeText` forbids can already exist and would become uneditable until
-renamed. The three attributes above close all four reported cases with no migration hazard.
-
-This is the mirror image of D7: the round-4 watch list flags sanitizers that *lengthen* a value; this is
-the same ordering hazard for sanitizers that *remove* content.
+---
 
 ## E3. A CIDR decrease from /31 or /32 strands a host IP on the new network address `[×1]`
 
