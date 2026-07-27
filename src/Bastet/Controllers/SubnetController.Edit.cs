@@ -35,7 +35,8 @@ public partial class SubnetController : Controller
             SubnetMask = ipUtilityService.CalculateSubnetMask(subnet.Cidr),
             CreatedAt = subnet.CreatedAt,
             LastModifiedAt = subnet.LastModifiedAt,
-            RowVersion = subnet.RowVersion
+            RowVersion = subnet.RowVersion,
+            IsAzureLinked = !string.IsNullOrEmpty(subnet.AzureResourceId)
         };
 
         // Add parent subnet info if exists
@@ -80,6 +81,20 @@ public partial class SubnetController : Controller
 
                     // Check if CIDR has changed
                     bool cidrChanged = viewModel.Cidr != subnet.Cidr;
+
+                    // An imported row records the prefix its Azure resource had at link time, and
+                    // the reconciler compares Bastet's current prefix against Azure's, reading any
+                    // difference as Azure-side drift. Changing the CIDR here breaks that invariant
+                    // silently: the row becomes a deletion candidate reported as "no longer exists
+                    // in Azure", and confirming it archives the subtree and its host IPs while the
+                    // Azure resource is healthy. Nothing downstream can tell that state apart from a
+                    // genuine Azure-side prefix change, so it has to be refused at the write.
+                    if (cidrChanged && !string.IsNullOrEmpty(subnet.AzureResourceId))
+                    {
+                        throw new ValidationException(
+                            "This subnet is linked to an Azure resource, so its CIDR cannot be changed here. " +
+                            "Change the prefix in Azure and re-import, or delete the subnet and recreate it.");
+                    }
 
                     // Always validate CIDR changes, regardless of whether this is a first or subsequent attempt
                     // This ensures validation is never bypassed, even on multiple form submissions
@@ -239,6 +254,10 @@ public partial class SubnetController : Controller
 
         // Repopulate the display-only properties
         viewModel.NetworkAddress = origSubnet.NetworkAddress;
+
+        // Re-derived from the database rather than trusted from the post, so a caller cannot claim a
+        // row is unlinked to get the editable field back on a re-render.
+        viewModel.IsAzureLinked = !string.IsNullOrEmpty(origSubnet.AzureResourceId);
 
         // Always set original CIDR to the actual DB value to prevent validation bypass
         viewModel.OriginalCidr = origSubnet.Cidr;

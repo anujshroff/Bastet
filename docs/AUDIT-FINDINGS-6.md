@@ -127,82 +127,47 @@ number was wrong it is corrected here and noted.
 
 ## F1. A legitimate CIDR edit on an Azure-linked subnet makes reconcile archive it and its subtree `[×2]`
 
-**Confidence: confirmed (live).** Three verifiers, three lenses, all confirmed.
+_F1 is fixed and committed. `SubnetController.Edit`'s POST now refuses a CIDR change on any subnet
+carrying an `AzureResourceId`, inside the same lock and beside the other CIDR guards, using the
+database value rather than the posted one. The Edit form renders the field read-only for those rows
+with a sentence saying why, and `EditSubnetViewModel.IsAzureLinked` is **re-derived from the database
+on every render, including the error re-render**, so a post cannot claim a row is unlinked to get the
+editable field back. The server is authoritative; the view only stops the operator typing._
 
-**Where:** [AzureReconciler.cs:216](../src/Bastet/Services/Azure/AzureReconciler.cs#L216) and
-[:252](../src/Bastet/Services/Azure/AzureReconciler.cs#L252) (the two prefix comparisons that produce
-`VNetPrefixRemoved` / `SubnetPrefixChanged` without establishing *which side* moved),
-[:134-136](../src/Bastet/Services/Azure/AzureReconciler.cs#L134) (non-absence rows are never judged),
-[AzureController.cs:377-381](../src/Bastet/Controllers/AzureController.cs#L377) (returns before
-`ConfirmResourcesAsync` when no absence rows exist — hence zero ARM reads),
-[SubnetController.Edit.cs:104](../src/Bastet/Controllers/SubnetController.Edit.cs#L104) and
-[:150](../src/Bastet/Controllers/SubnetController.Edit.cs#L150) (the CIDR write, which never reads
-`AzureResourceId`), [SubnetController.Azure.cs:320](../src/Bastet/Controllers/SubnetController.Azure.cs#L320)
-(a **third** writer of the same mismatch, with no prefix-equality check).
+_Refusal was chosen over the three alternatives the finding records, and the finding's own analysis of
+why is correct: the two reconciler-side fixes were measured to fail (containment misses the widening
+direction entirely, and re-creates E1 where it does bite), and clearing `AzureResourceId` on edit is
+irreversible - reconcile goes permanently blind to the row and re-import is refused. Refusal touches
+no reconcile code at all, so **E1 is untouched and genuine Azure drift stays reportable and
+deletable**, which is the constraint that killed the others._
 
-**Failure scenario.** Import VNet `vnet-visible` (`10.10.0.0/16`) through the real bulk wizard. An
-`Edit`-role user POSTs `/Subnet/Edit/1` with `Cidr=17`; it validates, persists, and keeps
-`AzureResourceId`. Azure is untouched. An Admin then runs an ordinary reconcile:
+_Five tests written first, all against existing xUnit infrastructure. Three failed against the unfixed
+action for the defect's own reason: both CIDR-change cases returned `RedirectToActionResult` instead of
+the form - `Assert.IsType() Failure: Value is not the exact type` - meaning the edit **succeeded**, and
+the GET flag was false. Both directions are covered (`/16`→`/17` narrowing and `/16`→`/15` widening)
+because the finding records that a containment-based fix closes only one of them. The other two tests
+are the guards against over-correcting and passed throughout: renaming, re-describing and re-tagging a
+linked subnet must keep working, and an **unlinked** subnet must keep its editable CIDR - without that
+second one, a fix that simply froze every CIDR would pass._
 
-```
-scan: canCommit=true items=1 reviewItems=0 warnings=[]
-  OFFERED id=1 vnet-visible 10.10.0.0/17 VNetPrefixRemoved descendants=2 hostIps=1
-  reason: VNet 'vnet-visible' still exists but no longer has the address prefix 10.10.0.0/17.
-commit: {"success":true,"targetsDeleted":1,"subnetsArchived":5,"hostIpsArchived":3}
-```
+_**The equality check at `SubnetController.Azure.cs:320` was deliberately not implemented**, and this
+is the one place the finding's stated fix was not followed. Checking that the parent's prefix is one of
+the VNet's requires the VNet's prefixes, which means an ARM read: `SubnetController` has no Azure
+service injected, and adding one would put a network round-trip inside a transactional write path so
+that a temporary ARM failure turns a working import into a failed one. That is far more invasive than
+the defect warrants - the verifier graded that leg low on its own, since `GetCompatibleVNets` filters
+the wizard's dropdown to exact prefix matches and only a crafted Admin post can reach it. It is carried
+on the watch list instead, where it belongs beside F13 (the same endpoint's missing guard) and the
+linked-prefix column, which subsumes it: once a row records the prefix it was linked at, a mismatched
+stamp records its own value and the reconciler stops misreporting it._
 
-Both directions work — narrowing and widening. Host IPs on the subnet do not prevent the edit.
+_Not re-measured against live ARM: the reconciler is unchanged by this fix, and the audit's live
+measurement of the defect stands. What changed is that the state can no longer be created._
 
-**Why the operator does not catch it.** `SubnetPrefixChanged` states both prefixes, so it is
-detectable. `VNetPrefixRemoved` ([:218](../src/Bastet/Services/Azure/AzureReconciler.cs#L218)) states
-only Bastet's own prefix, so nothing on screen distinguishes a local edit from genuine Azure
-re-addressing, where archiving is correct. Neither reason reaches `_StepConfirm.cshtml`, which offers
-a "Select all" checkbox above the table (see **F4**).
-
-**Privilege escalation, measured.** `RequireEditRole` = `Edit, Delete, Admin`; `RequireAdminRole` =
-`Admin` ([Program.cs:206-211](../src/Bastet/Program.cs#L206)):
-
-```
-[Edit] POST /Subnet/Edit/1 Cidr=17              -> 302, persisted, AzureResourceId intact
-[Edit] POST /Azure/ReconcileScan                -> 403
-[Edit] POST /Subnet/BulkDeleteStaleAzureSubnets -> 403
-[Edit] POST /Subnet/Delete/2 (approved)         -> 403
-```
-
-**Recoverability.** No restore action exists — all 28 public actions across the subnet and host-IP
-controllers were enumerated, and the only control on `/Subnet/DeletedSubnets` is "Purge All".
-`DeletedSubnets` (14 columns) has no `AzureResourceId` and no `IsFullyAllocated`. The rendered table
-omits `Tags` and `OriginalParentId`, so hand recovery requires direct database access. The archived
-CIDR is the *edited* one, so a faithful restore re-triggers the deletion. Purge is purge-all and
-orphans the host-IP archive, whose rows then render `Unknown (Original Subnet ID: n)`.
-
-**Root cause.** Not E1, and not the status computation. The broken invariant is **"a row carrying an
-`AzureResourceId` records the prefix that resource had at link time"**. No downstream rule can repair
-it: the state left by a Bastet narrowing and the state left by an Azure widening are the *same state*,
-and the two scan rows are byte-identical (`diff rowX.json rowY.json -> IDENTICAL`).
-
-**Fix.** Refuse the CIDR change when `AzureResourceId` is set — beside the `ValidateSubnetCidrChange`
-call at `Edit.cs:104`, with `Cidr` rendered display-only for those rows the way `NetworkAddress`
-already is — **plus** the missing prefix-equality check at `SubnetController.Azure.cs:320`. It touches
-no reconcile code, so E1 stays intact and genuine Azure drift stays reportable and deletable.
-
-**What it costs, stated because it is a real loss:** `Subnet/Edit` is today the only non-destructive
-remedy for a genuine Azure prefix *resize* — editing the row back to Azure's prefix makes the drift row
-disappear. After this fix that operator must archive and re-import.
-
-**The correct long-term fix** is to persist the prefix the row was linked at (a nullable column written
-by the three import sites, compared in the two evaluators). It costs an EF migration, which is why the
-refusal is recommended now and this is the follow-up if the resize workflow is worth keeping.
-
-**Fixes that were tried and rejected by measurement — do not take them:**
-
-| Rejected fix | Why |
-|---|---|
-| Containment test in the two evaluators | Local widening `/16`→`/15` is **not** contained in the live `/16`, so the row stays deletable; and where it does bite it re-creates E1 by demoting genuine Azure drift to `ReviewItems` |
-| Clear `AzureResourceId` on edit | Reconcile goes blind to the row (`items=0`) and the link cannot be restored — re-import is refused with four global errors. Trades a loud wrong answer for a silent permanent blind spot |
-| Fix only the screen text | Healthy infrastructure is still archived on a 200. That is **F4**, a companion, not a fix |
+_Tests 603 → 608 (+5). Build clean, 0 warnings._
 
 ---
+
 
 ## F2. The subnet-level prefix check tests equality where the VNet-level check tests membership `[×1]`
 
