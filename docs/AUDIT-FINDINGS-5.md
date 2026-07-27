@@ -4,6 +4,46 @@
 **Test baseline:** 576 passing, 0 failed. `dotnet build --no-incremental` clean, 0 warnings.
 **Date:** 2026-07-26
 
+## Reconciliation — complete
+
+**All 14 findings fixed, none refuted on re-verification.** One commit each, on `task/audit-5`.
+
+**Final state:** 603 passing (576 → 603, +27), 0 failed. Clean rebuild from deleted `bin`/`obj`,
+0 warnings. Working tree clean, no scaffolding committed.
+
+**Closing sweep.** Every major area was requested from the real application running against a real
+SQL Server, asserting titles and content rather than status codes: home, subnet hierarchy, create,
+details, edit, delete, deleted subnets, purge, host IP create, all-deleted-host-IPs, both Azure
+wizards, the reconcile wizard, and the 404/500/access-denied pages. Two redirects were classified
+rather than glossed: `/Azure/Import` 404s without a subnet id, and the purge page redirects when
+there is nothing to purge — both by design. Security headers ride on both a normal 200 and the error
+page. Three fixes were confirmed live through HTTP: E2 (markup name rejected, stored value
+untouched), E5 (out-of-range CIDR renders the form, not a 500), and E10 (the 409 carries its
+`warnings`).
+
+**The Azure surface was driven end to end against live ARM**, with the discrimination check that
+matters — a reconciler that blocks everything is as broken as one that deletes everything:
+
+| Linked row | Azure reality | Result |
+|---|---|---|
+| `invisible-link` | 403, resource group not visible | **withheld**, warning names it; delete refused 409 |
+| `really-gone` | 404, genuinely absent | **offered**, deleted and archived |
+| `drifted-prefix` | 200, exists with a changed prefix | **offered** — this is E1's fix, dead before it |
+
+**Log:** 1467 lines, **zero `fail:`**, five `warn:`. Three are `Azure denied access to … (403), so it
+cannot be reported as deleted` — the deliberate permission probe working, logged by design, not a
+fault. The other two are environmental and pre-existing: DataProtection has no XML encryptor
+configured for a local run, and EF advises on `QuerySplittingBehavior` for a multi-`Include` query.
+
+**Coverage was not re-run.** This round deleted no code — E8 removed a call, not a declaration — so
+there is no dead-code delta to compare against a reference sweep.
+
+**Deliberately not done**, each argued in the struck entry that owns it: `[SafeText]` was **not**
+added to the subnet edit model (E2), because no Azure import path applies it and existing rows could
+become uneditable; the overloaded `VNetDeleted` "exists but has no IPv4 space" sub-case was left
+withholding (E1); the three copies of the usable-IP calculation were **not** consolidated (E13); and
+`subnetIds` in the reconcile 409 remains unrendered (E10).
+
 ## Verdict
 
 No critical or high-severity defects, and nothing that loses or wrongly deletes data.
