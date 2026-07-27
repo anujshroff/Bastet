@@ -321,54 +321,59 @@ _Tests 615 → 615 (unchanged). Build clean, 0 warnings._
 
 ## F5. jQuery 4 breaks client-side validation on every validated form `[×2]`
 
-**Confidence: confirmed.** Measured on real rendered pages in real chromium with real trusted clicks.
+_F5 is fixed and committed with the one-line shim: `_ValidationScriptsPartial.cshtml` restores
+`jQuery.parseJSON = JSON.parse` before the two validation scripts load, guarded so it is a no-op on
+any jQuery that still ships the function - including a later rollback to 3.7.1._
 
-**Where:** [_Layout.cshtml:103](../src/Bastet/Views/Shared/_Layout.cshtml#L103) (pins `jquery@4.0.0`,
-which removed `$.parseJSON`),
-[_ValidationScriptsPartial.cshtml:3](../src/Bastet/Views/Shared/_ValidationScriptsPartial.cshtml#L3)
-(`jquery-validation-unobtrusive@4.0.0`, which calls it at its lines 58 and 91). Affects **four** views:
-`Subnet/Create.cshtml:21`, `Subnet/Edit.cshtml:21`, `HostIp/Create.cshtml:22`, `HostIp/Edit.cshtml:20`.
-Regression from `dcd50c2` (#82), the jQuery 3.7.1 → 4.0.0 bump.
-
-**Failure scenario.** On the shipped `/Subnet/Create`, a real click on the submit button with Name blank
-and `Cidr=99`:
+_The shim was chosen over pinning jQuery back to 3.7.1, and the reason is that it is **sufficient**
+rather than merely smaller: the verifier established that `$.parseJSON` is the only jQuery 4 removal
+this library chain actually touches, that `jQuery.validator.unobtrusive.options` is null so the
+second removed function is short-circuited before it is reached, and that the app's own scripts use
+no removed API at all. Pinning back would revert a deliberate upgrade (`dcd50c2`, #82) to work around
+one missing alias. The rollback remains available and the SRI hash it needs is recorded below, since
+it **cannot be recovered from git** - that commit predates the integrity attributes._
 
 ```
-POST body : Name=&NetworkAddress=10.99.0.0&Cidr=99&...
-Runtime.exceptionThrown: TypeError: s.parseJSON is not a function
+sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs
 ```
 
-The throw happens inside `showLabel` → `errorPlacement` → unobtrusive `onError`, *before*
-jquery-validation can `preventDefault()`. The library has already set `novalidate` on the form, so the
-browser's own `rangeOverflow` gate — confirmed live and would otherwise block it — is switched off.
-Three controls on the same real page (validation scripts blocked; a one-line shim; jQuery 3.7.1 with a
-valid SRI hash) all block the submit. **Every submit of those four forms throws, valid or not** — via
-`defaultShowErrors` iterating `successList`.
+_Measured in chromium against the artefacts `_Layout.cshtml` and this partial actually pin - jQuery
+4.0.0, jquery-validation 1.21.0, jquery-validation-unobtrusive 4.0.0, all fetched from the same CDN
+URLs - with the shim lifted verbatim out of the shipped partial rather than retyped:_
 
-**Blast radius, verified.** Nothing invalid is persisted and nothing 500s: `Cidr` of `-1, 33, 99,
-2147483647, 4294967296, abc` on both Create and Edit all return 200 re-renders with the range error, and
-the row is unchanged. The destructive paths check `confirmation != "approved"` server-side.
+```
+                          unfixed                                    fixed
+submit reached browser    true                                       false
+threw                     TypeError: s.parseJSON is not a function   null
+message                   ""                                         "Please enter a value less than
+                                                                      or equal to 32."
+novalidate                novalidate                                 novalidate
+```
 
-**The real cost is one extra HTTP round trip per validation error, plus a console `TypeError`** — not a
-missing message, because the fail-open POST lands on the same action and writes the same messages into
-the same validation spans. Both finders' framing overstated this; medium is the honest grade.
+_**The first version of that measurement was wrong and was redone.** It reported the form posting in
+*both* columns, because the recording listener was attached before jQuery's own submit handler and
+cancelled the event itself - so it measured "a submit event fired", not "the submit reached the
+browser". Re-instrumented to attach last and read `event.defaultPrevented`, which is the question that
+matters. `novalidate` is present in both columns, which is the point: the browser's own gate is off
+either way, so the shim is load-bearing rather than belt-and-braces._
 
-**This falsifies a claim in round 5's record.** E5's struck paragraph argues its reachability was narrow
-because "`asp-for` on an int emits `type="number"` with `min`/`max`, so a normal browser blocks the
-submit even with JavaScript disabled… the vector is a crafted POST". With JavaScript **enabled** — the
-shipped case — an ordinary `Edit`-role user posts `Cidr=99` by typing it. Amend that paragraph when this
-is fixed.
+_**Round 5's record was corrected**, which the finding explicitly asks for. E5's struck entry in
+`docs/AUDIT-FINDINGS-5.md` argued its reachability was narrow because "a normal browser blocks the
+submit even with JavaScript disabled" and "the vector is a crafted POST". Both are false: the library
+sets `novalidate`, and an ordinary Edit-role user reached it by typing a value and clicking Save. A
+correction paragraph is appended there rather than rewriting the entry, so the original reasoning and
+its refutation both stay visible._
 
-**Fix.** No jQuery-4-clean release of `jquery-validation-unobtrusive` exists — 4.0.0 is the latest
-published. Two options, both verified to produce zero new errors across six pages:
+_Scope: four views, not the five both finders listed. `HostIp/Delete.cshtml` has no `data-val`
+attributes, so `.validate()` is never called on it and its confirmation box is still gated by the
+browser's own `required`._
 
-- **Interim, one line, reversible:** `jQuery.parseJSON = JSON.parse` before the validation scripts.
-  Sufficient — `unobtrusive.options` is `null` and the app never calls the other removed function.
-- **Pin jQuery back to 3.7.1.** The SRI hash cannot be recovered from git (`dcd50c2` predates the
-  integrity attributes), so it is recorded here, computed from the CDN bytes and verified in-browser:
-  `sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs`
+_No test ships; there is still no JS harness in the repo. The rig was ephemeral and is deleted._
+
+_Tests 615 → 615 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 # Low
 

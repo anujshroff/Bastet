@@ -1,3 +1,15 @@
+@* jQuery 4 removed $.parseJSON, and jquery-validation-unobtrusive 4.0.0 - the latest published
+   version - still calls it while placing an error message. The call sits in onError, which runs
+   before jquery-validation can cancel the submit, so without this every invalid submit throws a
+   TypeError, the form posts anyway, and the browser's own min/max/required checks are already off
+   because the library set novalidate on the form. Restoring the alias is the whole fix: it is the
+   only jQuery 4 removal this library chain touches. Guarded so it is a no-op on any jQuery that
+   still ships parseJSON, including a rollback to 3.7.1. *@
+<script>
+    if (typeof jQuery !== "undefined" && typeof jQuery.parseJSON !== "function") {
+        jQuery.parseJSON = JSON.parse;
+    }
+</script>
 <script src="https://cdn.jsdelivr.net/npm/jquery-validation@1.21.0/dist/jquery.validate.min.js"
         integrity="sha384-INLNT6YPpjCRFM2xpOexEE3T4i2mIigf+Kr19b7a59RFtrVBZQzZWXkGuiMA/q1r" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/jquery-validation-unobtrusive@4.0.0/dist/jquery.validate.unobtrusive.min.js"

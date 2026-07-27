@@ -298,6 +298,15 @@ already-authenticated Edit-role user holding a valid antiforgery token — the s
 under — and the blast radius is a 500 on that caller's own request. The guarded block is skipped
 entirely, so no CIDR-change validation is bypassed and nothing is written._
 
+_**Correction, added by round 6 (F5).** The reachability sentence above is wrong at the time it was
+written. `jquery-validation-unobtrusive` sets `novalidate` on the form, which switches the browser's
+own `min`/`max` gate off — so a normal browser did **not** block the submit. And because jQuery 4
+removed `$.parseJSON`, which that library still calls, the client-side validation that was supposed
+to replace it threw before it could cancel the submit. An ordinary Edit-role user reached this by
+typing an out-of-range CIDR and clicking Save; no crafted POST was needed. Measured twice
+independently in a real browser against the pinned artefacts. The fix itself is unaffected — the
+guard was correct and remains correct — only the account of how easily it could be reached._
+
 _Tests 599 → 603 (+4). Build clean, 0 warnings._
 
 ---
