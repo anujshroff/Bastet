@@ -47,14 +47,3 @@ public class SanitizeTagsAttribute : SanitizationAttribute
 {
     public override string? Sanitize(string? value, IInputSanitizationService sanitizationService) => sanitizationService.SanitizeTags(value);
 }
-
-/// <summary>
-/// General string sanitization (strips HTML, encodes entities)
-/// </summary>
-[AttributeUsage(AttributeTargets.Property)]
-public class SanitizeGeneralAttribute : SanitizationAttribute
-{
-    public bool AllowHtml { get; set; } = false;
-
-    public override string? Sanitize(string? value, IInputSanitizationService sanitizationService) => sanitizationService.SanitizeString(value, AllowHtml);
-}
