@@ -318,11 +318,9 @@ and the fall-through repopulation that runs last — now use `AsNoTracking()`. B
 fall-through query is what actually reaches the view, so fixing only the handler would have changed
 nothing on screen._
 
-_Reproduced against a real SQL Server 2022 container, because the defect is unreachable on the SQLite
-the suite runs on: `[Timestamp] byte[] RowVersion` is only DB-generated on SQL Server, so
-`DbUpdateConcurrencyException` never fires under the test provider. Driving Bastet's own
-`BastetDbContext` through the exact handler sequence — load tracked, mutate, lose the optimistic
-concurrency race — gives:_
+_Reproduced against a real SQL Server 2022 container. `[Timestamp] byte[] RowVersion` is only
+DB-generated on SQL Server. Driving Bastet's own `BastetDbContext` through the exact handler sequence —
+load tracked, mutate, lose the optimistic concurrency race — gives:_
 
 ```
 loaded            LastModifiedAt=10:05  (this is user B's saved value)
@@ -344,6 +342,16 @@ _No permanent test ships with this one, deliberately. Reaching the defect requir
 pass vacuously. The rig was ephemeral and is deleted. The audit's cheaper interim —
 `ex.Entries[0].GetDatabaseValues()` — was not taken: it would fix only the handler and leave the
 fall-through query, which is the one that wins._
+
+_**Correction, added by round 6 (F17).** Two clauses above are false and were relied on. The premise is
+true — `RowVersion` really is store-generated only on SQL Server — but the inference from it is not:
+the Edit POST supplies the original token itself, writing the **posted** value into
+`OriginalValues["RowVersion"]`, so the conflict is an ordinary `WHERE … AND RowVersion = @posted` that
+SQLite evaluates fine. `DbUpdateConcurrencyException` does fire under the test provider, and the test
+"that would either not compile the scenario or pass vacuously" exists: it is
+`SubnetControllerConcurrencyRedisplayTests`, it passes at HEAD, and reverting both `AsNoTracking()`
+calls fails it with `Assert.Equal() Failure: Values differ`. The fix itself was always correct — only
+the account of why it could not be pinned._
 
 _Confirmed display-only, as the finding said: `RowVersion` was never corrupted, because the entity is
 loaded fresh inside the lock and only `OriginalValues` is rewound, so the retry keeps working._

@@ -846,40 +846,37 @@ _Tests 624 → 624 (unchanged). Build clean, 0 warnings._
 
 ## F17. Round 5's stated reason for leaving E6 untested is false, and the fix is unpinned `[×2]`
 
-**Confidence: confirmed.** Category note: the coverage gap alone would be refuted — HEAD behaves
-correctly. What survives is a **false statement committed in a findings file** that the next round would
-rely on.
+_F17 is fixed and committed, in both halves the finding asks for. `docs/AUDIT-FINDINGS-5.md`'s E6 entry
+carries a correction paragraph, and the test round 5 said could not exist now ships as
+`SubnetControllerConcurrencyRedisplayTests`._
 
-**Where:** `docs/AUDIT-FINDINGS-5.md:313-314` ("so `DbUpdateConcurrencyException` never fires under the
-test provider") and `:334-335` ("a SQLite test would either not compile the scenario or pass vacuously"),
-against [SubnetController.Edit.cs:155](../src/Bastet/Controllers/SubnetController.Edit.cs#L155), which
-writes the *posted* `RowVersion` into `OriginalValues` — making the conflict an ordinary
-`WHERE … AND RowVersion = @posted` that SQLite evaluates fine.
+_**Only the false clauses were struck, not the paragraph.** Round 5's premise is true - `[Timestamp]
+byte[] RowVersion` really is store-generated only on SQL Server - and it is the **inference** from it
+that fails, because the Edit POST supplies the original token itself and the comparison becomes an
+ordinary `WHERE … AND RowVersion = @posted` that SQLite evaluates fine. Rewriting the whole entry would
+have destroyed a true statement to correct a false one; the correction is appended so the original
+reasoning and its refutation both stay readable._
 
-**Round 5's premise is true and its inference is false.** `[Timestamp] byte[] RowVersion` really is
-store-generated only on SQL Server. That does not make the exception unreachable.
+_The test is the probe pass 2's beat 7 preserved, renamed from `E6ProbeTests` to say what it pins
+rather than which round found it, and re-documented. It passes at HEAD and fails on reverting both
+`AsNoTracking()` calls with `Assert.Equal() Failure: Values differ` - so the exit path of every failed
+Edit POST is now pinned._
 
-**Failure scenario.** The test round 5 said could not exist was written and runs on SQLite
-(`DataSource=:memory:`, no container). At HEAD it shows `LastModifiedAt=10:05` — the saved value. With
-E6's two `.AsNoTracking()` calls reverted:
+_**The provider caveat is written into the test's own doc comment**, which the verifier specifically
+asked for: under SQLite the stored token is `NULL`, so *any* non-null posted `RowVersion` conflicts. The
+test reaches the handler faithfully but does not reproduce production's value-versus-value comparison,
+and a later round must not read a pass here as proof of the SQL Server path. Without that note this
+would look like a test passing for a provider artefact._
 
-```
-Expected: 2026-01-02T10:05:00Z
-Actual:   2026-07-27T03:45:41Z     <- wall clock at the failed save
-db still holds 10:05
-```
+_This finding only ever cleared the bar on its documentation half - the coverage gap alone would have
+been refuted, since HEAD behaves correctly - and the fix reflects that: the correction is the finding,
+the test is the remedy. Recorded plainly because the distinction is what separated F17 from the three
+test-coverage findings this round refuted._
 
-So the exit path of **every** failed Edit POST is currently unpinned, on the strength of a sentence that
-is wrong.
-
-**Fix.** Two things. Strike the two false clauses above (not the whole paragraph — the premise stands),
-and add the test; a working copy is preserved at `scratchpad/p2-beat7/E6ProbeTests.cs.keep`. **Put this in
-the test's doc comment:** under SQLite the stored token is `NULL`, so *any* non-null posted `RowVersion`
-conflicts. The test pins the fall-through repopulation faithfully but does not reproduce production's
-value-versus-value comparison — say so, or a later round will re-flag it as passing for a provider
-artefact.
+_Tests 630 → 631 (+1). Build clean, 0 warnings._
 
 ---
+
 
 # Info
 
