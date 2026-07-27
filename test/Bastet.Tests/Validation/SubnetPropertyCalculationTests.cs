@@ -235,6 +235,42 @@ public class SubnetPropertyCalculationTests
         Assert.Equal(127, result[0].AddressCount);
     }
 
+    // -------------------------------------------------------------------------
+    // A gap that begins at the network address always has one unusable address in it - the
+    // network address itself - however small the gap is.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The cheapest repro: a lone host IP at 10.0.0.1 leaves a leading gap of exactly one address,
+    /// the network address, of which none is assignable.
+    /// </summary>
+    [Fact]
+    public void CalculateUnallocatedRanges_LeadingGapOfOne_ReportsNoUsableAddresses()
+    {
+        List<HostIpAssignment> hostIps = [new() { IP = "10.0.0.1" }];
+
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 24, [], hostIps)];
+
+        IPRange leading = result[0];
+        Assert.Equal("10.0.0.0", leading.StartIp);
+        Assert.Equal("10.0.0.0", leading.EndIp);
+        Assert.Equal(0, leading.AddressCount);
+    }
+
+    /// <summary>A leading gap of two holds the network address plus one assignable address.</summary>
+    [Fact]
+    public void CalculateUnallocatedRanges_LeadingGapOfTwo_ReportsOneUsableAddress()
+    {
+        List<HostIpAssignment> hostIps = [new() { IP = "10.0.0.2" }];
+
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 24, [], hostIps)];
+
+        IPRange leading = result[0];
+        Assert.Equal("10.0.0.0", leading.StartIp);
+        Assert.Equal("10.0.0.1", leading.EndIp);
+        Assert.Equal(1, leading.AddressCount);
+    }
+
     /// <summary>
     /// A trailing gap of exactly one address. The removed special case got this right via a
     /// hard-coded fallback, so it is pinned here to prove the general formula also does.

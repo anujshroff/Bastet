@@ -438,11 +438,20 @@ public class IpUtilityService : IIpUtilityService
                 // For the first gap that starts at the network address, adjust the address count to show usable IPs
                 if (currentPosition == startIp && cidr < 31)
                 {
+                    // This branch runs only when the gap begins at the network address, which is
+                    // never assignable - so exactly one address is always unusable, whatever the
+                    // gap's size. The threshold this replaces applied that subtraction only above
+                    // two, so a gap of two reported both addresses as usable and a gap of one
+                    // reported the network address itself as a usable address. The enclosing
+                    // Start > currentPosition guarantees at least one address, so this cannot go
+                    // negative. A zero-usable row is still emitted rather than suppressed: StartIp
+                    // is the network address, and _UnallocatedRanges.cshtml offers it as a place to
+                    // create a child subnet, which remains valid even with no assignable host IP.
                     unallocatedRanges.Add(new IPRange
                     {
                         StartIp = UIntToIpString((uint)currentPosition),
                         EndIp = UIntToIpString(Start - 1),
-                        AddressCount = (Start - currentPosition > 2) ? Start - currentPosition - 1 : Start - currentPosition
+                        AddressCount = Start - currentPosition - 1
                     });
                 }
                 else
