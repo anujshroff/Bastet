@@ -3,11 +3,13 @@ using Bastet.Data;
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Tests.SubnetManagement;
 
@@ -108,12 +110,44 @@ public class SubnetCreateGetPrefillTests : IDisposable
         Assert.NotEmpty(model.CalculatedSubnetMask);
     }
 
+    /// <summary>
+    /// The name the app fills in must survive the validation the very next POST applies to it.
+    /// [SafeText] forbids "/", so the slashed form was rejected with "Subnet name contains invalid
+    /// characters" on every create-from-unallocated-range flow that accepted the default - against
+    /// the one field the operator had not typed.
+    /// </summary>
+    [Theory]
+    [InlineData("10.0.1.0", 24, 1)]
+    [InlineData("10.0.9.9", 32, 1)]
+    public async Task Create_PrefilledName_PassesTheValidationThePostApplies(
+        string networkAddress, int cidr, int parentId)
+    {
+        IActionResult result = await _controller.Create(networkAddress, cidr, parentId);
+        string name = ModelOf(result).Name;
+
+        SafeTextAttribute rule = new();
+        ValidationContext context = new(new object(), new SafeTextServiceProvider(), null);
+
+        Assert.True(
+            rule.GetValidationResult(name, context) == System.ComponentModel.DataAnnotations.ValidationResult.Success,
+            $"the prefilled name '{name}' is refused by the rule its own POST applies");
+    }
+
+    /// <summary>SafeTextAttribute resolves the sanitization service from the validation context.</summary>
+    private sealed class SafeTextServiceProvider : IServiceProvider
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IInputSanitizationService) ? new InputSanitizationService() : null;
+    }
+
     [Fact]
     public async Task Create_ValidCidrWithParent_ComposesTheDefaultName()
     {
         IActionResult result = await _controller.Create(networkAddress: "10.0.1.0", cidr: 24, parentId: 1);
 
-        Assert.Equal("Parent-10.0.1.0/24", ModelOf(result).Name);
+        // Separator, not a slash: [SafeText] on Name forbids "/", so the slashed form this used to
+        // produce was refused by the very next POST.
+        Assert.Equal("Parent-10.0.1.0-24", ModelOf(result).Name);
     }
 
     /// <summary>
@@ -139,6 +173,6 @@ public class SubnetCreateGetPrefillTests : IDisposable
 
         string name = ModelOf(result).Name;
         Assert.True(name.Length <= 100, $"generated name was {name.Length} characters");
-        Assert.EndsWith("-10.5.1.0/24", name);   // the suffix survives intact
+        Assert.EndsWith("-10.5.1.0-24", name);   // the suffix survives intact
     }
 }

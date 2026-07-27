@@ -1,6 +1,7 @@
 using Bastet.Data;
 using Bastet.Filters;
 using Bastet.Services;
+using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Console;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +21,14 @@ if (!builder.Environment.IsDevelopment())
     builder.Logging.AddFilter("Microsoft.AspNetCore", Enum.TryParse(Environment.GetEnvironmentVariable("BASTET_LOG_LEVEL_ASPNETCORE") ?? "Warning", true, out LogLevel aspNetLevel) ? aspNetLevel : LogLevel.Warning);
     builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", Enum.TryParse(Environment.GetEnvironmentVariable("BASTET_LOG_LEVEL_ENTITYFRAMEWORK") ?? "Warning", true, out LogLevel efLevel) ? efLevel : LogLevel.Warning);
 }
+
+// Deliberately outside the block above, which only runs outside Development. The console sink writes
+// the exception itself, and an exception can carry a request-supplied value verbatim - so without a
+// sanitizing formatter a crafted identifier reaches the terminal with its control characters intact
+// and can erase a real log line to print a fabricated one. A developer's console deserves the same
+// protection as a production one, so this is registered unconditionally.
+builder.Logging.AddConsoleFormatter<SanitizingConsoleFormatter, ConsoleFormatterOptions>();
+builder.Logging.AddConsole(options => options.FormatterName = SanitizingConsoleFormatter.FormatterName);
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -230,8 +240,33 @@ if (autoMigrate)
     // lock held on a dedicated connection for the duration of both Migrate() calls. A replica
     // that cannot get the lock within the timeout fails startup loudly; on restart it finds the
     // migrations applied and Migrate() no-ops.
-    using SqlConnection migrationLockConnection = new(connectionString);
-    migrationLockConnection.Open();
+    // Scoped to master, not the target catalog. Migrate() below is what creates the database on a
+    // first run, and opening the lock connection against a catalog that does not exist yet fails
+    // first with SQL error 4060 - so BASTET_AUTO_MIGRATE could never bootstrap an empty server, a
+    // regression from when Migrate() ran before any lock existed. Holding the lock on master also
+    // means CREATE DATABASE happens inside it, which EF Core's own __EFMigrationsLock never covers:
+    // two simultaneous cold starts against a missing catalog otherwise race and one dies with
+    // "Database already exists".
+    SqlConnectionStringBuilder migrationLockConnectionString = new(connectionString)
+    {
+        InitialCatalog = "master"
+    };
+
+    using SqlConnection migrationLockConnection = new(migrationLockConnectionString.ConnectionString);
+
+    try
+    {
+        migrationLockConnection.Open();
+    }
+    catch (SqlException ex) when (ex.Number == 4060)
+    {
+        // 4060 is "cannot open database". Unhandled, this arrives as a bare stack trace naming
+        // neither the catalog nor the setting that asked for it.
+        throw new InvalidOperationException(
+            "BASTET_AUTO_MIGRATE is enabled, but the migration lock could not open a connection to "
+            + "'master' on the configured server. The login needs access to master so migrations can "
+            + "be serialised across replicas. See BASTET_CONNECTION_STRING.", ex);
+    }
 
     using (SqlCommand getLock = new("sp_getapplock", migrationLockConnection))
     {

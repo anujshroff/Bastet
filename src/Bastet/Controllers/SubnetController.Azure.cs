@@ -134,6 +134,27 @@ public partial class SubnetController : Controller
                 "No subnets were submitted for import.", BadRequest(ModelState));
         }
 
+        // The one Azure write path with no feature-flag guard, while its eleven siblings all have one.
+        // Gating on isAzureImport alone would not close it: the child stamp below is behind no flag at
+        // all, so an Admin could still create Azure-linked rows with the feature off - rows the
+        // Details page then renders a live "View in Azure Portal" link from, and which arm themselves
+        // the moment the flag is enabled. So the test is on the Azure state being written, whatever
+        // isAzureImport claims.
+        //
+        // Note this narrows the documented non-Azure JSON API: a caller using this as a plain
+        // batch-create may no longer send AzureResourceId or vnetResourceId while the feature is off.
+        // Sending them was never meaningful in that configuration.
+        bool writesAzureState = isAzureImport
+            || !string.IsNullOrEmpty(vnetResourceId)
+            || subnets.Exists(s => !string.IsNullOrEmpty(s.AzureResourceId));
+
+        if (writesAzureState && !AzureController.IsAzureImportEnabled())
+        {
+            return BatchCreateFailure(isAzureImport, parentId,
+                "Azure Import feature is not enabled.",
+                StatusCode(403, new { success = false, error = "Azure Import feature is not enabled" }));
+        }
+
         // Sanitize user inputs before processing
         if (sanitizationService != null)
         {

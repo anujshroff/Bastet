@@ -35,7 +35,7 @@
     <div id="rec-stale-section" class="d-none">
         <div class="alert alert-danger">
             <i class="bi bi-exclamation-triangle-fill me-2"></i>
-            <strong>These BASTET subnets no longer exist in Azure.</strong>
+            <strong>These BASTET subnets no longer match Azure.</strong>
             Deleting one also archives everything beneath it. Rows with a cascade warning will take child subnets or
             host IP assignments with them, including any you created by hand.
         </div>
@@ -73,8 +73,8 @@
     <div id="rec-review-section" class="d-none mt-4">
         <h5><i class="bi bi-eye"></i> Needs review</h5>
         <div class="alert alert-secondary">
-            These subnets still exist in Azure, so there is nothing to delete, but something about them has drifted.
-            BASTET will not change them automatically.
+            Nothing here can be fixed by deleting anything, so these are listed without checkboxes.
+            The reason column says what is wrong with each one. BASTET will not change them automatically.
         </div>
 
         <div class="table-responsive">

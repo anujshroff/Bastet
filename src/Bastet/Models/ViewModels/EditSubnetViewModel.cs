@@ -65,6 +65,13 @@ public class EditSubnetViewModel
     [Display(Name = "Parent Subnet")]
     public string? ParentSubnetInfo { get; set; }
 
+    /// <summary>
+    /// True when the subnet carries an AzureResourceId. Display-only and never bound from the form:
+    /// the controller re-derives it from the database on every render, so a post cannot claim a row
+    /// is unlinked to get past the CIDR guard.
+    /// </summary>
+    public bool IsAzureLinked { get; set; }
+
     [Display(Name = "Created")]
     public DateTime CreatedAt { get; set; }
 

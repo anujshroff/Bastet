@@ -43,7 +43,7 @@ namespace Bastet.Services.Azure
 
             // ARM resource IDs are case-insensitive.
             Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, string> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
 
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
@@ -56,7 +56,7 @@ namespace Bastet.Services.Azure
                 {
                     if (!string.IsNullOrEmpty(subnet.ResourceId))
                     {
-                        liveSubnetPrefixes[subnet.ResourceId] = subnet.AddressPrefix;
+                        liveSubnetPrefixes[subnet.ResourceId] = Ipv4PrefixesOf(subnet);
                     }
                 }
             }
@@ -75,16 +75,34 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
-                AzureReconcileItem? item = AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)
-                    ? EvaluateSubnetLevel(snapshot, liveSubnetPrefixes)
-                    : EvaluateVNetLevel(snapshot, liveVNets);
+                // Three-way, not two. An ID that is neither a VNet nor a subnet used to fall down
+                // the VNet branch, where absence from the listing reads as VNetDeleted - a claim
+                // nothing established, on the one path that removes data. It is reported for review
+                // instead, so the operator can correct the row rather than have it silently offered
+                // for archival.
+                AzureReconcileItem? item;
+                if (AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId))
+                {
+                    item = EvaluateSubnetLevel(snapshot, liveSubnetPrefixes);
+                }
+                else if (AzureResourceIdentity.IsAzureVNet(snapshot.AzureResourceId))
+                {
+                    item = EvaluateVNetLevel(snapshot, liveVNets);
+                }
+                else
+                {
+                    item = Item(snapshot, AzureReconcileStatus.UnrecognisedResourceId, true,
+                        "The recorded Azure resource ID names neither a VNet nor a subnet, so nothing "
+                        + "can be established about it. Correct or clear the link on this subnet.");
+                }
 
                 if (item is null)
                 {
                     continue;
                 }
 
-                if (item.Status == AzureReconcileStatus.FullyAllocatingSubnetDeleted)
+                if (item.Status is AzureReconcileStatus.FullyAllocatingSubnetDeleted
+                    or AzureReconcileStatus.UnrecognisedResourceId)
                 {
                     plan.ReviewItems.Add(item);
                 }
@@ -121,6 +139,7 @@ namespace Bastet.Services.Azure
 
             List<AzureReconcileItem> keep = [];
             List<AzureReconcileItem> notVisible = [];
+            List<AzureReconcileItem> unknown = [];
             List<AzureReconcileItem> stillLive = [];
 
             foreach (AzureReconcileItem item in plan.Items)
@@ -151,8 +170,16 @@ namespace Bastet.Services.Azure
                     case AzureResourceConfirmation.Live:
                         stillLive.Add(item);
                         break;
-                    default:
+                    case AzureResourceConfirmation.NotVisible:
                         notVisible.Add(item);
+                        break;
+                    default:
+                        // Unknown is a different fact from NotVisible and gets its own message. The
+                        // action is identical - both are withheld - but "the credential lost access"
+                        // is a guess when the truth is that Azure could not be asked, and an ARM
+                        // throttle or a transport blip mid-scan produces Unknown on a subscription
+                        // whose permissions are perfectly intact.
+                        unknown.Add(item);
                         break;
                 }
             }
@@ -162,9 +189,17 @@ namespace Bastet.Services.Azure
             if (notVisible.Count > 0)
             {
                 plan.Warnings.Add(
-                    $"{notVisible.Count} Azure-linked subnet(s) were missing from the subscription listing, but Azure would " +
-                    "not confirm they are deleted - the credential may simply have lost access to them. They have been " +
-                    $"withheld from deletion: {NameList(notVisible)}.");
+                    $"{notVisible.Count} Azure-linked subnet(s) were missing from the subscription listing, and Azure denied " +
+                    "access when asked about them directly - the credential may have lost access to their resource group. " +
+                    $"They have been withheld from deletion: {NameList(notVisible)}.");
+            }
+
+            if (unknown.Count > 0)
+            {
+                plan.Warnings.Add(
+                    $"{unknown.Count} Azure-linked subnet(s) were missing from the subscription listing, and Azure could not " +
+                    "be asked about them - the read failed rather than answering. Nothing is wrong with the subnet itself; " +
+                    $"try the scan again. They have been withheld from deletion: {NameList(unknown)}.");
             }
 
             if (stillLive.Count > 0)
@@ -224,7 +259,7 @@ namespace Bastet.Services.Azure
             // target's whole prefix, so if no such subnet remains, whatever justified it is gone.
             // Report only - the flag can also be set by hand, so we must not act on it.
             if (snapshot.IsFullyAllocated
-                && !vnet.Subnets.Any(s => string.Equals(s.AddressPrefix, prefix, StringComparison.OrdinalIgnoreCase)))
+                && !vnet.Subnets.Any(s => Ipv4PrefixesOf(s).Contains(prefix, StringComparer.OrdinalIgnoreCase)))
             {
                 return Item(snapshot, AzureReconcileStatus.FullyAllocatingSubnetDeleted, true,
                     $"Marked fully allocated, but no Azure subnet in VNet '{vnet.Name}' covers {prefix} any more. " +
@@ -239,24 +274,40 @@ namespace Bastet.Services.Azure
         /// </summary>
         private static AzureReconcileItem? EvaluateSubnetLevel(
             AzureLinkedSubnetSnapshot snapshot,
-            Dictionary<string, string> liveSubnetPrefixes)
+            Dictionary<string, List<string>> liveSubnetPrefixes)
         {
             string prefix = $"{snapshot.NetworkAddress}/{snapshot.Cidr}";
 
-            if (!liveSubnetPrefixes.TryGetValue(snapshot.AzureResourceId, out string? livePrefix))
+            if (!liveSubnetPrefixes.TryGetValue(snapshot.AzureResourceId, out List<string>? livePrefixes))
             {
                 return Item(snapshot, AzureReconcileStatus.SubnetDeleted, false,
                     "The Azure subnet this was imported from no longer exists.");
             }
 
-            if (!string.Equals(livePrefix, prefix, StringComparison.OrdinalIgnoreCase))
+            // Membership, not equality, and for the same reason the VNet-level check above uses it:
+            // an Azure subnet may own several IPv4 prefixes, and the one Bastet recorded need not be
+            // the first. Comparing against a single collapsed value reports drift on a subnet that
+            // still owns the prefix - and a drift row is offered for deletion with no Azure read
+            // behind it.
+            if (!livePrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
             {
+                string live = livePrefixes.Count == 0 ? "none" : string.Join(", ", livePrefixes);
                 return Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged, false,
-                    $"The Azure subnet still exists but its address prefix is now {livePrefix}, not {prefix}.");
+                    $"The Azure subnet still exists but its address prefix is now {live}, not {prefix}.");
             }
 
             return null;
         }
+
+        /// <summary>
+        /// Every IPv4 prefix an inventory subnet owns. GetVNetInventory populates the list, but a
+        /// caller that only sets the scalar must not silently compare against an empty set, so the
+        /// scalar is the fallback.
+        /// </summary>
+        private static List<string> Ipv4PrefixesOf(BulkAzureSubnetViewModel subnet) =>
+            subnet.Ipv4AddressPrefixes.Count > 0
+                ? subnet.Ipv4AddressPrefixes
+                : string.IsNullOrEmpty(subnet.AddressPrefix) ? [] : [subnet.AddressPrefix];
 
         private static AzureReconcileItem Item(
             AzureLinkedSubnetSnapshot snapshot,

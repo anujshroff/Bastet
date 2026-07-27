@@ -180,7 +180,16 @@ public partial class SubnetController : Controller
                     if (!await ValidateSubnetCreation(targetVm))
                     {
                         await transaction.RollbackAsync();
-                        return BadRequest(ModelState);
+                        // The wizard reads error/globalErrors/itemErrors; a bare ModelState carries
+                        // none of them, so it rendered a panel containing the words "Commit failed:"
+                        // and nothing else. Echo the validator's own messages instead.
+                        return BadRequest(new
+                        {
+                            success = false,
+                            error = ModelStateMessage("The import could not be applied."),
+                            globalErrors = Array.Empty<string>(),
+                            itemErrors = Array.Empty<object>()
+                        });
                     }
 
                     targetSubnet = new Subnet
@@ -248,7 +257,14 @@ public partial class SubnetController : Controller
                     if (!await ValidateSubnetCreation(childVm))
                     {
                         await transaction.RollbackAsync();
-                        return BadRequest(ModelState);
+                        // See the target path above: same contract, same reason.
+                        return BadRequest(new
+                        {
+                            success = false,
+                            error = ModelStateMessage("The import could not be applied."),
+                            globalErrors = Array.Empty<string>(),
+                            itemErrors = Array.Empty<object>()
+                        });
                     }
 
                     Subnet newChild = new()

@@ -17,21 +17,39 @@ namespace Bastet.Services.Azure
     public static class AzureResourceIdentity
     {
         private const string SubnetResourceType = "Microsoft.Network/virtualNetworks/subnets";
+        private const string VNetResourceType = "Microsoft.Network/virtualNetworks";
 
         /// <summary>
         /// True when the ID names an Azure subnet rather than a VNet or anything else.
         /// </summary>
         /// <remarks>
-        /// An ID that will not parse returns false, so callers treat it as VNet-level - the branch
-        /// an unrecognised value already took. AzureResourceId is free text on the entity and can be
-        /// edited by hand, and ResourceIdentifier's constructor throws on malformed input, so one
-        /// bad row must not be able to abort a whole reconcile scan.
+        /// An ID that will not parse returns false. AzureResourceId is free text on the entity and
+        /// can be edited by hand, so one bad row must not be able to abort a whole reconcile scan.
+        /// Note this is only half the question: false does not mean "VNet". Callers that act on the
+        /// answer must ask <see cref="IsAzureVNet"/> too and treat neither-of-the-two as unknown.
         /// </remarks>
         public static bool IsAzureSubnet(string? resourceId) =>
+            IsResourceType(resourceId, SubnetResourceType);
+
+        /// <summary>
+        /// True when the ID names an Azure VNet.
+        /// </summary>
+        /// <remarks>
+        /// Needed because the Azure SDK's VNet accessor builds its request from the subscription,
+        /// the resource group and the **last path segment** only - it discards the provider
+        /// namespace and type, and does not validate them. So reading a resource-group ID, a storage
+        /// account ID or a truncated subnet ID through it silently asks about a different resource,
+        /// and a 404 there is indistinguishable from the VNet genuinely being gone. Anything that is
+        /// neither a VNet nor a subnet must be reported as unknown, never as deleted.
+        /// </remarks>
+        public static bool IsAzureVNet(string? resourceId) =>
+            IsResourceType(resourceId, VNetResourceType);
+
+        private static bool IsResourceType(string? resourceId, string resourceType) =>
             !string.IsNullOrWhiteSpace(resourceId)
             && ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? id)
             && id is not null
-            && string.Equals(id.ResourceType.ToString(), SubnetResourceType, StringComparison.OrdinalIgnoreCase);
+            && string.Equals(id.ResourceType.ToString(), resourceType, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// The path to link to in the Azure portal. Per-subnet portal pages are nearly empty, so a

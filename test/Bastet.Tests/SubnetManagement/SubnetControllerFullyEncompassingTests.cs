@@ -15,6 +15,7 @@ namespace Bastet.Tests.SubnetManagement;
 /// <summary>
 /// Tests for the behavior of subnets that fully encompass a VNet's address prefix
 /// </summary>
+[Collection(Bastet.Tests.Azure.AzureFeatureFlagCollection.Name)]
 public class SubnetControllerFullyEncompassingTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -26,6 +27,10 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
 
     public SubnetControllerFullyEncompassingTests()
     {
+        // These tests drive the Azure import path, which is now behind the feature flag the
+        // other eleven Azure write paths were always behind.
+        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "true");
+
         // Use SQLite in-memory database for tests
         DbContextOptions<BastetDbContext> options = new DbContextOptionsBuilder<BastetDbContext>()
             .UseSqlite("DataSource=:memory:")
@@ -68,6 +73,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
 
     public void Dispose()
     {
+        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", null);
         _context.Database.CloseConnection();
         _context.Dispose();
         GC.SuppressFinalize(this);

@@ -15,13 +15,31 @@
             
             <div class="mb-3">
                 <label asp-for="Cidr" class="form-label">CIDR Notation</label>
-                <div class="input-group">
-                    <span class="input-group-text">/</span>
-                    <input asp-for="Cidr" class="form-control" min="0" max="32" />
-                </div>
-                <div class="form-text">
-                    Changing this value affects the size of the subnet.
-                </div>
+                @if (Model.IsAzureLinked)
+                {
+                    @* Imported rows record the prefix their Azure resource had at link time; the
+                       reconciler treats any difference as Azure-side drift. The server refuses the
+                       change either way - this only stops the operator typing one. *@
+                    <div class="input-group">
+                        <span class="input-group-text">/</span>
+                        <input value="@Model.Cidr" class="form-control" readonly disabled />
+                    </div>
+                    <input type="hidden" asp-for="Cidr" />
+                    <div class="form-text">
+                        Imported from Azure, so the prefix is fixed here. Change it in Azure and
+                        re-import, or delete the subnet and recreate it.
+                    </div>
+                }
+                else
+                {
+                    <div class="input-group">
+                        <span class="input-group-text">/</span>
+                        <input asp-for="Cidr" class="form-control" min="0" max="32" />
+                    </div>
+                    <div class="form-text">
+                        Changing this value affects the size of the subnet.
+                    </div>
+                }
                 <span asp-validation-for="Cidr" class="text-danger"></span>
             </div>
             

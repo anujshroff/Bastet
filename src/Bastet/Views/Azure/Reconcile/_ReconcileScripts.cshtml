@@ -345,10 +345,18 @@
                 $("#rec-confirm-cascade").addClass("d-none");
             }
 
+            // The reason is carried through to this screen deliberately. Step 2 prints it beside the
+            // checkbox, but this is the last screen before the archive and it used to show only the
+            // status label - so a row whose own reason says the Azure resource still exists was
+            // confirmed under a heading saying it did not.
             const list = $("#rec-confirm-list").empty();
             targets.forEach(function (i) {
-                list.append($('<li class="list-group-item"></li>')
-                    .text(i.name + " (" + i.networkAddress + "/" + i.cidr + ") - " + statusLabel(i.statusName).text));
+                const li = $('<li class="list-group-item"></li>')
+                    .text(i.name + " (" + i.networkAddress + "/" + i.cidr + ") - " + statusLabel(i.statusName).text);
+                if (i.reason) {
+                    li.append($('<div class="small text-muted"></div>').text(i.reason));
+                }
+                list.append(li);
             });
 
             $("#rec-confirmation").val("");

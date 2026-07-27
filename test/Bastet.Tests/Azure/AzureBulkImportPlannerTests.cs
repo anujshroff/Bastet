@@ -45,6 +45,83 @@ public class AzureBulkImportPlannerTests
             VNetPrefixes = [.. prefixes]
         };
 
+    /// <summary>
+    /// A VNet name that is entirely markup sanitizes to empty, and ValidateSubnetCreation never
+    /// inspects Name - so the bulk path persisted a subnet with no name at all while every
+    /// interactive write path refuses one. The child names four lines away always had this fallback.
+    /// </summary>
+    [Theory]
+    [InlineData("<b></b>")]
+    [InlineData("   ")]
+    [InlineData("")]
+    public void VNetNameThatSanitizesToEmpty_FallsBackToThePrefix(string vnetName)
+    {
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Sel(false, Pref(vnetName, "192.168.0.0/16", Sub("web", "192.168.1.0/24"))), []);
+
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.False(string.IsNullOrWhiteSpace(item.AutoCreateTargetName));
+        Assert.Equal("192.168.0.0_16", item.AutoCreateTargetName);
+    }
+
+    /// <summary>The guard: an ordinary VNet name is still used verbatim.</summary>
+    [Fact]
+    public void OrdinaryVNetName_IsUsedAsTheTargetName()
+    {
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Sel(false, Pref("prod-vnet", "192.168.0.0/16", Sub("web", "192.168.1.0/24"))), []);
+
+        Assert.Equal("prod-vnet", Assert.Single(plan.Items).AutoCreateTargetName);
+    }
+
+    /// <summary>
+    /// System.Text.Json overwrites a collection initialiser when the body carries an explicit null,
+    /// so `= []` on the DTO is not a guarantee. Dereferencing produced an unhandled
+    /// NullReferenceException - and on the commit path that happens inside the subnet lock and
+    /// outside the action's only catch, so the caller got an HTML 500 where every other malformed
+    /// body returns modelled JSON.
+    /// </summary>
+    [Fact]
+    public void NullVNetPrefixes_ReportsAnError_DoesNotThrow()
+    {
+        BulkImportSelectionDto selection = new()
+        {
+            SubscriptionId = "sub-1",
+            SubscriptionName = "Test Sub",
+            VNetPrefixes = null!
+        };
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(selection, []);
+
+        Assert.False(plan.CanCommit);
+        Assert.Contains(plan.GlobalErrors, e => e.Contains("No VNet address prefixes were selected."));
+    }
+
+    [Fact]
+    public void NullEntryInVNetPrefixes_ReportsAnError_DoesNotThrow()
+    {
+        BulkImportSelectionDto selection = Sel(false, Pref("vnet-a", "10.0.0.0/16"));
+        selection.VNetPrefixes.Add(null!);
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(selection, []);
+
+        Assert.Contains(plan.GlobalErrors, e => e.Contains("was empty"));
+    }
+
+    [Fact]
+    public void NullSubnetsCollection_ReportsNothingAndDoesNotThrow()
+    {
+        BulkImportSelectedVNetPrefixDto prefix = Pref("vnet-a", "10.0.0.0/16");
+        prefix.Subnets = null!;
+        BulkImportSelectionDto selection = Sel(false, prefix);
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(selection, []);
+
+        // A VNet prefix with no subnets is a legitimate selection - the target is still created.
+        Assert.Empty(plan.GlobalErrors);
+        Assert.Single(plan.Items);
+    }
+
     private static ExistingSubnetSnapshot Existing(
         int id, string name, string network, int cidr,
         bool hasChildren = false, bool hasHostIps = false, bool fullyAllocated = false,

@@ -67,13 +67,8 @@ public class TransactionCleanupTests
         await TransactionCleanup.RollbackQuietlyAsync(transaction.Object, logger.Object);
 
         transaction.Verify(t => t.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
-        logger.Verify(
-            l => l.Log(
-                It.IsAny<LogLevel>(),
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<Exception?>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Never);
+
+        // Nothing is recorded on the way through - the logger is never touched at all.
+        logger.VerifyNoOtherCalls();
     }
 }

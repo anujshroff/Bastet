@@ -353,7 +353,11 @@ namespace Bastet.Services.Azure
                         {
                             ResourceId = subnet.Id.ToString(),
                             Name = subnet.Data.Name ?? string.Empty,
-                            AddressPrefix = ipv4Prefix
+                            AddressPrefix = ipv4Prefix,
+                            // Distinct because ARM may report a single prefix in both the singular
+                            // property and the collection; a duplicate would reach the operator in
+                            // the reconcile reason text.
+                            Ipv4AddressPrefixes = [.. ExtractIpv4Prefixes(subnet).Distinct(StringComparer.OrdinalIgnoreCase)]
                         });
                     }
 
@@ -377,6 +381,34 @@ namespace Bastet.Services.Azure
         /// Returns the first IPv4 prefix associated with the given Azure subnet, or null if none exists.
         /// Handles both single-prefix subnets and dual-stack subnets.
         /// </summary>
+        /// <summary>
+        /// Every IPv4 prefix the subnet owns, in the order ARM reports them. Azure has allowed
+        /// several prefixes on one subnet since September 2025 and reports the singular
+        /// <c>AddressPrefix</c> as null once there is more than one, so anything comparing what
+        /// Bastet recorded against what Azure holds has to look at all of them - the recorded
+        /// prefix need not be the first.
+        /// </summary>
+        private static IEnumerable<string> ExtractIpv4Prefixes(SubnetResource subnet)
+        {
+            if (subnet.Data.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.Data.AddressPrefix))
+            {
+                yield return subnet.Data.AddressPrefix;
+            }
+
+            if (subnet.Data.AddressPrefixes is null)
+            {
+                yield break;
+            }
+
+            foreach (string? prefix in subnet.Data.AddressPrefixes)
+            {
+                if (!string.IsNullOrEmpty(prefix) && IsIpv4AddressPrefix(prefix))
+                {
+                    yield return prefix;
+                }
+            }
+        }
+
         private static string? ExtractIpv4Prefix(SubnetResource subnet)
         {
             // Case 1: Single address prefix
@@ -537,21 +569,33 @@ namespace Bastet.Services.Azure
         /// </remarks>
         private async Task<AzureResourceConfirmation> ConfirmOneAsync(string resourceId)
         {
-            ResourceIdentifier identifier;
-            try
+            // Free text on the entity, so a malformed value is possible. TryParse rather than the
+            // constructor: it returns false instead of throwing, and it throws for exactly one input
+            // anyway (the empty string), which the caller already filters - so the catch this
+            // replaces could never run.
+            if (!ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? identifier) || identifier is null)
             {
-                identifier = new ResourceIdentifier(resourceId);
+                _logger.LogWarning("Could not parse the Azure resource ID {ResourceId}", SanitizeForLog(resourceId));
+                return AzureResourceConfirmation.Unknown;
             }
-            catch (Exception ex)
+
+            // The type has to be established before reading, not assumed. The SDK's accessors build
+            // their request from (subscription, resource group, last path segment) and discard the
+            // provider namespace and type without validating them, so reading an ID of some other
+            // type asks about a different resource - and its 404 would come back here as a confirmed
+            // deletion. Unknown is the only honest answer for anything else.
+            bool isSubnet = AzureResourceIdentity.IsAzureSubnet(resourceId);
+            if (!isSubnet && !AzureResourceIdentity.IsAzureVNet(resourceId))
             {
-                // Free text on the entity, so a malformed value is possible. Unknown, never Deleted.
-                _logger.LogWarning(ex, "Could not parse the Azure resource ID {ResourceId}", SanitizeForLog(resourceId));
+                _logger.LogWarning(
+                    "The stored Azure resource ID {ResourceId} names neither a VNet nor a subnet, so it cannot be confirmed",
+                    SanitizeForLog(resourceId));
                 return AzureResourceConfirmation.Unknown;
             }
 
             try
             {
-                if (AzureResourceIdentity.IsAzureSubnet(resourceId))
+                if (isSubnet)
                 {
                     await _armClient.GetSubnetResource(identifier).GetAsync();
                 }

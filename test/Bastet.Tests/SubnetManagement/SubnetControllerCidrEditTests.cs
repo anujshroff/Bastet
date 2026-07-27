@@ -746,6 +746,154 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.Contains("Description", _controller.ModelState.Keys);
     }
 
+    /// <summary>
+    /// An Azure-linked row records the prefix its resource had at link time, and the reconciler reads
+    /// any difference from Azure's current prefix as Azure-side drift. Editing the CIDR here breaks
+    /// that invariant silently and a later reconcile offers the row - and its whole subtree - for
+    /// archival while Azure is healthy, so the edit must be refused rather than validated.
+    /// </summary>
+    [Theory]
+    [InlineData(17)] // narrowing
+    [InlineData(15)] // widening
+    public async Task Edit_POST_CidrChangeOnAzureLinkedSubnet_IsRefusedAndWritesNothing(int newCidr)
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 30,
+            Name = "azure-vnet",
+            NetworkAddress = "10.30.0.0",
+            Cidr = 16,
+            AzureResourceId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/azure-vnet",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 30,
+            Name = "azure-vnet",
+            NetworkAddress = "10.30.0.0",
+            Cidr = newCidr,
+            OriginalCidr = 16
+        };
+
+        IActionResult result = await _controller.Edit(30, viewModel);
+
+        _ = Assert.IsType<ViewResult>(result);
+        Assert.False(_controller.ModelState.IsValid);
+        Assert.Contains("Cidr", _controller.ModelState.Keys);
+        Assert.Contains("Azure", _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty);
+
+        Subnet? unchanged = await _context.Subnets.FindAsync([30], TestContext.Current.CancellationToken);
+        Assert.NotNull(unchanged);
+        Assert.Equal(16, unchanged.Cidr);
+    }
+
+    /// <summary>
+    /// The guard is on the CIDR only. Renaming, re-describing and re-tagging an imported subnet are
+    /// ordinary operations and must keep working, or the fix costs more than the defect.
+    /// </summary>
+    [Fact]
+    public async Task Edit_POST_NameChangeOnAzureLinkedSubnet_StillSucceeds()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 31,
+            Name = "azure-vnet",
+            NetworkAddress = "10.31.0.0",
+            Cidr = 16,
+            AzureResourceId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/azure-vnet",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 31,
+            Name = "renamed locally",
+            NetworkAddress = "10.31.0.0",
+            Cidr = 16, // unchanged
+            OriginalCidr = 16,
+            Description = "still editable"
+        };
+
+        IActionResult result = await _controller.Edit(31, viewModel);
+
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirect.ActionName);
+
+        Subnet? updated = await _context.Subnets.FindAsync([31], TestContext.Current.CancellationToken);
+        Assert.NotNull(updated);
+        Assert.Equal("renamed locally", updated.Name);
+        Assert.Equal("still editable", updated.Description);
+        Assert.Equal(16, updated.Cidr);
+    }
+
+    /// <summary>
+    /// The other half of the guard: a subnet with no Azure link keeps its editable CIDR. Without this
+    /// a fix that simply froze every CIDR would pass the test above.
+    /// </summary>
+    [Fact]
+    public async Task Edit_POST_CidrChangeOnUnlinkedSubnet_StillSucceeds()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 32,
+            Name = "local only",
+            NetworkAddress = "10.32.0.0",
+            Cidr = 16,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 32,
+            Name = "local only",
+            NetworkAddress = "10.32.0.0",
+            Cidr = 17,
+            OriginalCidr = 16
+        };
+
+        IActionResult result = await _controller.Edit(32, viewModel);
+
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirect.ActionName);
+
+        Subnet? updated = await _context.Subnets.FindAsync([32], TestContext.Current.CancellationToken);
+        Assert.NotNull(updated);
+        Assert.Equal(17, updated.Cidr);
+    }
+
+    /// <summary>
+    /// The form must say so before the operator types, not only after they save. The flag is derived
+    /// from the database on render, never bound from the post.
+    /// </summary>
+    [Fact]
+    public async Task Edit_GET_AzureLinkedSubnet_MarksTheModelAsLinked()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 33,
+            Name = "azure-vnet",
+            NetworkAddress = "10.33.0.0",
+            Cidr = 16,
+            AzureResourceId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/azure-vnet",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        ViewResult linked = Assert.IsType<ViewResult>(await _controller.Edit(33));
+        Assert.True(Assert.IsType<EditSubnetViewModel>(linked.Model).IsAzureLinked);
+
+        ViewResult unlinked = Assert.IsType<ViewResult>(await _controller.Edit(4));
+        Assert.False(Assert.IsType<EditSubnetViewModel>(unlinked.Model).IsAzureLinked);
+    }
+
     [Fact]
     public async Task Edit_POST_NonExistentSubnet_RedirectsToNotFoundError()
     {

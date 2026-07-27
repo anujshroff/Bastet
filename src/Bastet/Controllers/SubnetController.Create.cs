@@ -1,6 +1,6 @@
 using Bastet.Models;
-using Bastet.Services;
 using Bastet.Models.ViewModels;
+using Bastet.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -64,8 +64,13 @@ public partial class SubnetController : Controller
                 // combination is reachable straight from the UI, since the unallocated-range button
                 // navigates here with all three values. The parent name gives way rather than the
                 // address, which is the part that makes the name mean anything.
+                // "-{cidr}" and not "/{cidr}": [SafeText] on CreateSubnetViewModel.Name forbids
+                // "/", so the slashed form the app filled in was rejected by the very next POST with
+                // "Subnet name contains invalid characters" - on every create-from-unallocated-range
+                // flow that accepted the default. Round 4's D19 fixed this string's length and D8
+                // reasoned about its CIDR while both walked past the separator.
                 viewModel.Name = SubnetNaming.WithSuffix(
-                    parentSubnet.Name, $"-{networkAddress}/{cidr}", MaxSubnetNameLength);
+                    parentSubnet.Name, $"-{networkAddress}-{cidr}", MaxSubnetNameLength);
             }
         }
 
