@@ -277,59 +277,47 @@ _Tests 611 → 615 (+4). Build clean, 0 warnings._
 
 ## F4. The reconcile screens state that drift rows no longer exist in Azure `[×2]`
 
-**Confidence: confirmed.**
+_F4 is fixed and committed. Both sentences now say the rows **no longer match Azure**, which is true
+of an absence row and a drift row alike, and the confirmation screen renders each row's own reason
+underneath its list entry. That second half is the important one: step 2 already printed the reason
+beside the checkbox, but step 3 - the last screen before the archive, and the one carrying the
+type-`approved` gate - showed only the status label, so a row whose reason says the Azure resource
+still exists was confirmed under a heading saying it did not._
 
-**Where:** [_StepReview.cshtml:38](../src/Bastet/Views/Azure/Reconcile/_StepReview.cshtml#L38)
-("These BASTET subnets no longer exist in Azure."),
-[_StepConfirm.cshtml:5](../src/Bastet/Views/Azure/Reconcile/_StepConfirm.cshtml#L5) ("You are about to
-delete N subnet(s) that no longer exist in Azure."),
-[AzureReconciler.cs:87-94](../src/Bastet/Services/Azure/AzureReconciler.cs#L87) (only
-`FullyAllocatingSubnetDeleted` goes to `ReviewItems`; both drift statuses land in `Items`),
-[_ReconcileScripts.cshtml:241](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L241)
-(review renders `item.reason`), [:349-352](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L349)
-(confirm renders only `name (network/cidr) - statusLabel`),
-[:186](../src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml#L186) (`VNetPrefixRemoved` gets
-`bg-danger`, the same red as `VNetDeleted`).
+_**The finding's warning against a bare reword was heeded.** Replacing the headline with "You are
+about to delete N subnet(s)." would have removed the only statement of fact on that screen, which is
+a net information loss for absence rows - the common case, where "the resource is gone" is exactly
+what justifies the archive. Keeping a true statement and adding the per-row reason gives both._
 
-**Failure scenario.** A genuine Azure-side prefix change — replacing a VNet's address space, or
-re-addressing a subnet — produces a drift row. Step 2 asserts the resource is gone, while the same
-row's Reason, printed inches below, says it still exists. Step 3 repeats the false claim in bold above
-the type-`approved` gate **with nothing to contradict it** — grepping the rendered step-3 pane for
-"still exists" returns zero hits:
+_`_StepReview.cshtml:76` was **not** reworded here, as the finding directs - but it is no longer the
+sentence the finding examined. F3 widened what `ReviewItems` can hold, so "These subnets still exist
+in Azure" stopped being established for every row in that section and was generalised in F3's commit._
+
+_The badge colour was left alone. The finding offers a distinct colour for `VNetPrefixRemoved` as an
+optional aggravator fix; with the reason now on both screens, recolouring is a UI preference rather
+than a correctness matter, and an unrequested visual change riding along in a fix commit is the
+residue these rounds keep finding._
+
+_Verified in chromium against the pinned jQuery 4.0.0, with the shipped script read from the repo at
+run time and its three `@Url.Action` expressions substituted programmatically rather than retyped.
+The confirm-list block was lifted by offset, not rewritten, and run against a drift row:_
 
 ```
-STEP 3  HEADLINE: You are about to delete 2 subnet(s) that no longer exist in Azure.
-        list item 1: vnet-a (10.0.0.0/16) - Prefix removed
-        any "still exists" text on step 3? NO
+"parses": "OK"
+"listText": "vnet-visible (10.10.0.0/17) - Prefix removed
+             VNet 'vnet-visible' still exists but no longer has the address prefix 10.10.0.0/17."
 ```
 
-**Provenance — all three finders had this wrong.** The sentences were never accurate. At `aedd0bd`,
-where both views were written, no confirmation step existed; `BuildPlan` output went straight to
-`Json(...)`, so drift rows rendered under this banner from day one. Round 4's D3 *incidentally* made
-the sentence true by withholding every non-`Deleted` verdict. E1 un-masked a pre-existing text defect.
-Neither view has been touched since `aedd0bd`, and round 5's squash modified only
-`_ReconcileScripts.cshtml`.
+_The parse check is not ceremony: a syntax error inside a `.cshtml` script block is invisible to the
+C# compiler and to the test suite, and surfaces only when the page is requested._
 
-**Not a duplicate of F1.** A genuine Azure-side prefix change produces a drift row that E1
-*deliberately* made deletable, so this survives every fix proposed for F1.
+_No test ships. There is still no JS harness in the repo and no `WebApplicationFactory`, which the
+watch list records; the rig was ephemeral and is deleted._
 
-**Harm.** Told "Azure no longer has this", archiving is costless bookkeeping. Told the truth — "still
-exists, now `10.2.9.0/24`" — the operator can re-address the Bastet row and keep its children and host
-IPs. The banner suppresses the option that preserves data. Medium rather than high because step 2
-prints the contradicting Reason in the same row as the checkbox.
-
-**Fix.** Reword both sentences to "no longer match Azure" **and** append `i.reason` to each
-`#rec-confirm-list` item (built with `.text()`, so no injection sink). Optionally give
-`VNetPrefixRemoved` a distinct badge colour.
-
-**Do not** take the two string edits alone with the confirm-list left as-is: replacing the headline with
-"You are about to delete N subnet(s)." removes the only statement of fact on that screen, a **net
-information loss for absence rows** — the common case, where "the resource is gone" is what justifies
-the archive. And **do not** reword `_StepReview.cshtml:76`: that sentence is correct for its section,
-since `ReviewItems` can only ever hold `FullyAllocatingSubnetDeleted`. It is the model the other banner
-should be reworded toward.
+_Tests 615 → 615 (unchanged). Build clean, 0 warnings._
 
 ---
+
 
 ## F5. jQuery 4 breaks client-side validation on every validated form `[×2]`
 
