@@ -305,51 +305,33 @@ _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 
 ## E7. Every leaf subnet's toggle becomes an inert "+" expander after any tree interaction `[×2]`
 
-**Confidence: confirmed.**
+_E7 is fixed and committed. `updateToggleIcons` now early-returns for a subnet with no children,
+using `$children.children().length === 0` — the same test the startup loop already applies, so there
+is one definition of "leaf" instead of two that disagree._
 
-**Where:** [site.js:33-42](../src/Bastet/wwwroot/js/site.js#L33-L42) (`updateToggleIcons`, no leaf test)
-against [site.js:43-54](../src/Bastet/wwwroot/js/site.js#L43-L54) (the startup loop, which has one).
-[_SubnetTreeItem.cshtml:32](../src/Bastet/Views/Shared/_SubnetTreeItem.cshtml#L32) emits
-`.subnet-children` only when `ChildSubnets.Any()`.
+_Reproduced in a real browser before fixing, not reasoned about. The rig loads the **actual
+`site.js`** read from the repo at run time, against **jQuery 4.0.0 from the same CDN URL
+`_Layout.cshtml` pins**, into a tree built from `_SubnetTreeItem.cshtml`'s shipped markup with only
+the Razor stripped. The version matters: the defect turns on `:visible` returning false for an empty
+jQuery set, which is a library behaviour, not something to take on trust from a different build._
 
-Two disagreeing definitions of "leaf". The startup loop gives a childless subnet a flat `bi-dash`,
-`cursor: default`, and unbinds its click handler. `updateToggleIcons` then iterates **all** toggles; for
-a leaf, `children('.subnet-children')` is an empty set and `.is(':visible')` is false on an empty
-collection, so the else branch repaints it as `bi-plus-square`.
+```
+--- after ready ---                --- after clicking Expand All ---
+  parent 'corp' : bi-dash-square     leaf 'web'  : bi-plus-square
+  leaf   'web'  : bi-dash            leaf 'solo' : bi-plus-square
+  leaf   'solo' : bi-dash
+```
 
-**Failure scenario.** Load /Subnet, click Expand All (or Collapse All, or any parent toggle). Every leaf
-now advertises collapsed children it does not have, and clicking does nothing — the handler was already
-removed. The startup loop never re-runs, so only a page reload restores the dash.
+_Both a nested leaf and a top-level childless subnet flip, confirming it is not specific to depth.
+Against the fix both stay `bi-dash` through Expand All, Collapse All and a parent toggle click._
 
-Softening detail: the inline `cursor: default` survives the `.html()` rewrite, so the misleading
-affordance is the icon only, not the cursor.
+_The finding's "cheaper interim" — marking leaves at startup with a class and excluding them by
+selector — was not taken. It keeps the two definitions of "leaf" and just adds a third mechanism to
+hold them together; the early return removes the disagreement outright._
 
-**Fix.** Give `updateToggleIcons` the same emptiness test: inside the `.each`, early-return when
-`$children.children().length === 0`. One rule for what a leaf looks like instead of two that disagree.
-
-## E8. The Create form calls `/api/subnets/calculate-mask`, a route that has never existed `[×1]`
-
-_E8 is fixed and committed. The `$.get(...).fail(...)` wrapper is deleted and `updateSubnetInfo` now
-calls the local `calculateSubnetMask(cidrValue)` directly — which is what the `.fail` handler already
-did on every single keystroke, since the request could never succeed._
-
-_**Taken out of numeric order, ahead of E7**, which is recorded here rather than left implicit: E7 is
-a client-side jQuery defect needing a browser rig, and this one needed nothing but a grep. E7 follows
-immediately._
-
-_Verified the route genuinely does not exist rather than trusting the finding: a repo-wide grep for
-`api/subnets` and `calculate-mask` across `.cs`, `.cshtml` and `.js` returned exactly one line — the
-call itself — and the only `[Route]` attributes in the entire application are `ErrorController`'s two.
-After the fix the only remaining mention anywhere is the comment explaining what used to be there._
-
-_No fallback behaviour is lost. The guard immediately above the call already constrains the value to
-0–32, so `calculateSubnetMask` is never handed anything it reports as invalid, and the server renders
-the initial value into the span independently. Being a `[×1]` this was re-derived rather than assumed;
-it was found twice within pass 1 (by both the UI and dead-code beats) and missed entirely by pass 2._
-
-_No test ships: there is no JS harness in the repo, and the change removes a network call rather than
-altering a computed value. The definitive check is the absence of a 404 for that URL when the Create
-page is exercised, which is folded into the closing sweep._
+_No test ships. There is no JS harness in the repo, and adding Playwright to the suite for one
+cosmetic defect is far beyond this finding's weight — the rig stayed in the scratchpad. Recorded here
+instead, which is what the watch list already anticipated for client-side findings._
 
 _Tests 603 → 603 (unchanged). Build clean, 0 warnings._
 

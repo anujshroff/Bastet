@@ -33,6 +33,16 @@ $(document).ready(function () {
     function updateToggleIcons() {
         $('.subnet-toggle').each(function () {
             var $children = $(this).closest('.subnet-item').children('.subnet-children');
+
+            // Leave childless subnets alone. The view omits .subnet-children entirely when there
+            // are no children, and jQuery's :visible is false on an empty set - so without this the
+            // else branch below repaints their flat dash as a collapsed expander that can never
+            // expand, the startup loop having already unbound their click handler. Same test the
+            // startup loop uses, so there is one definition of "leaf" rather than two that disagree.
+            if ($children.children().length === 0) {
+                return;
+            }
+
             if ($children.is(':visible')) {
                 $(this).html('<i class="bi bi-dash-square"></i>');
             } else {
