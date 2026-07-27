@@ -264,35 +264,44 @@ _Tests 599 → 603 (+4). Build clean, 0 warnings._
 
 ## E6. Concurrency-conflict handler displays a Last Modified time that was never saved `[×2]`
 
-**Confidence: confirmed.** The EF behaviour was measured, not assumed.
+_E6 is fixed and committed. Both re-queries — the one in the `DbUpdateConcurrencyException` handler
+and the fall-through repopulation that runs last — now use `AsNoTracking()`. Both were needed: the
+fall-through query is what actually reaches the view, so fixing only the handler would have changed
+nothing on screen._
 
-**Where:** [SubnetController.Edit.cs:179-181](../src/Bastet/Controllers/SubnetController.Edit.cs#L179-L181)
-(the re-query under the comment "reload current data"),
-[:190](../src/Bastet/Controllers/SubnetController.Edit.cs#L190),
-[:218](../src/Bastet/Controllers/SubnetController.Edit.cs#L218) and
-[:247](../src/Bastet/Controllers/SubnetController.Edit.cs#L247) (the fall-through repopulation, which
-runs last and is what reaches the view),
-[_NetworkInformation.cshtml:24-27](../src/Bastet/Views/Subnet/Edit/_NetworkInformation.cshtml#L24-L27).
+_Reproduced against a real SQL Server 2022 container, because the defect is unreachable on the SQLite
+the suite runs on: `[Timestamp] byte[] RowVersion` is only DB-generated on SQL Server, so
+`DbUpdateConcurrencyException` never fires under the test provider. Driving Bastet's own
+`BastetDbContext` through the exact handler sequence — load tracked, mutate, lose the optimistic
+concurrency race — gives:_
 
-The re-query is a **tracking** query on a context where the entity is still tracked in `Modified` state,
-so EF returns that same instance and discards the row it read. Measured on EF Core 10.0.10: the tracking
-re-query returned `ReferenceEquals == True` with the in-memory values, while `AsNoTracking()` on the same
-context returned the real row.
+```
+loaded            LastModifiedAt=10:05  (this is user B's saved value)
+SaveChanges threw DbUpdateConcurrencyException - handler entered
+tracking re-query LastModifiedAt=01:35  Name=webA
+                  same object as the dirty entity? True
+AsNoTracking      LastModifiedAt=10:05  Name=web
+```
 
-**Failure scenario.** Subnet 5 last modified 10:05 by user B. User A submits a stale edit at 10:10;
-`subnet.LastModifiedAt` is set to 10:10 before the save, which then throws
-`DbUpdateConcurrencyException`. The page renders "Last Modified 1/1/2026 10:10 AM" directly above the
-banner "This subnet was modified by another user… review the current values before saving." The one
-current value on the screen is user A's own rejected attempt.
+_`ReferenceEquals` being true is the mechanism: identity resolution hands back the tracked instance
+and discards the row it just read. **The measurement corrected the finding on one point.** The audit
+expected the screen to show the submitting user's own timestamp; it actually shows `01:35`, the wall
+clock at the moment of the failed save, because `BastetDbContext.UpdateAuditFields` re-stamps
+`LastModifiedAt = UtcNow` on every `SaveChangesAsync` attempt including the one that fails. So the
+value displayed as "current" was never anyone's edit — it is simply *now_.
 
-**Bounded, deliberately:** `RowVersion` is *not* corrupted — line 72 loads the fresh row inside the lock,
-so only `OriginalValues` was rewound. Concurrency control and the retry work correctly; this is
-display-only. The view renders no username, so only the timestamp is wrong.
+_No permanent test ships with this one, deliberately. Reaching the defect requires a real
+`rowversion`, and the suite has no SQL Server; a SQLite test would either not compile the scenario or
+pass vacuously. The rig was ephemeral and is deleted. The audit's cheaper interim —
+`ex.Entries[0].GetDatabaseValues()` — was not taken: it would fix only the handler and leave the
+fall-through query, which is the one that wins._
 
-**Fix.** `await context.Entry(subnet).ReloadAsync()` in the handler, or read the display fields with
-`.AsNoTracking()`. **The fall-through query at :218 needs the same treatment** — it runs last, so fixing
-:179 alone changes nothing on screen. Cheapest correct option: read from
-`ex.Entries[0].GetDatabaseValues()`, which EF already fetched for the failed UPDATE.
+_Confirmed display-only, as the finding said: `RowVersion` was never corrupted, because the entity is
+loaded fresh inside the lock and only `OriginalValues` is rewound, so the retry keeps working._
+
+_Tests 603 → 603 (unchanged). Build clean, 0 warnings._
+
+---
 
 ## E7. Every leaf subnet's toggle becomes an inert "+" expander after any tree interaction `[×2]`
 

@@ -176,8 +176,15 @@ public partial class SubnetController : Controller
                     return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
                 }
 
-                // Handle concurrency conflict - reload current data and show user-friendly message
+                // Handle concurrency conflict - reload current data and show user-friendly message.
+                //
+                // AsNoTracking is load-bearing, not a performance tweak. The failed save left this
+                // subnet tracked and Modified, and UpdateAuditFields already re-stamped its
+                // LastModifiedAt, so an ordinary tracking query resolves to that same dirty instance
+                // and returns the caller's own rejected values as "current database values" - the
+                // exact opposite of what the message below tells the user they are looking at.
                 Subnet? currentSubnet = await context.Subnets
+                    .AsNoTracking()
                     .Include(s => s.ParentSubnet)
                     .FirstOrDefaultAsync(s => s.Id == id);
 
@@ -215,8 +222,12 @@ public partial class SubnetController : Controller
             }
         }
 
-        // If we got this far, something failed - repopulate the view model and return to the form
+        // If we got this far, something failed - repopulate the view model and return to the form.
+        // AsNoTracking for the same reason as the concurrency handler above: this runs last and is
+        // what actually reaches the view, so fixing only that one would change nothing on screen.
+        // Nothing here is saved - every field below is display or the concurrency token.
         Subnet? origSubnet = await context.Subnets
+            .AsNoTracking()
             .Include(s => s.ParentSubnet)
             .FirstOrDefaultAsync(s => s.Id == id);
 
