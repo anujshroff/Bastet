@@ -882,41 +882,39 @@ _Tests 630 → 631 (+1). Build clean, 0 warnings._
 
 ## F18. Bulk import persists a subnet with an empty name `[×1]`
 
-**Confidence: confirmed.** Downgraded from low: a harm probe found nothing that breaks.
+_F18 is fixed and committed. A `TargetName(prefix)` helper gives the auto-created target the same
+empty-name fallback the child names four lines away always had, falling back to
+`{network}_{cidr}` - so `192.168.0.0/16` becomes `192.168.0.0_16` rather than nothing at all._
 
-**Where:** [AzureBulkImportPlanner.cs:386](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L386)
-and [:403](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L403) (the target's name, with no
-empty-name fallback) against [:470-474](../src/Bastet/Services/Azure/AzureBulkImportPlanner.cs#L470) (the
-*child* fallback, four lines away), written at
-[BulkAzure.cs:198](../src/Bastet/Controllers/SubnetController.BulkAzure.cs#L198).
-`ValidateSubnetCreation` never inspects `Name`.
+_The planner-side fix was taken over the stricter alternative of rejecting a null or whitespace `Name`
+in `ValidateSubnetCreation`, for the reason the finding gives: the preview then shows what the commit
+will write. The verifier checked the stricter option is also safe - every in-code caller already
+supplies a non-empty name - so it remains available if a later round wants belt and braces._
 
-**Failure scenario.** A crafted Admin POST with `vNetName` that sanitizes to empty (e.g. markup only):
+_All three target-name sites route through the helper, not just the two the finding cites. The third is
+the `renameMatched` path, which proposed the same sanitized value as a rename: left alone it would have
+renamed an existing subnet to nothing, which is the same defect wearing a different hat._
 
-```
-{"success":true,"createdTargets":1,"createdChildSubnets":1}
-8|[]|0|192.168.0.0|16|NULL      <- nameless target persisted
-9|[web]|3|192.168.1.0|24|8      <- the child kept its name
-```
+_Five tests: three theory rows for names that sanitize to empty - markup-only, whitespace-only and
+empty - which fail against the unfixed planner, plus a guard that an ordinary name is still used
+verbatim. Without that guard a fix that always used the prefix would pass._
 
-The same three values through the interactive Create POST are all refused ("HTML tags are not allowed in
-subnet names" / "Name is required"). No genuine wizard path can reach it: `vNetName` comes only from an
-ARM VNet name, and Azure names permit only alphanumerics, `_`, `.` and `-`.
+_Graded **info** rather than low by the verifier, and the fix reflects that this is an invariant repair
+rather than a harm repair: it went looking for something that breaks and found nothing - the tree row
+stayed clickable with the address as its visible text, Details returned 200 with an empty heading, the
+dropdown option was selectable, and the row archived cleanly. What justifies fixing it anyway is that
+`EditSubnetViewModel` carries an explicit comment about this exact hazard - "StripHtml can empty a name
+outright, defeating `[Required]`" - closed for both interactive models by round 5's E2 and left open on
+the one write path with the same sanitizer output and no equivalent guard._
 
-**Why info rather than low.** Everything downstream survives: the tree row is clickable with the address
-as its visible text, Details returns 200 with an empty `<h1>`, the parent dropdown option is selectable,
-Edit/Delete/DeletedSubnets all 200, and the row archives cleanly. Nothing fails.
+_Reachability is a crafted admin POST only, and that was re-verified rather than inherited: `vNetName`
+is only ever set from an ARM VNet name, and Azure names permit only alphanumerics, `_`, `.` and `-`, so
+no legal Azure name can sanitize to empty._
 
-**Why keep it at all.** [EditSubnetViewModel.cs:37-41](../src/Bastet/Models/ViewModels/EditSubnetViewModel.cs#L37)
-carries an explicit comment — "StripHtml can empty a name outright, defeating `[Required]`" — which is
-precisely this hazard, closed for both interactive models by E2 and left open on the one write that has
-the same sanitizer output and no equivalent guard.
-
-**Fix.** Mirror the child fallback at `:386`/`:403`, so the preview shows what the commit will write.
-Rejecting a null/whitespace `Name` in `ValidateSubnetCreation` is also safe — every in-code caller already
-supplies a non-empty name.
+_Tests 631 → 635 (+4). Build clean, 0 warnings._
 
 ---
+
 
 # Refuted — reported by a finder, killed by the verifier
 

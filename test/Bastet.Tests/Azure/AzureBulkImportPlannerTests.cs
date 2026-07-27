@@ -46,6 +46,35 @@ public class AzureBulkImportPlannerTests
         };
 
     /// <summary>
+    /// A VNet name that is entirely markup sanitizes to empty, and ValidateSubnetCreation never
+    /// inspects Name - so the bulk path persisted a subnet with no name at all while every
+    /// interactive write path refuses one. The child names four lines away always had this fallback.
+    /// </summary>
+    [Theory]
+    [InlineData("<b></b>")]
+    [InlineData("   ")]
+    [InlineData("")]
+    public void VNetNameThatSanitizesToEmpty_FallsBackToThePrefix(string vnetName)
+    {
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Sel(false, Pref(vnetName, "192.168.0.0/16", Sub("web", "192.168.1.0/24"))), []);
+
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.False(string.IsNullOrWhiteSpace(item.AutoCreateTargetName));
+        Assert.Equal("192.168.0.0_16", item.AutoCreateTargetName);
+    }
+
+    /// <summary>The guard: an ordinary VNet name is still used verbatim.</summary>
+    [Fact]
+    public void OrdinaryVNetName_IsUsedAsTheTargetName()
+    {
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Sel(false, Pref("prod-vnet", "192.168.0.0/16", Sub("web", "192.168.1.0/24"))), []);
+
+        Assert.Equal("prod-vnet", Assert.Single(plan.Items).AutoCreateTargetName);
+    }
+
+    /// <summary>
     /// System.Text.Json overwrites a collection initialiser when the body carries an explicit null,
     /// so `= []` on the DTO is not a guarantee. Dereferencing produced an unhandled
     /// NullReferenceException - and on the commit path that happens inside the subnet lock and

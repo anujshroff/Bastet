@@ -378,7 +378,7 @@ namespace Bastet.Services.Azure
 
                 if (renameMatched)
                 {
-                    string proposed = TruncateAndSanitizeName(p.Source.VNetName);
+                    string proposed = TargetName(p);
                     if (!string.Equals(proposed, exact.Name, StringComparison.Ordinal))
                     {
                         item.WillRename = true;
@@ -396,7 +396,7 @@ namespace Bastet.Services.Azure
                     item.TargetType = BulkImportTargetType.AutoCreateChild;
                     item.AutoCreateParentSubnetId = deepest.Id;
                     item.AutoCreateParentSubnetName = deepest.Name;
-                    item.AutoCreateTargetName = TruncateAndSanitizeName(p.Source.VNetName);
+                    item.AutoCreateTargetName = TargetName(p);
 
                     // The auto-created target's parent must be eligible to receive children
                     if (deepest.HasHostIpAssignments)
@@ -413,7 +413,7 @@ namespace Bastet.Services.Azure
                 else
                 {
                     item.TargetType = BulkImportTargetType.AutoCreateTopLevel;
-                    item.AutoCreateTargetName = TruncateAndSanitizeName(p.Source.VNetName);
+                    item.AutoCreateTargetName = TargetName(p);
                 }
             }
 
@@ -672,6 +672,19 @@ namespace Bastet.Services.Azure
             cidr = parsedCidr;
             return true;
         }
+
+        /// <summary>
+        /// The auto-created target subnet's name, with the same empty-name fallback the child names
+        /// already had. TruncateAndSanitizeName strips markup, so a VNet name that is entirely markup
+        /// sanitizes to empty - and ValidateSubnetCreation never inspects Name, so an empty one was
+        /// persisted while every interactive write path refuses it. EditSubnetViewModel carries a
+        /// comment about exactly this hazard ("StripHtml can empty a name outright, defeating
+        /// [Required]"); this was the one write with the same sanitizer output and no equivalent guard.
+        /// </summary>
+        private string TargetName(ParsedPrefixSelection prefix) =>
+            TruncateAndSanitizeName(prefix.Source.VNetName) is { Length: > 0 } name
+                ? name
+                : $"{prefix.PrefixNetwork}_{prefix.PrefixCidr}";
 
         private string TruncateAndSanitizeName(string? rawName)
         {
