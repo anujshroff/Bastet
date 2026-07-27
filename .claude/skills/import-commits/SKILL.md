@@ -122,27 +122,41 @@ it trades the exact tree check for the scoped one in Step 4.
 Oldest first. For each commit: apply its changes without committing, rewrite the message, commit fresh.
 
 ```bash
+AUTHOR="$(git config user.name) <$(git config user.email)>"
+count=0
 for sha in $(git rev-list --reverse <base>..import-src/<branch>); do
-    git cherry-pick -n --allow-empty "$sha" || break
+    git cherry-pick -n --allow-empty "$sha" >/dev/null || { echo "CHERRY-PICK FAILED at $sha"; break; }
     git log -1 --pretty=%B "$sha" \
         | grep -viE '^(Co-Authored-By:|🤖 Generated with)' > .git/IMPORT_MSG
-    git commit --allow-empty --reset-author -F .git/IMPORT_MSG || break
+    git commit --quiet --allow-empty --author="$AUTHOR" --date=now -F .git/IMPORT_MSG \
+        || { echo "COMMIT FAILED at $sha"; break; }
+    count=$((count+1))
 done
 rm -f .git/IMPORT_MSG
+echo "replayed: $count"
 ```
 
 Why each flag is there:
 
 - **`-n`** stages the change without committing, so the message is entirely ours to write.
-- **`--reset-author` is load-bearing, not cosmetic.** `cherry-pick -n` leaves `CHERRY_PICK_HEAD`
-  behind, and a plain `git commit` silently reuses the **original author** from it. Without this flag
-  the skill appears to work while doing exactly the thing it exists to prevent.
+- **`--author` and `--date=now` set the author record explicitly.** Do **not** reach for
+  `--reset-author` here — git rejects it outside `-C` / `-c` / `--amend` and the loop dies on the
+  first commit with `fatal: --reset-author can be used only with -C, -c or --amend`. Setting the
+  author explicitly is also robust either way: whether or not `cherry-pick -n` leaves a
+  `CHERRY_PICK_HEAD` for `git commit` to inherit an author from (observed **absent** for a single
+  `-n` pick, but do not depend on that), the identity written is the one read from local config.
+- **Committer is always the local identity** — git takes it from config and it cannot be inherited
+  from the source commit.
 - **No `-S` needed** — `commit.gpgsign=true` signs every commit automatically. Step 0 already
   verified it.
 - **`--allow-empty`** handles a commit whose changes are already present.
 
-On conflict the loop breaks rather than continuing. Resolve, `git add`, run the two commands manually
-for that one commit, then resume the loop for the remainder.
+**Check the replayed count before moving on.** The loop `break`s on the first failure and leaves the
+rest unimported; without the counter that looks indistinguishable from success. If it does not equal
+the number of commits in the range, stop and diagnose rather than proceeding to Step 4.
+
+On conflict, resolve, `git add`, run the two commands manually for that one commit, then resume the
+loop for the remainder.
 
 ## Step 4 — Verify
 
@@ -154,11 +168,16 @@ git rev-parse import-src/<branch>^{tree}    # must be the SAME hash
 git diff HEAD import-src/<branch>           # must be empty
 ```
 
-Then confirm identity and signature on every imported commit:
+Confirm the whole range arrived, then check identity and signature on every commit:
 
 ```bash
-git log <base>..HEAD --pretty='%h | %G? | A:%an <%ae> | C:%cn <%ce> | %s'
+git rev-list --count <base>..HEAD                    # must equal the source range count
+git log <base>..HEAD --pretty='%G? %an <%ae> | %cn' | sort | uniq -c
 ```
+
+The second command collapses the range to one line per distinct signature/identity combination, so a
+single stray commit is obvious. Expect one row: `G`, with the local identity as both author and
+committer.
 
 Expect `G` (good signature) and the local identity as both author and committer on every row. Confirm
 no trailer survived:
