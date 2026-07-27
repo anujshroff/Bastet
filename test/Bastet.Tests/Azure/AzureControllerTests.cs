@@ -378,6 +378,78 @@ public class AzureControllerTests : IDisposable
         Assert.DoesNotContain("secret", resultObj.error);
     }
 
+    // -------------------------------------------------------------------------
+    // An Azure read that failed must not be rendered as an Azure that holds nothing
+    // -------------------------------------------------------------------------
+
+    private AzureController ControllerWith(IAzureService service) =>
+        new(_context, service, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+    private static JsonResponse Parse(IActionResult result)
+    {
+        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
+        JsonResponse? parsed = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(jsonResult.Value));
+        Assert.NotNull(parsed);
+        return parsed;
+    }
+
+    /// <summary>
+    /// A throttled or permission-denied read used to arrive at the wizard as an empty list, which it
+    /// renders as the amber "no compatible VNets" panel - so an admin concludes the address spaces no
+    /// longer match and either abandons the import or rebuilds the hierarchy by hand, permanently
+    /// unlinked from Azure and therefore invisible to reconcile.
+    /// </summary>
+    [Fact]
+    public async Task GetVNets_WhenAzureThrows_ReportsFailureRatherThanNoVNets()
+    {
+        Mock<IAzureService> throwing = new();
+        throwing.Setup(s => s.GetCompatibleVNets(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
+            .ThrowsAsync(new Exception("429 throttled: secret detail"));
+
+        JsonResponse response = Parse(await ControllerWith(throwing.Object).GetVNets("sub-1", 2));
+
+        Assert.False(response.success);
+        Assert.NotNull(response.error);
+        Assert.DoesNotContain("secret", response.error);
+    }
+
+    /// <summary>
+    /// Also covers the VNet being deleted between step 2 and step 3 of the wizard, which surfaces as
+    /// the inner Get() throwing rather than as a VNet that holds no compatible subnets.
+    /// </summary>
+    [Fact]
+    public async Task GetSubnets_WhenAzureThrows_ReportsFailureRatherThanNoSubnets()
+    {
+        Mock<IAzureService> throwing = new();
+        throwing.Setup(s => s.GetCompatibleSubnets(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
+            .ThrowsAsync(new Exception("403 AuthorizationFailed: secret detail"));
+
+        JsonResponse response = Parse(await ControllerWith(throwing.Object).GetSubnets("/vnet/id", 2));
+
+        Assert.False(response.success);
+        Assert.NotNull(response.error);
+        Assert.DoesNotContain("secret", response.error);
+    }
+
+    /// <summary>
+    /// A genuinely empty result is still reported as success - the fix must distinguish "Azure says
+    /// none" from "Azure could not be asked", not collapse both into an error.
+    /// </summary>
+    [Fact]
+    public async Task GetVNets_WhenAzureGenuinelyHasNone_IsStillSuccess()
+    {
+        Mock<IAzureService> empty = new();
+        empty.Setup(s => s.GetCompatibleVNets(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync([]);
+
+        JsonResponse response = Parse(await ControllerWith(empty.Object).GetVNets("sub-1", 2));
+
+        Assert.True(response.success);
+    }
+
     [Fact]
     public async Task GetVNets_WithValidParams_ReturnsVNets()
     {

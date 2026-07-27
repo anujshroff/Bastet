@@ -78,8 +78,14 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
+                // Rethrown rather than collapsed to an empty list. Every caller renders an empty
+                // result as "Azure has none of these", which is a different fact from "Azure could
+                // not be asked" - and the difference decides whether an admin retries or rebuilds
+                // the hierarchy by hand, permanently unlinked from Azure. The controllers already
+                // have catch blocks that report success = false; swallowing here made them
+                // unreachable. Same rule GetVNetInventory applies with its Success flag.
                 _logger.LogError(ex, "Failed to retrieve Azure subscriptions");
-                return [];
+                throw;
             }
         }
 
@@ -136,8 +142,10 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
+                // See GetSubscriptions: a failed read must reach the caller as a failure, not as an
+                // empty subscription. The wizard already renders #vnet-error for it.
                 _logger.LogError(ex, "Failed to retrieve compatible Azure VNets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
-                return [];
+                throw;
             }
         }
 
@@ -274,8 +282,11 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
+                // See GetSubscriptions. This one also covers vnetResource.Get() 404ing because the
+                // VNet was deleted between step 2 and step 3 of the wizard, which is a real failure
+                // rather than a VNet that happens to contain no compatible subnets.
                 _logger.LogError(ex, "Failed to retrieve compatible Azure subnets for VNet {VNetResourceId}", SanitizeForLog(vnetResourceId));
-                return [];
+                throw;
             }
         }
 
