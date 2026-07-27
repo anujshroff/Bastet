@@ -159,7 +159,7 @@ public partial class SubnetController : Controller
                 return false;
             }
 
-            // A fully-allocated subnet cannot receive child subnets (mirrors Subnet.CanAddChildSubnet)
+            // A fully-allocated subnet cannot receive child subnets
             if (parentSubnet.IsFullyAllocated)
             {
                 ModelState.AddModelError("ParentSubnetId",
