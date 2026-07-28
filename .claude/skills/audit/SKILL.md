@@ -242,10 +242,28 @@ rather than half-configuring the machine.
 | Docker daemon, **as this user** | `docker info` | **Stop.** `docker info` failing on group membership needs a re-login, which you cannot do |
 | SQL Server image | `docker image inspect` the tag | Pull it **here**, in Phase 1 — never leave sixteen beats to pull 1.5 GB concurrently |
 | Browser for beat 5 | chromium present for Playwright | Install the browser if it installs unattended; if it wants `install-deps` and root, **stop and say so** — beat 5 is near worthless without it and must not fail quietly |
-| `curl` | `curl --version` | Install; every ARM probe uses it. `az` is typically absent and is not needed |
+| `curl` | `curl --version` | Install; every ARM probe uses it |
+| **Azure CLI** | `az version` | **Install it — it is required, not optional.** It installs unattended with no `sudo`: `python3 -m venv <rig>/azcli`, then `curl -sSL https://bootstrap.pypa.io/get-pip.py \| <rig>/azcli/bin/python -` (Debian's `venv` ships without `ensurepip`, so `python -m ensurepip` fails and the bootstrap script is the way through), then `<rig>/azcli/bin/pip install azure-cli`. Takes a few minutes; do it **here**, in Phase 1, not sixteen times concurrently. If it genuinely cannot be installed, **stop and say so** — see below for what is lost |
 | Disk headroom | SDK + image + browser + `bin`/`obj` across 20 agents | **Stop** if tight. A mid-round `ENOSPC` is indistinguishable from the memory death |
 | CPU count | `nproc` | Concurrency is `min(16, cores-2)`. Report it — on 4 cores, twenty finders are nearly serial and the round takes far longer |
 | Network egress | NuGet, MCR, `management.azure.com` | **Stop** and name the unreachable host. Three slow failures otherwise |
+
+**Why `az` is mandatory, and what it is for.** The Azure beats rest on two service principals with
+**disjoint** RBAC, and the whole experiment is vacuous if that is merely asserted — a single
+assignment at *subscription* scope inherits into both resource groups, filters nothing, and still
+looks like it works. `az role assignment list --all --assignee <id> --query "[].{role:roleDefinitionName,scope:scope}"`
+settles it in one call, **before** anything is measured; there is no comparably cheap way to do it
+with raw REST. It is also how VNet fixtures get created and torn down
+(`az network vnet create|delete|list`), which every reconcile and import finding needs.
+
+**Credentials never go on a command line.** Put them in the rig's env file and reference them as
+variables (`az login --service-principal -u "$SP_A_CLIENT_ID" -p "$SP_A_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"`),
+and give each principal its own `AZURE_CONFIG_DIR` so two logins do not overwrite one another. For
+driving the **application** rather than ARM, export `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` /
+`AZURE_TENANT_ID` and let `DefaultAzureCredential` pick them up, so the production code path runs
+unmodified — and make sure `AZURE_TOKEN_CREDENTIALS` is **unset**, since the launch profiles set it
+to `dev`, which excludes `EnvironmentCredential` and produces a credential failure that looks like a
+permissions problem.
 
 **No Node is required anywhere in this round.** Workflow scripts are JavaScript but the Workflow tool
 runs them itself. Do not install Node, and do not try to syntax-check a script with `node --check` —
