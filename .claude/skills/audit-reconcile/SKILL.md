@@ -22,13 +22,32 @@ requirement, a finding that turns out to be wrong in a way that changes scope.
 
 ## Start of run
 
-1. Locate the findings file — `docs/AUDIT-FINDINGS-*.md`, highest number. If every finding in it is
+1. **Check the branch first, before anything else.** `/audit` creates `audit/round-<N>` and commits
+   the findings file there; reconciliation then stacks one commit per finding on the same branch.
+   `main` must be byte-identical before and after the whole audit-and-reconcile cycle.
+
+   ```
+   git branch --show-current
+   ```
+
+   If it is `main`, or any branch that is not the `audit/round-<N>` branch carrying the findings file,
+   **stop and ask the user to switch to the right one.** Name the candidates:
+
+   ```
+   git branch --list 'audit/round-*'
+   ```
+
+   **Do not switch, create or rename branches yourself.** Which round is being reconciled is the
+   user's call, and guessing it puts a dozen commits on the wrong branch — which is expensive to undo
+   once the fixes are interleaved with the findings-file updates.
+
+2. Locate the findings file — `docs/AUDIT-FINDINGS-*.md`, highest number. If every finding in it is
    already struck, say so and stop; there is nothing to reconcile.
-2. Read it whole first, including the refuted table and watch list, so an early fix does not
+3. Read it whole first, including the refuted table and watch list, so an early fix does not
    contradict a later finding.
-3. **Baseline:** `dotnet build --no-incremental` (0 warnings) and `dotnet test` (record the count).
+4. **Baseline:** `dotnet build --no-incremental` (0 warnings) and `dotnet test` (record the count).
    If either differs from what the file claims, **stop and report** rather than building on it.
-4. Detect available tooling (see *Rigs* below) and prompt only for what cannot be obtained.
+5. Detect available tooling (see *Rigs* below) and prompt only for what cannot be obtained.
 
 **Order is numeric — D1, D2, D3 — not the audit's "suggested order of attack".** That section is
 advice about consequence; the numbering is what keeps the run auditable. Deviate only if asked.
