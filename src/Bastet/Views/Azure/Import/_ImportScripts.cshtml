@@ -235,6 +235,17 @@
                     $("#subnet-selection").addClass("d-none");
                     $("#subnet-error").addClass("d-none");
                     $("#no-subnets").addClass("d-none");
+
+                    // Rebuilding the rows cannot reach either of these: #select-all-subnets lives
+                    // outside #subnet-list, so $list.empty() misses it, and nothing recomputed the
+                    // button. Coming back to this step with the same VNet still chosen fires no
+                    // `change` on #vnet-select, so invalidateSubnetStep() never runs either - which
+                    // left the master checkbox ticked and Import enabled over a freshly unticked
+                    // list, and made the operator's first click on Select All untick everything
+                    // instead of selecting it. Resetting here rather than beside $list.empty()
+                    // also covers the no-subnets and error branches.
+                    $("#select-all-subnets").prop("checked", false);
+                    $("#import-subnets-btn").prop("disabled", true);
                 },
                 success: function(result) {
                     if (result.success) {
@@ -293,6 +304,10 @@
                                 $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", !isChecked);
                             });
                             
+                            // Recompute from the rows that actually exist now, the same pairing the
+                            // reconcile wizard runs after every rebuild (_ReconcileScripts.cshtml).
+                            updateImportButton();
+
                             // Show subnet selection UI
                             $("#subnet-selection").removeClass("d-none");
                         } else {

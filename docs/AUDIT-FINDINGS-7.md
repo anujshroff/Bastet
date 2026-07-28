@@ -595,96 +595,48 @@ Build 0 warnings.*
 
 ---
 
-## G10 — Re-entering the Azure import wizard's subnet step leaves "Select All Subnets" ticked over an empty selection and the Import button live `[x1]`
+## G10 — Re-entering the import wizard's subnet step leaves "Select All Subnets" ticked over an empty selection `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Views/Azure/Import/_ImportScripts.cshtml:244`
-**Also:** `:110`, `:319`, `:83`, `:100`, `:297`;
-`src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:271`
-**Confidence:** confirmed
+*Took the finding's optional refinement rather than its primary placement, which it explicitly
+endorses as strictly better: the reset went into `loadSubnets`' `beforeSend` instead of beside
+`$list.empty()`, so it also clears the tick on the no-subnets and error branches, which the
+`$list.empty()` placement leaves ticked. `beforeSend` now unticks `#select-all-subnets` and disables
+`#import-subnets-btn`; `updateImportButton()` is called after the rows are appended, immediately
+before `$("#subnet-selection").removeClass("d-none")`, so the button is recomputed from the rows that
+actually exist. That is the same pairing the reconcile wizard already runs after every rebuild
+(`_ReconcileScripts.cshtml:271-272`), so this aligns the oldest wizard with the pattern the later
+ones set rather than inventing one.*
 
-### Scenario
+*Reproduced first, in a real browser against a running instance on a clean catalog (`bastet_g10`,
+real SQL Server, SP_A against real ARM, with a Bastet `10.10.0.0/16` making `vnet-visible` the sole
+compatible VNet). The five states the finding names, measured before and after:*
 
-An admin on `/Azure/Import/{id}` reaches step 3, clicks **Select All Subnets** (all rows tick, Import
-goes green), clicks **Back to VNets**, then immediately **Next: Select Subnets** with the same VNet
-still chosen. Because the dropdown value did not change, no `change` fires on `#vnet-select`, so
-`invalidateSubnetStep()` (`:83`, wired only at `:100`) never runs. `loadSubnets` succeeds and
-`$list.empty()` (`:244`) replaces every row, all unticked — but **nothing** resets
-`#select-all-subnets` (which lives *outside* `#subnet-list`, so `$list.empty()` cannot reach it) and
-nothing calls `updateImportButton()` (`:319`).
+| Step | Before | After |
+|---|---|---|
+| (0) fresh step 3 | rows 3, checked 0, ticked **false**, import **disabled** | same |
+| (1) after Select All | checked 3, ticked true, import enabled | same |
+| **(2) after re-entry** | rows 3, checked **0**, ticked **TRUE**, import **ENABLED** | checked 0, ticked **false**, import **disabled** |
+| (3) after ONE click on Select All | checked **0** — unticks instead of selecting | checked **3**, import enabled |
+| (4) after a SECOND click | checked 3 | checked 0 — an ordinary toggle |
 
-The screen shows "Select All Subnets" **ticked** with **zero** rows selected and the green "Import
-Selected Subnets" button **enabled**. The operator's natural repair — clicking Select All — reads
-`$(this).is(":checked")` as `false` (`:111`), so `.prop("checked", false)` runs across the rows and
-**still nothing is selected**; only the *second* click selects the list.
+*So the master checkbox no longer does the opposite of its label on first use, and the Import button
+no longer advertises a selection the list does not have. Re-entry is driven exactly as the finding
+describes — **Back to VNets** then **Next** with the same VNet still chosen, so the dropdown value
+never changes, no `change` fires on `#vnet-select`, and `invalidateSubnetStep()` never runs.*
 
-**No bad data reaches the server** — measured, not assumed: clicking Import in the stale state raises
-`alert("Please select at least one subnet to import")`, `location` does not change, and the server
-log contains **0** occurrences of `BatchCreateChildSubnets`. The wrong output is entirely on screen:
-two controls reporting a selection state the list does not have, and a master checkbox that does the
-opposite of its label on first use.
+***One of the finding's proofs does not hold up and is corrected:*** *it says "`step3TabDisabled`
+staying `false` at (2) proves `invalidateSubnetStep()` never ran". Measured, `step3TabDisabled` is
+`false` at state **(0)** as well — the tab is not disabled at that point in the flow — so on its own
+it proves nothing. What actually demonstrates the missed invalidation is the tick surviving a rebuild
+that produced zero checked rows, which is what the table above records.*
 
-Also reproduced: switching to a *different* matching VNet does fire `invalidateSubnetStep()`, so the
-button is correctly disabled — but the master checkbox is **still** left ticked over the new, empty
-list.
+*No bad data ever reached the server, as the finding says, and nothing about that changed: the guard
+is client-side display state. The note that this does not reintroduce round 4's D1
+`.trigger("change")` still holds — nothing here dispatches an event, it sets `checked` and recomputes
+the button.*
 
-### Evidence — reproduced: yes, in a real browser, twice, with the fix measured
-
-Verifier 1 (own instance at `6a1fe75`, catalog
-`bastet_verify-import-wizard-select-all-stale-on-reentry`, SP_A, headless Chromium 124 with jQuery
-4.0.0 confirmed loaded, native `element.click()` over CDP). Fixture used **only read-only rig
-resources**: a Bastet subnet `10.10.0.0/16` created through the app's own POST, making the existing
-`vnet-visible` (10.10.0.0/16, subnets web/app/multi) the sole compatible VNet. **No Azure resource
-was created or deleted.**
-
-```
-(0) fresh step 3        {rows:3, checked:0, selectAllTicked:false, importBtnDisabled:true}
-(1) after Select All    {checked:3, selectAllTicked:true,  importBtnDisabled:false}
-(2) after re-entry      {rows:3, checked:0, selectAllTicked:TRUE, importBtnDisabled:FALSE,
-                         step3TabDisabled:false}   <-- the defect
-(3) after ONE click     {checked:0, selectAllTicked:false, importBtnDisabled:true}
-(4) after a SECOND click{checked:3, selectAllTicked:true,  importBtnDisabled:false}
-```
-
-`step3TabDisabled` staying `false` at (2) proves `invalidateSubnetStep()` never ran.
-
-Verifier 2 reproduced independently (port 5291, catalog `bastet_selall_reach`, own Chrome container),
-with the same five states, and additionally captured the harm test with `window.alert` hooked and a
-submit listener installed: exactly one alert, `location.href` unchanged, 0 server-side
-`BatchCreateChildSubnets`.
-
-**Fix measured** by both: executing the two proposed statements at the same point in the sequence
-(verifier 2 used a jQuery `ajaxComplete` hook on the `GetSubnets` call, i.e. after rows are appended)
-gave `{checked:0, selectAllTicked:false, importBtnDisabled:true}`, and a **single** subsequent click
-on Select All ticked all rows and enabled Import. The interim variant (uncheck only) left
-`importBtnDisabled:FALSE` until the operator's first click, exactly as the finding concedes.
-
-### Fix
-
-In `loadSubnets`' success handler, reset the two things the row rebuild leaves behind:
-
-- add `$("#select-all-subnets").prop("checked", false);` beside `$list.empty()` at `:244`
-- call `updateImportButton();` after the rows are appended, just before
-  `$("#subnet-selection").removeClass("d-none")` at `:297`
-
-This is exactly the pair the reconcile wizard already runs after every rebuild —
-`_ReconcileScripts.cshtml:271-272` does
-`$("#rec-select-all").prop("checked", false); updateGoConfirmBtn();` — so it aligns the oldest wizard
-with the pattern the two later ones set rather than inventing one.
-
-Note for whoever applies it: this does **not** reintroduce the `.trigger("change")` that round 4's D1
-deliberately rejected — that was a payload concern; this is display state.
-
-Optional refinement: putting the uncheck in `loadSubnets`' `beforeSend` (beside the existing
-`$("#subnet-selection").addClass("d-none")` at `:235`) additionally clears the tick on the
-empty-result and error branches, which the `:244` placement leaves ticked (harmlessly, since the
-checkbox is inside the hidden `#subnet-selection` on those branches). The `updateImportButton()` call
-still belongs at `:297`.
-
-### Interim fix
-
-The single line `$("#select-all-subnets").prop("checked", false);` at `:244`. It fixes the lying
-master checkbox, and because the operator's first click then genuinely selects everything, the
-stale-enabled Import button becomes correct on that same click.
+*No permanent test ships: there is no JS test harness, already on the watch list. Verification is the
+before/after table. Tests 667 → 667, build 0 warnings.*
 
 ---
 
