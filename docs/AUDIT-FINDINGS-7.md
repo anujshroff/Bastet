@@ -193,92 +193,53 @@ Tests 651 → 651, build 0 warnings.*
 
 ---
 
-## G3 — One VNet deleted during a scan makes `GetVNetInventory` report the whole subscription unreadable, disabling bulk import and reconcile `[x1]`
+## G3 — One VNet deleted during a scan makes `GetVNetInventory` report the whole subscription unreadable `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Services/Azure/AzureService.cs:344`
-**Also:** `:369` (the single outer catch), `src/Bastet/Controllers/AzureController.cs:231`,
-`src/Bastet/Controllers/SubnetController.AzureReconcile.cs:55`
-**Confidence:** confirmed
+*Took the primary fix, not the interim. `GetVNetInventory` now iterates `vnet.Data.Subnets`
+(`SubnetData`) from the listing response instead of issuing a separate `vnet.GetSubnets()` call per
+VNet, and `ExtractIpv4Prefix`/`ExtractIpv4Prefixes` were retyped from `SubnetResource` to
+`SubnetData` — both are private and, as the finding said, called only from this method, so no
+overload was needed and no caller broke. This removes the 1+N round-trips outright, and with them
+the 404 window, the throttling surface and the failure mode. The interim narrowed catch was **not**
+applied and is not needed: with no inner per-VNet call there is nothing left to catch, and the outer
+`catch` now only sees a genuine failure of the subscription listing itself, which is correctly
+reported as one.*
 
-### Scenario
+*The fix's load-bearing claim was re-measured against live ARM rather than taken from the finding.
+A standalone console app on the exact pinned SDK (Azure.ResourceManager.Network 1.16.1,
+Azure.ResourceManager 1.14.0) walked every VNet in the subscription and compared the list-response
+`SubnetData` against the separately-fetched `SubnetResource` field by field:
+**8 subnets compared, 0 mismatches** — name, `Id` (compared `Ordinal`, so byte-identical, same
+casing), `AddressPrefix` and `AddressPrefixes` all agreed. That included both multi-prefix fixtures,
+`multi` (2 prefixes) and `g2multi` (3), where the singular `AddressPrefix` is empty and only
+`AddressPrefixes` carries data — the case that would have lost information had the list response been
+a summary. No information is lost.*
 
-`GetVNetInventory` lists the subscription's VNets once (`:317`) and then issues a **separate** ARM
-call per VNet to enumerate its subnets (`:344`). A 404 from any of those child calls escapes the
-inner `await foreach`, is caught by the **single** outer `catch (Exception ex)` at `:369`, and the
-entire inventory is returned as `Success=false, ErrorMessage="Azure could not be read for this
-subscription"`.
+*Defect reproduced first, against live ARM, on the first attempt. Fixture `rig-g3-race`
+(10.150.0.0/16, uksouth) created in RG `bastet`; `GET /Azure/BulkGetVNets` fired, the VNet deleted at
+t+0.4 s. Baseline immediately before returned `success=True` with 5 VNets including the fixture; the
+in-flight request returned
+`{"success":false,"error":"Azure could not be read for this subscription. Details have been logged."}`
+with `Azure.RequestFailedException: Resource …/RIG-G3-RACE not found. Status: 404` in the log, and the
+very next request self-healed.*
 
-Consumers then fail wholesale: `/Azure/BulkGetVNets` answers `success:false` so the wizard lists
-nothing; `/Azure/ReconcileScan` builds a plan with `scanSucceeded:false` and a global error and zero
-items; `POST /Subnet/BulkDeleteStaleAzureSubnets` answers 400 *"Azure could not be re-checked, so
-nothing was deleted."* The output is wrong on its own terms — the subscription **was** read
-successfully and every other VNet enumerated fine — and it fires on exactly the event reconcile
-exists to detect.
+*After the fix, the identical race on a second fixture `rig-g3-race2` (10.151.0.0/16, uksouth)
+returned `success=True` with the full inventory — three consecutive scans around the delete, all
+successful. The scan taken mid-delete still lists the VNet, which is correct: the listing is a
+point-in-time snapshot, and reconcile's `ConfirmProposedDeletionsAsync` direct-read guard is what
+decides deletion. Both consumers verified healthy afterwards on the same instance:
+`BulkGetVNets` `success=True`, and `POST /Azure/ReconcileScan` (form-bound, with a real antiforgery
+token) `success=True, scanSucceeded=True, globalErrors=[]`. Zero `fail:`/`warn:` lines in the log.*
 
-**The finder's stated mechanism is wrong and both verifiers corrected it.** ARM does **not** keep a
-deleted VNet in the subscription listing "for a period": measured, listing and child collection
-converge within ~600 ms (LIST still contained the VNet at t+1.39 s while `…/subnets` already 404'd at
-t+1.66 s; LIST was clear by t+1.97 s). The window that matters is **Bastet's own**: the list response
-is a point-in-time snapshot and the N serial `vnet.GetSubnets()` calls follow it inside the same
-request — measured at ~1.3–2 s over 5–6 VNets on this rig, proportionally minutes for a large
-subscription. Any VNet deleted in that span poisons the run.
+*One scope correction the finding does not make: there is a **second** `GetSubnets()` call at
+`AzureService.cs:170`, in `GetCompatibleSubnets`. It was deliberately left alone. That one is a
+targeted read of a single VNet the caller named, so a 404 there is a genuine failure of the thing
+asked for, not a 1+N amplification across a subscription — and it does not use the retyped
+extractors, so the change cannot reach it.*
 
-**Consequence, stated precisely:** every consumer fails **closed**. Nothing wrong is persisted, no
-row is lost, and the condition self-clears on the next request. This is a wrongly-attributed
-transient refusal, not a data defect — which is why it is medium and not high.
-
-One verifier additionally observed that ARM `429 ResourceCollectionRequestsThrottled` on
-`virtualNetworks/read` escapes the same inner loop to the same catch and yields the identical
-whole-subscription failure, **with no delete involved**. Same 1+N structure; it strengthens the
-primary fix.
-
-### Evidence — reproduced: yes, driven against live ARM, twice, first attempt each time
-
-Verifier 1 (port 5233, catalog `bastet_verify_azure`, SP_A): created `rig-verify-azure-uks` in
-uksouth (the region-grouped listing puts it last, widening the window), issued
-`GET /Azure/BulkGetVNets` on a thread, slept 350 ms, then `DELETE …/rig-verify-azure-uks` (202 at
-t+0.81 s). The in-flight request returned
-`{"success": false, "error": "Azure could not be read for this subscription. Details have been logged."}`
-with `app.log` showing `Azure.RequestFailedException: Resource …/RIG-VERIFY-AZURE-UKS not found`,
-stack `SubnetsGetAllAsyncCollectionResultOfT.GetNextResponseAsync → … → AzureService.GetVNetInventory
-… AzureService.cs:line 344` then `… line 317`. Repeated for reconcile: `POST /Azure/ReconcileScan` →
-HTTP 200, `scanSucceeded=False`, `globalErrors=['Could not read VNets from Azure, so nothing can be
-reported as deleted: …']`, `items=0`.
-
-Verifier 2, independently (port 5378, catalog `bastet_v404reach`, own fixtures `rig-v404reach-*`):
-three sequential requests around one DELETE —
-
-```
-start= 0.00 end= 1.91 success=True   target_in_result=True
-t= 3.03 DELETE -> 202
-start= 1.91 end= 3.40 success=False  err="Azure could not be read for this subscription. …"
-start= 3.40 end= 4.80 success=True   (self-heals on the very next request)
-```
-
-Both verifiers deleted their fixtures afterwards; `git status --porcelain --untracked-files=all`
-empty.
-
-### Fix — primary verified sound, interim corrected
-
-**Primary.** Read the subnets already present on the listing instead of re-fetching them: iterate
-`vnet.Data.Subnets` rather than `vnet.GetSubnets()`. This removes the N round-trips, the throttling
-surface and the failure mode entirely. **Verified against the real SDK** (Azure.ResourceManager.Network
-1.16.1) in a standalone console app: `vnet.Data.Subnets` comes back fully populated from the list
-response — name, `Id` (a `ResourceIdentifier` byte-identical to the `subnet.Id.ToString()` the
-current code emits, same casing), `AddressPrefix`, and `AddressPrefixes` including the multi-prefix
-fixtures `multi` (2 prefixes) and `g2multi` (3). No information is lost.
-`ExtractIpv4Prefix`/`ExtractIpv4Prefixes` are **private and called only from `GetVNetInventory`**
-(`:346`, `:360`), so retype both parameters from `SubnetResource` to `SubnetData` — no overload is
-needed and no caller breaks.
-
-**Interim — corrected; the finder's version is unsafe.** Wrapping the inner `await foreach` in
-`catch (global::Azure.RequestFailedException) { continue; }` also swallows **429, 403 and 500**, and
-because the VNet is then simply *absent* from the inventory, a throttled VNet silently vanishes from
-the bulk-import wizard. That is the exact "empty subscription vs. Azure could not be reached"
-conflation the fail-loud comment at `AzureController.cs:227-230` exists to prevent — and unlike the
-reconcile path, bulk import has **no** `ConfirmProposedDeletionsAsync` re-read to catch it. Narrow
-the catch to `catch (global::Azure.RequestFailedException ex) when (ex.Status == 404)`, log the VNet
-name, and `continue`; rethrow everything else.
+*No permanent test ships: `AzureServiceTests` drives `MockAzureService` only, and the real
+`GetVNetInventory` needs an `ArmClient`, so the SQLite suite cannot reach this path. Verification is
+the live-ARM measurement above. Tests 651 → 651, build 0 warnings.*
 
 ---
 
