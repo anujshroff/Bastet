@@ -85,6 +85,19 @@ choice. The answers become the script's `args`. Then stop asking, write the scri
 
 If the user has already answered these earlier in the conversation, do not ask again.
 
+**If the round includes the live Azure rig, have the credentials in hand before you launch.** The
+user supplies them; your job is to be certain you have them rather than to discover forty minutes in
+that you do not. Needed: two service principals — client id and secret each, with disjoint RBAC scope
+over the two resource groups — the tenant id, the subscription id, and both resource group ids. If
+any part is missing, **ask for it now.** Besides the cost question this is the one thing worth
+blocking on: five of the eight beats have Azure surface, and a credential cannot be inferred.
+
+A credential from a previous round is not evidence of a working one — they are rotated after a round,
+and round 6's was revoked. The rig agent proves it below rather than assuming it.
+
+Credentials go into a scratchpad file the script points agents at. **Never pasted into sixteen
+prompts, never into the repository, never into a commit.**
+
 ## Phase 1 — briefing and baseline (`parallel`, 2 agents)
 
 Everything later phases know comes from these two. Both write files into the scratchpad, and every
@@ -112,8 +125,41 @@ collections, `CollectDescendants` lacking a cycle guard, the unreachable IP-chan
 `ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and **C20** (the
 Azure reconcile check/act window).
 
-**Rig agent** → `RIG.md`. Establishes the baseline, because a moving baseline invalidates everything
-downstream:
+**Rig agent** → `RIG.md`. Runs the preflight, then establishes the baseline.
+
+### Preflight — three checks, before anything else, because each has already cost a round
+
+**Memory.** A round runs sixteen agents concurrently, each with its own build, container or browser.
+**Under 16 GB of RAM the host dies mid-run** — round 7 died this way on a VM whose allocation had not
+been raised, partway through the beats. Check total RAM first and **stop the round** if it is under
+16 GB, naming the figure. It costs a second, and it fails in seconds rather than forty minutes in.
+
+**Git identity.** `git commit` refuses to run without one, so this is a hard failure rather than a
+warning. Round 7 found `user.name` and `user.email` unset in every scope with no `~/.gitconfig`; the
+round would have completed every phase and then failed on its last action, and `/audit-reconcile`
+commits once per finding and would stop dead on the first.
+
+```
+git var GIT_AUTHOR_IDENT           # "Author identity unknown" means stop
+```
+
+If it is unset, **report it and stop rather than setting it** — whose name goes on a commit is the
+user's call, not an agent's. Tell them what the repository's existing commits use so the answer is
+one word. A checkpoint restore takes `user.name`, `user.email` and `~/.gnupg` together, so expect the
+signing key to be gone in the same breath. Unsigned commits are acceptable; an anonymous one is not.
+
+**Azure credentials**, where the round uses the live rig. Prove them before the beats start, or five
+of the eight fail slowly and separately instead of once and clearly. For each service principal:
+fetch a token, then probe **both** resource groups.
+
+The discrimination is the point, not the authentication. A credential that sees everything proves
+nothing about the reconciler's withhold path, and a rotated one presents as a rig that authenticates
+and then returns nothing — indistinguishable from a healthy subscription with no VNets. Expect SP_A
+to get 200 on its own group and **403** on the other, and SP_B the exact reverse. If that matrix does
+not reproduce, **stop and name the leg that failed**: an expired secret, a missing role assignment and
+a wrong subscription id all present differently, and the user can fix any of them in a minute.
+
+### The baseline, because a moving baseline invalidates everything downstream
 
 ```
 dotnet build --no-incremental      # expect 0 warnings
@@ -154,6 +200,15 @@ Eight beats, each an independent agent given the brief path and nothing else:
    behaviour, or do they pass against the unfixed code?
 8. **Dead code & refactor residue** — orphans left by earlier deletions. This beat exists because a
    round-3 deletion left a helper behind, and the round-4 version of it found nineteen more.
+
+**Every worker prompt carries this, and "do not modify the working tree" is not enough on its own.**
+Round 7's beats read that as "do not edit source" — a fair reading — and parked PID files in the
+repository root: `g7lk-5487.pid`, `p1r-app-5432.pid`, `sec2-5481.pid`, `x7ui-app.pid`, with round 6's
+`app-5407.pid` and `w2-master.txt` already sitting there from the same habit. Say the stronger thing:
+**write nothing into the repository directory at all** — no PID files, no logs, no scratch output, no
+notes — and put every created file under the rig directory. An untracked file makes the tree dirty,
+and Phase 5 is instructed to refuse the commit when anything but the findings file is dirty, so one
+stray `.pid` costs the round its output.
 
 **Run all eight twice**, as two passes of fresh workers with no knowledge of each other. Round 4 did
 this by accident and it produced the most useful signal in the file.
@@ -200,7 +255,10 @@ cleanup commit moved twenty-two source files under them.
 
 ## Phase 5 — teardown and commit (1 agent)
 
-One agent tears the rig down — containers, processes, any cloud fixtures the round created —
+One agent tears the rig down — containers, processes, any cloud fixtures the round created — then
+**sweeps the scratch files the beats left in the repository**: untracked `*.pid` and similar strays
+in the root, including any left by an earlier round, each guarded with `git ls-files --error-unmatch`
+so nothing tracked is ever removed and nothing under `src/`, `test/` or `docs/` is touched. Then it
 confirms the tree carries nothing but the findings file (no scaffolding, no credential, no stray
 edit) and **makes the commit**. It is a versioned record: `/audit-reconcile` then commits an updated
 copy alongside each fix, so the reasoning and the change land together.
