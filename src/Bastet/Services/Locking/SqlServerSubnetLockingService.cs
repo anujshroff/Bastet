@@ -2,6 +2,7 @@ using Bastet.Data;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
+using System.Diagnostics;
 
 namespace Bastet.Services.Locking;
 
@@ -22,6 +23,24 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
     private const int DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
     private const string SUBNET_OPERATIONS_LOCK = "Bastet:SubnetOperations";
 
+    /// <summary>
+    /// Caps how many requests this replica can have parked inside <c>sp_getapplock</c> at once, from
+    /// unbounded to one.
+    /// </summary>
+    /// <remarks>
+    /// Waiting inside <c>sp_getapplock</c> requires an open connection, so every queued writer used
+    /// to hold one out of the pool for the whole wait while doing no work. At SqlClient's default
+    /// Max Pool Size of 100 the pool emptied, and the next request failed at connection acquisition
+    /// after the 15s pool timeout - including read-only pages that take no lock and need one SELECT,
+    /// which surfaced as HTTP 500. Waiting here instead costs no connection.
+    ///
+    /// This is not a second lock: <c>sp_getapplock</c> remains the cross-replica mutex and its
+    /// semantics are untouched, so multi-replica correctness is unchanged. Every call site is a
+    /// top-level controller action and none re-enters another guarded action, so the gate cannot
+    /// self-deadlock.
+    /// </remarks>
+    private static readonly SemaphoreSlim _localGate = new(1, 1);
+
     /// <summary>SQL Server's error number for a client-side command timeout.</summary>
     private const int SQL_TIMEOUT_ERROR_NUMBER = -2;
 
@@ -30,42 +49,66 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
     {
         int timeoutMs = (int)(timeout?.TotalMilliseconds ?? DEFAULT_TIMEOUT_MS);
 
-        // Keep the session (and with it the session-owned lock) alive across the operation.
-        await context.Database.OpenConnectionAsync();
+        // Take this replica's turn before opening a connection, so a queued caller waits holding
+        // nothing. The wait is charged against the caller's own budget below, so a contended caller
+        // still times out in roughly timeoutMs overall rather than twice that, and the contention
+        // messages the controllers render keep their meaning.
+        long waitStarted = Stopwatch.GetTimestamp();
+        if (!await _localGate.WaitAsync(timeoutMs))
+        {
+            throw new TimeoutException(
+                $"Could not acquire subnet operation lock within {timeoutMs}ms (another operation on this instance holds it)");
+        }
+
         try
         {
-            int lockResult = await AcquireAppLockAsync(SUBNET_OPERATIONS_LOCK, timeoutMs);
-            if (lockResult < 0)
+            int remainingMs = timeoutMs - (int)Stopwatch.GetElapsedTime(waitStarted).TotalMilliseconds;
+            if (remainingMs < 0)
             {
-                throw new TimeoutException($"Could not acquire subnet operation lock within {timeoutMs}ms (result code: {lockResult})");
+                remainingMs = 0;
             }
 
+            // Keep the session (and with it the session-owned lock) alive across the operation.
+            await context.Database.OpenConnectionAsync();
             try
             {
-                return await operation();
+                int lockResult = await AcquireAppLockAsync(SUBNET_OPERATIONS_LOCK, remainingMs);
+                if (lockResult < 0)
+                {
+                    throw new TimeoutException($"Could not acquire subnet operation lock within {timeoutMs}ms (result code: {lockResult})");
+                }
+
+                try
+                {
+                    return await operation();
+                }
+                finally
+                {
+                    // A failed release must not become the caller's error. Every guarded path commits
+                    // inside operation(), so by now the work is durable: rethrowing here would report a
+                    // completed operation as failed, and - because an exception raised in a finally
+                    // replaces the one in flight - would also destroy the original error when the
+                    // operation itself was what failed. Swallowing does not change the lock's fate: if
+                    // the connection died the session died with it and SQL Server has already dropped
+                    // the session-scoped lock, and if it is alive the outer finally closes it anyway.
+                    try
+                    {
+                        await ReleaseAppLockAsync(SUBNET_OPERATIONS_LOCK);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Failed to release the subnet operation lock after the operation completed");
+                    }
+                }
             }
             finally
             {
-                // A failed release must not become the caller's error. Every guarded path commits
-                // inside operation(), so by now the work is durable: rethrowing here would report a
-                // completed operation as failed, and - because an exception raised in a finally
-                // replaces the one in flight - would also destroy the original error when the
-                // operation itself was what failed. Swallowing does not change the lock's fate: if
-                // the connection died the session died with it and SQL Server has already dropped
-                // the session-scoped lock, and if it is alive the outer finally closes it anyway.
-                try
-                {
-                    await ReleaseAppLockAsync(SUBNET_OPERATIONS_LOCK);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Failed to release the subnet operation lock after the operation completed");
-                }
+                await context.Database.CloseConnectionAsync();
             }
         }
         finally
         {
-            await context.Database.CloseConnectionAsync();
+            _localGate.Release();
         }
     }
 

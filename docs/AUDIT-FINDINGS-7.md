@@ -305,96 +305,64 @@ the SQLite suite has no host. Verification is the measured table above. Tests 65
 
 # Low
 
-## G5 — A request waiting for the subnet lock already holds a pooled SQL connection, so a burst of writers exhausts the pool and read-only pages return HTTP 500 `[x2]`
+## G5 — A request waiting for the subnet lock already holds a pooled SQL connection `[x2]` — **FIXED**
 
-**File:** `src/Bastet/Services/Locking/SqlServerSubnetLockingService.cs:34`
-**Also:** `:22` (`DEFAULT_TIMEOUT_MS = 30000`), `:37`, `src/Bastet/Program.cs:53`, `README.md:129`
-**Confidence:** confirmed
-**Severity corrected from medium to low by the verifier** — see below.
+*Took the primary fix: a process-local `SemaphoreSlim(1, 1)` gate in front of the database lock, so
+at most one request per replica is ever parked inside `sp_getapplock`. The gate is waited on
+**before** `OpenConnectionAsync()`, released in an outer `finally`, and — this is the part that keeps
+the existing contention contract honest — the time spent waiting on it is subtracted from the
+caller's budget and the remainder passed as `sp_getapplock`'s `@LockTimeout`, so a contended caller
+still fails in ~30 s rather than 60. The no-static-state alternative (`@LockTimeout=0` plus a backoff
+loop with `CloseConnectionAsync()` between attempts) was not taken: it re-acquires a connection per
+attempt and turns one wait into a poll, for the same effect.*
 
-### Scenario
+*The interim fix was **not** taken. Setting `Max Pool Size` higher or lowering `DEFAULT_TIMEOUT_MS`
+moves the threshold rather than removing the amplification, as the finding says. The watch-list note
+advising operators to set `Max Pool Size` explicitly still stands on its own merits.*
 
-One mutating operation holds `Bastet:SubnetOperations`. Other write requests arrive; each enters
-`ExecuteWithSubnetLockAsync`, calls `context.Database.OpenConnectionAsync()` at `:34` — checking a
-connection **out of the pool** — and only then blocks inside `sp_getapplock` at `:37` for up to 30 s.
-A queued writer therefore occupies a pooled connection for the whole wait while doing no work. At
-100 queued writers the pool is empty (SqlClient's default `Max Pool Size`; `grep` finds no
-`Max Pool Size` / `Pooling` anywhere in `src`, `README.md` or `appsettings`, and both documented
-`BASTET_CONNECTION_STRING` samples omit it, so the default applies in every documented deployment).
+*Reproduced against real SQL Server 2022 (Docker, port 11433) before any change, with the finding's
+own method: an outside `sqlcmd` session held `Bastet:SubnetOperations`
+(`sp_getapplock` Exclusive/Session + `WAITFOR`), then 110 concurrent authenticated
+`POST /Subnet/Create` — each with its **own** session and antiforgery token, which matters: pairing
+one session's token with another's cookie jar is rejected at 400 before any lock is taken, and the
+first attempt at this rig measured nothing because of exactly that.*
 
-Every subsequent request then fails at connection acquisition after the 15 s pool timeout —
-**including read-only requests that take no lock and need one SELECT**. `GET /Subnet/Index` → HTTP
-500, `Timeout expired … max pool size was reached`.
+| Measurement | Before | After |
+|---|---|---|
+| `GET /Subnet` (read-only, takes no lock) | **HTTP 500 after 15.01 s** | **HTTP 200 in 0.068 s** |
+| `max pool size was reached` entries in the log | **13** | **0** |
+| stacks naming `ExecuteWithSubnetLockAsync` | 10 | — |
+| stacks naming `SubnetController.Index` | 7 | — |
+| writer completion | 30.02–30.65 s | 30.02–30.08 s (**not** 60 s) |
 
-**Corrected by the verifier:** the finder's claim that *"the writers themselves degrade gracefully"*
-holds only for the first 100. In the 110-writer run, 10 writers never got a connection at all — they
-threw the pool-exhaustion `InvalidOperationException` at `:34`, which is **not** a `TimeoutException`,
-so `catch (TimeoutException)` at `SubnetController.Create.cs:128` is bypassed and the operator sees
-the generic *"Error creating subnet. Details have been logged."* instead of the modelled contention
-message. Same for the JSON endpoints, where the contended-lock contract is 503.
+*Control, to prove it is queued waiters and not write load or HTTP concurrency: the same 110
+concurrent `POST /Subnet/Create` with **no** external lock holder completed in ≤1.26 s each and the
+reader returned **200 in 0.051 s**.*
 
-**Why low, not medium (the verifier's ruling):** reaching the threshold needs ~100 concurrent
-authenticated Edit-role writers *per replica* coinciding with a lock held long enough for them to
-pile up. Bastet is an IPAM tool with no fan-out — no single user action generates concurrent writes —
-so this is far outside plausible operation for its user population. The outage self-heals within 30 s
-and nothing is corrupted (`sys.dm_tran_locks` showed **0** `APPLICATION` rows after every run). What
-keeps it a finding at all is the amplification, isolated cleanly by control (c) below.
+*Two behaviours re-checked after the fix on a clean lock state: an uncontended write still returns
+**302**, and a contended write returns after 30 s rendering the modelled
+*"The operation timed out due to high concurrency. Please try again."* rather than the generic
+*"Error creating subnet. Details have been logged."* That is the finding's own correction landing —
+before the fix, writers past the hundredth threw `InvalidOperationException` (pool exhaustion), which
+is not a `TimeoutException` and so bypassed the `catch (TimeoutException)` the contention message
+lives behind.*
 
-### Evidence — reproduced: yes, against real SQL Server, with three controls, and the fix measured
+*The no-self-deadlock precondition was verified rather than assumed, because the gate makes nesting
+fatal where `sp_getapplock` with `Session` owner would previously have been re-entrant: all ten
+`ExecuteWithSubnetLockAsync` call sites are top-level controller actions, and `DeleteConfirmed`,
+`BatchCreateChildSubnets`, `BulkCreateFromAzurePlan` and `BulkDeleteStaleAzureSubnets` have **no**
+internal callers anywhere in `src/` — every guarded action is reachable only from HTTP routing.*
 
-Verifier ran its own instance (port 5271, catalog `bastet_verify_lockpool`, unmodified build at
-`6a1fe75`) against the shared SQL Server 2022 with the default connection string.
+*One rig artefact worth recording so it is not mistaken for a defect next round: a leftover
+`docker exec sqlcmd` holder keeps its session — and therefore its APPLICATION lock — alive after the
+driving process is killed, which made a follow-up write time out and read as a regression.
+`sys.dm_tran_locks` returned to 0 `APPLICATION` rows as soon as the container's stray `sqlcmd`
+processes were killed. Kill holders inside the container, not just the client.*
 
-**Main run:** held `Bastet:SubnetOperations` from an outside `sqlcmd` session
-(`sp_getapplock` Exclusive/Session + `WAITFOR 00:02:00`), then fired 110 concurrent authenticated
-`POST /Subnet/Create` with real antiforgery token and cookie. After 10 s,
-`SELECT wait_type, COUNT(*) FROM sys.dm_exec_requests` → `LCK_M_X = 100` exactly. A plain
-`GET /Subnet/Index` issued at that moment → **HTTP 500 after 15.016 s**; `app.log` records
-`System.InvalidOperationException: Timeout expired. The timeout period elapsed prior to obtaining a
-connection from the pool … max pool size was reached`, stack ending at `SubnetController.Index() …
-Read.cs:line 16`, with eleven sibling stacks naming
-`SqlServerSubnetLockingService.ExecuteWithSubnetLockAsync … SqlServerSubnetLockingService.cs:line 34`.
-
-**Controls:** (a) 60 queued writers under the same held lock → `LCK_M_X = 60`, reader 200 in 0.013 s;
-(b) 110 concurrent `GET /Subnet/Index` with no lock held → all 200, reader 200 in 0.003 s;
-(c) 110 concurrent `POST /Subnet/Create` with **no** external lock holder → all 302, reader 200 in
-0.004 s. So it is not HTTP concurrency or write load — it is queued waiters pinning connections,
-thresholded at exactly 100.
-
-**Fix measured:** the verifier copied `src/` to scratch (repository untouched), added the
-`SemaphoreSlim` gate, rebuilt (0 warnings, 0 errors) and reran the identical experiment:
-`LCK_M_X = 1`, `GET /Subnet/Index` **200 in 0.128 s**, zero `max pool size` entries, all 110 writers
-returned at 30.04–30.11 s (**not** 60 s), two contended writers rendered the modelled *"The operation
-timed out due to high concurrency. Please try again."*, an uncontended write still succeeded (302),
-and `APPLICATION` locks = 0 afterwards.
-
-### Fix
-
-Do not hold a pooled connection while merely waiting. Put a process-local gate in front of the
-database lock so at most one request per replica is ever parked inside `sp_getapplock`:
-
-- add `private static readonly SemaphoreSlim _localGate = new(1, 1);`
-- in `ExecuteWithSubnetLockAsync`, wait on `_localGate` for the caller's timeout, and only then
-  `OpenConnectionAsync()` / `AcquireAppLockAsync()`; release `_localGate` in an **outer** `finally`
-- charge the gate wait against the same overall budget (pass the remaining time as `sp_getapplock`'s
-  `@LockTimeout`) so a contended caller still surfaces `TimeoutException` in ~30 s rather than 60,
-  and the existing contention messages keep their meaning.
-
-Safe for multi-replica: `sp_getapplock` remains the cross-replica mutex and its semantics are
-untouched; the gate only caps how many connections **one replica** can park in it, from unbounded to
-one. All ten `ExecuteWithSubnetLockAsync` call sites are top-level in controller actions with no
-nesting, so the gate cannot self-deadlock.
-
-A no-static-state alternative with the same effect: acquire with `@LockTimeout=0` and retry in a
-short backoff loop, calling `CloseConnectionAsync()` between attempts so the connection returns to
-the pool while waiting.
-
-### Interim fix
-
-Append an explicit `Max Pool Size=` well above expected write concurrency to
-`BASTET_CONNECTION_STRING` and document it in `README.md`'s connection-string table, and/or lower
-`DEFAULT_TIMEOUT_MS` (`:22`) so a queued writer frees its connection sooner. Both move the threshold
-rather than removing the amplification.
+*No permanent test ships: the suite runs SQLite, `SqlServerSubnetLockingService` has no test
+reference anywhere in `test/`, and `SubnetLockTimeoutTests` fakes `ISubnetLockingService` outright —
+so the pool behaviour is unreachable from it. The controller-side contract that a `TimeoutException`
+renders the friendly message is already pinned there. Tests 651 → 651, build 0 warnings.*
 
 ---
 
