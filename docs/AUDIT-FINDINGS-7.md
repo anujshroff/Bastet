@@ -477,95 +477,61 @@ Tests 651 → 651, build 0 warnings.*
 
 ---
 
-## G8 — `/Account/Logout` returns HTTP 500 in Development: `SignOutAsync` is called for a scheme that is not registered there `[x2]`
+## G8 — `/Account/Logout` returns HTTP 500 in Development `[x2]` — **FIXED**
 
-**File:** `src/Bastet/Controllers/AccountController.cs:45`
-**Also:** `src/Bastet/Program.cs:163`, `:171`, `AccountController.cs:58`,
-`test/Bastet.Tests/Security/AccountControllerLogoutTests.cs:28`
-**Confidence:** confirmed
+*Took the verifier's simpler variant: the unconditional
+`await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)` was **deleted**
+rather than guarded on `!environment.IsDevelopment()`. The `SignOutResult` returned on the
+Production branch already lists `CookieAuthenticationDefaults.AuthenticationScheme`, so the guarded
+form would have left Production signing the cookie scheme out twice — harmless but redundant. The
+cookie-clearing loop is untouched, and a comment now records why the call is not there. The interim
+`try/catch (InvalidOperationException)` was not taken: it would leave the throw happening on every
+Development logout and swallow it.*
 
-### Scenario
+*Reproduced against the running Development instance before the change — all three inputs the finding
+names returned **HTTP 500 with no `Location` header**, and the response body carried
+`No sign-out authentication handlers are registered. Did you forget to call
+AddAuthentication().AddCookie("Cookies",...)?` together with the frame
+`AccountController.Logout(String returnUrl)`.*
 
-Development is the only environment where `Program.cs:160-172` registers a single scheme,
-`DevAuthScheme`, and `DevAuthHandler` is **not** an `IAuthenticationSignOutHandler`. `Logout` deletes
-every request cookie at `:39-42`, then calls
-`HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)` at `:45`
-**unconditionally**. Scheme `"Cookies"` has no sign-out handler at all, so it throws. The
-Development branch the author wrote at `:48-58` (*"In development, just redirect to the specified URL
-or the signed-out page"*) is unreachable.
-
-**The wrong output is not merely a log entry.** Development registers `UseDeveloperExceptionPage`
-(`Program.cs:408-416`), so the full framework stack trace **including the absolute source path** is
-the HTTP response body. The operator reaches this by clicking Logout in the nav dropdown
-(`_Layout.cshtml:77`; also `Views/Account/AccessDenied.cshtml:14`) — not by crafting a URL.
-
-The suite is blind to it: `AccountControllerLogoutTests.CreateController` injects a
-`Mock<IAuthenticationService>` (`:29-32`), so `SignOutAsync` is a no-op there and two tests —
-`Logout_Development_LocalReturnUrl_IsPreserved` and
-`Logout_Development_NonLocalReturnUrl_RedirectsToSignedOutPage` — assert a `RedirectResult` the
-running application **cannot produce**.
-
-This is a distinct defect from the accepted Development-only `DevAuthHandler` bypass: that item is
-about the handler granting all roles; this is a sign-out call for a scheme that was never registered.
-
-**Corrected by the verifier:** the finder's claim that *"the whole SignedOut view is unreachable in
-Development"* is true but over-attributed. Even with `:45` guarded, Development's
-`Redirect("/Account/SignedOut")` lands on `SignedOut()`, which sees
-`User.Identity.IsAuthenticated == true` — `DevAuthHandler` re-authenticates every request — and 302s
-to Home (measured: `GET /Account/SignedOut` → 302 → `/`). **Fixing this turns a 500 into a redirect
-to the home page, not into the signed-out page.** The view stays unreachable in Development because
-of the accepted `DevAuthHandler` bypass; do not chase that here.
-
-### Evidence — reproduced: yes, response body captured, and the suite's blindness confirmed
-
-Verifier ran `rig-app.sh start verify:logout-500-development A` → pid 423486 on
-`http://127.0.0.1:5239` (`GET /` → 200). Three requests:
+*After the fix, on the same instance:*
 
 ```
-/Account/Logout                                          -> HTTP 500 redirect=[]
-/Account/Logout?returnUrl=%2FSubnet                      -> HTTP 500 redirect=[]
-/Account/Logout?returnUrl=https%3A%2F%2Fevil.example.com -> HTTP 500 redirect=[]
+/Account/Logout                                          -> 302 -> /Account/SignedOut
+/Account/Logout?returnUrl=%2FSubnet                      -> 302 -> /Subnet
+/Account/Logout?returnUrl=https%3A%2F%2Fevil.example.com -> 302 -> /Account/SignedOut
 ```
 
-The **body**, not just the log, is the raw developer exception page; its first bytes:
+*So the local return URL is preserved and the non-local one is still rejected — the security property
+the test class exists for is intact. Following the first redirect through confirms the **verifier's
+correction**: `/Account/SignedOut` itself 302s to `/`, so the fix turns a 500 into a redirect to the
+home page, not into the signed-out page. That view stays unreachable in Development because
+`DevAuthHandler` re-authenticates every request, which is the separately accepted bypass and was not
+chased here.*
 
-```
-System.InvalidOperationException: No sign-out authentication handlers are registered. Did you forget
-to call AddAuthentication().AddCookie("Cookies",...)?
-   at Microsoft.AspNetCore.Authentication.AuthenticationService.SignOutAsync(...)
-   at Bastet.Controllers.AccountController.Logout(String returnUrl) in
-      /home/anuj/code/Bastet/src/Bastet/Controllers/AccountController.cs:line 45
-```
+***One claim in the finding does not reproduce and is corrected:*** *the response body is **not** the
+"full framework stack trace including the absolute source path". `grep` for `anuj/code/Bastet` over
+the returned HTML matched **0** times. The body does carry the exception type, message and managed
+stack frames — which is the defect — but no filesystem path is disclosed in this build.*
 
-`app.log` carries the same frame three times. No `RedirectResult`, no `Location` header, on any
-input. In the same session:
-`dotnet test … --filter-query "/*/*/AccountControllerLogoutTests/*"` → **9 total, 9 succeeded**,
-including the two tests that assert the redirect the live app cannot produce.
+*The test change is asymmetric, exactly as the finding requires. `CreateController` gained a
+`signOutRegistered` parameter; when false it configures `IAuthenticationService.SignOutAsync` to
+throw `InvalidOperationException("No sign-out authentication handlers are registered.")`, matching
+what the real framework does when Development registers only `DevAuthScheme`. Only the two
+Development cases pass `signOutRegistered: false`; the five Production cases keep the permissive
+mock, which they legitimately need. Replacing the mock wholesale would have failed the Production
+cases for the wrong reason.*
 
-### Fix
+***The new tests were proven non-vacuous:*** *with the controller fix reverted and the tests kept,
+`Logout_Development_NonLocalReturnUrl_RedirectsToSignedOutPage` and
+`Logout_Development_LocalReturnUrl_IsPreserved` both **failed** with
+`System.InvalidOperationException : No sign-out authentication handlers are registered.` while the
+other seven passed — 9 total, 2 failed. With the fix restored, 9/9. That is the blindness the
+finding identified, now closed: those two tests previously asserted a `RedirectResult` the running
+application could not produce.*
 
-Call `HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)` only when
-`!environment.IsDevelopment()`, leaving the cookie-clearing loop at `:39-42` where it is. That makes
-the existing Development branch reachable and matches the intent already written in the comments.
-Production/Staging are byte-for-byte unchanged because `Program.cs:160` keys the auth registration on
-the same `IsDevelopment()` test — there is no third environment shape where the guard and the
-registration disagree. Nothing touches HTTPS, OIDC or the host model.
-
-**The verifier notes a strictly simpler variant:** delete line 45 outright. The `SignOutResult` at
-`:51-54` already lists `CookieAuthenticationDefaults.AuthenticationScheme`, so the guarded version
-leaves the cookie sign-out happening twice in Production (idempotent, harmless, redundant). Prefer
-the deletion unless the explicit pre-sign-out is wanted for readability.
-
-**The test change must be asymmetric.** Supply a throwing (or real) `IAuthenticationService` only to
-the two Development tests; keep the permissive `Mock<IAuthenticationService>` for the five Production
-cases (the four-row theory at `:50-55` plus `Logout_Production_LocalReturnUrl_IsPreserved` at `:66`),
-which legitimately need `SignOutAsync` to be callable. Replacing the mock in `CreateController`
-wholesale would fail the Production cases for the wrong reason.
-
-### Interim fix
-
-Wrap the `:45` call in `try/catch (InvalidOperationException)` and continue — the cookies are already
-deleted, so the redirect at `:58` still ends the visible session.
+*Test count unchanged at 651 — this modified two existing tests rather than adding any. Build
+0 warnings.*
 
 ---
 
