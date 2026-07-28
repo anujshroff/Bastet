@@ -2,6 +2,7 @@ using Bastet.Data;
 using Bastet.Filters;
 using Bastet.Services;
 using Bastet.Services.Security;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
@@ -222,7 +223,27 @@ else
          options.Scope.Add("profile");
          options.Scope.Add("email");
          options.Scope.Add("roles");
-         options.Scope.Add("offline_access");
+
+         // Keep only the id_token in the auth cookie. Nothing in Bastet ever reads an access or
+         // refresh token - the id_token alone is load-bearing, supplying id_token_hint on the
+         // end-session request in AccountController.Logout. Storing the others meant that anyone
+         // who could read the database (where the DataProtection key ring is persisted unencrypted)
+         // and capture one cookie could lift a long-lived credential redeemable at the identity
+         // provider - reach beyond anything Bastet itself controls.
+         //
+         // This runs after SaveTokens has written them, which is deliberate: SaveTokens has no
+         // scope gate, so an provider that returns a refresh token without being asked (Keycloak's
+         // standard flow does) would still have put one in the cookie. Dropping the
+         // offline_access scope alone is a best effort; this makes it a guarantee. It also shrinks
+         // the cookie, which matters because a realistically sized refresh token pushes it past
+         // 4096 bytes and into chunking, on every request from every signed-in user.
+         options.Events.OnTicketReceived = context =>
+         {
+             AuthenticationProperties? properties = context.Properties;
+             properties?.StoreTokens(
+                 [.. properties.GetTokens().Where(token => token.Name == "id_token")]);
+             return Task.CompletedTask;
+         };
      });
 }
 

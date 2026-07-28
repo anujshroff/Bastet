@@ -62,7 +62,6 @@ BASTET uses OpenID Connect (OIDC) for authentication in production environments.
     - `profile`
     - `email`
     - `roles`
-    - `offline_access` (for refresh tokens)
   - Issue tokens with one of these user identifier claims (checked in this order):
     - `preferred_username` (checked first)
     - `email` (ClaimTypes.Email, fallback)

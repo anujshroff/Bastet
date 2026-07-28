@@ -416,107 +416,64 @@ table and the browser differential above. Tests 651 → 651, build 0 warnings.*
 
 ---
 
-## G7 — The OIDC handler requests and stores a refresh token that no code in the application ever reads `[x1]`
+## G7 — The OIDC handler requests and stores a refresh token that no code ever reads `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Program.cs:206`
-**Also:** `:199` (`SaveTokens = true`), `:200` (`UseTokenLifetime = true`),
-`src/Bastet/Controllers/AccountController.cs:51`
-**Confidence:** **corrected from plausible to confirmed** — the finder could not drive an OIDC
-sign-in and inferred the token's presence; both verifiers built a spec-conformant IdP, drove a real
-sign-in, and decrypted the cookie.
+*All three parts applied. `options.Scope.Add("offline_access")` deleted; `SaveTokens = true`
+**kept**, because the saved id_token is what supplies `id_token_hint` on the end-session request in
+`AccountController.Logout`; the `offline_access` bullet removed from `README.md`'s list of scopes the
+operator's IdP must grant; and the `Events.OnTicketReceived` handler added, re-storing only the
+id_token.*
 
-### Scenario
+*The handler was included rather than treated as optional, because the finding measured that
+`SaveTokens` has no scope gate: on a provider that returns a refresh token without being asked
+(Keycloak's standard flow), dropping the scope does not stop the token reaching the cookie. With the
+handler the scope deletion stops being a best effort.*
 
-A deployment follows the configuration `README.md:139` explicitly supports — *"providers that support
-PKCE without client authentication (e.g., Auth0)"*, i.e. `BASTET_OIDC_CLIENT_SECRET` unset, a public
-client. A user signs in; the token response includes a refresh token because `offline_access` was
-requested, and `SaveTokens = true` writes it into the auth cookie. **Bastet never uses it** — the
-only hit for `GetTokenAsync|access_token|SaveTokens|id_token|refresh_token` across `src/` and `test/`
-is the `SaveTokens` line itself.
+*Reproduced end to end against a purpose-built spec-conformant IdP — discovery, JWKS, authorize,
+token, userinfo and end-session, RS256-signed id_tokens, served over HTTPS behind a locally
+generated CA — with the shipped `Bastet.dll` running in **Production** as a **public client**
+(`BASTET_OIDC_CLIENT_ID` set, **no** `BASTET_OIDC_CLIENT_SECRET`), the configuration `README.md`
+explicitly supports.*
 
-Anyone who can both read the Bastet database (the DataProtection keys are persisted there
-unencrypted by `Program.cs:100-102`) and capture one cookie can decrypt it and lift a long-lived IdP
-credential that Bastet had no reason to hold. For a public client it is redeemable against the IdP
-with only the public client id.
+| Measurement | Before | After |
+|---|---|---|
+| authorize `scope` | `openid profile email roles offline_access` | `openid profile email roles` |
+| auth cookie bytes (IdP returns refresh token) | **3266** | **2498** |
+| auth cookie bytes (control: IdP omits it) | 2818 | — |
+| `id_token_hint` on end-session | present, 833 chars | **present, 833 chars** |
+| signed-in `GET /` | 200 | 200 |
 
-**Corrections carried from the verifiers:**
+*The control isolates the refresh token's own cost: 3266 − 2818 = **448 bytes** on every request
+from every signed-in user, for a value nothing reads. The after figure is lower than the control
+too, because the handler also drops the equally unused access_token.*
 
-- The scenario's *"the cookie's own lifetime is 1 hour (`Program.cs:187`)"* is wrong.
-  `UseTokenLifetime = true` at `:200` overrides `ExpireTimeSpan` — the ticket expiry comes from the
-  id_token. Measured: `.issued Tue, 28 Jul 2026 03:00:10 GMT` / `.expires 04:00:10 GMT` against a
-  1-hour id_token. The substance is unchanged.
-- **Honest framing of the precondition:** whoever can read the database already has the unencrypted
-  DataProtection keys and can forge any Bastet session. The marginal loss is specifically the
-  **IdP-side** credential — reach *beyond* Bastet's blast radius. That is what keeps this at low and
-  no higher.
-- **A second cost the finding does not mention:** with a realistically sized (4 KB, Entra-shaped)
-  refresh token the auth cookie crossed 4096 bytes and the framework **chunked** it —
-  `.AspNetCore.Cookies=chunks-3` with `C1`/`C2`/`C3` totalling 8526 bytes, against 3142 with no
-  refresh token. Every request from every signed-in user carries ~5.4 KB of extra header for a value
-  nothing reads, and some reverse proxies cap request-header size.
+***The strongest measurement is the last row of the before/after: the IdP was still returning an
+unsolicited refresh token when the "after" run was taken, and the cookie did not grow.*** *That is
+the unsolicited-token case the finding could only describe, exercised directly — the handler discards
+it. And `id_token_hint` is byte-for-byte the same length after the change, so keeping `SaveTokens`
+was the right call and logout is intact.*
 
-### Evidence — reproduced: yes, real OIDC sign-in against a purpose-built IdP, cookie decrypted, twice
+*Two corrections to the finding's own fix text, both found by applying it:*
 
-Verifier 1: built a spec-conformant RS256 OIDC provider (discovery/JWKS/token/userinfo) on
-`https://localhost:18259` behind a locally generated CA, and ran the shipped
-`bin/Debug/net10.0/Bastet.dll` in **Production** as a **public client** (`BASTET_OIDC_CLIENT_ID` set,
-**no** `BASTET_OIDC_CLIENT_SECRET`) on `http://127.0.0.1:18260`, own catalog `bastet_verify_oidc_rt`.
+*1. **The suggested snippet does not compile in this tree.* `StoreTokens`/`GetTokens` are extension
+methods on `Microsoft.AspNetCore.Authentication`, which `Program.cs` did not import — it had only the
+`.Cookies` and `.OpenIdConnect` child namespaces. A `using Microsoft.AspNetCore.Authentication;` was
+added.*
 
-1. `GET /` → 302 to the IdP with `scope=openid profile email roles offline_access` — the app really
-   does ask for a refresh token, from an anonymous GET of the default route.
-2. Completed the callback; the token endpoint returned
-   `refresh_token = "RTMARKER." + 280x"R" + ".RTEND"`. `Set-Cookie: .AspNetCore.Cookies` = 3376 chars.
-3. Control run, identical except the token endpoint omitted `refresh_token`: cookie 2928 chars.
-4. Pulled the single `DataProtectionKeys` row out of the application database via `sqlcmd`; the XML
-   contains a plaintext `masterKey` and no `encryptedSecret`. A 30-line console app rebuilding the
-   protector (`…CookieAuthenticationMiddleware`, `Cookies`, `v2`) unprotected the cookie:
-   ```
-   PROP .Token.refresh_token (len=295) = RTMARKER.RRRR…RTEND
-   PROP .TokenNames = access_token;id_token;refresh_token;token_type;expires_at
-   ```
-   Control cookie: no `.Token.refresh_token`; `.TokenNames = access_token;id_token;token_type;expires_at`.
-5. **Fix check:** `GET /Account/Logout` with the auth cookie → 302 to
-   `…/endsession?…&id_token_hint=<924 chars>&state=…`. `SaveTokens` **is** load-bearing.
+*2. **The suggested snippet also breaks the 0-warning baseline.**
+`ctx.Properties!.StoreTokens(ctx.Properties.GetTokens()…)` null-forgives only the *first*
+`ctx.Properties`; the second is still nullable and raises `CS8604`. Rewritten to bind
+`AuthenticationProperties? properties` once and use `properties?.StoreTokens(…)`.*
 
-Verifier 2 reproduced the whole chain independently (own IdP on `127.0.0.1:5473`, app on `:5273`,
-catalog `bastet_lblreach`-adjacent), measured the 4 KB chunking above, and found one additional fact
-that changes the fix (below).
+*Two rig notes, neither a product defect. The OIDC correlation and auth cookies are issued `Secure`
+(`CookieSecurePolicy.Always`), so a conformant client refuses to return them over the rig's plain
+HTTP and the callback fails "Correlation failed" — the client clears the flag locally, since the
+transport is not what is under test. And the CA must carry `basicConstraints`/`keyUsage` or .NET
+rejects the chain with "CA cert does not include key usage extension".*
 
-The only step neither verifier could drive is whether a *commercial* IdP returns a refresh token at
-all; that is documented Auth0/Entra behaviour for a granted `offline_access` and is not Bastet code.
-Every step that **is** Bastet code was measured.
-
-### Fix — corrected; the one-line deletion is necessary but not sufficient
-
-Delete `options.Scope.Add("offline_access");` at `Program.cs:206`. **Keep `SaveTokens = true`** — the
-saved id_token is what supplies `id_token_hint` on the end-session request at
-`AccountController.cs:51-54`, measured present.
-
-Two additions, both from the verifiers:
-
-1. **`README.md:60-65` lists `offline_access` — annotated *"(for refresh tokens)"* — among the scopes
-   the operator's IdP must support and grant.** Delete that bullet in the same commit, leaving
-   `openid`/`profile`/`email`/`roles`. Otherwise the documentation keeps telling every deployment to
-   grant a scope the app no longer asks for and to believe Bastet uses refresh tokens.
-2. **`SaveTokens` has no scope gate — measured.** With the token response granting only
-   `"openid profile email roles"` (offline_access explicitly **not** granted) but still returning a
-   refresh token, the decryptor still found
-   `ITEM .Token.refresh_token len=326 value=UNSOLICITED-REFRESH-TOKEN-UUU…`. So on an IdP that
-   returns a refresh token for the authorization-code grant without being asked (Keycloak's standard
-   flow does exactly this), dropping the scope does **not** stop the token reaching the cookie. If a
-   guarantee is wanted rather than a best effort, add an `Events.OnTicketReceived` handler — which
-   runs after `SaveTokens` — that re-stores only the id_token:
-   ```csharp
-   ctx.Properties!.StoreTokens(ctx.Properties.GetTokens().Where(t => t.Name == "id_token").ToList());
-   ```
-   That also drops the equally unused access_token and shrinks the cookie further.
-
-Nothing outbound is added or removed; the Development `DevAuthHandler` branch never reaches this
-code. Plain-HTTP and air-gapped hosting are unaffected.
-
-### Interim fix
-
-None cheaper than the one-line scope deletion.
+*No permanent test ships: there is no `WebApplicationFactory` and no way to drive an OIDC handshake
+from the SQLite suite — already on the watch list. Verification is the table above.
+Tests 651 → 651, build 0 warnings.*
 
 ---
 
