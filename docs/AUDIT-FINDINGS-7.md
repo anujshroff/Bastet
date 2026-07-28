@@ -366,91 +366,53 @@ renders the friendly message is already pinned there. Tests 651 → 651, build 0
 
 ---
 
-## G6 — Authenticated listing pages ship with no cache directives at all; the protection is present only by accident on pages that emit an antiforgery token `[x1]`
+## G6 — Authenticated listing pages ship with no cache directives at all `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Program.cs:438`
-**Also:** `:443`, `:38`
-**Confidence:** confirmed
+*Took the global filter, not the four-attribute interim. `Program.cs`'s
+`AddControllersWithViews` lambda now registers
+`new ResponseCacheAttribute { NoStore = true, Location = ResponseCacheLocation.None }` beside the
+existing `GlobalSanitizationFilter`. `ResponseCacheAttribute` is an `IFilterFactory`, so
+`FilterCollection` takes the instance directly. The interim was rejected on the finding's own
+grounds: it leaves `/`, `/Account/Roles`, `/HostIp/Index` and `/HostIp/DeletedHostIps` uncovered, and
+the defect is precisely that coverage was per-page by accident.*
 
-### Scenario
+*Reproduced before the change. Headers on the running instance — the six authenticated listing pages
+`/`, `/Subnet`, `/HostIp/AllHostIps`, `/Account/Roles`, `/Subnet/DeletedSubnets` and
+`/HostIp/AllDeletedHostIps` returned 200 with **no** `Cache-Control` and **no** `Pragma`, while
+`/Subnet/Create`, `/Subnet/Details/1` and `/Subnet/Edit/1` returned `no-cache, no-store` +
+`Pragma: no-cache`. That is the finding's central point measured directly: the protection tracked
+"does this view render an antiforgery token", not "is this page authenticated".*
 
-On a shared or kiosk workstation, user A signs in and opens `/HostIp/AllHostIps` (every host IP
-assignment Bastet knows) and `/Subnet` (the whole address-space tree). A signs out via
-`/Account/Logout`, which deletes the cookies. User B, on the same browser, presses **Back**. Because
-the response carried no `Cache-Control` and no validator, the browser serves the stored
-representation without revalidating and renders A's full inventory to B.
+*Consequence proven in a real browser with a staleness differential rather than a shutdown, so the
+result cannot be confused with a connection error. A marker subnet was created through the
+application's own `POST /Subnet/Create`, `/Subnet` loaded in Chromium, the subnet renamed
+server-side (confirmed over HTTP), then Back:*
 
-The same URLs one click away — `/Subnet/Details/1`, `/Subnet/Create`, `/Subnet/Edit/1` — **are**
-protected, because the antiforgery middleware sets `Cache-Control: no-cache, no-store` +
-`Pragma: no-cache` on views that render a token. Nothing in the application does. The coverage
-therefore tracks *"does this view happen to render an antiforgery token"*, not *"is this page
-authenticated"*.
+| Page | Before — Back shows | After — Back shows |
+|---|---|---|
+| `/Subnet` (listing) | **stale** name; fresh name absent | **fresh** name; stale absent |
+| `/Subnet/Details/<id>` (no-store control) | fresh name; stale absent | fresh name; stale absent |
 
-**Corrected by the verifiers — two mechanisms, both measured, and this matters for the fix
-rationale:** verifier 1 proved the **HTTP disk cache** path (the response body is written to a file
-in `Chrome/Default/Cache/Cache_Data` keyed on the URL, survives the browser process, and is served on
-history navigation without revalidation); verifier 2 proved the **back/forward cache** path (same
-tab, **zero network requests at all**). A bfcache-only problem would not be fixed by a header; the
-disk-cache path is, which is why the header fix is the right one.
+*So before the fix the listing served a cached document while the no-store page refetched; after it,
+the listing behaves like the control. The eight network requests counted in every run are the pinned
+CDN stylesheet and scripts, not the document.*
 
-The exposure is also **wider than the four actions in the interim fix**: `/` (Home),
-`/Account/Roles`, `/HostIp/Index?subnetId=` and `/HostIp/DeletedHostIps` are all authenticated, all
-carry inventory or role data, and all ship with no directives.
+*Headers re-measured after the fix: `/`, `/Subnet`, `/HostIp/AllHostIps`, `/Account/Roles`,
+`/Subnet/DeletedSubnets`, `/HostIp/AllDeletedHostIps`, `/Subnet/Create`, `/Subnet/Details/1` and
+`/Error/404` all return `Cache-Control: no-store,no-cache`, while `/css/site.css` and `/js/site.js`
+return **none** and stay cacheable — confirming the filter reaches controller responses only.
+`grep` for `FileResult`/`return File(` over `src/` finds nothing, so there is no binary response the
+filter would wrongly mark. The directives name no scheme, so plain-HTTP and air-gapped hosting are
+unaffected.*
 
-### Evidence — reproduced: yes, in a real browser, twice, with a differential control
+*The finding's two-mechanism correction is carried and matters for why this fix is the right one:
+the bfcache path would not be closed by a header, but the HTTP disk-cache path is, and that is the
+one that survives the browser process and leaks across a sign-out. This change closes the disk-cache
+path; it does not claim to close bfcache.*
 
-Headers (verifier 1, PID-confirmed own instance): `/`, `/Subnet`, `/HostIp/AllHostIps`,
-`/Account/Roles`, `/Subnet/DeletedSubnets`, `/HostIp/AllDeletedHostIps` → 200 `text/html` with **no**
-`Cache-Control`, **no** `Pragma`, **no** `Expires`, **no** `ETag`/`Last-Modified`.
-`/Subnet/Create`, `/Subnet/Edit/1`, `/Subnet/Details/1` → `Cache-Control: no-cache, no-store` +
-`Pragma: no-cache`.
-
-**Storage proven:** created subnet `SECRETINVENTORY7` / `10.99.0.0/16` desc `zzconfidentialzz`,
-loaded `/Subnet` in Chrome with a persistent profile; the disk-cache file
-`Default/Cache/Cache_Data/cdce0916ba833241_0` is keyed `http://127.0.0.1:5259/Subnet` and `grep -a`
-finds both strings in it. `/Subnet/Details/1` and `/Subnet/Edit/1` produce **no cache entry at all**.
-
-**Scenario driven end to end over CDP:** navigate `/Subnet` → navigate `/Account/Logout` →
-`Network.clearBrowserCookies` → **kill the application** (`curl` → 000, connection refused) →
-`history.back()`. Result: `location.href = …/Subnet`, `document.title = "Subnet Hierarchy - BASTET"`,
-`SECRETINVENTORY7` present in the rendered DOM, **zero `Network.*` events**. Differential control on
-`/Subnet/Details/1` (the no-store page): back gave `chrome-error://chromewebdata/`,
-`net::ERR_CONNECTION_REFUSED`, no marker, nothing on disk.
-
-Verifier 2 reproduced independently with a staleness test rather than a shutdown: loaded `/Subnet`
-showing `SECRET-INVENTORY-ALPHA`, renamed the subnet server-side to `RENAMED-INVENTORY-BETA`
-(confirmed by `curl`), then `Page.navigateToHistoryEntry` back → DOM contained ALPHA, not BETA, with
-**zero** `requestWillBeSent` events. Same procedure on `/Subnet/Details/1` → stale value absent,
-fresh value present, `responseReceived 200 fromDiskCache False`.
-
-**Fix measured:** the patched build (scratch copy, repository untouched, 0 warnings/0 errors) returns
-`Cache-Control: no-store,no-cache` + `Pragma: no-cache` on `/`, `/Subnet`, `/HostIp/AllHostIps`,
-`/Account/Roles`, `/Subnet/Details/1`, `/Subnet/Create`, `/Error/404` and `/Account/SignedOut`, while
-`/css/site.css` and `/js/site.js` stay cacheable. Re-running the CDP scenario against it: back after
-logout with the server down → `chrome-error://chromewebdata/`, no marker, nothing in the disk cache.
-
-### Fix
-
-Register a global response-cache filter beside the existing `GlobalSanitizationFilter` at
-`Program.cs:38`:
-
-```csharp
-options.Filters.Add(new ResponseCacheAttribute { NoStore = true, Location = ResponseCacheLocation.None });
-```
-
-`ResponseCacheAttribute` is an `IFilterFactory`, so `FilterCollection` accepts an instance directly.
-It emits the directives on **controller responses only**, so `UseStaticFiles` keeps serving CSS/JS
-cacheably. Bastet maps only controllers and returns no `FileResult` anywhere, so this is complete
-coverage for the HTML surface. It names no scheme — **plain-HTTP and air-gapped hosting are
-unaffected**. Note that line 38 becomes a braced lambda registering both filters, and the
-`Microsoft.AspNetCore.Mvc` types must be in scope.
-
-### Interim fix — incomplete on its own terms
-
-`[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]` on `SubnetController.Index`,
-`SubnetController.DeletedSubnets`, `HostIpController.AllHostIps` and
-`HostIpController.AllDeletedHostIps` closes the pages carrying the most data, but leaves `/`,
-`/Account/Roles`, `/HostIp/Index` and `/HostIp/DeletedHostIps` uncovered. Prefer the global filter.
+*No permanent test ships: response headers are set by the MVC filter pipeline in a running host, and
+the suite has no `WebApplicationFactory` — already on the watch list. Verification is the header
+table and the browser differential above. Tests 651 → 651, build 0 warnings.*
 
 ---
 

@@ -34,8 +34,27 @@ builder.Logging.AddConsole(options => options.FormatterName = SanitizingConsoleF
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-// Add MVC with global sanitization filter
-builder.Services.AddControllersWithViews(options => options.Filters.Add<GlobalSanitizationFilter>());
+// Add MVC with global sanitization and response-cache filters
+builder.Services.AddControllersWithViews(options =>
+{
+    options.Filters.Add<GlobalSanitizationFilter>();
+
+    // Every page here is authenticated and most of them list inventory, so none of it may sit in a
+    // shared or on-disk browser cache. Until this was global, the directives arrived only by
+    // accident: the antiforgery middleware sets no-cache/no-store on views that happen to render a
+    // token, so /Subnet/Create and /Subnet/Details were covered while /Subnet, /HostIp/AllHostIps,
+    // /Account/Roles and / were not - coverage tracked "does this view render a token" rather than
+    // "is this page authenticated". A signed-out user pressing Back was served the previous user's
+    // inventory from the disk cache.
+    //
+    // Applies to controller responses only, so UseStaticFiles keeps serving CSS and JS cacheably.
+    // Names no scheme, so plain-HTTP and air-gapped deployments are unaffected.
+    options.Filters.Add(new Microsoft.AspNetCore.Mvc.ResponseCacheAttribute
+    {
+        NoStore = true,
+        Location = Microsoft.AspNetCore.Mvc.ResponseCacheLocation.None
+    });
+});
 
 // Allow antiforgery tokens to be sent via the "RequestVerificationToken" header in addition to
 // the default form field. Required by AJAX endpoints that POST application/json (e.g. the
