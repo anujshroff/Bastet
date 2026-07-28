@@ -535,95 +535,63 @@ application could not produce.*
 
 ---
 
-## G9 — F9's own contract is still violable: the parent name is copied into the Create prefill unchecked, so any parent whose name carries a `[SafeText]`-forbidden character reproduces F9 exactly `[x1]`
+## G9 — F9's own contract is still violable: the parent name is copied into the Create prefill unchecked `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Controllers/SubnetController.Create.cs:72`
-**Also:** `src/Bastet/Services/Security/InputSanitizationService.cs:14`,
-`src/Bastet/Models/ViewModels/EditSubnetViewModel.cs`
-**Confidence:** confirmed
+*Took the filter, not the `IsSafeText` alternative, for the reasons the verifiers gave: testing the
+composed value and falling back would discard the **whole** parent name for one bad character — a
+worse default than `ProdWeb-10.0.0.0-17` — and would cost an eighth parameter on the primary
+constructor that `SubnetController`'s eight partials share. `SubnetNaming` gained
+`ToSafeText(string?)`, which strips everything outside the SafeText class **and trims**, and
+`SubnetController.Create` composes from that, falling back to a bare `{networkAddress}-{cidr}` when
+nothing usable survives.*
 
-### Scenario
+*The trim is load-bearing and came from the verifiers: the class admits `\s`, so a parent named
+`"/ / /"` filters to `"   "` and would compose `"   -10.0.0.0-17"` — valid but ugly, and the
+empty-fallback branch would not catch it. Measured: that parent now yields the bare
+`10.171.128.0-17`.*
 
-F9 changed the generated suffix from `-{networkAddress}/{cidr}` to `-{networkAddress}-{cidr}` because
-`[SafeText]` on `CreateSubnetViewModel.Name` forbids `/`. The **other half** of the same string —
-`parentSubnet.Name`, passed straight into `SubnetNaming.WithSuffix` at `:72-73` — is never checked
-against that rule. `SafeTextPattern` is `^[a-zA-Z0-9\s\-_.,!?@#$%&()+=]*$`, so `/`, `'`, `:`, `;`,
-`*`, `"`, `[`, `]`, `|`, `~`, `^` and backtick all fail it. Round 5's E2 deliberately did **not** put
-`[SafeText]` on `EditSubnetViewModel.Name` (only `[NoHtml]` + `[SanitizeName]`, and `SanitizeName`
-only trims/truncates/strips markup), so those characters are reachable in a stored subnet name
-through the ordinary Edit form.
+*The helper lives in `SubnetNaming` — "composition rules for generated subnet names, shared by
+everything that builds one" — rather than in the controller, so the rule is where the other naming
+rules are. That means a second copy of the character class, which is a drift risk, so
+`SubnetNamingSafeTextTests` pins it to `InputSanitizationService.IsSafeText` **character by
+character across the printable ASCII range** rather than leaving two regex literals to be compared by
+eye. It also pins that `ToSafeText` only ever shortens, which is what D19/F9's length arithmetic in
+`WithSuffix` assumes.*
 
-Rename `10.0.0.0/16` to `Prod/Web` (accepted, 302). Click Create Subnet on an unallocated range —
-`GET /Subnet/Create?networkAddress=10.0.0.0&cidr=17&parentId=1` prefills
-`value="Prod/Web-10.0.0.0-17"`. POST that exact prefilled value back → HTTP 200 with
-`data-valmsg-for="Name"` reading **"Subnet name contains invalid characters"** — F9's own failure
-text, on F9's own flow, with F9's fix in place. `Bob's Lab` and `DC1:Core` do the same.
+*Reproduced against the running application first, driving the exact flow the Details page's button
+drives. For each of four parent names, the rename persisted through `/Subnet/Edit`, then
+`GET /Subnet/Create?networkAddress=…&cidr=17&parentId=…` was read for its prefilled value and that
+exact value POSTed back:*
 
-**Corrected scope, from the reachability verifier:** the precondition is narrower than "any parent
-with a forbidden character" implies. E2's paragraph justifies omitting `[SafeText]` from Edit by
-pointing at Azure import, but Azure VNet/subnet resource names are themselves restricted to
-alphanumerics, `.`, `-` and `_` — all inside `SafeTextPattern` — so the **import path cannot in
-practice produce an out-of-class stored name**. The operator must first rename through
-`/Subnet/Edit`. That is an ordinary action with ordinary names, so it is reachable, but it is a
-two-step precondition rather than a passive state.
+| Parent name | Prefill before | POST before | Prefill after | POST after |
+|---|---|---|---|---|
+| `Prod/Web` | `Prod/Web-…-17` | *Subnet name contains invalid characters* | `ProdWeb-…-17` | accepted |
+| `Bob's Lab` | `Bob&#x27;s Lab-…-17` | *same* | `Bobs Lab-…-17` | accepted |
+| `DC1:Core` | `DC1:Core-…-17` | *same* | `DC1Core-…-17` | accepted |
+| `/ / /` | `/ / /-…-17` | *same* | `10.171.128.0-17` | accepted |
 
-**Consequence is UX friction only**, and the finding should not be read as more: nothing is persisted
-(`/Subnet/Index` still lists exactly one subnet after the rejected POST), nothing is corrupted, and
-the operator can fix it by editing the one field. This is precisely F9's consequence — an error
-message on the one field the operator did not type — which is why low is right and why it should not
-be argued up.
+*Three of the "after" POSTs returned 200 rather than a redirect because the rig's child address was
+already taken by the preceding row — a duplicate-address conflict, not a name failure: the
+`data-valmsg-for="Name"` span was **empty** in every one, which is the assertion that matters here.*
 
-### Evidence — reproduced: yes, twice, on the flow the Details page's own button drives
+*The permanent tests were proven non-vacuous. With the controller change reverted and the tests
+kept, all four rows of `Create_ParentNameOutsideSafeText_PrefillStillPassesThePost` failed on
+`Assert.Equal() Failure: Strings differ`. The finding's observation about why this survived is
+confirmed in the fixture itself: the existing theory's parent is literally named `Parent`, so its two
+rows pass without touching the parent-name half of the string at all.*
 
-Verifier 1 (port 5297, catalog `bastet_vf9parent`, unmodified binaries, curl with a cookie jar and
-real antiforgery tokens): `POST /Subnet/Create` `Name=Prod, 10.0.0.0/16` → 302 `/Subnet/Details/1`;
-`POST /Subnet/Edit/1` `Name=Prod/Web` → **302**, and `GET /Subnet/Details/1` renders `<h1>Prod/Web</h1>`
-so the slash really is persisted; `GET /Subnet/Create?networkAddress=10.0.0.0&cidr=17&parentId=1` →
-`id="Name" maxlength="100" name="Name" value="Prod/Web-10.0.0.0-17"`; `POST /Subnet/Create` with
-exactly that value → **HTTP 200**, no redirect, `field-validation-error … data-valmsg-for="Name" …>
-Subnet name contains invalid characters`. Every other field's validation span was empty.
+*The verifier's scope correction is carried and was not argued up: the precondition is a rename
+through `/Subnet/Edit`, not a passive state, because Azure resource names are restricted to
+characters already inside the SafeText class and the import path cannot in practice produce an
+out-of-class stored name. The consequence remains UX friction — nothing is persisted and nothing is
+corrupted.*
 
-Verifier 2 (port 5262, catalog `bastet_f9reach2`) reproduced the same chain **and** the finding's
-second claimed input: renamed to `Bob's Lab` → 302; prefill came back
-`value="Bob&#x27;s Lab-10.0.0.0-17"`; POSTing it back → 200 with the same message. It confirmed
-`GET /Subnet/Index` afterwards still shows exactly one subnet — nothing created, nothing corrupted.
+*`SubnetNaming.WithSuffix`'s other caller, the bulk import planner's private wrapper
+(`AzureBulkImportPlanner.cs:771`), is untouched: it composes from Azure resource names, which are
+already inside the class.*
 
-Both verifiers confirmed the flow is the Details page's own button
-(`_SubnetCalculationScripts.cshtml:151` navigates to
-`/Subnet/Create?networkAddress=…&cidr=…&parentId=…`), that `SubnetNaming.WithSuffix` has only one
-other caller (`AzureBulkImportPlanner.cs:744`, untouched by the fix), and that
-`SubnetCreateGetPrefillTests.cs:119-133` pins only the suffix — its theory rows use a fixture parent
-literally named `Parent`, so both current rows pass vacuously with respect to this defect.
-
-### Fix
-
-In the `parentSubnet != null` block, **filter the parent name to the `SafeTextPattern` character
-class** before calling `SubnetNaming.WithSuffix`, falling back to a bare `{networkAddress}-{cidr}`
-when nothing usable survives.
-
-Three refinements from the verifiers:
-
-- **Prefer the filter over the alternative** the finder also offered (resolve
-  `IInputSanitizationService` and test `IsSafeText` on the composed value, else fall back). The
-  `IsSafeText` variant discards the **whole** parent name for one bad character — a worse default
-  than `ProdWeb-10.0.0.0-17` — and costs an 8th parameter on the primary constructor in
-  `SubnetController.cs` shared by eight partials.
-- **Trim the filtered parent name** before composing: `SafeTextPattern` admits `\s`, so a parent
-  named `"/ / /"` filters to `" "` and composes `"  -10.0.0.0-17"` — valid but ugly, and the
-  empty-fallback branch would not catch it.
-- The filter is complete for the whole POST rule set: the class excludes `<` and `>` so `[NoHtml]` is
-  satisfied; filtering only shortens, so D19/F9's length arithmetic in `WithSuffix` is untouched; and
-  the fallback satisfies `[Required]` while avoiding a leading `-`.
-
-Extend `SubnetCreateGetPrefillTests`' theory with a parent-name row (`Prod/Web`, `Bob's Lab`) that
-exercises the `parentId` path, so the contract it claims to pin actually covers both components of
-the string.
-
-### Interim fix
-
-Strip characters outside the SafeText class from the parent-name component only, leaving the suffix
-and the length logic untouched — a one-expression change at `:72` with no effect on any name that is
-already clean.
+*Tests 651 → 667 (+16: four prefill rows, twelve in the new `SubnetNamingSafeTextTests`).
+Build 0 warnings.*
 
 ---
 

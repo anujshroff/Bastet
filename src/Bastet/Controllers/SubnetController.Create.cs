@@ -69,8 +69,16 @@ public partial class SubnetController : Controller
                 // "Subnet name contains invalid characters" - on every create-from-unallocated-range
                 // flow that accepted the default. Round 4's D19 fixed this string's length and D8
                 // reasoned about its CIDR while both walked past the separator.
-                viewModel.Name = SubnetNaming.WithSuffix(
-                    parentSubnet.Name, $"-{networkAddress}-{cidr}", MaxSubnetNameLength);
+                // The parent's own name is not held to [SafeText] - Edit applies only [NoHtml] and
+                // [SanitizeName] - so it can carry "/", "'", ":" and the rest of the class this
+                // form forbids. Copying it in unchecked reproduced the same failure the separator
+                // above was changed to avoid: the prefilled default rejected by the very next POST.
+                string safeParentName = SubnetNaming.ToSafeText(parentSubnet.Name);
+
+                viewModel.Name = string.IsNullOrEmpty(safeParentName)
+                    ? $"{networkAddress}-{cidr}"
+                    : SubnetNaming.WithSuffix(
+                        safeParentName, $"-{networkAddress}-{cidr}", MaxSubnetNameLength);
             }
         }
 
