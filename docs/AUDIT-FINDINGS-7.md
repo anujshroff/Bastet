@@ -640,106 +640,49 @@ before/after table. Tests 667 → 667, build 0 warnings.*
 
 ---
 
-## G11 — The Details page's Create-Subnet modal reopens carrying the previous range's validation failure: a red field and "would overlap with existing subnets" under a CIDR that is valid and committable `[x1]`
+## G11 — The Details page's Create-Subnet modal reopens carrying the previous range's validation failure `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml:49`
-**Also:** `src/Bastet/Views/Subnet/Details/_CidrInputModal.cshtml:25`,
-`_SubnetCalculationScripts.cshtml:112`, `:135`
-**Confidence:** confirmed
+*Two lines added to the `.create-subnet-btn` click handler, beside `makeNetworkAddressReadOnly()`
+and **before** the modal is shown, so there is no flash of the stale red state:
+`$('#cidrInput').removeClass('is-invalid is-valid')` and resetting `#cidrValidationFeedback` to the
+default string already used in `_CidrInputModal.cshtml` and in the success branch, so all three
+copies stay in agreement.*
 
-### Scenario
+*Reproduced first, in a real browser against a running instance (`bastet_g10`, real SQL Server),
+with parent `10.10.0.0/16` and child `10.10.1.0/24` giving two unallocated ranges:*
 
-An Edit-role user on `/Subnet/Details/1` clicks **Create Subnet** on an unallocated range, mistypes
-the CIDR (any value the handler rejects), and sees the field turn red with a specific reason. They
-cancel, then click Create Subnet on a **different** unallocated range. The modal opens with a freshly
-computed, entirely valid `/23` (510 usable addresses) and an **enabled** Create Subnet button, but
-the CIDR field is **still red** and still carries *"This CIDR would create a subnet that overlaps
-with existing subnets."* — a statement about a value that is no longer in the field. The screen
-contradicts itself: the error says the subnet cannot be created, the button says it can.
+| Step | Before | After |
+|---|---|---|
+| 1 open on `10.10.0.0` | cidr 24, size 254, isInvalid **false**, btn enabled | same |
+| 2 type `5` | isInvalid true, *"…overlaps with existing subnets."*, size **"Invalid - Would overlap"** | isInvalid true, *"…valid CIDR value within the allowed range."*, size **"Invalid"** |
+| 3 Cancel | isInvalid **still true** | still true (modal is not destroyed on close) |
+| 4 open on `10.10.2.0` | cidr 23, size 510, **isInvalid TRUE**, overlap text **visible**, **btn ENABLED** | isInvalid **false**, default text, **not visible**, btn enabled |
 
-The `.create-subnet-btn` click handler (`:23-60`) resets `#networkAddressDisplay`,
-`#originalNetworkAddress`, `#parentId`, `#parentCidr`, `#recommendedCidr`, `#validCidrRange`,
-`#cidrInput`'s min/max/value, the subnet size (`:52`) and the button's `disabled` state (`:59`), and
-calls `makeNetworkAddressReadOnly()` at `:49` — but nothing clears `#cidrInput`'s
-`is-invalid`/`is-valid` classes or the text the input handler wrote into `#cidrValidationFeedback`,
-which is declared as an `.invalid-feedback` sibling at `_CidrInputModal.cshtml:25-27` and therefore
-renders whenever the input carries `is-invalid`.
+*State 4 before the fix is the contradiction the finding describes on one screen: an error saying the
+subnet cannot be created beside an enabled button saying it can.* ***The error was provably false,
+not merely stale*** *— posting exactly that value, `NetworkAddress=10.10.2.0, Cidr=23,
+ParentSubnetId=1`, returned **302**, i.e. the flagged CIDR was committable all along.*
 
-Same class as round 6's F14 (a stale explanation left standing under a value the script did not
-produce), at a second site. F14's struck paragraph explicitly records that the `is-valid` class on
-`#cidrInput` *"was accurate"* and was **not** its anchor, so this is a genuine residual, not a
-re-raise.
+*The green direction was checked too, since the same two lines have to clear it: typing a valid `24`
+sets `is-valid`, and reopening on another range comes back with `is-valid` **false** and
+`is-invalid` false.*
 
-**Corrections from the verifiers, both worth carrying:**
+*The finding's reachability correction is confirmed and worth keeping: the stale state also survives
+reopening the **same** range, because the handler never cleared validation state on any open — the
+cancel step is not what leaves it behind. The two-ranges framing understates it.*
 
-- **The stale state also survives reopening the *same* range**, so the two-ranges framing understates
-  reachability — the handler simply never clears validation state on any open. The modal is not
-  destroyed on close (Bootstrap's `data-bs-dismiss` only removes `.show`), which is why the classes
-  and text persist; the cancel step is not what leaves them behind, the missing reset in the open
-  path is.
-- **The error is provably false, not merely stale**: the flagged value is genuinely committable.
+*The independent branch-ordering defect in the same handler was folded in, as the finding suggests.
+`else if (wouldOverlap)` was tested before the range check, so a CIDR that is both out of range and
+overlapping was reported as an overlap — visible above at step 2, where `5` under a `/16` parent
+(minimum `/17`) claimed an overlap when the real objection is the range. The branches are now
+success → range → overlap. A cleared field still lands on the generic branch, because `parseInt`
+gives `NaN` and every comparison is false, which the after-column at step 2 also demonstrates.*
 
-### Evidence — reproduced: yes, in a real browser, twice, with a screenshot and a server-side proof
+*Nothing here touches the network: pure client-side DOM work, so plain-HTTP and air-gapped hosting
+are unaffected.*
 
-Both verifiers seeded parent `10.10.0.0/16` (id 1) and child `10.10.1.0/24` through the real
-`POST /Subnet/Create`, giving two unallocated ranges, and drove `/Subnet/Details/1` over CDP with
-native clicks and `Input.insertText`.
-
-Verifier 1 (port 5287, catalog `bastet_verify_csmodal_stale`, own Chromium on CDP 9287):
-
-```
-1 open on 10.10.0.0 -> addr 10.10.0.0, cidr 24, size 254, isInvalid false, btnDisabled false
-2 type "5"          -> isInvalid TRUE, "This CIDR would create a subnet that overlaps with
-                       existing subnets.", size "Invalid - Would overlap", btnDisabled true
-3 click Cancel      -> modal hidden, isInvalid still TRUE
-4 open on 10.10.2.0 -> addr 10.10.2.0, cidr 23, size 510, btnDisabled FALSE,
-                       isInvalid TRUE, same overlap text, computed display block, visible TRUE
-```
-
-A `Page.captureScreenshot` of state 4 shows the contradiction on screen: red-bordered CIDR field
-containing `23`, red overlap text, *"Valid range: 17 - 32 (recommended: 23)"*, *"Resulting subnet
-size: 510 IP addresses"*, and an enabled blue **Create Subnet** button.
-
-**The flagged value is committable:** `POST /Subnet/Create` with `NetworkAddress=10.10.2.0, Cidr=23,
-ParentSubnetId=1` → **302 → `/Subnet/Details/3`**. Verifier 2 (port 5249, catalog
-`bastet_verify2_stalecidr`) reproduced the identical five states and the identical 302.
-
-**Fix measured** by both, by binding the two proposed lines as an additional handler after the
-shipped one: reopening after the invalid entry gave `class="form-control"`, default feedback text,
-`feedbackVisible false`, `btnDisabled false`, and one click on Select-equivalent behaviour restored.
-Both also checked the **green** direction (type a valid 24, cancel, reopen): the same two lines clear
-the leftover `is-valid` too. No other stale element remains — `#subnetSizeDisplay` is already
-overwritten by `updateSubnetSize()` at `:52` and `#networkAddressHelp` by `makeNetworkAddressReadOnly()`
-at `:49`.
-
-### Fix
-
-In the `.create-subnet-btn` click handler, beside the existing `makeNetworkAddressReadOnly()` call at
-line 49 — and **before** the modal is shown at `:55`, so there is no flash of the stale red state —
-reset the CIDR field's validation state:
-
-```javascript
-$('#cidrInput').removeClass('is-invalid is-valid');
-$('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
-```
-
-Use the exact default string already at `_CidrInputModal.cshtml:26` and line 130 so the three copies
-stay in agreement. Pure client-side DOM work, no network dependency; plain-HTTP and air-gapped
-hosting unaffected.
-
-**Worth folding in at the same time, but independent — do not let it gate the primary fix.** Lines
-127-142 test `else if (wouldOverlap)` *before* the range test, so a CIDR that is out of range and
-also overlaps is reported as an overlap: entering `5` under a `/16` parent (minimum `/17`) produced
-the overlap message when the real objection is the range. Concretely: keep the
-`if (cidrValue >= minCidr && cidrValue <= maxCidr && !wouldOverlap)` success branch, then
-`else if (cidrValue < minCidr || cidrValue > maxCidr)` → *"Please enter a valid CIDR value within the
-allowed range."* / `"Invalid"`, then `else` → the overlap message / `"Invalid - Would overlap"`. This
-preserves today's handling of a cleared field (`parseInt` gives `NaN`, every comparison is false, and
-it still lands on the generic `"Invalid"` branch).
-
-### Interim fix
-
-None cheaper; the fix is two lines.
+*No permanent test ships: there is no JS test harness, already on the watch list. Verification is the
+table above plus the 302. Tests 667 → 667, build 0 warnings.*
 
 ---
 
