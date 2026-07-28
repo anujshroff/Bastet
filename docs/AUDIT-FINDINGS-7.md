@@ -1,12 +1,77 @@
 # Bastet — Round-7 Audit Findings
 
-| Baseline | |
-|---|---|
-| Branch | `main` |
-| HEAD | `6a1fe75` |
-| Build | 0 warnings, 0 errors (`dotnet build --no-incremental`) |
-| Tests | 643 passed, 0 failed, 0 skipped |
-| Date | 2026-07-27 |
+| Baseline | Audit | After reconciliation |
+|---|---|---|
+| Branch | `main` | `audit/round-7` |
+| HEAD | `6a1fe75` | one commit per finding |
+| Build | 0 warnings, 0 errors | **0 warnings, 0 errors** (clean rebuild, `bin`/`obj` deleted) |
+| Tests | 643 passed, 0 failed, 0 skipped | **667 passed, 0 failed, 0 skipped** (+24) |
+| Date | 2026-07-27 | 2026-07-28 |
+
+**All thirteen findings were fixed — none was refuted on re-verification.** Each was reproduced
+before being fixed and re-measured after, one commit per finding, carrying its own struck entry.
+The test count rose by 24 and never regressed.
+
+## Final verification sweep
+
+- **Clean rebuild** with `bin`/`obj` deleted: 0 warnings, 0 errors. This mattered for G13, where a
+  package removal is exactly what an incremental build can hide; `NU1903` count is **0**.
+- **Full suite**: 667 passed, 0 failed, 0 skipped, reconciled against the 643 baseline (+8 G1,
+  +16 G9; G8 changed two existing tests rather than adding any).
+- **Real application against real SQL Server 2022** (Docker): subnet list, create, details, edit,
+  delete-with-confirmation, deleted-subnets, host IP index/create, all-host-IPs,
+  all-deleted-host-IPs, home, roles, both Azure wizards and Azure Reconcile all render with their
+  real titles and seeded content asserted — not just HTTP 200. Security headers ride on a normal
+  response (`X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
+  `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`) **and on the error
+  response class**; G6's new `Cache-Control: no-store,no-cache` is present on controller responses
+  while `/css/site.css` and `/js/site.js` stay cacheable.
+- **Log read and classified**: **0** `fail:` lines. Four `warn:` lines, both classes expected —
+  `XmlKeyManager` *"No XML encryptor configured"* is the accepted unencrypted DataProtection key ring
+  already on the watch list, and three `Microsoft.EntityFrameworkCore.Query[20504]`
+  `QuerySplittingBehavior` advisories are pre-existing query-shape notices; this round changed no EF
+  query.
+- **Live Azure, both surfaces, with the two counter-tests that prove reconcile *discriminates*
+  rather than merely blocks.** Two service principals with **verified-disjoint** RBAC (SP_A Owner on
+  `/resourceGroups/bastet` only, SP_B Owner on `/resourceGroups/bastet-hidden` only, neither holding
+  a subscription-scope assignment — checked with `az role assignment list` before measuring, since a
+  subscription-scope grant would silently defeat the whole setup):
+  - a resource the credential **cannot see** was **withheld**, with a warning naming it:
+    *"…Azure denied access when asked about them directly … They have been withheld from deletion:
+    'vnet-hidden'."*
+  - a **genuinely deleted** resource was still **offered and deletable**: `rig-final-doomed`
+    → `statusName=VNetDeleted, canCommit=true` → commit returned
+    `targetsDeleted:1, subnetsArchived:2`, with the row on `/Subnet/DeletedSubnets` and
+    `vnet-hidden` still live and untouched.
+- **`git status` clean**; no scaffolding in any commit. All rigs ran from the scratchpad, never the
+  repository tree.
+
+## Deliberately not done
+
+- **G1 fix part 3 — the per-item "replace the existing Azure link" opt-in.** The finding sanctions
+  the cheaper option ("or, at minimum, make the refusal text state that recourse") and that is what
+  shipped. A renamed or moved VNet therefore still has **no in-app relink**; the refusal text names
+  both ARM ids and says to delete and re-import. Carried to the watch list.
+- **G4's `Microsoft.Hosting.Lifetime` exception.** The finding offers an unconditional
+  `AddFilter(..., Information)` to keep the *"Now listening on…"* lines at the default level; it was
+  rejected because it would print them even when the operator sets `BASTET_LOG_LEVEL_DEFAULT=None`,
+  reintroducing in miniature the very "the knob is a lie" defect being fixed. **Production's default
+  log level is now `Warning`, as `README.md` has always promised, so those startup lines no longer
+  appear unless a level is set.** This is a visible change on upgrade.
+- **Coverage re-run**: not applicable. No round-7 fix deleted a method — G13 removed registrations
+  and package references, not code with coverage — and there was no pre-round coverage baseline to
+  compare against.
+
+## Noticed during the sweep, not fixed (out of scope for this round)
+
+- **`/Error/404` returns HTTP 200.** `/Subnet/Details/999999` correctly 302s to `/Error/404`, but
+  that page then answers **200** while displaying "Not Found". `ErrorController` and
+  `SubnetController.Read` are untouched by this round (empty diff against `main`), so this is
+  pre-existing and no finding covered it. Worth a round-8 look: monitoring and crawlers read the
+  status, not the title.
+- **G6's finding text cites `/HostIp/DeletedHostIps`** among the uncovered authenticated pages. That
+  route does not exist — `HostIpController` has only `AllDeletedHostIps`. The finding's substance is
+  unaffected (the global filter covers every controller response regardless).
 
 Finding ids use the letter **G** and are numbered sequentially across the whole file, grouped by
 severity, ordered within each severity by consequence.
