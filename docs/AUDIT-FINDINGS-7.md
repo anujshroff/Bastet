@@ -747,78 +747,48 @@ Tests 667 → 667, build 0 warnings.*
 
 # Info
 
-## G13 — OpenAPI is registered, mapped and carried as two NuGet packages, and serves a document with zero paths `[x2]`
+## G13 — OpenAPI is registered, mapped and carried as two NuGet packages, and serves a document with zero paths `[x2]` — **FIXED**
 
-**File:** `src/Bastet/Program.cs:35`
-**Also:** `Program.cs:411`, `src/Bastet/Bastet.csproj:14`, `:15`
-**Confidence:** confirmed
+*Applied the whole fix, which the verifier is emphatic is the only safe option: `Program.cs`'s
+`AddOpenApi()` and its comment, `app.MapOpenApi()`, and **both** `PackageReference` lines. The
+interim — dropping only `Microsoft.OpenApi` — was **not** applied, and the finding's reasoning was
+re-verified rather than taken on trust: `src/Bastet/obj/project.assets.json` shows
+`Microsoft.AspNetCore.OpenApi/10.0.10 -> {'Microsoft.OpenApi': '2.0.0'}`, so the direct reference is
+indeed what lifts the resolved version to 2.11.0, and removing it alone would resolve **down** to the
+version carrying GHSA-v5pm-xwqc-g5wc.*
 
-### Scenario
+*Reproduced before the change: `GET /openapi/v1.json` on the Development instance returned
+**200, 178 bytes**, `{"openapi":"3.1.1", …, "paths": { }}` — a live endpoint documenting zero
+endpoints — with `Microsoft.AspNetCore.OpenApi.dll` and `Microsoft.OpenApi.dll` both in
+`bin/Debug/net10.0/` and `Bastet.deps.json` recording `"Microsoft.OpenApi": "2.11.0"`. The premise
+was re-checked too: `grep` for `ApiController|ApiExplorerSettings` over `src/` and `test/` returns
+**nothing**, so the document could never have described anything, and the five cited lines were the
+only `openapi`/`swagger` references in the tree.*
 
-Bastet is an MVC app with no API surface: `grep -rn 'ApiController|ApiExplorerSettings'` over `src/`
-and `test/` returns nothing, so the generated document describes nothing. An operator or auditor who
-opens `/openapi/v1.json` on a Development instance (the only environment where `Program.cs:411` maps
-it) gets a **200 and an empty `paths` object** — a live endpoint that documents zero endpoints.
-Meanwhile `AddOpenApi()` runs on every startup in **every** environment including production, and
-`Microsoft.AspNetCore.OpenApi` 10.0.10 plus `Microsoft.OpenApi` 2.11.0 ship in every published output
-and every container image and appear in every dependency/CVE scan, purely as `dotnet new webapp`
-template residue. The cost is deployment and supply-chain surface, not a wrong answer to a user.
+*After the change, from a **clean rebuild with `bin`/`obj` deleted** — which matters here, because a
+package removal is exactly the case an incremental build can hide:*
 
-**The verifier's finding strengthens this one:** the residue is not inert. See the fix.
+- `dotnet build --no-incremental` → **0 warnings, 0 errors**, and **0** `NU1903` occurrences, so the
+  0-warning baseline is intact and no vulnerable assembly was pulled in;
+- `ls bin/Debug/net10.0/ | grep -i openapi` → **nothing**; both assemblies are gone from the output;
+- `GET /openapi/v1.json` → **404**;
+- `/`, `/Subnet`, `/Subnet/Details/1`, `/Azure/Reconcile`, `/Azure/BulkImport`, `/HostIp/AllHostIps`
+  → all **200**;
+- `dotnet test` → **667 passed**.
 
-### Evidence — reproduced: yes, endpoint fetched, and both fixes built and run
+*One orphan the compiler would not have reported was swept: deleting `AddOpenApi()` left its
+`// Add services to the container.` comment stacked directly on top of the MVC registration's own
+comment. The surviving comment was reworded so the two do not read as one stray fragment.*
 
-Verifier (label `verify:deadcode`, port 5238, catalog `bastet_verify_deadcode`, SP_A, from the built
-DLL):
+*`Microsoft.AspNetCore.Authentication.OpenIdConnect` is a different package and is untouched — it is
+the only remaining `csproj` line matching "OpenId", and confusing the two would have removed
+authentication.*
 
-```
-curl -s -w 'status=%{http_code} size=%{size_download}' http://127.0.0.1:5238/openapi/v1.json
-status=200 size=178
-{"openapi":"3.1.1","info":{"title":"Bastet | v1","version":"1.0.0"},
- "servers":[{"url":"http://127.0.0.1:5238/"}],"paths": { }}
-```
+*The finding's citation note is confirmed and worth keeping for round 8: `deps.json` records the
+**resolved** version, while the constraint that actually mattered lives in `project.assets.json`. The
+finder's inference was right; the file it cited was the wrong one for that claim.*
 
-`/openapi/v1.yaml` → 404. `ls src/Bastet/bin/Debug/net10.0/ | grep -i openapi` →
-`Microsoft.AspNetCore.OpenApi.dll` and `Microsoft.OpenApi.dll`, both in every published build.
-`grep -rn -i 'openapi|swagger'` over the repo excluding `bin`/`obj`/`docs` returns exactly the five
-cited lines and nothing else — no `using Microsoft.OpenApi`, no type reference anywhere.
-
-**Full fix measured in a scratch copy of the tree** (nothing written into the repository): with
-`Program.cs:33-35`, `:411` and both `PackageReference`s deleted — `dotnet build` → **0 warnings, 0
-errors**; `dotnet test --no-build` → **643 passed / 0 failed** (the exact rig baseline); the patched
-DLL served `GET /` → 200, `/Subnet/Index` → 200, `/Azure/Reconcile` → 200, `/openapi/v1.json` → 404.
-
-### Fix
-
-Delete `Program.cs:33-35` (the comment and `builder.Services.AddOpenApi();`), delete
-`Program.cs:411` (`app.MapOpenApi();`), and delete **both** `PackageReference` lines at
-`Bastet.csproj:14-15`. Nothing else in the tree references either package, so this cannot strand a
-caller. If an OpenAPI document is wanted later, it needs `[ApiController]`/ApiExplorer metadata on
-the JSON endpoints first — the registration on its own produces nothing.
-
-### Interim fix — DELETED BY THE VERIFIER; do not apply it
-
-The finder proposed dropping only `Microsoft.OpenApi` (`Bastet.csproj:15`), on the stated grounds
-that it is transitive and *"removing the direct reference changes no restored assembly"*. **That is
-factually false and the change is actively harmful.** `src/Bastet/obj/project.assets.json` shows
-`Microsoft.AspNetCore.OpenApi/10.0.10` declares its dependency as `Microsoft.OpenApi >= 2.0.0`, not
-2.11.0 — the direct `PackageReference` is what lifts the resolved version. The verifier built a
-scratch copy with only line 15 removed: NuGet resolved `Microsoft.OpenApi` **down to 2.0.0**
-(`deps.json` then reads `"Microsoft.OpenApi": "2.0.0"`, shipping `lib/net8.0/Microsoft.OpenApi.dll`
-v2.0.0.0) and the build emitted four
-`warning NU1903: Package 'Microsoft.OpenApi' 2.0.0 has a known high severity vulnerability,
-GHSA-v5pm-xwqc-g5wc` — turning a 0-warning baseline into a 4-warning one and putting a vulnerable
-assembly into every image.
-
-**Either apply the whole fix or change nothing.** The hand-pinned 2.11.0 is not drift risk, it is the
-CVE floor — which is itself the strongest argument for deleting the feature: the project carries a
-hand-maintained security pin for a package no source file imports.
-
-*Citation note:* the finder's evidence cites `bin/Debug/net10.0/Bastet.deps.json:105-107` as showing
-the package is "satisfied only as a transitive dependency". `deps.json` records the **resolved**
-version (2.11.0, which the direct reference forced); the real constraint (2.0.0) lives in
-`src/Bastet/obj/project.assets.json`. The inference is right in substance; the cited file is the
-wrong one for that specific claim.
+*Tests 667 → 667, build 0 warnings.*
 
 ---
 

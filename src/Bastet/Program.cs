@@ -32,10 +32,7 @@ builder.Logging.AddConsoleFormatter<SanitizingConsoleFormatter, ConsoleFormatter
 builder.Logging.AddConsole(options => options.FormatterName = SanitizingConsoleFormatter.FormatterName);
 
 // Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
-
-// Add MVC with global sanitization and response-cache filters
+// MVC with global sanitization and response-cache filters
 builder.Services.AddControllersWithViews(options =>
 {
     options.Filters.Add<GlobalSanitizationFilter>();
@@ -448,7 +445,6 @@ string frameAncestors = string.IsNullOrWhiteSpace(configuredFrameAncestors) ? "'
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
-    app.MapOpenApi();
 
     // In development, also use status code pages but with direct re-execution
     // This allows us to see the custom error pages while still getting detailed error info
