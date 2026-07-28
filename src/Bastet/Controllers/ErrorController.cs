@@ -21,6 +21,16 @@ public class ErrorController : Controller
         // arbitrary text under this origin. Falls back to the per-status default below.
         string? errorMessage = TempData["ErrorPageMessage"] as string;
 
+        // UseStatusCodePagesWithReExecute sets the status itself before re-executing, so a route
+        // that matched nothing really did answer 404. A controller that *redirects* here does not:
+        // the browser issues a fresh GET, this action returns a view, and the response went out as
+        // HTTP 200 with "Resource Not Found" rendered in it. Eleven redirect sites reach the page
+        // that way, so a missing subnet reported success to anything reading the status rather than
+        // the page. Setting it here is a no-op on the re-execute path, which already carries the
+        // same value. The route segment is caller-supplied, so anything outside the error range
+        // becomes 500 rather than letting /Error/200 answer 200.
+        Response.StatusCode = statusCode is >= 400 and <= 599 ? statusCode : 500;
+
         ErrorViewModel viewModel = new()
         {
             RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier,
@@ -61,6 +71,10 @@ public class ErrorController : Controller
     [Route("Error")]
     public IActionResult Error()
     {
+        // Same reason as above. UseExceptionHandler already sets 500 before re-executing, so this
+        // only changes the case where the page is reached directly.
+        Response.StatusCode = 500;
+
         ErrorViewModel viewModel = new()
         {
             RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier,

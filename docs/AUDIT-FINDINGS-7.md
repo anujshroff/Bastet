@@ -5,7 +5,7 @@
 | Branch | `main` | `audit/round-7` |
 | HEAD | `6a1fe75` | one commit per finding |
 | Build | 0 warnings, 0 errors | **0 warnings, 0 errors** (clean rebuild, `bin`/`obj` deleted) |
-| Tests | 643 passed, 0 failed, 0 skipped | **667 passed, 0 failed, 0 skipped** (+24) |
+| Tests | 643 passed, 0 failed, 0 skipped | **677 passed, 0 failed, 0 skipped** (+34) |
 | Date | 2026-07-27 | 2026-07-28 |
 
 **All thirteen findings were fixed — none was refuted on re-verification.** Each was reproduced
@@ -16,8 +16,8 @@ The test count rose by 24 and never regressed.
 
 - **Clean rebuild** with `bin`/`obj` deleted: 0 warnings, 0 errors. This mattered for G13, where a
   package removal is exactly what an incremental build can hide; `NU1903` count is **0**.
-- **Full suite**: 667 passed, 0 failed, 0 skipped, reconciled against the 643 baseline (+8 G1,
-  +16 G9; G8 changed two existing tests rather than adding any).
+- **Full suite**: 677 passed, 0 failed, 0 skipped, reconciled against the 643 baseline (+8 G1,
+  +16 G9, +10 for the error-status fix below; G8 changed two existing tests rather than adding any).
 - **Real application against real SQL Server 2022** (Docker): subnet list, create, details, edit,
   delete-with-confirmation, deleted-subnets, host IP index/create, all-host-IPs,
   all-deleted-host-IPs, home, roles, both Azure wizards and Azure Reconcile all render with their
@@ -64,11 +64,20 @@ The test count rose by 24 and never regressed.
 
 ## Noticed during the sweep, not fixed (out of scope for this round)
 
-- **`/Error/404` returns HTTP 200.** `/Subnet/Details/999999` correctly 302s to `/Error/404`, but
-  that page then answers **200** while displaying "Not Found". `ErrorController` and
-  `SubnetController.Read` are untouched by this round (empty diff against `main`), so this is
-  pre-existing and no finding covered it. Worth a round-8 look: monitoring and crawlers read the
-  status, not the title.
+- **`/Error/*` answered HTTP 200 — found by the sweep, and FIXED** (not a round-7 finding; fixed on
+  request, in its own commit). `UseStatusCodePagesWithReExecute` sets the status itself, which is why
+  a route that matched nothing really did answer 404 and masked the rest — but
+  `ErrorController.HttpStatusCodeHandler` returned a view without ever setting `Response.StatusCode`,
+  so the **eleven** controller sites that *redirect* to the page
+  (`SubnetController.Read/Edit/Delete`, `AzureController`; 404s and 403s) ended on **HTTP 200** with
+  "Resource Not Found" rendered in the body. Measured before: `/Error/404`, `/403`, `/400`, `/500`
+  and `/Error` all returned 200. After: 404 / 403 / 500 / 500 respectively, the followed redirect
+  path `/Subnet/Details/999999` ends on **404**, `/definitely/not/a/route` still 404, and `/Subnet`
+  still 200. The route segment is caller-supplied, so anything outside 400-599 becomes 500 —
+  `/Error/200` returns **500**, not 200. Ten tests added, proven failing first.
+  **Still open, deliberately:** those eleven sites still *redirect*, so the original URL is replaced
+  by `/Error/{code}` and the client pays a round trip. Answering the status at the requested URL
+  would touch five controllers and behaviour the audit never examined; left for round 8.
 - **G6's finding text cites `/HostIp/DeletedHostIps`** among the uncovered authenticated pages. That
   route does not exist — `HostIpController` has only `AllDeletedHostIps`. The finding's substance is
   unaffected (the global filter covers every controller response regardless).

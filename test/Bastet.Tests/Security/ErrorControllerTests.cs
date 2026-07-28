@@ -71,4 +71,56 @@ public class ErrorControllerTests
         Assert.Equal(404, redirect.RouteValues?["statusCode"]);
         Assert.Contains("999", controller.TempData["ErrorPageMessage"]?.ToString() ?? "");
     }
+
+    /// <summary>
+    /// The status-code-pages middleware sets the response status itself before re-executing, which
+    /// is why a route that matched nothing really did answer 404. A controller that *redirects*
+    /// here does not: the browser issues a fresh GET, this action returns a view, and the response
+    /// went out as HTTP 200 with "Resource Not Found" rendered in it. Eleven redirect sites across
+    /// SubnetController.Read/Edit/Delete and AzureController reached the page that way, so every
+    /// missing subnet and every feature-flag refusal reported success to anything reading the
+    /// status rather than the page.
+    /// </summary>
+    [Theory]
+    [InlineData(400)]
+    [InlineData(403)]
+    [InlineData(404)]
+    [InlineData(409)]
+    [InlineData(500)]
+    public void HttpStatusCodeHandler_SetsTheResponseStatus(int statusCode)
+    {
+        ErrorController controller = CreateController();
+
+        _ = controller.HttpStatusCodeHandler(statusCode);
+
+        Assert.Equal(statusCode, controller.Response.StatusCode);
+    }
+
+    /// <summary>
+    /// The route segment is caller-controlled, so a nonsense or success-range value must not become
+    /// the response status - /Error/200 answering 200 would be the same defect wearing a hat.
+    /// </summary>
+    [Theory]
+    [InlineData(200)]
+    [InlineData(302)]
+    [InlineData(0)]
+    [InlineData(99999)]
+    public void HttpStatusCodeHandler_OutOfRangeStatus_FallsBackTo500(int statusCode)
+    {
+        ErrorController controller = CreateController();
+
+        _ = controller.HttpStatusCodeHandler(statusCode);
+
+        Assert.Equal(500, controller.Response.StatusCode);
+    }
+
+    [Fact]
+    public void Error_SetsA500Status()
+    {
+        ErrorController controller = CreateController();
+
+        _ = controller.Error();
+
+        Assert.Equal(500, controller.Response.StatusCode);
+    }
 }
