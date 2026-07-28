@@ -686,91 +686,62 @@ table above plus the 302. Tests 667 → 667, build 0 warnings.*
 
 ---
 
-## G12 — Three form fields carry a hand-written `id`, so their generated `<label for=…>` points at an element that does not exist `[x1]`
+## G12 — Three form fields carry a hand-written `id`, so their generated `<label for=…>` points at an element that does not exist `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Views/Subnet/Create/_SubnetForm.cshtml:23`
-**Also:** `_SubnetForm.cshtml:16`, `src/Bastet/Views/HostIp/Create/_HostIpForm.cshtml:19`
-**Confidence:** confirmed
+*Took the primary fix, not the interim. The three hand-written `id` attributes were dropped so the
+tag helper generates `id="NetworkAddress"`, `id="Cidr"` and `id="IP"` from the model property, and
+the three selectors that depended on them were repointed:
+`Subnet/Create/_SubnetFormScripts.cshtml` (`#cidrInput` → `#Cidr`, `#networkAddressInput` →
+`#NetworkAddress`) and `HostIp/Create/_FormScripts.cshtml`
+(`getElementById('ipAddressInput')` → `'IP'`). The interim — leaving the ids and repointing the
+labels with `@Html.DisplayNameFor` — was declined: it keeps three hand-written ids whose only purpose
+was to be different from what the tag helper already produces.*
 
-### Scenario
+*Scoping the selector change to those two script files was verified, not assumed:
+`Subnet/Details/_SubnetCalculationScripts.cshtml` is the only other `#cidrInput` user, and its input
+is the plain `<input id="cidrInput">` in `Subnet/Details/_CidrInputModal.cshtml`, which
+`grep` confirms is rendered **only** by `Views/Subnet/Details.cshtml` — `Subnet/Create.cshtml`
+renders `Create/_SubnetForm`, `Create/_SubnetInformation` and `Create/_SubnetFormScripts` and never
+that partial.*
 
-A user opens `/Subnet/Create` and clicks the text **"CIDR Notation"** or **"Network Address"** — the
-standard way to put focus in a field. Nothing happens: the label's `for` names `Cidr`/`NetworkAddress`
-and the only element on the page is `id="cidrInput"`/`id="networkAddressInput"`. Measured: focus
-stays on `<BODY>`.
+*Reproduced first, in a real browser, on both pages:*
 
-A screen-reader user reaches the same three inputs (Subnet Create's network address and CIDR, Host IP
-Create's IP address) with no `for`/`id` pair, no wrapping label and no `aria-label`.
+| Measurement | Before | After |
+|---|---|---|
+| `label[for=NetworkAddress]` | `idExists=False, control=None` | `control=INPUT#NetworkAddress` |
+| `label[for=Cidr]` | `idExists=False, control=None` | `control=INPUT#Cidr` |
+| `label[for=IP]` | `idExists=False, control=None` | `control=INPUT#IP` |
+| click "Network Address" | focus **BODY** | focus `INPUT#NetworkAddress` |
+| click "CIDR Notation" | focus **BODY** | focus `INPUT#Cidr` |
+| click "IP Address" | focus **BODY** | focus `INPUT#IP` |
+| accessible name, CIDR field | `''` | `'CIDR Notation'` |
+| accessible name, IP field | `''` | `'IP Address'` |
+| accessible name, network-address field | `'192.168.1.0'` | `'Network Address'` |
 
-Client-side validation is unaffected — jquery-validation-unobtrusive keys on `name`, and
-`asp-validation-for` emits `data-valmsg-for` by name — which is why this has survived: nothing
-functional breaks, so nothing complains.
+*The last row is the verifiers' correction landing: that field was not nameless but **wrongly**
+named, announcing the placeholder `_SubnetFormScripts.cshtml` installs on load. The placeholder is
+still installed after the fix — checked — but the label now wins, which is the correct precedence.
+The controls that already had matching ids (`Name`, `Tags`, `Description`, `ParentSubnetId`) resolved
+correctly throughout and were the differential.*
 
-**Corrected by both verifiers — the accessible-name claim is right for two of the three, not all
-three:**
+*Nothing regressed behind the rename, checked in the live DOM rather than reasoned about:
+`querySelectorAll('[id="Cidr"]')` and `[id="NetworkAddress"]` return **1** each, so no duplicate id
+was introduced; typing `30` into the renamed field still produces `255.255.255.252 | 4 | 2` in the
+mask/max/usable displays; `HostIp/Create`'s `DOMContentLoaded` autofocus still lands on `INPUT#IP`;
+and the Details page's own Create-Subnet modal still drives correctly, with G11's fix intact.*
 
-- `#cidrInput` (role `spinbutton`) and `#ipAddressInput` (role `textbox`) compute an accessible name
-  of **`''`** — genuinely nameless.
-- `#networkAddressInput` computes **`'192.168.1.0'`** — the placeholder that
-  `_SubnetFormScripts.cshtml:74` installs on load. A screen-reader user hears a value-shaped string
-  instead of "Network Address": a *wrong* name, not an absent one.
-- On `/HostIp/Create` the dead-click symptom is largely masked, because
-  `HostIp/Create/_FormScripts.cshtml:19-21` focuses the IP field at `DOMContentLoaded`. The missing
-  accessible name is the live consequence there.
+*The finding's note that client-side validation is unaffected holds by construction —
+jquery-validation-unobtrusive keys on `name`, and `asp-validation-for` emits `data-valmsg-for` by
+name — and neither attribute was touched.*
 
-### Evidence — reproduced: yes, in a real browser with the accessibility tree read, twice
+*One correction to the finding's framing of the HostIp page: it says the dead-click symptom is
+"largely masked" there by the load-time focus. Measured, the click genuinely does nothing — focus
+lands on `BODY` — the load-time focus merely means the field is usually already focused before
+anyone clicks the label. The missing accessible name was the live consequence, and it is closed.*
 
-Verifier 1 (port 5341, catalog `bastet_verify_labelfor`, headless Chrome over CDP with trusted
-`Input.dispatchMouseEvent`): `/Subnet/Create` renders
-`<label class="form-label" for="NetworkAddress">` + `<input … id="networkAddressInput" …
-name="NetworkAddress">` and `<label … for="Cidr">` + `<input … id="cidrInput" … name="Cidr">`;
-`grep -c 'id="Cidr"'` = **0**, `grep -c 'id="NetworkAddress"'` = **0**. `/HostIp/Create?subnetId=1`
-renders `<label … for="IP">` + `<input … id="ipAddressInput" … name="IP">`; `grep -c 'id="IP"'` = 0.
-
-DOM audit: `for="NetworkAddress"` / `for="Cidr"` / `for="IP"` all `idExists=false, control=null`,
-while `for="Name"` / `"Tags"` / `"Description"` / `"ParentSubnetId"` are all `true`.
-
-Trusted clicks on the label text: *"Subnet Name"* → `INPUT#Name`; *"Tags"* → `INPUT#Tags`;
-*"Network Address"* → `BODY`; *"CIDR Notation"* → `BODY`; on Host IP Create, *"Host Name (Optional)"*
-→ `INPUT#Name`, *"IP Address"* → `BODY`.
-
-`Accessibility.getPartialAXTree`: `#cidrInput` role=spinbutton name=`''`; `#ipAddressInput`
-role=textbox name=`''`; `#networkAddressInput` role=textbox name=`'192.168.1.0'` (namefrom:
-placeholder); `#Name` name=`'Subnet Name'`; `#Tags` name=`'Tags'`.
-
-Verifier 2 reproduced independently (port 5273, catalog `bastet_lblreach`, own Chrome container) with
-identical results, and additionally enumerated the full id inventory of `/Subnet/Create`
-(`cidrInput, cidrRangeText, Description, maxIpsDisplay, Name, networkAddressHelp,
-networkAddressInput, ParentSubnetId, subnetMaskDisplay, Tags, usableIpsDisplay` — no `Cidr`, no
-`NetworkAddress`).
-
-**Both fixes measured in the live DOM.** Renaming the ids: `label[for=Cidr].control.name === "Cidr"`,
-click focuses `INPUT#Cidr`, AX names become `'CIDR Notation'` / `'Network Address'`,
-`querySelectorAll('[id="Cidr"]').length === 1` (no duplicate id introduced), and typing `30` into the
-renamed field still produced `255.255.255.252 | 4 | 2` in the mask/max/usable displays. The interim
-variant (leave the ids, repoint the labels): clicks land on `INPUT#cidrInput` /
-`INPUT#networkAddressInput` with the correct AX names.
-
-### Fix
-
-Drop the hand-written `id` attributes and let the tag helper generate `id="NetworkAddress"`,
-`id="Cidr"`, `id="IP"`, then update the three selectors that used them:
-
-- `src/Bastet/Views/Subnet/Create/_SubnetFormScripts.cshtml`: `#cidrInput` → `#Cidr`,
-  `#networkAddressInput` → `#NetworkAddress`
-- `src/Bastet/Views/HostIp/Create/_FormScripts.cshtml`: `getElementById('ipAddressInput')` → `'IP'`
-
-Safe to scope to those two script files: the other `#cidrInput` user,
-`src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml`, drives a **different page** whose
-input is the plain `<input id="cidrInput">` in `Subnet/Details/_CidrInputModal.cshtml`, and that
-partial is not loaded by `Subnet/Create.cshtml`.
-
-### Interim fix
-
-Touch only the three view files: replace `<label asp-for="Cidr" class="form-label"></label>` with
-`<label for="cidrInput" class="form-label">@Html.DisplayNameFor(m => m.Cidr)</label>`, and the same
-for NetworkAddress/`networkAddressInput` and IP/`ipAddressInput`. No JavaScript changes, so nothing
-can regress in the inline scripts.
+*No permanent test ships: there is no JS test harness and no way to read the accessibility tree from
+the SQLite suite — already on the watch list. Verification is the table above.
+Tests 667 → 667, build 0 warnings.*
 
 ---
 
