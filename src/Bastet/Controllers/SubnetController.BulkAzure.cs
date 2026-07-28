@@ -87,6 +87,11 @@ public partial class SubnetController : Controller
             int totalTargetsCreated = 0;
             int totalTargetsMarkedFullyAllocated = 0;
 
+            // Linking a previously unlinked subnet to Azure is a persisted change that no other
+            // counter records; without it an import that only stamps resource IDs reports every
+            // count as zero while the database did change.
+            int totalTargetsLinked = 0;
+
             // Order items so any AutoCreateChild/TopLevel that may itself contain another item runs first.
             // In practice items don't contain each other (overlap check guarantees that), so order is by CIDR ascending
             // is a safe, deterministic order regardless.
@@ -146,11 +151,40 @@ public partial class SubnetController : Controller
                     }
 
                     // Stamp the VNet resource ID onto the matched target so the Details page can link to Azure.
-                    if (!string.IsNullOrEmpty(sanitizedVNetResourceId)
-                        && !string.Equals(targetSubnet.AzureResourceId, sanitizedVNetResourceId, StringComparison.Ordinal))
+                    if (!string.IsNullOrEmpty(sanitizedVNetResourceId))
                     {
-                        targetSubnet.AzureResourceId = sanitizedVNetResourceId;
-                        targetModified = true;
+                        bool alreadyLinked = !string.IsNullOrEmpty(targetSubnet.AzureResourceId);
+
+                        // Refuse to repoint an existing link at a different VNet. The planner
+                        // already errors on this, so a commit only reaches here if the tree moved
+                        // underneath the plan - but this is the write itself, and the consequence of
+                        // letting it through is a row reconcile will later archive on the strength
+                        // of a resource it was never imported from, with no in-app way back.
+                        // ARM IDs are path-based, so a delete-and-recreate under the same name
+                        // compares equal here and is unaffected.
+                        if (alreadyLinked
+                            && !string.Equals(targetSubnet.AzureResourceId, sanitizedVNetResourceId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            await transaction.RollbackAsync();
+                            return Conflict(new
+                            {
+                                success = false,
+                                error = $"Bastet subnet '{targetSubnet.Name}' ({targetSubnet.NetworkAddress}/{targetSubnet.Cidr}) "
+                                    + $"is already linked to Azure VNet '{targetSubnet.AzureResourceId}' and cannot be re-linked to "
+                                    + $"'{sanitizedVNetResourceId}' by an import. If the VNet was renamed or moved, delete the Bastet "
+                                    + "subnet and import it again."
+                            });
+                        }
+
+                        if (!string.Equals(targetSubnet.AzureResourceId, sanitizedVNetResourceId, StringComparison.Ordinal))
+                        {
+                            targetSubnet.AzureResourceId = sanitizedVNetResourceId;
+                            targetModified = true;
+                            if (!alreadyLinked)
+                            {
+                                totalTargetsLinked++;
+                            }
+                        }
                     }
 
                     if (targetModified)
@@ -291,6 +325,7 @@ public partial class SubnetController : Controller
                 $"Bulk import succeeded: created {totalTargetsCreated} VNet target subnet(s), " +
                 $"created {totalSubnetsCreated} Azure child subnet(s), " +
                 $"renamed {totalTargetsRenamed} target(s), " +
+                $"linked {totalTargetsLinked} existing target(s) to Azure, " +
                 $"and marked {totalTargetsMarkedFullyAllocated} target(s) as fully allocated.";
 
             return Ok(new
@@ -300,6 +335,7 @@ public partial class SubnetController : Controller
                 createdTargets = totalTargetsCreated,
                 createdChildSubnets = totalSubnetsCreated,
                 renamedTargets = totalTargetsRenamed,
+                linkedTargets = totalTargetsLinked,
                 fullyAllocatedTargets = totalTargetsMarkedFullyAllocated
             });
         }

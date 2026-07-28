@@ -5,138 +5,466 @@ description: Run a fresh multi-agent security and correctness audit of the Baste
 
 # Run an audit round
 
-Produces `docs/AUDIT-FINDINGS-<N>.md`: a numbered list of verified defects, each with a citation, a
-confidence level, a concrete failure scenario and a proposed fix.
+A round is **one `Workflow` call** that you launch and then actively operate. It always runs the same
+shape, at the same scale, against the same rig, and commits the same way. There is nothing to decide
+and nothing to ask.
 
-The output is worked afterwards by `/audit-reconcile`. Write it for that reader — precise citations,
-honest confidence, and no findings that cannot be acted on.
+## This machine is disposable
 
-## Before starting
+The VM is reverted daily to a state before you existed. Nothing in `~/.claude` survives — not memory
+files, not config, not credentials, not a signing key. **Only committed files survive**, carried off
+by the audit-findings commit and the reconciliation commits, which the host replays and re-signs.
 
-**Say what this will cost.** Round 4 ran 88 agents across two passes. Confirm the user wants that
-before spawning anything.
+Anything that must hold across runs belongs in this file. Do not write preferences to memory and
+expect them back. Do not assume a credential or a git identity from a previous round exists.
 
-**Establish the baseline.** A moving baseline invalidates everything downstream.
+## Ask once, for inputs only
+
+The round asks the user for **the inputs it cannot infer, once, in a single message, before
+launching.** Check what is missing first, then ask for everything missing in one go — never trickle
+questions out one at a time, and never ask again later.
+
+Always needed:
+
+- **the scale of the round** — offer three, with the agent count for each, and take the answer as
+  given. Standard is the default and is what the numbers below describe.
+
+  | | finders | verifiers | total | what you lose |
+  |---|---|---|---|---|
+  | Light | 8 (one pass) | ~10 | ~22 | no `[x2]`/`[x1]` signal at all — the most useful thing the round produces |
+  | Standard | 20 (2 passes + deep sweep) | ~36 | ~62 | nothing |
+  | Deep | 28 (2 passes + deep sweep on all 8) | ~48 | ~80 | nothing; more coverage of the tail, ~30% longer |
+
+- two service principals — client id and secret each, with disjoint RBAC scope over the two resource groups
+- the tenant id
+- the subscription id
+- both resource group ids
+
+Conditionally needed — **check before asking**:
 
 ```
-dotnet build --no-incremental      # expect 0 warnings
-dotnet test                        # record the count
-git rev-parse --short HEAD ; git branch --show-current
+git var GIT_AUTHOR_IDENT        # "Author identity unknown" (exit 128) means it is unset
 ```
 
-Use `--no-incremental`: an incremental build does not re-run the analyzers and reports 0 warnings
-even when there are some. If the build is dirty or tests fail, stop and report — do not audit a tree
-that is already broken.
+If that fails, **ask for the git name and email in the same message as the credentials.** Do not
+guess them, do not scrape them out of `git log`, and do not discover the problem forty minutes later
+at the commit step — round 7 would have completed every phase and then died on its last action.
+Whose name goes on a commit is the user's call; asking costs one line in a message you are already
+sending. If the identity resolves, say nothing and do not ask.
 
-**Read the previous round.** `docs/AUDIT-FINDINGS-*.md`, highest number — rounds 3 and 4 are there.
-From it, take:
+Credentials are **never stored**. They are pasted by the user, written once to a scratchpad file the
+script points agents at, and die with the machine. Never into the repository, never into a config
+file, never into a prompt repeated across sixteen agents, never into a commit. A credential from a
+previous round is not evidence of a working one — they rotate, and round 6's was revoked.
 
-- the **round letter**: round 3 used `C1..C23`, round 4 used `D1..D43`, so the next is `E`;
-- the **refuted table** — do not re-raise anything in it;
-- **struck entries** (italic paragraphs starting `_D12 is fixed and committed…`) — already fixed, and
-  the paragraph explains what was deliberately *not* done and why. Re-raising one of those is the
-  most annoying kind of noise;
-- the **watch list** of accepted risks, carried forward again unless something has changed.
+**Ask nothing else. Ever.** Not scale, not rig, not verification depth, not "shall I proceed", not
+"should I continue". Everything else is fixed below or discovered by the script. If a required input
+is missing at run time, the rig agent stops the round naming it — that is the only way this skill
+returns without a findings file.
 
-Accepted and still open, do not re-raise as new: ForwardedHeaders trust-all with `AllowedHosts: "*"`,
-the Development-only `DevAuthHandler` bypass, `GlobalSanitizationFilter` skipping nested `System.*`
+## Fixed configuration
+
+| | |
+|---|---|
+| Scale | Asked every round: Light / **Standard** / Deep. Everything below describes Standard |
+| Finders | 8 beats x 2 independent passes + deep sweep on beats 1, 3, 6, 7 = **20** |
+| Verification | 1 adversarial verifier per candidate; a 2nd for every `[x1]`; a 3rd only to break a tie |
+| Rig | Always live: database, application, browser, Azure fixtures in both resource groups |
+| Credentials | Asked for once, up front; written to scratchpad only; never stored, never committed |
+| Branch | `audit/round-<N>`, created in Phase 1 **before any work runs**. **`main` is never touched** |
+| Output | `docs/AUDIT-FINDINGS-<N>.md`, committed, never pushed |
+| Total | ~62 agents, ~45 min |
+
+Do not offer a smaller or larger round. If the user wants a different scale they will say so
+unprompted, and only then does it change.
+
+---
+
+# You are the operator, not a spectator
+
+Launch the workflow, then **watch it and intervene**. Round 7's skill said to launch and say nothing,
+answer status questions by pointing at `/workflows`, and never look at the run. All three were wrong:
+`/workflows` does not exist in the VSCode extension, the merge agent stalled dead twice, and the round
+only finished because those rules were broken. Observation is your job.
+
+## Your tool budget
+
+| Tool | For |
+|---|---|
+| `Workflow` | The round. Launch, and resume after an intervention. |
+| `Bash` | **Read-only** run inspection and git state. Never build, test, or touch the app. |
+| `Write` / `Edit` | The workflow script, in scratchpad. **Never a repo file while a round is running** — an untracked file dirties the tree and Phase 5 refuses the commit. |
+| `Read` | Scratchpad files and the run journal. |
+| `TaskStop` | Killing a stalled run before resuming it. |
+| `TodoWrite` | The phase list. |
+
+**Never `Agent`.** Spawning workers directly puts every one of their tool calls in the user's
+conversation, sixty workers deep. One `Workflow` call, or nothing.
+
+Everything that *does* audit work — build, tests, git archaeology, containers, cloud fixtures,
+reading source, verifying, writing, committing — happens **inside the script**, never in the
+foreground.
+
+## Polling
+
+Use **`python3`** — it is present on Debian, and `grep` against JSON gives wrong answers the moment a
+finding's text contains the string you are matching on. (Node is neither present nor needed; see the
+preflight.)
+
+```python
+import json, os, time, glob, sys
+D = sys.argv[1]                                    # transcriptDir, returned by the Workflow tool
+started, results = set(), {}
+for line in open(os.path.join(D, "journal.jsonl")):
+    r = json.loads(line)
+    (started.add if r["type"] == "started" else lambda a: None)(r["agentId"])
+    if r["type"] == "result":
+        results[r["agentId"]] = r.get("result")
+now = time.time()
+def age(a):
+    p = os.path.join(D, f"agent-{a}.jsonl")
+    return int(now - os.path.getmtime(p)) if os.path.exists(p) else -1
+inflight = [(a, age(a)) for a in started - set(results)]
+print("started", len(started), "results", len(results))
+for a, s in sorted(inflight, key=lambda x: x[1]):
+    print(f"  inflight {a} {s}s{'   <-- STALLED' if s > 480 else ''}")
+```
+
+Read the verdict fields out of `results` the same way — `survives`, `reproduced`, `tag`, `memberIds` —
+rather than grepping for them.
+
+A `result` line means an agent **returned**; that work is banked and survives any later failure.
+Started-minus-results is in flight. Agents killed in an earlier attempt never get a result line, so
+they linger in that arithmetic — check each in-flight id's transcript age before believing the count.
+
+## Stall detection and escalation — fixed thresholds, no judgement
+
+| condition | action |
+|---|---|
+| active transcript static **< 8 min** | normal; a single long generation looks like this |
+| static **≥ 8 min** | stalled. `TaskStop` the run, relaunch with `resumeFromRunId` |
+| **2nd stall at the same step** | structural. Stop, fix the script, resume — do not retry a third time |
+
+Resume replays every completed agent from cache and re-runs only what did not finish, so an
+intervention costs one agent, not sixty. **Editing the script is free for any step that has not
+completed** — completed agents sit earlier in the prefix and still replay.
+
+**Resume is same-session only.** If the session ends, every banked result is lost and the whole round
+re-runs from scratch. That is the reason to intervene rather than wait something out.
+
+## Reporting
+
+**Status questions get a markdown table and nothing else.** Same rows every time so successive checks
+diff by eye. No narrative, no interpretation, no reassurance, no speculation about what comes next, no
+remarking that a number is good or notable. If something is broken, state it in one short sentence —
+that is data. Analysis only when asked for.
+
+| row | content |
+|---|---|
+| time | wall clock |
+| started / results | journal counts |
+| in flight | started minus results, discounting known-dead agents |
+| active | newest agent id + seconds since last write |
+| candidates | merge output with the x2/x1 split |
+| judged / survived / refuted | verifier verdicts |
+| reproduced / failed / not-runnable | reproduction outcomes |
+| findings file | bytes, or none |
+| tree | dirty entry count |
+| HEAD | short sha |
+
+At launch: one line. At completion: the funnel, the severities, the headline finding, the commit sha,
+anything the teardown failed to clean, and — **always** — a reminder to revoke the service principal
+secrets. This skill asked for them; this skill reminds you to kill them.
+
+---
+
+# The script
+
+`meta.phases` must match the `phase()` calls. `pipeline()` by default. Only two genuine barriers exist:
+Phase 1 (nothing starts until the baseline is known good) and the merge (telling `[x2]` from `[x1]`
+needs every beat's output at once). Put a `schema` on every agent the script branches on.
+
+**The baseline is a hard gate.** Dirty tree, failing test or build warning → `return` immediately.
+
+## The merge must return ids, not prose
+
+Give the merge a flat list of every finding, each with an id, carrying only what it must reason about
+— title, severity, file, line, confidence, scenario, fix. Strip evidence prose. It returns **groupings
+of ids**: `memberIds`, `canonicalId`, `tag`, and a drop list. The script rebuilds full candidates in
+plain JavaScript from the originals.
+
+This is not style. Two consecutive round-7 merge agents stalled dead trying to emit the whole corpus
+as one structured payload — writes for three minutes, then a flat line, twice, at the same step. The
+id-based version landed in under four minutes. **Never make an agent re-transcribe text the script
+already has.**
+
+---
+
+## Phase 1 — briefing and baseline (`parallel`, 2 agents)
+
+Both write files into the scratchpad; every later agent is handed the **paths**, never the contents.
+
+**Briefing agent** → `BRIEF.md`. Reads `docs/AUDIT-FINDINGS-*.md` highest-number-first and every commit
+since that round's HEAD.
+
+**If no findings file exists at all**, this is round 1: letter `A`, file `docs/AUDIT-FINDINGS-1.md`,
+no refuted table, no struck entries, no watch list. Say so explicitly in the brief so twenty finders
+do not go looking for prior context that was never written, and brief against the full history instead
+of "commits since the last round".
+
+Otherwise the brief must contain: the **round letter** (rounds 3-7 used C, D, E, F, G; take the
+next, file number = previous + 1); the **refuted table** verbatim with reasons; the **struck entries**
+(italic paragraphs starting `_D12 is fixed and committed…`, each explaining what was deliberately not
+done and why); the **watch list**; the sections "What every finding must carry" and "Constraints on
+what counts as a finding" copied from this file, because finders never see it; and a map of the
+codebase good enough to orient a worker who has never seen it.
+
+Accepted and still open, never re-raised: ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
+Development-only `DevAuthHandler` bypass, `GlobalSanitizationFilter` skipping nested `System.*`
 collections, `CollectDescendants` lacking a cycle guard, the unreachable IP-change branch in
-`ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and **C20** (the
-Azure reconcile check/act window).
+`ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and **C20**.
 
-## The beats
+**Rig agent** → `RIG.md`. Preflight, baseline, then stands the rig up.
 
-Seven subagents in parallel, each with one beat and the baseline context:
+### Preflight — the environment, then the three checks that have each cost a round
 
-1. **Security / web** — authorization coverage, antiforgery on state-changing actions, XSS, injection,
-   SSRF, response headers, log forging, secrets handling.
-2. **Logic & data integrity** — the subnet/CIDR arithmetic, containment and overlap rules, host-IP
-   validation, anything that can persist a state the validated path would reject.
-3. **Azure integration** — the import wizards, the bulk planner, the reconciler. Highest stakes: this
-   is the only code that *deletes* on the strength of what an external system reports.
-4. **Locking & lifecycle** — `sp_getapplock` usage, the migration lock, transaction boundaries,
-   check-then-act windows, EF connection pooling.
-5. **UI & client-JS** — the three wizards' state machines and emitted form payloads. Read carefully:
-   what gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`.
-6. **Regression review** of every commit since the last audit — diff them line by line against what
-   they replaced, and check the tests added alongside actually assert the new behaviour.
-7. **Dead code & refactor residue** — orphans left by earlier deletions. This beat exists because a
-   round-3 deletion left a helper behind, and the round-4 version of it found nineteen more.
+Assume nothing is installed. The target is a fresh Debian box with VSCode, the Claude Code extension
+and a fresh checkout — no .NET, no Docker, no browser, possibly no `curl`. Every one of these failures
+looks like something else when it happens mid-round, which is why they are checked up front and named.
 
-## Adversarial verification
+**Policy: install what installs unattended, stop and name what does not.** Anything needing `sudo`,
+a group change or a re-login is the user's action, not yours — report the exact command and stop
+rather than half-configuring the machine.
 
-**Every finding goes to an independent verifier**, prompted to **refute** it and to default to "not
-real" when uncertain. Only survivors reach the file.
+| check | command | if missing |
+|---|---|---|
+| .NET SDK | `dotnet --version`, and the major matches the project's TFM | **Stop.** Name the SDK version required |
+| Docker daemon, **as this user** | `docker info` | **Stop.** `docker info` failing on group membership needs a re-login, which you cannot do |
+| SQL Server image | `docker image inspect` the tag | Pull it **here**, in Phase 1 — never leave sixteen beats to pull 1.5 GB concurrently |
+| Browser for beat 5 | chromium present for Playwright | Install the browser if it installs unattended; if it wants `install-deps` and root, **stop and say so** — beat 5 is near worthless without it and must not fail quietly |
+| `curl` | `curl --version` | Install; every ARM probe uses it |
+| **Azure CLI** | `az version` | **Install it — it is required, not optional.** It installs unattended with no `sudo`: `python3 -m venv <rig>/azcli`, then `curl -sSL https://bootstrap.pypa.io/get-pip.py \| <rig>/azcli/bin/python -` (Debian's `venv` ships without `ensurepip`, so `python -m ensurepip` fails and the bootstrap script is the way through), then `<rig>/azcli/bin/pip install azure-cli`. Takes a few minutes; do it **here**, in Phase 1, not sixteen times concurrently. If it genuinely cannot be installed, **stop and say so** — see below for what is lost |
+| Disk headroom | SDK + image + browser + `bin`/`obj` across 20 agents | **Stop** if tight. A mid-round `ENOSPC` is indistinguishable from the memory death |
+| CPU count | `nproc` | Concurrency is `min(16, cores-2)`. Report it — on 4 cores, twenty finders are nearly serial and the round takes far longer |
+| Network egress | NuGet, MCR, `management.azure.com` | **Stop** and name the unreachable host. Three slow failures otherwise |
 
-The verifier's job is to kill findings, not to confirm them. Round 4 refuted five this way, all of
-which reduced to preference wearing a severity label: an unused optional parameter, three constants
-that "could" drift while currently agreeing, an interface member with no external caller. **If the
-finding's own failure scenario opens with words like "not a runtime defect", it belongs in the
-refuted table.**
+**Why `az` is mandatory, and what it is for.** The Azure beats rest on two service principals with
+**disjoint** RBAC, and the whole experiment is vacuous if that is merely asserted — a single
+assignment at *subscription* scope inherits into both resource groups, filters nothing, and still
+looks like it works. `az role assignment list --all --assignee <id> --query "[].{role:roleDefinitionName,scope:scope}"`
+settles it in one call, **before** anything is measured; there is no comparably cheap way to do it
+with raw REST. It is also how VNet fixtures get created and torn down
+(`az network vnet create|delete|list`), which every reconcile and import finding needs.
 
-Record refuted findings in a table at the end with the reason they were killed, so the next round
-does not spend agents re-discovering them.
+**Credentials never go on a command line.** Put them in the rig's env file and reference them as
+variables (`az login --service-principal -u "$SP_A_CLIENT_ID" -p "$SP_A_CLIENT_SECRET" --tenant "$AZURE_TENANT_ID"`),
+and give each principal its own `AZURE_CONFIG_DIR` so two logins do not overwrite one another. For
+driving the **application** rather than ARM, export `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` /
+`AZURE_TENANT_ID` and let `DefaultAzureCredential` pick them up, so the production code path runs
+unmodified — and make sure `AZURE_TOKEN_CREDENTIALS` is **unset**, since the launch profiles set it
+to `dev`, which excludes `EnvironmentCredential` and produces a credential failure that looks like a
+permissions problem.
 
-## Run the beats twice
+**No Node is required anywhere in this round.** Workflow scripts are JavaScript but the Workflow tool
+runs them itself. Do not install Node, and do not try to syntax-check a script with `node --check` —
+on a machine without Node that check silently passes and proves nothing. `Workflow` reports a syntax
+error immediately on launch, which is the only validation needed.
 
-Round 4 did this by accident and it produced the most useful signal in the file.
+**`Workflow` must be available.** It is the entire skill. If the tool is not present, **stop and say
+so** — never quietly fall back to `Agent`, which is what put sixty workers' tool calls into the user's
+terminal in rounds 6 and 7.
 
-Tag every finding **`[×2]`** (both passes found it independently) or **`[×1]`** (one pass only). The
-corollary is the important half: **absence is weak evidence.** A `[×1]` is not weaker in truth, but it
-means one full pass missed it — so it deserves *more* scrutiny during reconciliation, not less. State
-what the tags mean in the file itself.
+**Memory.** Sixteen concurrent agents, each with a build, container or browser. **Under 16 GB the host
+dies mid-run** — round 7's first attempt died this way. Stop and name the figure.
 
-For reference, round 4's passes: 31 survived / 1 refuted, and 37 survived / 4 refuted.
+**Git identity.** `git var GIT_AUTHOR_IDENT`. If it resolves, move on. If it does not, the name and
+email were collected in the up-front ask — set them at **global (user) scope**:
+
+```
+git config --global user.name  "<supplied>"
+git config --global user.email "<supplied>"
+```
+
+**Global, never `--local`.** Identity belongs to the machine, not one repository — a `--local` fix
+leaves every other checkout on the box still broken, and it evaporates with the daily revert either
+way. If the identity is unset *and* was not supplied, stop the round and say so; do not invent one.
+Unsigned commits are fine — no signing key survives the revert, and the host re-signs on replay.
+
+**Azure credentials.** First confirm the two resource groups **exist and are distinct** — a typo'd
+resource group id returns 403 and is indistinguishable from a missing role assignment, which sends
+you debugging RBAC that was never wrong. Then, for each principal: fetch a token, and probe **both**
+resource groups.
+The *discrimination* is the point, not the authentication — a credential that sees everything proves
+nothing about the reconciler's withhold path, and a rotated one looks identical to a healthy
+subscription with no VNets. Expect 200 on its own group and **403** on the other, and the reverse for
+the second. Prove it for reads *and* writes, and through the application, not just `curl`. If the
+matrix does not reproduce, stop and name the failing leg.
+
+### Baseline
+
+```
+dotnet build --no-incremental      # expect 0 warnings; incremental does not re-run the analyzers
+dotnet test                        # record the count
+git rev-parse --short HEAD ; git branch --show-current ; git status --porcelain
+```
+
+Untracked strays from a previous round are the one dirt you may clear, each guarded with
+`git ls-files --error-unmatch`.
+
+### The branch — created here, not at commit time
+
+The moment the baseline is green, before a single beat runs:
+
+```
+N=$(ls docs/AUDIT-FINDINGS-*.md | sed 's/.*-\([0-9]*\)\.md/\1/' | sort -n | tail -1)
+git checkout -b "audit/round-$((N+1))"
+```
+
+Derive `N` yourself from the files on disk rather than waiting on the briefing agent — the two run in
+parallel, and the script **asserts the two round numbers match and stops if they disagree**. Two
+independent derivations of the same number is a cheap correctness check on the round's own identity.
+
+Branching here rather than at Phase 5 means there is never a window in which the round could commit to
+`main`. Round 7 branched at commit time, which is to say it did not branch, and the findings commit
+landed on `main` and had to be moved afterwards. `main` must be byte-identical before and after a
+round.
+
+### The rig
+
+**Sweep the wreckage of a dead round first.** A round killed mid-flight leaves its rig running: round
+7's SQL container outlived the workflow, and its Azure fixtures outlived the whole session. Before
+standing anything up, remove stale `bastet-audit-*` containers and any leftover `rig-*` fixtures in
+both resource groups. Rebuilding on top of a previous round's rig means auditing against state you did
+not create.
+
+Then: database, application, browser image, and Azure fixtures in **both** resource groups so the
+disjoint principals see genuinely different slices of reality. **Keep an explicit inventory of every
+Azure resource created** — round 7's teardown reported success while removing none, because nothing
+forced it to enumerate. The inventory is what Phase 5 deletes.
+
+## Phase 2 — the beats, twice (20 agents + 1 merge)
+
+1. **Security / web** — authorization coverage, antiforgery, XSS, injection, SSRF, headers, log forging, secrets.
+2. **Logic & data integrity** — subnet/CIDR arithmetic, containment and overlap, host-IP validation, and any path that persists a state the validated path would reject.
+3. **Azure integration** — import wizards, bulk planner, reconciler. Highest stakes: the only code that *deletes* on the strength of what an external system reports. Work partial visibility hard — throttling, an empty page, a 403 on one group, a token expiring mid-enumeration, a paged response whose second page fails. Which of those does it treat as "absent, therefore delete"?
+4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
+5. **UI & client-JS** — the three wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
+6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. **The round-N-1 fixes are where the defects are** — round 7's highest-value findings were all residue of round 6's own fixes.
+7. **Regression tests** — do the tests added alongside those commits fail against the unfixed code? Revert the fix hunk in a scratch copy and find out.
+8. **Dead code & refactor residue** — orphans from earlier deletions.
+
+**Every worker prompt carries this:** write **nothing** into the repository directory — no PID files,
+no logs, no scratch, no notes; everything goes under the rig directory. "Do not modify the working
+tree" is not enough: round 7's beats read it as "do not edit source" and left four `.pid` files in the
+root. One untracked file makes the tree dirty and Phase 5 refuses the commit. Also: own port, own
+catalog, kill only by captured PID — never `pkill -f "Bastet.dll"`, which cost two agents their
+applications in round 6.
+
+Tag `[x2]` (both passes, independently) or `[x1]` (one pass). **Absence is weak evidence** — a `[x1]`
+deserves *more* scrutiny, not less. The deep sweep is a third population and does not by itself make
+anything `[x2]`.
+
+## Phase 3 — adversarial verification (1-2 agents per candidate)
+
+Every candidate goes to a verifier prompted to **refute** it, defaulting to "not real" when uncertain.
+
+`[x2]` candidates get one verifier and that verdict stands. `[x1]` candidates get a second on a
+reachability-and-consequence lens, because one full independent pass already missed them. **If the two
+disagree, a third breaks the tie and the majority wins** — one aggressive verifier should not be able
+to bury a real defect on its own, and a candidate two of three verifiers can refute was not solid
+enough to hand a human. The third only runs on disagreement, so it costs almost nothing.
+
+**Reproduce it or kill it.** The rig is live. The verifier drives the failure — sends the request, runs
+the query, clicks the wizard — and records `reproduced` as `yes-ran-it` (with the actual command and
+the actual observed result), `no-could-not` (**refuted**), or `not-runnable` (the narrow exception for
+dead code and missing assertions, with the reason stated). A finding nobody executed is how a
+hallucinated defect reaches a human. In round 7 this killed 8 of 36 — nearly a quarter.
+
+A verifier may also change the answer rather than the confidence: kill a proposed *fix* while keeping
+the finding, correct a severity, correct a citation. Round 7 found 8 of 20 proposed fixes unsound or
+incomplete. Those corrections go in the file.
+
+**If a finding's own failure scenario opens with "not a runtime defect", it is refuted.** Rounds 4-7
+killed the same test-coverage-observation shape every time.
+
+## Phase 4 — the scribe (2 agents, sequential)
+
+One writes `docs/AUDIT-FINDINGS-<N>.md`. A second re-checks **every** citation against the working tree
+and **fixes** what is wrong — round 7's checker corrected 5 of 130, including one stale line number
+carried over from round 6. A findings file is correct only against the HEAD it was written at.
+
+## Phase 5 — teardown and commit (1 agent)
+
+In this order:
+
+1. Tear down containers, processes, and **every Azure resource in the rig inventory** — enumerate and
+   delete, then **re-list both resource groups and assert no round fixture remains**. Report what was
+   deleted. An empty removal list with a success verdict is a bug, and so is a delete whose error
+   nobody read. Cloud resources are the one part of the rig that outlives the machine.
+2. Sweep untracked root-level strays, each guarded with `git ls-files --error-unmatch`, touching
+   nothing under `src/`, `test/` or `docs/`.
+3. Confirm `git branch --show-current` is `audit/round-<N>`. **If it is `main`, stop and report** —
+   Phase 1 failed to branch and the commit must not land here.
+4. Confirm the tree carries nothing but the findings file, then commit it alone.
+
+Commit subject, fixed shape so a glance at `git log` tells you the round's outcome:
+
+```
+Audit round <N>: <S> findings survived (<a> critical, <b> high, <c> medium, <d> low, <e> info), <R> refuted
+```
+
+Body: baseline branch/HEAD/test count, the beat and pass structure, and the funnel — raw findings,
+candidates, survived, refuted, and how many were reproduced live. No trailers; the host strips them
+on replay, so they are noise.
+
+**Never push.** The remote is read-only here and publishing happens on the host.
+
+Then assert, and report failure loudly if any of these is false: the commit exists, it touches exactly
+one file, `main` still points where the baseline said it did, and the tree is clean. Round 7 satisfied
+none of the branch conditions and reported success anyway.
+
+---
 
 ## What every finding must carry
 
-- **File and line citation**, re-checked against the working tree before the file is written. Round 4
-  re-checked all of D1–D10 plus a sample of the rest and found no invented line numbers; keep that
-  record clean.
-- **Confidence: confirmed or plausible.** *Plausible* means a load-bearing step could not be
-  established — say which step. Do not use it to hedge a finding you simply did not check.
-- **A concrete failure scenario** with real inputs and the wrong output. "This could be a problem" is
-  not a finding.
-- **A proposed fix** — and where a cheaper interim exists, both.
+- **File and line citation**, re-checked against the working tree.
+- **Confidence: confirmed or plausible.** *Plausible* names the load-bearing step that could not be
+  established. It is not a hedge.
+- **A concrete failure scenario** with real inputs and the wrong output.
+- **Evidence it was reproduced** — what was run, what came back.
+- **A proposed fix**, plus a cheaper interim where one exists.
 
-Group by severity (critical / high / medium / low / info), number sequentially across the whole file,
-and order within severity by consequence.
+Grouped by severity, numbered sequentially across the file, ordered within severity by consequence.
 
-## Output
-
-Write `docs/AUDIT-FINDINGS-<N>.md`, creating `docs/` if absent, and **commit it**. It is a versioned
-record: `/audit-reconcile` then commits an updated copy alongside each fix, so the reasoning and the
-change land together.
-
-This machine has read-only access to the remote and never pushes — publishing is handled elsewhere.
-Do not attempt it.
-
-Structure, matching round 4:
+## Output structure
 
 ```
 # Bastet — Round-<N> Audit Findings
 target branch / HEAD / test baseline / date
 
-## Verdict            — the shape of what was found, and what to read first
-## How this audit ran — beats, verification, what [×2]/[×1] mean
+## Verdict            — what was found, and what to read first
+## How this audit ran — beats, verification, what [x2]/[x1] mean
 
-# Critical / High / Medium / Low / Info   — findings, numbered sequentially
+# Critical / High / Medium / Low / Info
 
 # Refuted — reported by a finder, killed by the verifier   (table, with reasons)
 # Watch list — not findings, but worth knowing
-# Clean bill — swept and produced nothing
 ```
 
-The **clean bill** matters as much as the findings: it tells the next round what has already been
-looked at, so its agents can go somewhere new.
+**No clean-bill section.** Dropped deliberately: it bulked the file and fed itself back into later
+rounds. Do not reintroduce it.
+
+**A round that finds nothing still writes and commits the file.** Verdict section says so plainly,
+with the baseline, the agent counts, the funnel that collapsed to zero, and the refuted table — which
+is the whole content in that case, and the part worth having. A clean round is the goal, not a
+failure, and it must leave the same durable record as any other so the next one can see it happened.
 
 ## Constraints on what counts as a finding
 
-- **"This is an open source tool that anyone can host in any way."** Plain-HTTP and air-gapped
-  deployments must keep working. "Assumes HTTPS" is not a finding, and a fix that breaks those hosting
-  models is a bad fix.
-- **No literal control characters** in any example or fix — use a named constant such as
-  `(char)0x1B`. Literals are invisible in diffs and get mangled through tool round-trips.
-- **Migration `.Designer.cs` snapshots are frozen history.** They contain old column widths on
-  purpose. Never report them as stale.
-- **No novels.** A finding is a citation, a scenario, a fix.
+- **Bastet is an open source tool anyone can host any way they like.** Plain-HTTP and air-gapped
+  deployments must keep working. "Assumes HTTPS" is not a finding, and a fix that breaks those is a
+  bad fix.
+- **No literal control characters** — write `(char)0x1B`. Literals are invisible in diffs and get
+  mangled through tool round-trips.
+- **Migration `.Designer.cs` snapshots are frozen history.** Never report them as stale.
+- **No novels.** A finding is a citation, a scenario, a reproduction, a fix.

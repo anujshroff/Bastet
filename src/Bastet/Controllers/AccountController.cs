@@ -41,8 +41,12 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
             Response.Cookies.Delete(cookie);
         }
 
-        // Sign out of the local authentication
-        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        // No unconditional SignOutAsync here. Development registers a single scheme, DevAuthScheme,
+        // and DevAuthHandler is not an IAuthenticationSignOutHandler - so signing out of "Cookies"
+        // threw "No sign-out authentication handlers are registered", which the developer exception
+        // page returned as the response body, and made the Development branch below unreachable.
+        // Production is unaffected: the SignOutResult returned there already lists the cookie
+        // scheme, so the sign-out still happens, once instead of twice.
 
         // If we're in production, also sign out from the identity provider
         if (!environment.IsDevelopment())

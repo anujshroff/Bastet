@@ -724,4 +724,90 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.Null(created.AzureResourceId);
         _ = result;
     }
+
+    // -------------------------------------------------------------------------
+    // Re-pointing an already-linked parent at a different VNet
+    //
+    // Two VNets in one subscription may carry the same prefix, so importing the second one into a
+    // subnet already imported from the first used to overwrite the recorded resource ID in place.
+    // Reconcile then measured the row against the wrong VNet and reported it deleted once that VNet
+    // went away, archiving the row and its subtree with no in-app way back.
+    // -------------------------------------------------------------------------
+
+    private const string VNetVa = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/va";
+    private const string VNetVb = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vb";
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_ParentLinkedToADifferentVNet_RefusesAndKeepsTheLink()
+    {
+        Subnet parent = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
+        parent.AzureResourceId = VNetVa;
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "web", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = 2 }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            2, subnets, vnetName: "vb", vnetResourceId: VNetVb, isAzureImport: true);
+
+        // The Azure import path reports failure by redirecting with a TempData message.
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal("Details", redirect.ActionName);
+        string message = Assert.IsType<string>(_controller.TempData["ErrorMessage"]);
+        Assert.Contains(VNetVa, message);
+        Assert.Contains(VNetVb, message);
+
+        // Nothing was written: the link is intact, the parent keeps its name, no child was created.
+        _context.ChangeTracker.Clear();
+        Subnet after = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
+        Assert.Equal(VNetVa, after.AzureResourceId);
+        Assert.Equal("Parent Subnet", after.Name);
+        Assert.False(await _context.Subnets.AnyAsync(s => s.Name == "web", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_ParentLinkedToTheSameVNet_StillImports()
+    {
+        // Re-importing the same VNet must keep working. ARM IDs survive delete-and-recreate, so
+        // this is also the path a re-created VNet takes.
+        Subnet parent = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
+        parent.AzureResourceId = VNetVa;
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "web", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = 2 }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            2, subnets, vnetName: "va", vnetResourceId: VNetVa, isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+        _context.ChangeTracker.Clear();
+        Assert.True(await _context.Subnets.AnyAsync(s => s.Name == "web", TestContext.Current.CancellationToken));
+        Subnet after = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
+        Assert.Equal(VNetVa, after.AzureResourceId);
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_UnlinkedParent_IsStampedAndCounted()
+    {
+        // The first import of a hand-created subnet: no recorded link, so the stamp is not a relink.
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "web", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = 2 }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            2, subnets, vnetName: "va", vnetResourceId: VNetVa, isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+        _context.ChangeTracker.Clear();
+        Subnet after = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
+        Assert.Equal(VNetVa, after.AzureResourceId);
+    }
 }

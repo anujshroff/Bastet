@@ -133,6 +133,44 @@ public class SubnetCreateGetPrefillTests : IDisposable
             $"the prefilled name '{name}' is refused by the rule its own POST applies");
     }
 
+    /// <summary>
+    /// The other half of the same string. F9 fixed the generated suffix but the parent name was
+    /// copied in unchecked, and stored names are deliberately not held to [SafeText] - Edit applies
+    /// only [NoHtml] and [SanitizeName] - so an ordinary rename to "Prod/Web" reproduced F9 exactly:
+    /// a prefilled default rejected by the very next POST, on the one field the operator did not type.
+    /// The fixture parent for the rows above is literally named "Parent", so they cannot see this.
+    /// </summary>
+    [Theory]
+    [InlineData("Prod/Web", "ProdWeb-10.7.1.0-24")]
+    [InlineData("Bob's Lab", "Bobs Lab-10.7.1.0-24")]
+    [InlineData("DC1:Core", "DC1Core-10.7.1.0-24")]
+    [InlineData("/ / /", "10.7.1.0-24")]
+    public async Task Create_ParentNameOutsideSafeText_PrefillStillPassesThePost(
+        string parentName, string expectedName)
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 7,
+            Name = parentName,
+            NetworkAddress = "10.7.0.0",
+            Cidr = 16,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "test-user"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IActionResult result = await _controller.Create(networkAddress: "10.7.1.0", cidr: 24, parentId: 7);
+        string name = ModelOf(result).Name;
+
+        Assert.Equal(expectedName, name);
+
+        SafeTextAttribute rule = new();
+        ValidationContext context = new(new object(), new SafeTextServiceProvider(), null);
+        Assert.True(
+            rule.GetValidationResult(name, context) == System.ComponentModel.DataAnnotations.ValidationResult.Success,
+            $"the prefilled name '{name}' is refused by the rule its own POST applies");
+    }
+
     /// <summary>SafeTextAttribute resolves the sanitization service from the validation context.</summary>
     private sealed class SafeTextServiceProvider : IServiceProvider
     {
