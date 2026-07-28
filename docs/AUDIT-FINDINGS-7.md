@@ -243,100 +243,63 @@ the live-ARM measurement above. Tests 651 → 651, build 0 warnings.*
 
 ---
 
-## G4 — `BASTET_LOG_LEVEL_DEFAULT` does nothing, and `BASTET_LOG_LEVEL_ENTITYFRAMEWORK` cannot silence the SQL: `appsettings.json`'s shipped rules outrank both `[x1]`
+## G4 — `BASTET_LOG_LEVEL_DEFAULT` does nothing, and `BASTET_LOG_LEVEL_ENTITYFRAMEWORK` cannot silence the SQL `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Program.cs:20`
-**Also:** `:22`, `src/Bastet/appsettings.json:7` and `:9`, `README.md:141` and `:143`
-**Confidence:** confirmed
+*The whole `Logging` section moved out of `src/Bastet/appsettings.json` into
+`src/Bastet/appsettings.Development.json`, where the only key genuinely needing to be added was
+`"Microsoft.EntityFrameworkCore.Database.Command": "Information"` — Development previously inherited
+it from the base file. With no configuration-derived rules in Production, `SetMinimumLevel` becomes
+the matching-rule fallback again and the code's `Microsoft.EntityFrameworkCore` filter becomes the
+longest match for `…Database.Command`. The interim `AddFilter((string?)null, level)` was **not**
+taken, as the finding directs: it would win the null-category tie against `Logging__LogLevel__Default`
+and convert the operator's one working escape hatch into a second inert knob.*
 
-### Scenario
+*Reproduced against the shipped DLL in Production before touching anything, on a warm boot,
+categories counted with `grep -oE '^[a-z]+: [A-Za-z.]+' | sort | uniq -c`:*
 
-An operator deploys to Container Apps with logs shipped to a shared workspace and, following
-`README.md:141/143` (*"Default logging level for all categories"*, default `Warning`, *"Only applied
-in non-development environments"*), sets `BASTET_LOG_LEVEL_DEFAULT=None` and
-`BASTET_LOG_LEVEL_ENTITYFRAMEWORK=None`. The application still writes **the complete text of every
-SQL statement it executes**, plus its host lifetime messages, at Information. The same operator,
-troubleshooting later, sets `BASTET_LOG_LEVEL_DEFAULT=Debug` and gets **no additional output at
-all**. The knob is inert in both directions.
+| Configuration | Before | After |
+|---|---|---|
+| all three knobs = `None` | 15 `info: …Database.Command` + 5 `info: Microsoft.Hosting.Lifetime` | **0 lines total** |
+| all unset | same 15 + 5 | 3 `fail:` + 1 `warn:` only |
+| `ENTITYFRAMEWORK=Information` | (SQL printed regardless) | 15 `Database.Command` **+ 4 `Migrations`** |
+| `DEFAULT=Debug` | 0 `dbug:` outside `Microsoft.AspNetCore.*` | **3** `dbug: Microsoft.Extensions.Hosting.Internal.Host` |
 
-Mechanism: `SetMinimumLevel` writes `LoggerFilterOptions.MinLevel`, which `LoggerRuleSelector.Select`
-consults **only when no rule matches**; `appsettings.json:7`'s `"Default": "Information"` installs a
-rule with a null `CategoryName` that matches every category. And `appsettings.json:9`'s
-`"Microsoft.EntityFrameworkCore.Database.Command"` is a strictly longer prefix than the code's
-`AddFilter("Microsoft.EntityFrameworkCore", …)` at `:22`, so it wins for the one EF category that
-prints queries. `BASTET_LOG_LEVEL_ASPNETCORE` works because its rule is exactly equal in length and,
-being registered after the configuration rules, wins the tie.
+*So the knob is now live in both directions, which is the defect: it was inert going down (`None`
+still printed every SQL statement) and inert going up (`Debug` produced nothing new). A first
+migrating boot showed 42 `Database.Command` lines under `None`, confirming the finding's note that the
+count is boot-dependent and should be stated qualitatively rather than as a fixed number.*
 
-**Two corrections from the verifiers, both load-bearing:**
+*Development verified behaviour-neutral by running it: 43 `info: …Database.Command` and 8
+`…Migrations` lines still appear, i.e. the explicit key reproduces exactly what the inherited one
+did. The three `fail:` lines present in every Production run are **expected and not a defect** —
+they are OIDC discovery failing against the default `https://localhost` authority, because the rig
+configures no IdP; the single `warn:` is the HTTPS redirection notice on a plain-HTTP rig.*
 
-- The finder's *"forever, with no configuration that can stop it"* is **too absolute and must be
-  dropped**. Measured against the unmodified tree, the standard framework variables
-  `Logging__LogLevel__Default=None` and
-  `Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command=None` reduce the same run to
-  **0 log lines**. The defect is therefore not unsuppressable logging — it is that **the knob Bastet
-  ships and documents is a lie**: the operator sets it, gets no error, no warning and no effect, and
-  believes the sink is quiet.
-- There is **no** `EnableSensitiveDataLogging` anywhere in the tree, so EF renders parameter values
-  as placeholders. The exposure is SQL text and schema shape, not subnet or host-IP data. This is a
-  log-volume and troubleshooting defect, not an information-disclosure one.
-- The finder's fixed count of "19 Information entries" is boot-dependent (20 on a warm boot, 42–47
-  on a migrating first boot) and should be stated qualitatively.
+*One consequence accepted deliberately, and the finding's optional mitigation declined.* ***The
+`Microsoft.Hosting.Lifetime` "Now listening on…" / "Application started" lines no longer appear at
+the default level in Production*** *— visible above as `post_unset` having no lifetime lines. The
+finding offers `AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information)` to keep them
+unconditionally; that was **rejected**, because an unconditional filter would print those five lines
+even when the operator sets `BASTET_LOG_LEVEL_DEFAULT=None` — reintroducing in miniature the exact
+"the knob is a lie" defect being fixed. `Warning` is what `README.md` has always promised as the
+default, and an operator who wants startup lines sets `BASTET_LOG_LEVEL_DEFAULT=Information`, which
+now actually works. This is a visible behaviour change on upgrade and belongs in the release notes.*
 
-### Evidence — reproduced: yes, ran the shipped DLL, both verifiers, plus a framework harness
+*`README.md`'s three logging rows rewrote the note that was false: they no longer claim development
+"falls back to appsettings.json" for a section that is no longer there, they name
+`appsettings.Development.json` instead, they record that the standard `Logging__LogLevel__*`
+variables outrank every `BASTET_LOG_LEVEL_*` knob, and the EntityFramework row now says it covers the
+whole `Microsoft.EntityFrameworkCore.*` namespace including the `Database.Command` category that
+prints SQL.*
 
-Verifier 1 (port 5468, catalog `bastet_vloglvl`), Production, boot + two requests, categories counted
-with `grep -oE '^[a-z]+: [A-Za-z.]+' | sort | uniq -c`:
+*The finding's two other corrections are carried and were not re-litigated: there is no
+`EnableSensitiveDataLogging` anywhere in the tree, so this is a log-volume and troubleshooting
+defect, not information disclosure; and `Logging__LogLevel__*` remains the higher-precedence
+override after this change, which is why the README now says so.*
 
-- **All three knobs = `None`:** 15 `info: Microsoft.EntityFrameworkCore.Database.Command` (each
-  printing full SQL — `CREATE DATABASE`, `ALTER DATABASE … READ_COMMITTED_SNAPSHOT ON`, the migration
-  history SELECTs) + 5 `info: Microsoft.Hosting.Lifetime`.
-- **`DEFAULT=Debug, ASPNETCORE=Debug, ENTITYFRAMEWORK=Warning`:** 207 `dbug:` lines, of which **0**
-  outside `Microsoft.AspNetCore.*`, and the 15 EF Information lines still present.
-- **All unset:** identical 15 + 5.
-
-A standalone harness loading the identical rule set confirmed the mechanism directly:
-`…Database.Command`, `Microsoft.Hosting.Lifetime` and `Bastet.Whatever` all report
-`IsEnabled(Information) == True` after `SetMinimumLevel(LogLevel.None)`.
-
-Verifier 2 (port 5299, catalog `bastet_vlogreach`) reproduced all three runs independently and found
-the framework-variable escape hatch quoted above.
-
-**The fix was measured**, using an alternate `--contentRoot` with symlinked `Views`/`wwwroot` so the
-repository was never touched: with the `Logging` section removed from `appsettings.json`, `None` →
-**0-line log**; unset → only 2 `fail` + 1 `warn`; `ENTITYFRAMEWORK=Information` → the 15
-`Database.Command` lines return; `DEFAULT=Debug` → `dbug: Microsoft.Extensions.Hosting.Internal.Host`
-lines appear, i.e. debug output outside `Microsoft.AspNetCore` for the first time. Development
-category tallies diffed **identical** to HEAD.
-
-### Fix
-
-Move the whole `Logging` section out of `src/Bastet/appsettings.json` into
-`src/Bastet/appsettings.Development.json`. With no configuration-derived rules present in
-Production, `SetMinimumLevel` becomes the matching-rule fallback again and the
-`Microsoft.EntityFrameworkCore` filter becomes the longest match for `…Database.Command`.
-
-Three notes for whoever applies it:
-
-- `appsettings.Development.json` already carries `"Default": "Information"` and
-  `"Microsoft.AspNetCore": "Information"`, so the only key that genuinely needs adding is
-  `"Microsoft.EntityFrameworkCore.Database.Command": "Information"`. That is a real change to
-  Development inputs (verified behaviour-neutral, because Development currently inherits it from the
-  base file) and the commit should say so.
-- Removing the section changes the shipped Production default from Information to Warning — which is
-  what `README.md:141` already promises — but the `"Now listening on: …"` / `"Application started"`
-  `Microsoft.Hosting.Lifetime` lines then disappear at the default level. If those are wanted
-  unconditionally, keep them with `AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information)`,
-  not by leaving the appsettings rules in place.
-- `README.md:141-143` should stop saying *"In development, falls back to appsettings.json"* for a
-  section that will no longer be in `appsettings.json`, and should mention that `Logging__LogLevel__*`
-  remains a higher-precedence override.
-
-### Interim fix — do not take it
-
-Replacing `SetMinimumLevel(level)` with `AddFilter((string?)null, level)` plus a
-`"Microsoft.EntityFrameworkCore.Database.Command"` filter does work mechanically, **but it also wins
-the null-category tie against `Logging__LogLevel__Default`** — the one override an operator has
-today — converting a working escape hatch into a second inert knob. Take the primary fix.
+*No permanent test ships: log-provider rule selection is decided by host configuration at boot and
+the SQLite suite has no host. Verification is the measured table above. Tests 651 → 651, build
+0 warnings.*
 
 ---
 
