@@ -328,6 +328,27 @@ public partial class SubnetController : Controller
             // Update parent subnet if this is an Azure import
             if (!string.IsNullOrEmpty(vnetName) && isAzureImport)
             {
+                // Refuse to repoint an existing Azure link at a different VNet. Two VNets in one
+                // subscription may share a prefix, so a subnet matching this VNet's address may
+                // still have been imported from another one. Overwriting the link here is invisible
+                // - the row keeps its old name - and makes reconcile measure it against a VNet it
+                // was never imported from, archiving it and its subtree when that VNet is removed.
+                // ARM IDs are path-based, so re-importing the same VNet, including after a
+                // delete-and-recreate under the same name, compares equal and still works.
+                if (!string.IsNullOrEmpty(vnetResourceId)
+                    && !string.IsNullOrEmpty(parentSubnet.AzureResourceId)
+                    && !string.Equals(parentSubnet.AzureResourceId, vnetResourceId, StringComparison.OrdinalIgnoreCase))
+                {
+                    string conflict =
+                        $"Bastet subnet '{parentSubnet.Name}' ({parentSubnet.NetworkAddress}/{parentSubnet.Cidr}) is already "
+                        + $"linked to Azure VNet '{parentSubnet.AzureResourceId}' and cannot be re-linked to '{vnetResourceId}' "
+                        + "by an import. If the VNet was renamed or moved, delete the Bastet subnet and import it again.";
+
+                    ModelState.AddModelError("subnets", conflict);
+                    await transaction.RollbackAsync();
+                    return BatchCreateFailure(isAzureImport, parentId, conflict, Conflict(new { success = false, error = conflict }));
+                }
+
                 // Update the name to match the Azure VNet name. Azure VNet names reach 64 characters
                 // and the column holds 100, so this never truncates a real Azure name - it is a guard
                 // against a hand-crafted post, since SanitizeName trims at the same 100.

@@ -94,111 +94,59 @@ Nothing in this file was reported on inspection alone. No finding is marked not-
 
 # High
 
-## G1 — Bulk import silently repoints an existing subnet's Azure link to a different VNet, and reconcile then archives the subtree on the strength of the wrong resource `[x1]`
+## G1 — Bulk import silently repoints an existing subnet's Azure link to a different VNet `[x1]` — **FIXED**
 
-**File:** `src/Bastet/Controllers/SubnetController.BulkAzure.cs:152`
-**Also:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:209`, `:283`, `:353`;
-`src/Bastet/Controllers/SubnetController.Azure.cs:341`; `src/Bastet/Services/Azure/AzureReconciler.cs:241`
-**Confidence:** confirmed
+*Both write sites now refuse to move a non-empty `AzureResourceId` to a different VNet, and the
+planner refuses the selection before the operator ever reaches commit. `AnnotatePrefix` gained the
+`BulkAzureVNetViewModel` parameter the finding said it lacked (threaded from `AnnotateAvailability`,
+which already had it in scope) and returns `Blocked` naming **both** ARM ids; `BuildPlanItem` adds
+the matching hard error, so preview reports `canCommit=false` instead of `errors=[]`. The commit
+response and success banner gained a `linkedTargets` counter, closing the all-zeros report: linking
+a previously unlinked subnet is a persisted change no other counter recorded.*
 
-### Scenario
+*Verified by regression tests written first and confirmed failing against the unfixed tree:
+`ExactMatch_TargetLinkedToADifferentVNet_HardFails` failed on `Assert.False(plan.CanCommit)`,
+`Availability_PrefixTargetLinkedToADifferentVNet_IsNotSelectable` failed on the status still being
+`WillUpdateExisting`, and `BatchCreateChildSubnets_ParentLinkedToADifferentVNet_RefusesAndKeepsTheLink`
+failed with `TempData["ErrorMessage"]` null — the silent success the finding describes. Three guard
+tests (same VNet re-imported, unlinked target stamped, plain batch create) passed before and after,
+so the refusal is not blanket. The wizard really does render the reason:
+`_BulkScripts.cshtml:204` appends `reasonHtml(prefixInfo.reason)` HTML-escaped.*
 
-An operator has Bastet subnet `10.98.0.0/16` imported from VNet `va` — a VNet imported with no
-subnets selected, so the target row is childless. A second VNet `vb` in the same subscription uses
-the same RFC1918 range; Azure permits this (both `PUT`s return 201) and it is ordinary in
-hub-and-spoke and dev/prod topologies.
+*Three places the finding's fix was changed, all load-bearing:*
 
-The operator runs Bulk Import. `/Azure/BulkGetVNets` offers **vb's** `10.98.0.0/16` as
-`statusName=WillUpdateExisting, isSelectable=true`, with reason *"Will import into existing Bastet
-subnet 'va'"* — which names a Bastet subnet, not an ARM resource, and does not say a link will be
-replaced. The preview returns `targetTypeName=ExactMatch, errors=[], warnings=[], canCommit=true`.
-The commit returns **`createdTargets:0, createdChildSubnets:0, renamedTargets:0,
-fullyAllocatedTargets:0`** — every counter zero, nothing on screen says anything changed.
+*1. **Identity compares `OrdinalIgnoreCase`, not `Ordinal`.** The finding says only "differs from the
+recorded id". Taking `Ordinal` — which the shipped stamp test at `:150` uses — would refuse an import
+whose id differs only in casing, and ARM path segments are case-insensitive. `AnnotateSubnet`
+already used `OrdinalIgnoreCase` for exactly this comparison, so this aligns with the file's own
+precedent. `Ordinal` is retained for the separate question of whether the stored string needs
+rewriting.*
 
-State did change: `Subnet.AzureResourceId` was rewritten from va's ARM id to vb's. The row's *name*
-is untouched (unless "rename matched" is ticked), so it keeps advertising va.
+*2. **Both new checks are guarded on the selected id being non-empty.** The finding's wording would
+have errored whenever a recorded id was present and the selection carried none — but a selection
+with no resource id never stamps anything, so that would be a refusal with no defect behind it.*
 
-When vb is later decommissioned, `/Azure/ReconcileScan` reports the row as `statusName=VNetDeleted,
-canCommit=true, warnings=[]`, reason *"The VNet this subnet was imported from no longer exists in
-Azure"* — false; va is alive and is what it was imported from. The direct-read confirmation guard
-cannot help: it correctly reads vb, and vb really is 404. Committing archives the row and its whole
-subtree. `DeletedSubnets` does not archive `AzureResourceId` and there is no restore path anywhere
-in the app, so recovery needs direct database access.
+*3. **The bulk write-site refusal is defence-in-depth, not the operator-facing one, and the record
+should not pretend otherwise.** `BulkCreateFromAzurePlanCore` re-runs the planner and returns
+`BadRequest` on `!plan.CanCommit` (`:64-75`) before reaching the write at `:152`, so once the planner
+errors the write-site branch is unreachable through HTTP. It was still applied — that line is the
+actual integrity boundary and the consequence of letting a relink through is unrecoverable — but the
+message an operator sees comes from the planner. The **second** write site
+(`SubnetController.Azure.cs`, single-VNet import) has no planner in front of it and its guard is
+genuinely reachable; that is the one the controller test drives.*
 
-**Corrected by the verifiers, and load-bearing:** at the moment of the repoint the ExactMatch target
-must be **empty** — `AnnotatePrefix` (`:196-207`) and `BuildPlanItem` (`:363-377`) both block an
-exact match carrying child subnets, host IP assignments, or `IsFullyAllocated`. So the finder's
-clause *"including children still linked to live Azure subnets in va"* is **not reachable** and must
-be dropped. The archived subtree can only contain children added by hand after the repoint, or
-children imported from vb (which are legitimately stale). The finding stands without it: the target
-row itself is archived on the strength of a resource it was never imported from.
+***Deliberately not done: fix part 3, the per-item "replace the existing Azure link" opt-in.*** *The
+finding offers "or, at minimum, make the refusal text state that recourse", and that is what was
+taken — both refusals end with "If the VNet was renamed or moved, delete the Bastet subnet and import
+it again." A real opt-in spans the selection DTO, the planner, the commit loop and two wizard views;
+that is a feature, not the defect. The rename/move case therefore still has no in-app relink, which
+remains true of the tree and is carried on the watch list.*
 
-### Evidence — reproduced: yes, driven against live ARM, twice, independently
+*Not re-driven against live ARM: the defect and fix are both above the SDK boundary — the repoint is
+a string comparison on a stored column — and the finding already carries two independent live-ARM
+reproductions. The Azure surfaces were exercised end to end in the closing sweep.*
 
-Verifier 1 (port 5307, catalog `bastet_verify-bulk-import-repoints-azure-link`, SP_A): created
-`rig-verify-bulkrepoint-va` and `-vb` in RG `bastet`, both `10.98.0.0/16` (ARM 201 for both);
-imported va → `createdTargets:1`, Details/1 links `virtualNetworks/rig-verify-bulkrepoint-va`;
-`BulkGetVNets` then offered **both** prefixes as `WillUpdateExisting/isSelectable:true`; preview for
-vb `canCommit=true, errors=[], warnings=[]`; commit returned all-zero counters and Details/1 now
-links `…-vb`; DELETE vb (202, then 404 for vb / 200 for va); `ReconcileScan` → one item
-`statusName=VNetDeleted, canCommit=true, warnings=[]`; `BulkDeleteStaleAzureSubnets` with
-confirmation `approved` → `targetsDeleted:1, subnetsArchived:1`, row now on `/Subnet/DeletedSubnets`
-while va still returns 200 from ARM.
-
-Verifier 2, independently (port 5297, catalog `bastet_x2reach9297`, its own fixtures `rig-x2reach-va`
-/`-vb`): identical chain, plus a hand-created child `10.98.1.0/24` before the delete →
-`ReconcileScan` reported `descendantCount 1, descendantSubnetIds [2]`, and the commit returned
-`targetsDeleted:1, subnetsArchived:2` with both rows on `/Subnet/DeletedSubnets`. It also measured
-the **second write site**: two `POST /Subnet/BatchCreateChildSubnets` for the same parent with
-`vnetResourceId=va` then `=vb` moved the parent's portal link and renamed it.
-
-Both verifiers left the RG clean. Neither found an alternative relink path: `EditSubnetViewModel`
-never binds `AzureResourceId` (`SubnetController.Edit.cs:39,260` derive only a display-only
-`IsAzureLinked`), so these two import writes are the only code that can change an Azure link.
-
-### Fix — corrected; take the refusal, not the disclosure
-
-Two finders proposed opposed fixes. **Take the refusal.** The objection to it — *"blocking breaks
-the legitimate delete-and-recreate-with-same-prefix case"* — was measured and is **empirically
-false**: ARM ids are path-based, so deleting a VNet and re-creating it with the same name in the
-same resource group returns HTTP 201 with a **byte-identical** id string (only `resourceGuid`
-changes, and Bastet never stores that). That case is already skipped by the equality test at
-`BulkAzure.cs:150` and can never trip a "differs from the recorded id" block. Only a genuine
-**rename or move** produces a different id.
-
-Apply all four parts:
-
-1. **Refuse at both write sites.** At `SubnetController.BulkAzure.cs:149-154` and
-   `SubnetController.Azure.cs:339-342`: when the row's existing `AzureResourceId` is non-empty and
-   differs from the selected VNet's id, roll back and refuse, **naming both ARM ids**.
-2. **Surface it in the planner** — the same test `AnnotateSubnet` already applies to child subnets
-   at `AzureBulkImportPlanner.cs:283-289`. Do **not** emit a bare `Blocked`: emit a distinguishable
-   status/warning on the item naming the recorded VNet id and the newly selected one, so the wizard
-   can render it (per-item warnings do render — `_BulkScripts.cshtml:515-517`).
-   *Mechanical note:* `AnnotatePrefix`'s signature is `(string addressPrefix,
-   IReadOnlyList<ExistingSubnetSnapshot>)` and has **no access to the selected VNet's ResourceId**.
-   Thread the `BulkAzureVNetViewModel` through the way `AnnotateSubnet` already receives it —
-   `AnnotateAvailability:163-171` has it in scope.
-3. **Ship a deliberate relink affordance in the same change.** A hard block bites one real case: a
-   VNet renamed or moved to another RG/subscription gets a new id, and there is **no in-app way to
-   relink** (Edit never binds `AzureResourceId`, there is no Restore action). Without an opt-in, the
-   operator's only recourse is reconcile-archive-then-reimport, which is itself irreversible. Add an
-   explicit per-item "replace the existing Azure link" opt-in, defaulting to off, that the commit
-   honours — or, at minimum, make the refusal text state that recourse.
-4. **Count relinks in the commit response.** Not optional: without it the success banner reads all
-   zeros while persisted state changed.
-
-Nothing here touches transport or hosting; plain-HTTP and air-gapped deployments are unaffected.
-
-### Interim fix
-
-Refuse at the **write site only**, without touching the planner or the wizard: at
-`SubnetController.BulkAzure.cs:149-154`, when `targetSubnet.AzureResourceId` is non-empty and
-differs from `sanitizedVNetResourceId`, roll back and return `Conflict` naming both ids — the same
-shape the ExactMatch not-found branch at `:126-130` already uses. This closes the persisted-state
-defect on the bulk path in isolation; the preview still offers the prefix, but nothing is silently
-rewritten. Its cost, which is acceptable for an interim: a multi-prefix batch containing one
-colliding prefix is rolled back whole.
+*Tests 643 → 651 (+8: five planner, three controller).*
 
 ---
 

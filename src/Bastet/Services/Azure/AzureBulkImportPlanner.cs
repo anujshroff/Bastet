@@ -162,7 +162,7 @@ namespace Bastet.Services.Azure
 
             foreach (BulkAzureVNetViewModel vnet in vnets)
             {
-                vnet.Prefixes = [.. vnet.Ipv4AddressPrefixes.Select(p => AnnotatePrefix(p, existingSubnets))];
+                vnet.Prefixes = [.. vnet.Ipv4AddressPrefixes.Select(p => AnnotatePrefix(p, vnet, existingSubnets))];
 
                 foreach (BulkAzureSubnetViewModel subnet in vnet.Subnets)
                 {
@@ -177,6 +177,7 @@ namespace Bastet.Services.Azure
         /// </summary>
         private BulkAzurePrefixViewModel AnnotatePrefix(
             string addressPrefix,
+            BulkAzureVNetViewModel vnet,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
         {
             BulkAzurePrefixViewModel result = new() { AddressPrefix = addressPrefix };
@@ -204,6 +205,21 @@ namespace Bastet.Services.Azure
                 if (exact.IsFullyAllocated)
                 {
                     return Blocked(result, $"Bastet subnet '{exact.Name}' is marked as fully allocated.");
+                }
+
+                // Matching on address says nothing about which Azure resource the row came from:
+                // two VNets in one subscription may carry the same prefix, which is ordinary in
+                // hub-and-spoke and dev/prod topologies. Importing this one would replace the
+                // recorded link, after which reconcile measures the row against a VNet it was never
+                // imported from and offers it - and its subtree - for deletion when that VNet goes.
+                // Name both resources: "blocked" alone does not explain a same-prefix collision.
+                if (!string.IsNullOrEmpty(exact.AzureResourceId)
+                    && !string.IsNullOrEmpty(vnet.ResourceId)
+                    && !string.Equals(exact.AzureResourceId, vnet.ResourceId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Blocked(result,
+                        $"Bastet subnet '{exact.Name}' is already linked to Azure VNet '{exact.AzureResourceId}'. "
+                        + $"Importing '{vnet.ResourceId}' would replace that link, so it is refused.");
                 }
 
                 result.Status = BulkImportAvailability.WillUpdateExisting;
@@ -374,6 +390,18 @@ namespace Bastet.Services.Azure
                 {
                     item.Errors.Add(
                         $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) is marked as fully allocated.");
+                }
+
+                // See AnnotatePrefix: an exact address match may still be a different Azure VNet,
+                // and silently repointing the link is what makes reconcile archive the row later.
+                if (!string.IsNullOrEmpty(exact.AzureResourceId)
+                    && !string.IsNullOrEmpty(p.Source.VNetResourceId)
+                    && !string.Equals(exact.AzureResourceId, p.Source.VNetResourceId, StringComparison.OrdinalIgnoreCase))
+                {
+                    item.Errors.Add(
+                        $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' "
+                        + $"({exact.NetworkAddress}/{exact.Cidr}) is already linked to Azure VNet '{exact.AzureResourceId}', "
+                        + $"and importing '{p.Source.VNetResourceId}' would replace that link.");
                 }
 
                 if (renameMatched)
