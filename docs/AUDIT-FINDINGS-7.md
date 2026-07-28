@@ -152,82 +152,44 @@ reproductions. The Azure surfaces were exercised end to end in the closing sweep
 
 # Medium
 
-## G2 — F11's fix throws a `ReferenceError` on the exact screen it exists for: `suppressedPrefixes` is declared inside the per-VNet loop and read outside it `[x2]`
+## G2 — F11's fix throws a `ReferenceError` on the exact screen it exists for `[x2]` — **FIXED**
 
-**File:** `src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:264`
-**Also:** `:180` (the declaration), `:186` (the increment), `:268` (a dead `else` arm)
-**Confidence:** confirmed
+*`let suppressedPrefixes = 0;` moved out of the `$.each(vnets, …)` callback and into `renderVNetTree`'s
+own scope, immediately after `const hideImported = …`. That is also the semantically correct scope:
+the message says "in this subscription", so it must be a subscription-wide total rather than the last
+VNet's. `visiblePrefixes` stays in the callback — it is genuinely per-VNet and drives the
+card-skip at `:249`. The interim `try`/`catch` was **not** taken, as the finding directs: it is the
+same size as the correct change and leaves the panel blank in exactly the case the block exists for.*
 
-### Scenario
+*Reproduced first, in a real browser, against the running application — not a lifted copy of the
+function, which is how round 6 missed it. Chromium via Playwright loaded `/Azure/BulkImport` from a
+live instance on port 5401 (catalog `bastet_rig7`, real SQL Server 2022 in Docker, SP_A against real
+ARM), so the page carried the exact jQuery 4.0.0 and Bootstrap 5.3.8 that `_Layout.cshtml` pins.
+Precondition built through the application's own `POST /Subnet/Create`: four blocker subnets
+(`10.30.1.0/24`, `10.10.1.0/24`, `10.140.1.0/24`, `10.120.1.0/24`), after which `BulkGetVNets`
+reported all four VNet prefixes `Blocked / isSelectable=False`.*
 
-`let suppressedPrefixes = 0;` at `:180` sits **inside** the `$.each(vnets, function (vIdx, vnet) { … })`
-callback, which closes at `:255`. It is read at `:264` and `:266`, in `renderVNetTree`'s own scope.
-`let` is block-scoped and not hoisted out of the callback, so the moment
-`$tree.children().length === 0` is true the function dies with
-`ReferenceError: suppressedPrefixes is not defined` and the `$tree.append($empty)` at `:272` never
-runs.
+*Before the fix — step 2 rendered 4 cards and 9 "Cannot import" badges; one real click on
+`#bulk-hide-imported` produced `pageerror: suppressedPrefixes is not defined`, with
+`#bulk-vnet-tree` children = 0 and `innerHTML === ''` — a completely blank panel. The second-order
+consequence reproduced too: after **Back to Subscription** → re-select, `#bulk-vnet-loading` visible =
+True, `#bulk-vnet-selection` = False and `#bulk-hide-imported` itself not visible — the permanently
+stuck "Loading VNets…" spinner, with a second `ReferenceError` logged.*
 
-Precondition: every VNet prefix in the subscription is `isSelectable:false` — any partially
-overlapping Bastet subnet per VNet prefix achieves this. The operator selects the subscription, then
-ticks **"Hide unavailable"**. Wrong output: a **completely blank selection panel** — no message, no
-count, no instruction — in precisely the case F11 was written to explain
-(*"N VNet prefix(es) in this subscription cannot be selected, and are hidden. Untick 'Hide
-unavailable' to see why."*).
+*After the fix — same sequence, same instance: tree children = 1, text = "**4** VNet prefix(es) in
+this subscription cannot be selected, and are hidden. Untick "Hide unavailable" to see why.",
+`#bulk-vnet-selection` still visible, page errors **0**, and re-entry renders normally instead of
+hanging. The count being 4 (all VNets) rather than the last VNet's 1 is the scope correction landing.*
 
-**The second-order consequence is what turns a blank panel into a stuck wizard, and the verifier
-insisted it be carried:** the throw escapes jQuery's deferred, which does not catch it, so the AJAX
-`complete:` handler at `:150-152` never runs. The switch is sticky, so on re-entry to step 2
-(*Back to Subscription* → re-select) `loadVNets` → `renderVNetTree` throws again and the operator is
-left with `#bulk-vnet-loading` visible, `#bulk-vnet-selection` hidden, and therefore **the switch
-itself hidden** — a permanent "Loading VNets…" spinner recoverable only by a page reload.
+*The unreachable `else` arm was dropped, and its unreachability was re-derived rather than taken on
+the finding's word: `loadVNets` returns early to `#bulk-no-vnets` when `vnets.length === 0`
+(`:137-141`), `GetVNetInventory` skips any VNet whose `Ipv4AddressPrefixes.Count == 0`, and
+`AzureController.BulkGetVNets` always calls `AnnotateAvailability` on its success path — so every
+VNet reaching the loop has at least one prefix, and an empty tree can only mean suppression. A
+comment now records that chain in place of the dead branch.*
 
-Why round 6 missed it: its record claims *"the suppressed counter is wired"*, verified by lifting
-the function out of the file, which discards the enclosing scope.
-
-The `else` arm at `:268` is also dead: `loadVNets` returns early to `#bulk-no-vnets` when
-`vnets.length === 0` (`:137-141`), and `GetVNetInventory` `continue`s past any VNet with
-`Ipv4AddressPrefixes.Count == 0`, so an empty tree can only arise from suppression.
-
-### Evidence — reproduced: yes, driven in a real browser
-
-Verifier ran its own instance (port 5259, catalog `bastet_verify_bulksup`, SP_A) and its own
-`zenika/alpine-chrome` container on CDP 9259 with a hand-rolled RFC6455/CDP client, against the
-shipped page with the pinned jQuery 4.0.0. Created six blocker subnets through the real
-`POST /Subnet/Create`, confirmed via `/Azure/BulkGetVNets` that every VNet prefix came back
-`Blocked / isSelectable:false` with reason *"Would contain existing Bastet subnet …"*. Selecting the
-subscription rendered 6 cards with 6 "Cannot import" badges; a real click on
-`#bulk-hide-imported` fired `Runtime.exceptionThrown`:
-
-```
-ReferenceError: suppressedPrefixes is not defined
-    at renderVNetTree (http://127.0.0.1:5259/Azure/BulkImport:601:16)
-    at HTMLInputElement.<anonymous> (…:669) via jQuery 4.0.0 dispatch/v.handle
-```
-
-Observed after: `$('#bulk-vnet-tree').children().length === 0` and
-`$('#bulk-vnet-tree').html() === ''`. Re-entry measured: `#bulk-vnet-loading` visible = true,
-`#bulk-vnet-selection` = false, `#bulk-vnet-error` = false, `#bulk-no-vnets` = false,
-`#bulk-hide-imported` = false.
-
-**The fix was measured, not assumed.** Using `Fetch.enable` on the document URL only, the verifier
-served a patched document with the declaration moved and re-drove the page: 5 cards before the tick,
-1 child after, text = *"5 VNet prefix(es) in this subscription cannot be selected, and are hidden.
-Untick 'Hide unavailable' to see why."*, `#bulk-vnet-selection` still visible, untick restores the
-cards, `Runtime.exceptionThrown` count = 0. The repository was never touched.
-
-### Fix
-
-Delete `let suppressedPrefixes = 0;` from `:180` and declare it (as `let`, not `const`) immediately
-after `const hideImported = …` at `:174`, in `renderVNetTree`'s own scope. That is also the
-semantically correct scope: the message says *"in this subscription"*, so it must be a
-subscription-wide total rather than the last VNet's. No caller changes, no server change. While the
-file is open, drop the unreachable `else` arm at `:268-271`.
-
-### Interim fix — do not take it
-
-Wrapping the empty-state block in `try`/`catch` is the same size as the correct change and leaves
-the panel blank in exactly the case the block exists for. The declaration move is both cheaper and
-correct.
+*No permanent test ships: there is still no JS test harness, which the watch list already carries.
+Tests 651 → 651, build 0 warnings.*
 
 ---
 

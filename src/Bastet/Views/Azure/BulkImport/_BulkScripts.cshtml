@@ -173,11 +173,15 @@
             const $tree = $("#bulk-vnet-tree").empty();
             const hideImported = $("#bulk-hide-imported").is(":checked");
 
+            // Subscription-wide, so it must live in this scope and not the per-VNet loop below:
+            // the empty-state message reads "in this subscription", and a `let` declared inside the
+            // $.each callback is not in scope where that message is built.
+            let suppressedPrefixes = 0;
+
             $.each(vnets, function (vIdx, vnet) {
                 const $card = $('<div class="card mb-2"></div>');
                 const $body = $('<div class="card-body p-2"></div>');
                 let visiblePrefixes = 0;
-                let suppressedPrefixes = 0;
 
                 $.each(vnet.prefixes, function (pIdx, prefixInfo) {
                     const prefix = prefixInfo.addressPrefix;
@@ -260,15 +264,13 @@
                 // blocked by a conflict with a hand-made subnet. So "already imported" was asserted
                 // over rows that had never been imported at all, with the red explanation hidden
                 // rather than shown. Say how many were suppressed and how to see why.
+                // Only suppression can empty the tree: loadVNets returns early to #bulk-no-vnets on
+                // an empty list, GetVNetInventory skips VNets with no IPv4 prefix, and BulkGetVNets
+                // always annotates - so every VNet reaching here has at least one prefix.
                 const $empty = $('<div class="alert alert-info mb-0"></div>');
-                if (suppressedPrefixes > 0) {
-                    $empty.append($('<span></span>').text(
-                        suppressedPrefixes + ' VNet prefix(es) in this subscription cannot be selected, '
-                        + 'and are hidden. Untick "Hide unavailable" to see why.'));
-                } else {
-                    $empty.append($('<span></span>').text(
-                        'This subscription has no VNet prefixes to import.'));
-                }
+                $empty.append($('<span></span>').text(
+                    suppressedPrefixes + ' VNet prefix(es) in this subscription cannot be selected, '
+                    + 'and are hidden. Untick "Hide unavailable" to see why.'));
                 $tree.append($empty);
             }
 
