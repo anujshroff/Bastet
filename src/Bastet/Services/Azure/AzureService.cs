@@ -340,8 +340,14 @@ namespace Bastet.Services.Azure
                         continue;
                     }
 
-                    // Enumerate subnets in the VNet (IPv4 only)
-                    await foreach (SubnetResource? subnet in vnet.GetSubnets())
+                    // Read the subnets the listing already returned rather than issuing a separate
+                    // ARM call per VNet. The extra calls made this method 1+N: a VNet deleted after
+                    // the listing but before its own call - exactly the event reconcile exists to
+                    // detect - threw a 404 that escaped to the single outer catch and reported the
+                    // whole subscription unreadable, disabling bulk import and reconcile until the
+                    // next request. Throttling (429) on any one of those calls did the same with no
+                    // delete involved. The list response carries every field used here.
+                    foreach (SubnetData subnet in vnet.Data.Subnets ?? [])
                     {
                         string? ipv4Prefix = ExtractIpv4Prefix(subnet);
                         if (string.IsNullOrEmpty(ipv4Prefix))
@@ -351,8 +357,8 @@ namespace Bastet.Services.Azure
 
                         vnetVm.Subnets.Add(new BulkAzureSubnetViewModel
                         {
-                            ResourceId = subnet.Id.ToString(),
-                            Name = subnet.Data.Name ?? string.Empty,
+                            ResourceId = subnet.Id?.ToString() ?? string.Empty,
+                            Name = subnet.Name ?? string.Empty,
                             AddressPrefix = ipv4Prefix,
                             // Distinct because ARM may report a single prefix in both the singular
                             // property and the collection; a duplicate would reach the operator in
@@ -388,19 +394,19 @@ namespace Bastet.Services.Azure
         /// Bastet recorded against what Azure holds has to look at all of them - the recorded
         /// prefix need not be the first.
         /// </summary>
-        private static IEnumerable<string> ExtractIpv4Prefixes(SubnetResource subnet)
+        private static IEnumerable<string> ExtractIpv4Prefixes(SubnetData subnet)
         {
-            if (subnet.Data.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.Data.AddressPrefix))
+            if (subnet.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.AddressPrefix))
             {
-                yield return subnet.Data.AddressPrefix;
+                yield return subnet.AddressPrefix;
             }
 
-            if (subnet.Data.AddressPrefixes is null)
+            if (subnet.AddressPrefixes is null)
             {
                 yield break;
             }
 
-            foreach (string? prefix in subnet.Data.AddressPrefixes)
+            foreach (string? prefix in subnet.AddressPrefixes)
             {
                 if (!string.IsNullOrEmpty(prefix) && IsIpv4AddressPrefix(prefix))
                 {
@@ -409,18 +415,18 @@ namespace Bastet.Services.Azure
             }
         }
 
-        private static string? ExtractIpv4Prefix(SubnetResource subnet)
+        private static string? ExtractIpv4Prefix(SubnetData subnet)
         {
             // Case 1: Single address prefix
-            if (subnet.Data.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.Data.AddressPrefix))
+            if (subnet.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.AddressPrefix))
             {
-                return subnet.Data.AddressPrefix;
+                return subnet.AddressPrefix;
             }
 
             // Case 2: Multiple address prefixes (dual-stack)
-            if (subnet.Data.AddressPrefixes?.Any() == true)
+            if (subnet.AddressPrefixes?.Any() == true)
             {
-                foreach (string? prefix in subnet.Data.AddressPrefixes)
+                foreach (string? prefix in subnet.AddressPrefixes)
                 {
                     if (!string.IsNullOrEmpty(prefix) && IsIpv4AddressPrefix(prefix))
                     {

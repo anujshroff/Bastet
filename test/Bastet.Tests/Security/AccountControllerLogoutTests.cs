@@ -1,6 +1,7 @@
 using Bastet.Controllers;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Moq;
@@ -17,7 +18,8 @@ public class AccountControllerLogoutTests
 {
     private const string SignedOutPath = "/Account/SignedOut";
 
-    private static AccountController CreateController(bool isDevelopment, bool authenticated = false)
+    private static AccountController CreateController(
+        bool isDevelopment, bool authenticated = false, bool signOutRegistered = true)
     {
         Mock<Microsoft.AspNetCore.Hosting.IWebHostEnvironment> environment = new();
         environment.Setup(e => e.EnvironmentName).Returns(isDevelopment ? "Development" : "Production");
@@ -25,8 +27,24 @@ public class AccountControllerLogoutTests
         AccountController controller = new(environment.Object, ControllerTestHelper.CreateMockUserContextService());
         ControllerTestHelper.SetupController(controller);
 
-        // SignOutAsync resolves IAuthenticationService from RequestServices
+        // SignOutAsync resolves IAuthenticationService from RequestServices.
+        //
+        // The default permissive mock is what the Production cases need - they legitimately call
+        // SignOutAsync and it must be callable. It is also what hid this defect: with SignOutAsync
+        // a no-op, the Development tests asserted a RedirectResult the running application could
+        // not produce. Development registers only DevAuthScheme, and DevAuthHandler is not an
+        // IAuthenticationSignOutHandler, so the real framework throws there. signOutRegistered:false
+        // reproduces that, and is used only by the Development cases.
         Mock<IAuthenticationService> authService = new();
+        if (!signOutRegistered)
+        {
+            authService
+                .Setup(a => a.SignOutAsync(
+                    It.IsAny<HttpContext>(), It.IsAny<string?>(), It.IsAny<AuthenticationProperties?>()))
+                .ThrowsAsync(new InvalidOperationException(
+                    "No sign-out authentication handlers are registered."));
+        }
+
         Mock<IServiceProvider> services = new();
         services.Setup(s => s.GetService(typeof(IAuthenticationService))).Returns(authService.Object);
         controller.HttpContext.RequestServices = services.Object;
@@ -76,7 +94,7 @@ public class AccountControllerLogoutTests
     [Fact]
     public async Task Logout_Development_NonLocalReturnUrl_RedirectsToSignedOutPage()
     {
-        AccountController controller = CreateController(isDevelopment: true);
+        AccountController controller = CreateController(isDevelopment: true, signOutRegistered: false);
 
         IActionResult result = await controller.Logout("https://evil.example");
 
@@ -87,7 +105,7 @@ public class AccountControllerLogoutTests
     [Fact]
     public async Task Logout_Development_LocalReturnUrl_IsPreserved()
     {
-        AccountController controller = CreateController(isDevelopment: true);
+        AccountController controller = CreateController(isDevelopment: true, signOutRegistered: false);
 
         IActionResult result = await controller.Logout("/Subnet/Details/5");
 

@@ -62,7 +62,6 @@ BASTET uses OpenID Connect (OIDC) for authentication in production environments.
     - `profile`
     - `email`
     - `roles`
-    - `offline_access` (for refresh tokens)
   - Issue tokens with one of these user identifier claims (checked in this order):
     - `preferred_username` (checked first)
     - `email` (ClaimTypes.Email, fallback)
@@ -138,9 +137,9 @@ BASTET supports configuration through environment variables:
 | Authentication Configuration | **BASTET_OIDC_AUTHORITY** | OpenID Connect authority URL | `https://identity.your-domain.com` or `https://login.microsoftonline.com/0af80680-dd36-43bf-bf53-b951b9fdd68b` | `https://localhost` | Required in non-development environments. Authentication is disabled in development environments. |
 | Authentication Configuration | **BASTET_OIDC_CLIENT_SECRET** | Client secret for authentication with the OIDC provider | `your-client-secret` | - | Required when using authorization code flow with providers that require client authentication (e.g., Microsoft Entra ID). Not needed for providers that support PKCE without client authentication (e.g., Auth0). |
 | Authentication Configuration | **BASTET_OIDC_RESPONSE_TYPE** | OIDC response type | `id_token` or `code` | `code` | Controls the authentication flow: `id_token` for implicit flow, `code` for authorization code flow. Set to `code` when using PKCE. |
-| Logging Configuration | **BASTET_LOG_LEVEL_DEFAULT** | Default logging level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
-| Logging Configuration | **BASTET_LOG_LEVEL_ASPNETCORE** | Logging level for ASP.NET Core components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
-| Logging Configuration | **BASTET_LOG_LEVEL_ENTITYFRAMEWORK** | Logging level for Entity Framework components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments. In development, falls back to appsettings.json. |
+| Logging Configuration | **BASTET_LOG_LEVEL_DEFAULT** | Default logging level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. The standard `Logging__LogLevel__Default` variable outranks this one if both are set. |
+| Logging Configuration | **BASTET_LOG_LEVEL_ASPNETCORE** | Logging level for ASP.NET Core components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. The standard `Logging__LogLevel__Microsoft.AspNetCore` variable outranks this one if both are set. |
+| Logging Configuration | **BASTET_LOG_LEVEL_ENTITYFRAMEWORK** | Logging level for Entity Framework components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. Covers every `Microsoft.EntityFrameworkCore.*` category, including the `Database.Command` one that prints SQL. The standard `Logging__LogLevel__*` variables outrank this one if both are set. |
 | Feature Configuration | **BASTET_AZURE_IMPORT** | Enables the Azure integration | `true` or `false` | `false` | When enabled, admin users can import subnets from Azure VNets and run Azure Reconcile. Gates the Subnet Azure Import, Bulk Azure Import, and Azure Reconcile flows. |
 
 ## Azure Integration

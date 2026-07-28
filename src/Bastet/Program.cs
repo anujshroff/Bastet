@@ -2,6 +2,7 @@ using Bastet.Data;
 using Bastet.Filters;
 using Bastet.Services;
 using Bastet.Services.Security;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
@@ -31,11 +32,27 @@ builder.Logging.AddConsoleFormatter<SanitizingConsoleFormatter, ConsoleFormatter
 builder.Logging.AddConsole(options => options.FormatterName = SanitizingConsoleFormatter.FormatterName);
 
 // Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+// MVC with global sanitization and response-cache filters
+builder.Services.AddControllersWithViews(options =>
+{
+    options.Filters.Add<GlobalSanitizationFilter>();
 
-// Add MVC with global sanitization filter
-builder.Services.AddControllersWithViews(options => options.Filters.Add<GlobalSanitizationFilter>());
+    // Every page here is authenticated and most of them list inventory, so none of it may sit in a
+    // shared or on-disk browser cache. Until this was global, the directives arrived only by
+    // accident: the antiforgery middleware sets no-cache/no-store on views that happen to render a
+    // token, so /Subnet/Create and /Subnet/Details were covered while /Subnet, /HostIp/AllHostIps,
+    // /Account/Roles and / were not - coverage tracked "does this view render a token" rather than
+    // "is this page authenticated". A signed-out user pressing Back was served the previous user's
+    // inventory from the disk cache.
+    //
+    // Applies to controller responses only, so UseStaticFiles keeps serving CSS and JS cacheably.
+    // Names no scheme, so plain-HTTP and air-gapped deployments are unaffected.
+    options.Filters.Add(new Microsoft.AspNetCore.Mvc.ResponseCacheAttribute
+    {
+        NoStore = true,
+        Location = Microsoft.AspNetCore.Mvc.ResponseCacheLocation.None
+    });
+});
 
 // Allow antiforgery tokens to be sent via the "RequestVerificationToken" header in addition to
 // the default form field. Required by AJAX endpoints that POST application/json (e.g. the
@@ -203,7 +220,27 @@ else
          options.Scope.Add("profile");
          options.Scope.Add("email");
          options.Scope.Add("roles");
-         options.Scope.Add("offline_access");
+
+         // Keep only the id_token in the auth cookie. Nothing in Bastet ever reads an access or
+         // refresh token - the id_token alone is load-bearing, supplying id_token_hint on the
+         // end-session request in AccountController.Logout. Storing the others meant that anyone
+         // who could read the database (where the DataProtection key ring is persisted unencrypted)
+         // and capture one cookie could lift a long-lived credential redeemable at the identity
+         // provider - reach beyond anything Bastet itself controls.
+         //
+         // This runs after SaveTokens has written them, which is deliberate: SaveTokens has no
+         // scope gate, so an provider that returns a refresh token without being asked (Keycloak's
+         // standard flow does) would still have put one in the cookie. Dropping the
+         // offline_access scope alone is a best effort; this makes it a guarantee. It also shrinks
+         // the cookie, which matters because a realistically sized refresh token pushes it past
+         // 4096 bytes and into chunking, on every request from every signed-in user.
+         options.Events.OnTicketReceived = context =>
+         {
+             AuthenticationProperties? properties = context.Properties;
+             properties?.StoreTokens(
+                 [.. properties.GetTokens().Where(token => token.Name == "id_token")]);
+             return Task.CompletedTask;
+         };
      });
 }
 
@@ -408,7 +445,6 @@ string frameAncestors = string.IsNullOrWhiteSpace(configuredFrameAncestors) ? "'
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
-    app.MapOpenApi();
 
     // In development, also use status code pages but with direct re-execution
     // This allows us to see the custom error pages while still getting detailed error info

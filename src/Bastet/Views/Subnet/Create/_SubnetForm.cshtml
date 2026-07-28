@@ -13,14 +13,14 @@
             
             <div class="mb-3">
                 <label asp-for="NetworkAddress" class="form-label"></label>
-                <input asp-for="NetworkAddress" class="form-control" id="networkAddressInput" />
+                <input asp-for="NetworkAddress" class="form-control" />
                 <div class="form-text" id="networkAddressHelp">Enter the network address (e.g. 192.168.1.0)</div>
                 <span asp-validation-for="NetworkAddress" class="text-danger"></span>
             </div>
             
             <div class="mb-3">
                 <label asp-for="Cidr" class="form-label"></label>
-                <input asp-for="Cidr" class="form-control" min="0" max="32" type="number" id="cidrInput" />
+                <input asp-for="Cidr" class="form-control" min="0" max="32" type="number" />
                 <div class="form-text">
                     <span id="cidrRangeText">CIDR values: 0-32</span>
                     <span class="ms-3">Subnet mask: <span id="subnetMaskDisplay">@Model.CalculatedSubnetMask</span></span>

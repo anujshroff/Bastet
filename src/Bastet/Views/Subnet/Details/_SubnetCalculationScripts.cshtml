@@ -47,6 +47,16 @@
             
             // Reset network address field to read-only state
             makeNetworkAddressReadOnly();
+
+            // The modal is not destroyed on close - data-bs-dismiss only removes .show - so the
+            // classes and the message the input handler wrote survive until something clears them,
+            // and nothing did. Reopening therefore showed the previous range's failure under a
+            // freshly computed, valid CIDR, with the Create button enabled: an error saying the
+            // subnet cannot be created next to a button saying it can. Cleared before the modal is
+            // shown below, so there is no flash of the stale red state. The default string is the
+            // one in _CidrInputModal.cshtml and in the success branch, so the three stay in step.
+            $('#cidrInput').removeClass('is-invalid is-valid');
+            $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
             
             // Calculate initial subnet size
             updateSubnetSize(optimalCidr);
@@ -129,16 +139,20 @@
                 $('#createSubnetBtn').prop('disabled', false);
                 $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
                 updateSubnetSize(cidrValue);
-            } else if (wouldOverlap) {
-                $(this).removeClass('is-valid').addClass('is-invalid');
-                $('#createSubnetBtn').prop('disabled', true);
-                $('#cidrValidationFeedback').text('This CIDR would create a subnet that overlaps with existing subnets.');
-                $('#subnetSizeDisplay').text('Invalid - Would overlap');
-            } else {
+            } else if (cidrValue < minCidr || cidrValue > maxCidr) {
+                // Range before overlap: a CIDR that is both out of range and overlapping was
+                // reported as an overlap, which is not the objection the operator can act on.
+                // A cleared field still lands here - parseInt gives NaN, every comparison is
+                // false - and still gets the generic message, as before.
                 $(this).removeClass('is-valid').addClass('is-invalid');
                 $('#createSubnetBtn').prop('disabled', true);
                 $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
                 $('#subnetSizeDisplay').text('Invalid');
+            } else {
+                $(this).removeClass('is-valid').addClass('is-invalid');
+                $('#createSubnetBtn').prop('disabled', true);
+                $('#cidrValidationFeedback').text('This CIDR would create a subnet that overlaps with existing subnets.');
+                $('#subnetSizeDisplay').text('Invalid - Would overlap');
             }
         });
         

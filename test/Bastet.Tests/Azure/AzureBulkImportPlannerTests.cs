@@ -1106,4 +1106,104 @@ public class AzureBulkImportPlannerTests
             "Everything the annotation left selectable should import. Global errors: "
             + string.Join(" | ", plan.GlobalErrors.Concat(plan.Items.SelectMany(i => i.Errors))));
     }
+
+    // -------------------------------------------------------------------------
+    // Re-pointing an existing subnet's Azure link at a different VNet
+    //
+    // Two VNets in one subscription may carry the same RFC1918 prefix, so an exact match on the
+    // address says nothing about which Azure resource the target was imported from. Importing the
+    // second VNet used to overwrite the first one's resource ID in place, after which reconcile
+    // read the row against the wrong VNet and offered the whole subtree for deletion once that
+    // VNet was decommissioned.
+    //
+    // ARM IDs are path-based, so deleting a VNet and re-creating it under the same name in the
+    // same resource group yields a byte-identical ID - the ordinary re-import case compares equal
+    // and is unaffected by these rules.
+    // -------------------------------------------------------------------------
+
+    private static string AzVNetId(string vnetName) =>
+        $"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/{vnetName}";
+
+    [Fact]
+    public void ExactMatch_TargetLinkedToADifferentVNet_HardFails()
+    {
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-vb", "10.98.0.0/16", Sub("web", "10.98.1.0/24")));
+
+        // The target was imported from vnet-va; the operator is now importing vnet-vb.
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "va-target", "10.98.0.0", 16, azureResourceId: AzVNetId("vnet-va"))];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
+
+        Assert.False(plan.CanCommit);
+        string error = Assert.Single(Assert.Single(plan.Items).Errors);
+        Assert.Contains(AzVNetId("vnet-va"), error);
+        Assert.Contains(AzVNetId("vnet-vb"), error);
+    }
+
+    [Fact]
+    public void ExactMatch_TargetLinkedToTheSameVNet_StillCommits()
+    {
+        // Re-importing the same VNet - including after a delete and re-create, which returns the
+        // same ARM ID - must stay possible.
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-va", "10.98.0.0/16", Sub("web", "10.98.1.0/24")));
+
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "va-target", "10.98.0.0", 16, azureResourceId: AzVNetId("vnet-va"))];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
+
+        Assert.True(plan.CanCommit);
+        Assert.Empty(Assert.Single(plan.Items).Errors);
+    }
+
+    [Fact]
+    public void ExactMatch_TargetNotLinkedToAzure_StillCommits()
+    {
+        // A hand-created subnet with no Azure link is what the first import stamps.
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-vb", "10.98.0.0/16", Sub("web", "10.98.1.0/24")));
+
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "hand-made", "10.98.0.0", 16)];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
+
+        Assert.True(plan.CanCommit);
+        Assert.Empty(Assert.Single(plan.Items).Errors);
+    }
+
+    [Fact]
+    public void Availability_PrefixTargetLinkedToADifferentVNet_IsNotSelectable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-vb", ["10.98.0.0/16"]);
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "va-target", "10.98.0.0", 16, azureResourceId: AzVNetId("vnet-va"))];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+
+        // The wizard has to be able to say which resource it is already linked to, and to what the
+        // operator just selected - "blocked" on its own does not explain a same-prefix collision.
+        Assert.Contains(AzVNetId("vnet-va"), prefix.Reason);
+        Assert.Contains(AzVNetId("vnet-vb"), prefix.Reason);
+    }
+
+    [Fact]
+    public void Availability_PrefixTargetLinkedToTheSameVNet_WillUpdateExisting()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-va", ["10.98.0.0/16"]);
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "va-target", "10.98.0.0", 16, azureResourceId: AzVNetId("vnet-va"))];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
+        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
+        Assert.True(prefix.IsSelectable);
+    }
 }
