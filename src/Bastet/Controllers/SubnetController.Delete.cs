@@ -281,14 +281,15 @@ public partial class SubnetController : Controller
             return RedirectToAction(nameof(DeletedSubnets));
         }
 
-        return View(new PurgeAllDeletedSubnetsViewModel { Count = count });
+        int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;
+        return View(new PurgeAllDeletedSubnetsViewModel { Count = count, MaxId = maxId });
     }
 
     // POST: Subnet/PurgeAllDeletedSubnets
     [HttpPost, ActionName("PurgeAllDeletedSubnets")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> PurgeAllDeletedSubnetsConfirmed(string confirmation)
+    public async Task<IActionResult> PurgeAllDeletedSubnetsConfirmed(string confirmation, int? confirmedMaxId)
     {
         if (confirmation != "approved")
         {
@@ -296,7 +297,24 @@ public partial class SubnetController : Controller
             return RedirectToAction(nameof(PurgeAllDeletedSubnets));
         }
 
-        int removed = await context.DeletedSubnets.ExecuteDeleteAsync();
+        // The confirmation page states a count, and this is what makes that statement true: the
+        // purge is bounded to the records that existed when the operator read it. Without the bound
+        // the POST carries no scope at all and destroys whatever exists at execution time, which is
+        // a different set whenever anything was archived in between.
+        //
+        // Bound as int? and refuse a missing value rather than defaulting: a POST without the field
+        // would otherwise bind 0, delete nothing, and report "Permanently purged 0 record(s)".
+        if (confirmedMaxId is null or <= 0)
+        {
+            TempData["ErrorMessage"] =
+                "The purge scope was missing from the form. Review the archive and confirm again.";
+            return RedirectToAction(nameof(PurgeAllDeletedSubnets));
+        }
+
+        int removed = await context.DeletedSubnets
+            .Where(d => d.Id <= confirmedMaxId)
+            .ExecuteDeleteAsync();
+
         TempData["SuccessMessage"] = $"Permanently purged {removed} deleted subnet record(s).";
         return RedirectToAction(nameof(DeletedSubnets));
     }
