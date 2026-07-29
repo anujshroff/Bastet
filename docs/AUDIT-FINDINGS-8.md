@@ -420,72 +420,44 @@ verification. `dotnet build --no-incremental` 0 warnings, 0 errors._
 
 ## H7 [x2] — Bulk import's commit-success banner never reads `linkedTargets`, so a link-only import reports every count as zero
 
-**Citation.** `src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:588`.
+_H7 is fixed and committed with the one-line change the finding proposes: the commit-success banner in
+`_BulkScripts.cshtml` now renders `linked ${result.linkedTargets} existing target(s) to Azure`, in the
+position that makes its counter order match `TempData["SuccessMessage"]` exactly, so the two summaries
+of one commit agree word for word. `linkedTargets` is always present on the success path, so there is
+no undefined case to guard._
 
-**Confidence.** Confirmed.
-
-**Scenario.** Bastet holds a hand-made subnet `Prod Core 10.20.0.0/16`, no `AzureResourceId`, no
-children. An admin ticks only the VNet prefix `10.20.0.0/16` in the bulk wizard (badge *"Will update
-existing"*), selects no child subnets, leaves rename off, and commits. The server stamps the VNet's
-ARM id onto `Prod Core` and answers
-`{"createdTargets":0,"createdChildSubnets":0,"renamedTargets":0,"linkedTargets":1,"fullyAllocatedTargets":0}`.
-
-`:588` renders *"Bulk import completed. Created 0 VNet target(s), 0 child subnet(s), renamed 0
-target(s), marked 0 target(s) as fully allocated."* — four counters, `linkedTargets` absent.
-`grep -rn "linkedTargets" src/Bastet/Views src/Bastet/wwwroot test/` returns **no hits**. G1 added the
-counter to the JSON response and to the TempData banner, but `:588` is original wizard code
-(`73fc76f2`) that G1 never touched.
-
-**The sharpest form of the wrong output:** re-committing the identical selection now writes nothing
-and returns `linkedTargets: 0` — and `:588` renders **byte-identical text**. The completion screen
-cannot distinguish *"I just stamped an ARM id onto Prod Core"* from *"I did absolutely nothing"*.
-
-**Reproduction.** Headless Chromium against the live app, port 5401, catalog `bastet_audit_201`. Built
-by clicking, not by crafting a post:
+_Verified in headless Chromium against the live app on 127.0.0.1:5817, SQL Server 2022, real ARM,
+built by clicking rather than by crafting a post: a hand-made Bastet subnet `Prod Core` 10.70.0.0/16,
+the Azure VNet `rig-h7-match` on the same prefix, tick only the prefix (badge "Will update existing"),
+no child subnets selected, rename off, commit. Then commit the identical selection a second time,
+which writes nothing._
 
 ```
-TICKING: bulk-prefix-3-0  10.20.0.0/16  "Will update existing"
-CHECKED SUBNET BOXES AFTER TICKING PREFIX: []
-STEP 3 PREVIEW: Exact match Bastet subnet "Prod Core" (10.20.0.0/16) / No child subnets selected.
-COMMIT BUTTON DISABLED: False
-COMMIT BANNER (t+0.11s):
- ' Bulk import completed. Created 0 VNet target(s), 0 child subnet(s), renamed 0 target(s), marked 0 target(s) as fully allocated.'
-COMMIT RESPONSE: {"success":true,...,"createdTargets":0,"createdChildSubnets":0,"renamedTargets":0,"linkedTargets":1,"fullyAllocatedTargets":0}
-CONSOLE: (empty)
+                        unfixed (ff285cf)                        fixed
+link commit banner      "Created 0 VNet target(s), 0 child       "... renamed 0 target(s), linked 1
+                        subnet(s), renamed 0 target(s),           existing target(s) to Azure,
+                        marked 0 target(s) as fully allocated."   marked 0 ..."
+  its response          linkedTargets=1                          linkedTargets=1
+re-commit banner        byte-identical to the above              "... linked 0 existing target(s) ..."
+  its response          linkedTargets=0                          linkedTargets=0
+the two banners         IDENTICAL                                distinct
+after the 2 s redirect  correct sentence, both runs              unchanged
+page errors             []                                       []
 ```
 
-The write landed — `sqlcmd` shows `Prod Core` carrying
-`azid=.../virtualNetworks/rig-regressp2-dup`. Re-posting the same selection returned all counters zero
-and produced identical banner text.
+_The write landed in both runs, confirmed in `bastet_h7`: `Prod Core` carries
+`.../virtualNetworks/rig-h7-match`. That is what makes the unfixed banner wrong rather than merely
+terse — it cannot distinguish "I stamped an ARM id onto your subnet" from "I did nothing", and the
+only plausible reaction to the second reading is to run it again._
 
-**Why info and not low:** `:592-594` schedules an **unconditional** `window.location.href =
-result.redirectUrl` on a 2000 ms timer, and `TempData["SuccessMessage"]`
-(`SubnetController.BulkAzure.cs:324-329`) carries the complete sentence. Measured: banner at t+0.11 s,
-correct sentence on `/Subnet` at t+2.17 s:
+_**The finder's optional extra was deliberately not bundled**, as the finding itself directs: naming
+the pending link in the preview's `ExactMatch` branch is a separate call, and step 2 already says
+"Will import into existing Bastet subnet 'Prod Core'." under a "Will update existing" badge — visible
+in the run above — so the decision point is not uninformed._
 
-```
-POST-REDIRECT alert-success: "Bulk import succeeded: created 0 VNet target subnet(s), created 0 Azure
-child subnet(s), renamed 0 target(s), linked 1 existing target(s) to Azure, and marked 0 target(s) as
-fully allocated."
-```
-
-The only plausible reaction to the wrong banner ("it did nothing, do it again") is a tested no-op: 200,
-all counters zero, no second write, no G1 conflict.
-
-**Fix.** One line, rendering verified in the pinned Chromium:
-
-```js
-` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s), linked ${result.linkedTargets} existing target(s) to Azure, marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
-```
-
-Counter order then matches `TempData["SuccessMessage"]` exactly, so the two summaries of one commit
-agree. `linkedTargets` is always present on the success path
-(`SubnetController.BulkAzure.cs:338`). No cheaper interim exists — one line is already the floor. It
-touches an inline template literal only, so plain-HTTP and air-gapped hosting are unaffected.
-
-**Do not bundle** the finder's optional extra (naming the pending link in the preview's `ExactMatch`
-branch): step 2 already says *"Will import into existing Bastet subnet 'Prod Core'."* under a "Will
-update existing" badge, so the decision point is not uninformed. Separate call.
+_It touches an inline template literal only, so plain-HTTP and air-gapped hosting are unaffected. Test
+count unchanged at 690 — no JS test harness, per the watch list. `dotnet build --no-incremental`
+0 warnings, 0 errors._
 
 ---
 
