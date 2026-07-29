@@ -139,11 +139,12 @@
                 $('#createSubnetBtn').prop('disabled', false);
                 $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
                 updateSubnetSize(cidrValue);
-            } else if (cidrValue < minCidr || cidrValue > maxCidr) {
+            } else if (isNaN(cidrValue) || cidrValue < minCidr || cidrValue > maxCidr) {
                 // Range before overlap: a CIDR that is both out of range and overlapping was
                 // reported as an overlap, which is not the objection the operator can act on.
-                // A cleared field still lands here - parseInt gives NaN, every comparison is
-                // false - and still gets the generic message, as before.
+                // isNaN is tested explicitly because a cleared field parses to NaN and every
+                // NaN comparison is false, so the range test alone would drop it through to the
+                // overlap arm below - claiming a collision with a sibling that need not exist.
                 $(this).removeClass('is-valid').addClass('is-invalid');
                 $('#createSubnetBtn').prop('disabled', true);
                 $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');

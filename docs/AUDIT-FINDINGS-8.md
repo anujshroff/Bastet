@@ -367,97 +367,52 @@ round trip on a path that already opened a connection._
 
 ## H6 [x2] — G11's branch reorder makes a cleared CIDR field in the Details Create-Subnet modal report a non-existent overlap
 
-**Citation.** `src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml:142` (the range arm
-that fails to catch `NaN`). The wrong text is written at `:154-155`; the comment that states the
-opposite of what the code does is at `:145-146`.
+_H6 is fixed and committed with the one-token change the finding proposes, verified sound:
+`isNaN(cidrValue) ||` added to the range arm at `_SubnetCalculationScripts.cshtml`, so a cleared or
+non-numeric CIDR box gets the objection the operator can act on instead of a claim that it collides
+with a sibling._
 
-**Confidence.** Confirmed.
+_The comment above the arm was rewritten rather than deleted, which the finding is right about and
+which is the only place the fix departs from a pure one-token diff: after the change the comment's
+**conclusion** ("a cleared field lands here") becomes true, but its stated **mechanism** — "every
+comparison is false", offered as the reason it lands here — remains exactly backwards, because that is
+precisely why it did **not** land here. The new wording says why `isNaN` has to be tested explicitly._
 
-**Scenario.** Open `/Subnet/Details/1` for a parent `10.0.0.0/16` with one child `10.0.0.0/18`, click
-the Unallocated Ranges "Create Subnet" button (network `10.0.64.0`, prefilled CIDR 18), then **clear
-the CIDR box** — or type any non-numeric text into it. `#cidrInput` is `<input type="number">`, so the
-element value is `''` and `parseInt('')` is `NaN`. `NaN < minCidr` and `NaN > maxCidr` are both false,
-so the range arm at `:142` is skipped and control falls to the `else` at `:151`, which since `ff285cf`
-is the **overlap** arm.
-
-Actual wrong output, observed: `#cidrValidationFeedback` = *"This CIDR would create a subnet that
-overlaps with existing subnets."* with computed `display: block` (visible, not merely in the DOM), and
-`#subnetSizeDisplay` = *"Invalid - Would overlap"* — while the page's own `wouldOverlap` is false. The
-same output appears on `/Subnet/Details/2`, a subnet with **no children at all**: the page asserts an
-overlap with a set that is empty.
-
-Before `ff285cf` the same input produced *"Please enter a valid CIDR value within the allowed range."*
-/ *"Invalid"*. G11's reorder moved the false sentence off the out-of-range input, which it correctly
-fixed, and onto the empty field.
-
-**Reproduction.** Playwright/Chromium driving the published `ff285cf` build on 127.0.0.1:5402 against
-SQL Server catalog `bastet_audit_202`, fixtures created through the app's own Create form. Real
-keystrokes (`click`, `Control+a`, `Delete`) on the shipped button:
+_Verified in Playwright/Chromium against the published build on 127.0.0.1:5816, SQL Server 2022,
+fixtures created through the app's own Create form, real keystrokes (`click`, `Control+a`, `Delete`)
+on the shipped button. Three topologies — one child, no children at all, two fragmented children — and
+a 46-input census per topology (`''`, `0..40`, `abc`, `-4`, `1e2`, `18.5`)._
 
 ```
-== A. modal just opened ==   rawValue "18"  classes "form-control"  sizeDisplay "16,382"  btn enabled
-== B. field CLEARED ==       rawValue ""    parseInt "NaN"
-                             classes  "form-control is-invalid"
-                             feedback "This CIDR would create a subnet that overlaps with existing subnets."
-                             feedbackDisplay "block"   feedbackVisible true
-                             sizeDisplay "Invalid - Would overlap"   createBtnDisabled true
-== C. typed 5 (minCidr 17) == feedback "Please enter a valid CIDR value within the allowed range."
-== D. typed 18 ==             classes "form-control is-valid"  sizeDisplay "16,382"  btn enabled
-page errors: []
+                          unfixed (ff285cf)                        fixed
+Details/1, field cleared  "This CIDR would create a subnet that    "Please enter a valid CIDR value
+                          overlaps with existing subnets."          within the allowed range."
+                          display block, "Invalid - Would overlap"  display block, "Invalid"
+                          button disabled                           button disabled
+
+census, overlap arm       Details/1  2 inputs: '' and 'abc'        0
+                          Details/2  2 inputs: '' and 'abc'        0
+                          Details/3  2 inputs: '' and 'abc'        0
+census, success arm       17 / 17 / 16                             17 / 17 / 16   <- unmoved
+census, range arm         27 / 27 / 28                             29 / 29 / 30   <- +2, the NaN inputs
+page errors               []                                       []
 ```
 
-The same scripts against a `6a1fe75` worktree published separately: `== B. field CLEARED ==` gave
-*"Please enter a valid CIDR value within the allowed range." / "Invalid"*, and `== C. typed 5 ==` gave
-the overlap sentence. The builds swap exactly. That run also settles the one value not directly
-readable at HEAD: on `6a1fe75` the cleared field does **not** take `else if (wouldOverlap)`, proving
-`wouldOverlap === false` for the `NaN` input — so the overlap claim at HEAD contradicts the page's own
-overlap computation.
+_`Details/2` is the sharpest form and it moved with the rest: that subnet has no children whatsoever,
+so the unfixed page was asserting an overlap against an empty set. No numeric path moves in either
+direction, as it must not — `isNaN(x)` is false for every value `parseInt` can return other than
+`NaN`, and the success arm's count is identical on all three topologies._
 
-A 46-input census (`''`, `0..40`, `abc`, `-4`, `1e2`, `18.5`) across three topologies (1 child, 0
-children, 3 children fragmented) shows the overlap arm is now reached by **exactly two inputs on every
-topology** — `''` and `abc` (an `<input type="number">` reports `value === ''` for non-numeric text, so
-typing letters is a second trigger) — and by no numeric input at all:
+_`abc` is the second trigger for the same reason as the empty string: `#cidrInput` is
+`<input type="number">`, which reports `value === ''` for non-numeric text._
 
-```
-Details/1  OVERLAP-ARM 2 inputs: '' and 'abc'   RANGE-ARM 27   SUCCESS-ARM 17
-Details/2  OVERLAP-ARM 2 inputs: '' and 'abc'   RANGE-ARM 30   SUCCESS-ARM 14
-Details/3  OVERLAP-ARM 2 inputs: '' and 'abc'   RANGE-ARM 27   SUCCESS-ARM 17
-```
+_**The overlap arm was left in place and must stay.** After this fix it has no remaining visitor, and
+the temptation is to tidy it away; it is defence-in-depth for a case `findOptimalCidr` currently makes
+impossible, and the watch list records this. Deleting it would be the exact class of refactor residue
+these audits keep finding._
 
-Nothing is written and `#createSubnetBtn` is correctly disabled in both arms, hence **low**. It is not
-info: it is a false factual assertion, visible, on the main path an operator uses to carve a child out
-of an unallocated range — the identical class of defect G11 itself was accepted for in round 7.
-
-**Fix.** Verified **sound** as filed, applied and measured in a worktree:
-
-```diff
--            } else if (cidrValue < minCidr || cidrValue > maxCidr) {
-+            } else if (isNaN(cidrValue) || cidrValue < minCidr || cidrValue > maxCidr) {
-                 // Range before overlap: a CIDR that is both out of range and overlapping was
-                 // reported as an overlap, which is not the objection the operator can act on.
--                // A cleared field still lands here - parseInt gives NaN, every comparison is
--                // false - and still gets the generic message, as before.
-+                // isNaN is tested explicitly because a cleared field parses to NaN and every
-+                // NaN comparison is false, so the range test alone would drop it through to the
-+                // overlap arm below - claiming a collision with a sibling that need not exist.
-```
-
-Measured on the fixed build: cleared field on `/Subnet/Details/1` and `/2` gives *"Please enter a valid
-CIDR value within the allowed range." / "Invalid"*, button disabled. Census, arm by arm:
-`SUCCESS-ARM 17/14/17` (identical to HEAD), `RANGE-ARM 29/32/29` (HEAD 27/30/27, `+2` = exactly the two
-`NaN` inputs), `OVERLAP-ARM 0` (HEAD 2). **No numeric path moves**, as it must not, since `isNaN(x)` is
-false for every value `parseInt` can return other than `NaN`. `dotnet build --no-incremental` 0
-warnings / 0 errors; `dotnet test` 677 passed.
-
-The comment rewrite is required, and is not quite what the finder proposed: after the fix the
-comment's *conclusion* ("a cleared field lands here") becomes true, but its stated *mechanism* ("every
-comparison is false", offered as the reason it lands here) remains exactly backwards — that is why it
-did **not** land here. Reword as above rather than deleting.
-
-**No cheaper interim exists** — this one-token change is already the floor. Note for whoever applies
-it: `:151-155` is already unreachable for every numeric input at HEAD, so the fix removes the arm's
-only visitor. **Do not "tidy" the arm away**; it is defence-in-depth for a case `findOptimalCidr`
-currently makes impossible.
+_Test count unchanged at 690 — no JS test harness exists, per the watch list; the census above is the
+verification. `dotnet build --no-incremental` 0 warnings, 0 errors._
 
 ---
 
