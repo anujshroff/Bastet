@@ -791,4 +791,110 @@ public class AzureReconcilerTests
         Assert.True(plan.ScanSucceeded);
         Assert.Empty(plan.GlobalErrors);
     }
+
+    // -------------------------------------------------------------------------
+    // The cascade. Archiving a target takes its whole subtree, so a target is only deletable if
+    // every Azure-linked row beneath it is deletable too. A descendant this scan verified is live,
+    // or explicitly withheld from deletion, must take its ancestor out of the plan with it -
+    // otherwise approving the ancestor destroys exactly the rows the scan just protected.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The no-RBAC variant, and the likeliest in the field: an outer VNet is deleted in Azure while
+    /// an inner VNet imported beneath it is still live. The inner row never becomes an item at all
+    /// (it evaluated to live), so nothing downstream can notice it - the check has to happen here.
+    /// </summary>
+    [Fact]
+    public void BuildPlan_TargetWhoseDescendantIsStillLiveInAzure_IsWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("inner", ["10.78.128.0/17"])),                                  // outer is gone, inner is not
+            Linked(1, "outer", "10.78.0.0", 16, VNetId("outer"), descendants: 1, descendantIds: [2]),
+            Linked(2, "inner", "10.78.128.0", 17, VNetId("inner")));
+
+        Assert.True(plan.ScanSucceeded);
+        Assert.Empty(plan.Items);
+        Assert.False(plan.CanCommit);
+        Assert.Contains(plan.Warnings, w => w.Contains("still exist in Azure") && w.Contains("'outer'"));
+    }
+
+    /// <summary>
+    /// The RBAC variant. The descendant is withheld by <see cref="AzureReconciler.ApplyConfirmations"/>
+    /// - Azure would not confirm it is gone - and the warning says so by name. Approving the ancestor
+    /// archived it anyway, including the case where the credential that would be needed to re-import
+    /// it is the one ARM is refusing.
+    /// </summary>
+    [Theory]
+    [InlineData(AzureResourceConfirmation.NotVisible)]
+    [InlineData(AzureResourceConfirmation.Unknown)]
+    [InlineData(AzureResourceConfirmation.Live)]
+    public void ApplyConfirmations_TargetWhoseDescendantWasWithheld_IsAlsoWithheld(
+        AzureResourceConfirmation verdict)
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),                                    // live VNet, no subnets
+            Linked(1, "outer", "10.78.0.0", 16, VNetId("outer"), descendants: 1, descendantIds: [2]),
+            Linked(2, "child", "10.0.1.0", 24, SubnetId("vnet-a", "snet-a")));
+
+        Assert.Equal(2, plan.Items.Count);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("outer")] = AzureResourceConfirmation.Deleted,
+            [SubnetId("vnet-a", "snet-a")] = verdict
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.False(plan.CanCommit);
+        Assert.Contains(plan.Warnings, w => w.Contains("'outer'"));
+    }
+
+    /// <summary>
+    /// ApplyConfirmations iterates plan.Items and never reads plan.ReviewItems, so a review-item
+    /// descendant is in none of the sets built there. FullyAllocatingSubnetDeleted is produced by
+    /// ordinary imports, so this is not an exotic shape.
+    /// </summary>
+    [Fact]
+    public void ApplyConfirmations_TargetWhoseDescendantIsAReviewItem_IsAlsoWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("inner", ["10.78.128.0/17"])),                                  // live, but nothing covers the prefix
+            Linked(1, "outer", "10.78.0.0", 16, VNetId("outer"), descendants: 1, descendantIds: [2]),
+            Linked(2, "inner", "10.78.128.0", 17, VNetId("inner"), fullyAllocated: true));
+
+        _ = Assert.Single(plan.ReviewItems);
+        _ = Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("outer")] = AzureResourceConfirmation.Deleted
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.Contains(plan.Warnings, w => w.Contains("'outer'"));
+    }
+
+    /// <summary>
+    /// The ordinary case must survive both guards: when a VNet is deleted its imported subnets go
+    /// with it, confirm as Deleted, and are still deletable. A guard that withheld this would make
+    /// the feature useless.
+    /// </summary>
+    [Fact]
+    public void ApplyConfirmations_TargetWhoseDescendantIsAlsoDeleted_IsStillCommittable()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            Linked(1, "outer", "10.78.0.0", 16, VNetId("outer"), descendants: 1, descendantIds: [2]),
+            Linked(2, "child", "10.78.1.0", 24, SubnetId("outer", "snet-a")));
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("outer")] = AzureResourceConfirmation.Deleted,
+            [SubnetId("outer", "snet-a")] = AzureResourceConfirmation.Deleted
+        });
+
+        Assert.Equal(2, plan.Items.Count);
+        Assert.True(plan.CanCommit);
+        Assert.Empty(plan.Warnings);
+    }
 }

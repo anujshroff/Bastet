@@ -103,113 +103,52 @@ None.
 
 ## H1 [x2] — Azure reconcile archives descendants the same scan proved live, or explicitly withheld from deletion
 
-**Citation.** `src/Bastet/Controllers/SubnetController.AzureReconcile.cs:144` — the unconstrained
-subtree archive. Co-site: `src/Bastet/Services/Azure/AzureReconciler.cs:145-213`
-(`ApplyConfirmations` withholds rows from deletion without making the withholding transitive).
+_H1 is fixed and committed. `AzureReconciler` now withholds any target whose subtree contains a
+subnet the same scan says must not be destroyed, in **both** places that knowledge exists and nowhere
+else. In `BuildPlan`, every linked row that evaluated to live — the ones that become neither an item
+nor a review item, and so are invisible downstream — is collected into a `liveLinked` set, and any
+item whose `DescendantSubnetIds` meets it is dropped with a warning naming it. In
+`ApplyConfirmations`, the same is done for `notVisible ∪ unknown ∪ stillLive ∪ plan.ReviewItems`.
+`ReviewItems` is in that set for the reason the finding gives: the confirmation loop walks
+`plan.Items` only, so a `FullyAllocatingSubnetDeleted` descendant — which ordinary imports produce —
+appears in none of the lists built there._
 
-**Confidence.** Confirmed.
+_The two removals are one private helper, `WithholdTargetsWhoseCascadeIsBlocked`, rather than the two
+inline copies the finding sketched. They differ only in which ids are protected and in the clause
+explaining why, so a single implementation is what stops the live-descendant guard and the withheld
+guard drifting apart — the same failure mode that produced this finding, where `ApplyConfirmations`
+knew about withholding and the cascade did not._
 
-**Scenario.** Two ordinary bulk imports nest `rig-verc1-inner` (10.78.128.0/17) under
-`rig-verc1-outer` (10.78.0.0/16), each linked to its own live Azure VNet, with
-`rig-snet-verc1-inner-a` (10.78.130.0/24) beneath. Only `rig-verc1-outer` is deleted in Azure.
-
-`POST /Azure/ReconcileScan` returns exactly one item — `subnetId 1`, `VNetDeleted`,
-`descendantSubnetIds [2,3]` — and **`warnings: []`**, because the scan read rows 2 and 3 from the
-same subscription listing and found them **live**. The very next request,
-`POST /Subnet/BulkDeleteStaleAzureSubnets {"subnetIds":[1],"confirmation":"approved"}`, answers
-`{"success":true,"targetsDeleted":1,"subnetsArchived":3,"hostIpsArchived":0}` — all three rows
-archived, including the two whose Azure resources are still `Succeeded`.
-
-The gate at `:77-92` is keyed on `request.SubnetIds` only. No descendant is ever compared against
-`plan.Items`, `plan.ReviewItems`, or the per-resource confirmation verdicts.
-
-The RBAC variant is sharper. With rows 5 and 6 linked into a resource group the current credential
-cannot see, the scan's own body says:
-
-> *"2 Azure-linked subnet(s) were missing from the subscription listing, and Azure denied access when
-> asked about them directly … **They have been withheld from deletion**: 'rig-verc1-hidden',
-> 'rig-snet-verc1-hidden-a'."*
-
-and the next request archives exactly those two rows plus a host IP. `DeletedSubnets` has no
-`AzureResourceId` column (`Models/DeletedSubnet.cs:11-43`) and there is no restore path anywhere in
-the app, so the Azure link is destroyed unrecoverably. In the RBAC variant the operator cannot even
-re-import: the credential that would have to do it is the one ARM refuses.
-
-**Reproduction.** Live rig, port 5400, catalog `bastet_audit_200`, real ARM, SP_A and SP_B, fixtures
-created through the shipped wizards (no hand-seeded rows).
+_Verified at both levels. Six tests were written first and five of them failed against the unfixed
+code with `Collection was not empty` — the target surviving in `plan.Items` — covering the live
+descendant, all three withholding verdicts (`NotVisible`, `Unknown`, `Live`) and a review-item
+descendant. The sixth is the control that must **not** move: a VNet deleted together with its own
+imported children stays committable, and it passed before and after. Then end to end on the live rig,
+real ARM and SQL Server 2022, driving the shipped endpoints: `rig-h1-inner` (10.78.128.0/17, live,
+carrying `rig-h1-inner-a`) nested under `rig-h1-outer` (10.78.0.0/16) by two ordinary bulk imports,
+then only the outer VNet deleted in Azure._
 
 ```
-POST /Azure/ReconcileScan  subscriptionId=f0e8d6db-e9c4-4215-81a5-17762ea56be8
-scanSucceeded True  canCommit True
-items: [{subnetId:1, name:'rig-verc1-outer', statusName:'VNetDeleted',
-         descendantCount:2, hostIpCount:0, descendantSubnetIds:[2,3]}]
-reviewItems: []
-warnings:    []          <-- EMPTY: the scan read 2 and 3 and found them live
-
-POST /Subnet/BulkDeleteStaleAzureSubnets {"subnetIds":[1],"confirmation":"approved"}
-{"success":true,"redirectUrl":"/Subnet","targetsDeleted":1,"subnetsArchived":3,"hostIpsArchived":0}
-
-Subnets        -> (no rows)
-DeletedSubnets -> 1|rig-verc1-outer  2|rig-verc1-inner  3|rig-snet-verc1-inner-a
-az network vnet subnet list --vnet-name rig-verc1-inner
-               -> rig-snet-verc1-inner-a  10.78.130.0/24  Succeeded    <-- still live
+                       unfixed (ff285cf)                       fixed
+scan                   canCommit True, warnings []             canCommit False, warning names 'rig-h1-outer'
+approve subnetIds:[1]  200 {"subnetsArchived":2}               409 "no longer reported as deleted in Azure"
+Subnets after          (no rows)                               1 rig-h1-outer, 2 rig-h1-inner
+DeletedSubnets after   2                                       0
+rig-h1-inner-a in ARM  10.78.130.0/24 Succeeded                10.78.130.0/24 Succeeded
 ```
 
-Also driven end to end in real Chromium through the shipped three-step wizard (zero page errors, zero
-console errors). Step 3, the last screen before the archive, reads verbatim: *"You are about to
-delete 1 subnet(s) that no longer match Azure… This also archives 2 child subnet(s) and 0 host IP
-assignment(s) that live beneath them."* Both review screens state the cascade and its **count**; what
-neither ever says is that the collateral is linked to Azure resources this same scan verified are
-still live, or explicitly withheld. Step 2's banner actively misleads on the point, framing the
-collateral as *"including any you created by hand"*. `_StepConfirm.cshtml` has **no warnings block at
-all** — `#rec-scan-warnings` exists only in `_StepReview.cshtml:23` — so in the RBAC variant the
-withheld sentence never reaches the screen that performs the archive.
+_The finding's step 3 — that nothing further is needed server-side, because the existing
+`noLongerStale` gate answers 409 and already carries `plan.Warnings` — is correct and was confirmed
+rather than assumed: the 409 body above carries the withholding sentence verbatim, so the operator is
+told why without any new plumbing._
 
-This is **not** the accepted C20 window. In both reproductions the archived subtree matched
-`stillStale[id].DescendantSubnetIds` **exactly**, so the closure C20 documents at `:109-110` would not
-catch either case. Everything here is deterministic, single-request, single-threaded.
+_Two things in the finding were deliberately **not** done, both out of scope for the defect.
+Interim **(C)**, the display-only descendant count, is moot now that a blocked target is never offered:
+there is nothing to warn about on a screen that cannot be reached. Adding a warnings block to
+`_StepConfirm.cshtml` is a real gap and stays on the watch list, but it is a separate change to a view
+this fix does not touch, and with the cascade guard in place no withheld row can reach that screen._
 
-**Fix.** *The finder's fix was corrected as incomplete: its part 2 was placed in a method with no
-access to `linkedSubnets`, and its cheap interim missed `plan.ReviewItems` entirely.*
-
-In `AzureReconciler`, so it stays pure and testable:
-
-1. In `ApplyConfirmations`, after `plan.Items = keep` (`:187`), build
-   `HashSet<int> blocked = [.. notVisible.Concat(unknown).Concat(stillLive).Select(i => i.SubnetId),
-   .. plan.ReviewItems.Select(i => i.SubnetId)]`, then
-   `plan.Items.RemoveAll(i => i.DescendantSubnetIds.Any(blocked.Contains))`, naming the removed
-   targets in a new warning. **`plan.ReviewItems` must be in that set**: `ApplyConfirmations` iterates
-   `plan.Items` only (`:145`) and never reads `ReviewItems`, so an `UnrecognisedResourceId` or
-   `FullyAllocatingSubnetDeleted` descendant is in no set built there — and
-   `FullyAllocatingSubnetDeleted` is produced by ordinary imports (`AzureReconciler.cs:261-267`).
-2. In `BuildPlan`, collect into `HashSet<int> liveLinked` the ids of `linkedSubnets` entries that
-   evaluated to `null` — verified live in Azure — at `:99-102`, and after the loop remove from
-   `plan.Items` any item whose `DescendantSubnetIds` intersects it, with its own warning naming those
-   descendants. This is the half that closes the no-RBAC variant, the likeliest in the field.
-   `BuildPlan` is the right home: both callers hold `linked` (`AzureController.cs:342`,
-   `SubnetController.AzureReconcile.cs:56`).
-3. Nothing further is needed server-side: with (1) and (2) in place the existing `noLongerStale` gate
-   at `:78-92` already answers **409** for a dropped target and already carries `plan.Warnings`
-   (`:90`), so the operator gets the real reason for free.
-
-This does not over-withhold the ordinary case: when a VNet is deleted its own imported subnets vanish
-with it, confirm as `Deleted`, and land in `keep`. Dropping items degrades safely — `CanCommit` is
-`ScanSucceeded && GlobalErrors.Count == 0 && Items.Count > 0`
-(`AzureReconcileViewModels.cs:192`) and the wizard's `nothingToReport` check
-(`_ReconcileScripts.cshtml:258`) already handles warnings-without-items.
-`AzureReconcileItem.DescendantSubnetIds` is the **full transitive** descendant set
-(`AzureSubnetSnapshotService.GetDescendants`, BFS with a visited set), and
-`BulkDeleteStaleAzureSubnets` rebuilds the plan server-side at `:57`, so the guard runs on fresh data.
-
-**Cheaper interims, ranked by harm removed per line.**
-**(A)** step 1 alone — about five lines, closes the withheld and review-item variants.
-**(B)** step 2 alone — about ten lines, closes the live-descendant variant.
-**(C)** display-only, closes nothing but ends the surprise: have `BuildPlan` count, per item, the
-descendants that are Azure-linked and became neither an item nor a review item, carry it on
-`AzureReconcileItem`, and render it in `cascadeNote()` (`_ReconcileScripts.cshtml:194-203`) **and** in
-the step-3 confirm list (`:352`) — *"also archives 2 subnet(s) still linked to live Azure resources"*.
-Worth doing regardless: `_StepConfirm.cshtml` should repeat `plan.warnings`, because today the
-withheld sentence never reaches the screen that archives.
+_Test count 677 → 683 (+6). `dotnet build --no-incremental` 0 warnings, 0 errors._
 
 ---
 

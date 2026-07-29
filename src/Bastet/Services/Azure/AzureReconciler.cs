@@ -45,6 +45,10 @@ namespace Bastet.Services.Azure
             Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
 
+            // Subnets this scan positively verified are still present in Azure. Collected so a
+            // target sitting above one is never offered for deletion: see the cascade guard below.
+            HashSet<int> liveLinked = [];
+
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
                 if (!string.IsNullOrEmpty(vnet.ResourceId))
@@ -98,6 +102,11 @@ namespace Bastet.Services.Azure
 
                 if (item is null)
                 {
+                    // Evaluated against a successful read and found live: the VNet or Azure subnet
+                    // is there and still carries the recorded prefix. Nothing downstream ever sees
+                    // this row again - it becomes neither an item nor a review item - so the only
+                    // place it can protect an ancestor from the cascade is here.
+                    liveLinked.Add(snapshot.Id);
                     continue;
                 }
 
@@ -111,6 +120,10 @@ namespace Bastet.Services.Azure
                     plan.Items.Add(item);
                 }
             }
+
+            WithholdTargetsWhoseCascadeIsBlocked(
+                plan, liveLinked,
+                "archiving them would also archive Azure-linked subnet(s) beneath them that still exist in Azure");
 
             // An empty subscription and a subscription we failed to enumerate properly look the same
             // from here, and the consequence of being wrong is deleting everything.
@@ -210,6 +223,51 @@ namespace Bastet.Services.Azure
                     $"{stillLive.Count} Azure-linked subnet(s) were missing from the subscription listing but still exist " +
                     $"in Azure, so they have been withheld from deletion: {NameList(stillLive)}.");
             }
+
+            // Withholding a row means nothing while an ancestor that would archive it is still on
+            // offer: approving the ancestor takes the whole subtree, including everything protected
+            // above. ReviewItems belongs in the set as well - the loop above walks plan.Items only,
+            // so a FullyAllocatingSubnetDeleted or UnrecognisedResourceId descendant appears in none
+            // of the lists built from it, and ordinary imports produce the former.
+            HashSet<int> withheld =
+            [
+                .. notVisible.Select(i => i.SubnetId),
+                .. unknown.Select(i => i.SubnetId),
+                .. stillLive.Select(i => i.SubnetId),
+                .. plan.ReviewItems.Select(i => i.SubnetId)
+            ];
+
+            WithholdTargetsWhoseCascadeIsBlocked(
+                plan, withheld,
+                "archiving them would also archive subnet(s) beneath them that were withheld from deletion");
+        }
+
+        /// <summary>
+        /// Drops every remaining item whose subtree contains a protected subnet, because archiving a
+        /// target archives its whole subtree. <paramref name="protectedSubnetIds"/> holds the rows
+        /// that must not be destroyed; <paramref name="because"/> completes the warning sentence.
+        /// </summary>
+        private static void WithholdTargetsWhoseCascadeIsBlocked(
+            AzureReconcilePlanViewModel plan,
+            HashSet<int> protectedSubnetIds,
+            string because)
+        {
+            if (protectedSubnetIds.Count == 0 || plan.Items.Count == 0)
+            {
+                return;
+            }
+
+            List<AzureReconcileItem> blocked =
+                [.. plan.Items.Where(i => i.DescendantSubnetIds.Any(protectedSubnetIds.Contains))];
+
+            if (blocked.Count == 0)
+            {
+                return;
+            }
+
+            plan.Items.RemoveAll(blocked.Contains);
+            plan.Warnings.Add(
+                $"{blocked.Count} subnet(s) were withheld from deletion because {because}: {NameList(blocked)}.");
         }
 
         /// <summary>
