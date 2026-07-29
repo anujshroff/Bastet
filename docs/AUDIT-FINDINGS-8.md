@@ -308,145 +308,60 @@ _Test count 683 → 690 (+7). `dotnet build --no-incremental` 0 warnings, 0 erro
 
 ## H5 [x1] — Migration bootstrap misreads SQL 4060: a database that exists but cannot be opened is treated as missing, so startup aborts with two successively wrong diagnostics
 
-**Citation.** `src/Bastet/Program.cs:305` (block `:305-326`); the consequence lands at `:371`
-(`dbContext.Database.Migrate()`).
+_H5 is fixed and committed. After the `master` bootstrap connection opens, `Program.cs` now probes
+`SELECT HAS_DBACCESS(@catalog)` on it, and when the answer is **0** — the catalog exists but cannot be
+opened — it disposes the connection and aborts startup with a message that names the database, both
+possible causes, and what not to do. `NULL` (genuinely absent) and `1` (healthy) keep today's
+behaviour, and a probe that cannot run at all is swallowed so the fix fails open rather than refusing
+to start._
 
-**Confidence.** Confirmed. The one step the finder inferred — that the `:305` branch is what puts the
-lock connection on `master` — was measured directly, twice and by two different methods.
+_It aborts rather than logging, which the finding is right to call a constraint: EF Core's
+`SqlServerDatabaseCreator.Exists()` misreads 4060 identically, so anything that merely warns is
+overruled by `Migrate()` a few lines later. The message names **both** causes because `HAS_DBACCESS`
+is also 0 for an offline database, even for `sa` — wording that asserted "this login has no user
+inside it" would be confidently wrong in exactly the case measured as run D below._
 
-**Scenario.** SQL Server raises error 4060 with **byte-identical text** for three different
-conditions: the catalog does not exist, the login has no user inside an existing catalog, and the
-catalog is offline. `Program.cs:305` treats 4060 as the bootstrap path unconditionally, contradicting
-its own comment at `:307-309` (*"the catalog is not there yet, so this is the bootstrap path"*).
+_**The finder's `SELECT DB_ID(@catalog)` probe was rejected, as the verifiers found.** It answers only
+because `VIEW ANY DATABASE` is granted to `public` by default; deny that — ordinary hardening — and it
+returns NULL for a database that plainly exists, so the fix silently no-ops and both wrong messages
+come back. That is run C below, and it is why `HAS_DBACCESS` is used instead. `DB_ID` also returns
+`smallint`, so the natural `is int` test never matches._
 
-With `BASTET_AUTO_MIGRATE=true`, the lock connection falls back to `master` — which **always succeeds
-on a stock SQL Server**, because `guest` holds `CONNECT` there — so the crafted
-`InvalidOperationException` at `:319-324` never fires, and `Migrate()` at `:371` issues
-`CREATE DATABASE [<catalog>]` against a database that already holds the operator's data. Startup
-aborts (exit 134) with `SqlException 262 "CREATE DATABASE permission denied in database 'master'"`.
-Acting on that message's own advice (`ALTER SERVER ROLE dbcreator ADD MEMBER`) produces
-`SqlException 1801 "Database '<catalog>' already exists. Choose a different database name."` — whose
-literal advice would abandon the production catalog. Neither message names the cause. The **same
-deployment with `BASTET_AUTO_MIGRATE=false` reports it accurately**, which is what makes this
-Bastet's wrong output rather than SQL Server's.
-
-**Reproduction.** Rig SQL Server 2022, unmodified shipped binary (byte-copy of the reference publish),
-`ASPNETCORE_ENVIRONMENT=Production`. Reached from three independent starting states:
-
-*Run A — orphaned database user after a restore or failover*, on a deployment that was serving
-`10.44.0.0/16` a minute earlier (README "Database Setup" done correctly, then the login recreated
-without `WITH SID`, which is `sp_change_users_login`'s entire reason to exist):
+_Verified on the rig SQL Server 2022 against the shipped binary in `ASPNETCORE_ENVIRONMENT=Production`,
+from six starting states, on both builds. The deployment was first migrated and given a row of real
+data, then its database user was orphaned the way `sp_change_users_login` exists to repair — the login
+dropped and recreated without `WITH SID`._
 
 ```
-PROCESS EXITED rc=134 after 11.06s
-fail: Microsoft.EntityFrameworkCore.Database.Command[20102]
-      CREATE DATABASE [bastet_audit_606];
-Unhandled exception. Microsoft.Data.SqlClient.SqlException: CREATE DATABASE permission denied in database 'master'.
-   at Program.<Main>$(String[] args) in /home/anuj/code/Bastet/src/Bastet/Program.cs:line 371
-Error Number:262,State:1,Class:14
+                                          unfixed (ff285cf)                fixed
+A orphaned user, auto-migrate on          CREATE DATABASE [bastet_h5];     no CREATE DATABASE
+                                          Error Number:262 "CREATE         Error Number:4060
+                                          DATABASE permission denied       "The configured database
+                                          in database 'master'."           'bastet_h5' exists on this
+                                                                           server but could not be opened"
+B same deployment, auto-migrate off       starts, accurate 4060 message    unchanged
+C DENY VIEW ANY DATABASE TO public        Error Number:262, as above       same correct message
+  (where the rejected DB_ID probe blinds)                                  (this is the case DB_ID fails)
+D database OFFLINE, connecting as sa      Error Number:1801 "Database      same correct message
+                                          'bastet_h5' already exists."
+E genuine bootstrap, catalog absent, sa   starts                           starts; database created,
+                                                                           6 tables - no over-fire
+F orphaned user repaired, nothing else    starts                           starts
+damage sweep                              Bastet tables in master 0, Subnets rows 1, migrations 6
 ```
 
-Not one line names the login, the user, or the fact that the database exists and holds the operator's
-subnets. *Run B* — follow that advice: `Error Number:1801 … Database 'bastet_audit_606' already
-exists.` *Run C — nothing misconfigured at all*, login `sa`, database `SET OFFLINE` for a maintenance
-window: same 4060 at login, same `CREATE DATABASE`, same 1801.
+_Runs B, E and F are identical on both builds, which is the point: the probe fires on exactly the
+condition it names and on nothing else. (`GET /Subnet` answers 500 in every started run on both
+builds — this rig runs Production with no OIDC authority configured. Pre-existing and environmental,
+not a regression; the signal in this table is started-versus-aborted.)_
 
-*Counterfactual*: identical broken deployment with `BASTET_AUTO_MIGRATE=false` →
-`GET /Subnet` 500 with the **accurate** message *"Cannot open database … Login failed for user
-'bastet_c7r_app'."* *Control*: `ALTER USER [bastet_c7r_app] WITH LOGIN = [bastet_c7r_app];` and
-nothing else → *"Application started"*, `GET /Subnet` 200. The only fault was the missing database
-user, which is exactly what neither message named.
+_Test count unchanged at 690. `Program.cs` is top-level startup code with no seam the suite can
+reach — the six-state rig above is the verification, and the watch list already records that this
+repo has no integration host. `dotnet build --no-incremental` 0 warnings, 0 errors._
 
-*Direct proof the `:305` branch fires* — 30 ms DMV sampling during Run A:
-
-```
-APPLOCK 52  master  0:[Bastet:Migration]:(4afee137) X GRANT
-SESSION 52  master  login=bastet_c7r_app  prog=Core Microsoft SqlClient Data Provider
-```
-
-`Configured()` returns the connection string verbatim, so the only path that yields a `master` lock
-connection is `:305 -> :312`. Corroborated by an external hold on `sp_getapplock 'Bastet:Migration'`:
-startup took 11.13 s unblocked, **27.83 s** with the lock held **in master**, and 11.14 s with the
-same resource held in another catalog.
-
-Damage sweep afterwards: `Bastet tables in master: 0`, no stray database, `Subnets` intact,
-`__EFMigrationsHistory: 6`, `APPLICATION locks on the server: 0`. `CREATE DATABASE` on this path can
-only end as 262 or 1801 — there is no data-loss path, which is why this is **low**. It is not info:
-the code takes an action the operator never asked for against a live catalog, throws away a correct
-diagnostic the same deployment produces with auto-migrate off, and its literal advice makes the
-operator grant the application account a server-level `dbcreator` right that does not help.
-
-**Fix.** *The finder's fix — `SELECT DB_ID(@catalog)`, treating non-NULL as "exists" — was corrected:
-it does not work as written, for two reasons both verifiers measured independently. `DB_ID` only
-answers because `VIEW ANY DATABASE` is granted to `public` by default; deny it to the application
-login (ordinary hardening) and the probe returns NULL for a database that plainly exists, so the fix
-silently no-ops and both wrong messages come back — demonstrated end to end with a build carrying the
-`DB_ID` probe. And `DB_ID` returns `smallint`, so the natural `probeResult is int` test never matches.* `HAS_DBACCESS` returns
-`int`, keeps answering under `DENY VIEW ANY DATABASE`, and separates the states correctly in every
-condition measured (0 = exists but unusable, including offline and including for `sa`; NULL = absent;
-1 = healthy, so it does not over-fire).
-
-```csharp
-SqlConnection bootstrapConnection;
-try
-{
-    bootstrapConnection = Open(MigrationLockConnectionString.MasterBootstrap(connectionString));
-}
-catch (SqlException bootstrapException)
-{
-    throw new InvalidOperationException(/* the existing :319-324 message, unchanged */, bootstrapException);
-}
-
-// 4060 is also what a login gets when the catalog EXISTS but cannot be opened - byte-identical text.
-// HAS_DBACCESS answers 0 (exists, not usable) / NULL (no such database) and, unlike DB_ID or
-// sys.databases, keeps answering when VIEW ANY DATABASE has been revoked from public. It returns
-// int, where DB_ID returns smallint. Fail open: if the probe cannot run, keep today's bootstrap path.
-string configuredCatalog = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
-int? catalogAccess = null;
-try
-{
-    using SqlCommand probe = new("SELECT HAS_DBACCESS(@catalog)", bootstrapConnection);
-    probe.Parameters.AddWithValue("@catalog", configuredCatalog);
-    catalogAccess = probe.ExecuteScalar() is int access ? access : null;
-}
-catch (SqlException) { /* probe unavailable - behave exactly as before */ }
-
-if (catalogAccess == 0)
-{
-    bootstrapConnection.Dispose();
-    throw new InvalidOperationException(
-        $"The configured database '{configuredCatalog}' exists on this server but could not be opened, "
-        + "which SQL Server reports as error 4060 using the same text it uses for a database that does "
-        + "not exist. Either the login in BASTET_CONNECTION_STRING has no user inside that database "
-        + $"(CREATE USER inside '{configuredCatalog}', then db_owner for BASTET_AUTO_MIGRATE=true - if "
-        + "the database was restored or failed over, the user may be orphaned: ALTER USER ... WITH "
-        + "LOGIN), or the database is offline or recovering. Do not grant the login permission to "
-        + "create databases; it does not need it.");
-}
-
-return bootstrapConnection;
-```
-
-The message must name **both** causes: `HAS_DBACCESS` is also 0 for an offline database, even for
-`sa`, so wording that asserts "this login has no user inside it" would be confidently wrong in Run C.
-
-This form was built in a private worktree, published and run: correct message on the default server,
-**same** correct message under `DENY VIEW ANY DATABASE` (where `DB_ID` fails), genuine bootstrap
-(`sa`, catalog absent) still creates the database and serves `GET /Subnet` 200, and a genuinely absent
-catalog with a login that cannot create databases still gets the original 262 — the probe does not
-over-fire. `dotnet build` 0 warnings / 0 errors, `dotnet test` 677 passed.
-
-**Constraint on any fix:** EF Core's `SqlServerDatabaseCreator.Exists()` makes the *same* 4060
-misreading independently — that is why `Migrate()` issues `CREATE DATABASE` at all — so a fix at
-`:305` must **abort startup**. One that merely logs and continues is overruled by EF three lines
-later.
-
-**Cheaper interim:** remember that the `master` fallback fired and wrap `dbContext.Database.Migrate()`
-at `:371` so any failure on that path adds *"the configured database '<name>' could not be opened; if
-it already exists this login is not a user inside it, or the database is offline — grant access or
-bring it online rather than creating the database."* A few lines, no extra round trip, robust to
-metadata-visibility settings because it probes nothing. Strictly weaker — it fires only *after* the
-pointless `CREATE DATABASE` — but it removes the misdirection toward `dbcreator`.
+_Not taken: the cheaper interim that wraps `Migrate()` and appends advice after the fact. It is
+strictly weaker — it fires only after the pointless `CREATE DATABASE` — and the real fix costs one
+round trip on a path that already opened a connection._
 
 ---
 

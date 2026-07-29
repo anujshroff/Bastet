@@ -304,12 +304,13 @@ if (autoMigrate)
         }
         catch (SqlException ex) when (ex.Number == 4060)
         {
-            // 4060 is "cannot open database" - the catalog is not there yet, so this is the
-            // bootstrap path. Every other failure, a bad credential included, is left to surface as
-            // itself rather than being reinterpreted as a missing database.
+            // 4060 is "cannot open database". Every other failure, a bad credential included, is
+            // left to surface as itself rather than being reinterpreted as a missing database.
+            SqlConnection bootstrapConnection;
+
             try
             {
-                return Open(MigrationLockConnectionString.MasterBootstrap(connectionString));
+                bootstrapConnection = Open(MigrationLockConnectionString.MasterBootstrap(connectionString));
             }
             catch (SqlException bootstrapException)
             {
@@ -323,6 +324,52 @@ if (autoMigrate)
                     + $"login access to '{MigrationLockConnectionString.BootstrapCatalog}'. "
                     + "See BASTET_CONNECTION_STRING and BASTET_AUTO_MIGRATE.", bootstrapException);
             }
+
+            // 4060 is byte-identical for three different conditions: the catalog is absent, the
+            // login has no user inside a catalog that exists, and the catalog is offline. Assuming
+            // the first sends a deployment whose database is present and full of data down the
+            // bootstrap path, where Migrate() issues CREATE DATABASE against it and startup dies
+            // with a diagnostic about master permissions that names nothing real.
+            //
+            // HAS_DBACCESS separates them: 0 = it exists but cannot be used, NULL = no such
+            // database, 1 = healthy. It is used rather than DB_ID or sys.databases because it keeps
+            // answering when VIEW ANY DATABASE has been revoked from public - ordinary hardening,
+            // under which DB_ID returns NULL for a database that plainly exists - and because it
+            // returns int where DB_ID returns smallint. Fail open: if the probe cannot run at all,
+            // behave exactly as before.
+            string configuredCatalog = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+            int? catalogAccess = null;
+
+            try
+            {
+                using SqlCommand probe = new("SELECT HAS_DBACCESS(@catalog)", bootstrapConnection);
+                probe.Parameters.AddWithValue("@catalog", configuredCatalog);
+                catalogAccess = probe.ExecuteScalar() is int access ? access : null;
+            }
+            catch (SqlException)
+            {
+                // Probe unavailable - keep today's behaviour rather than refusing to start.
+            }
+
+            if (catalogAccess == 0)
+            {
+                bootstrapConnection.Dispose();
+
+                // This must abort startup, not log and continue: EF Core's
+                // SqlServerDatabaseCreator.Exists() misreads 4060 the same way, so anything short of
+                // throwing is overruled by Migrate() a few lines below.
+                throw new InvalidOperationException(
+                    $"The configured database '{configuredCatalog}' exists on this server but could not be "
+                    + "opened, which SQL Server reports as error 4060 using the same text it uses for a "
+                    + "database that does not exist. Either the login in BASTET_CONNECTION_STRING has no "
+                    + $"user inside that database (CREATE USER inside '{configuredCatalog}', then db_owner "
+                    + "for BASTET_AUTO_MIGRATE=true - if the database was restored or failed over the user "
+                    + "may be orphaned: ALTER USER ... WITH LOGIN), or the database is offline or "
+                    + "recovering. Do not grant the login permission to create databases; it does not need "
+                    + "it.", ex);
+            }
+
+            return bootstrapConnection;
         }
 
         // Disposes on any failed open, so neither attempt above can leak a connection.
