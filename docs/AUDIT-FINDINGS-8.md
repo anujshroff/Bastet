@@ -255,107 +255,54 @@ the verification. `dotnet build --no-incremental` 0 warnings, 0 errors._
 
 ## H4 [x1] — "Purge All" ignores the scope its own confirmation page states: the POST round-trips nothing and deletes whatever exists at execution time
 
-**Citation.** `src/Bastet/Controllers/SubnetController.Delete.cs:299` (`ExecuteDeleteAsync`), with the
-GET at `:275-284` and the view text at `Views/Subnet/PurgeAllDeletedSubnets.cshtml:17`. Twin:
-`src/Bastet/Controllers/HostIpController.cs:617`, GET at `:593-602`.
+_H4 is fixed and committed by bounding the purge to the set the confirmation page counted, which is
+the finding's own promoted interim. Both view models carry a `MaxId`, both GETs read
+`MaxAsync(d => (int?)d.Id) ?? 0` into it, both views post it back as a hidden `confirmedMaxId`, and
+both POSTs delete `Where(d => d.Id <= confirmedMaxId)`. The parameter binds as `int?` and a missing or
+non-positive value is **refused** with an error and a redirect to the confirmation page, rather than
+binding 0 and reporting a cheerful "Permanently purged 0 record(s)" — the trap one verifier fell into
+by accident. Both twins were changed together; they had already drifted once._
 
-**Confidence.** Confirmed — for the reframed defect. *The finding as filed blamed the missing global
-subnet lock; that mechanism is refuted (see the fix, and the reproduction below with zero
-concurrency). The defect does not depend on it.*
+_**The finding's originally proposed fix was not applied, and must not be.** Wrapping the two POSTs in
+`ExecuteWithSubnetLockAsync` was built, run and measured unsound by both verifiers: it prevents
+nothing, because the loss needs no concurrency at all, and it converts the one ordering HEAD already
+handles correctly into total loss by parking a purge behind an entire delete. Round 6's clean bill had
+already noticed the same unguarded purge and left it deliberately. The watch list carries this;
+nothing here should be read as re-opening it._
 
-**Scenario.** The POST's whole signature is `PurgeAllDeletedSubnetsConfirmed(string confirmation)`.
-Nothing from the GET is round-tripped, so the delete is unbounded, while the page the operator typed
-`approved` into says *"You are about to permanently delete **1** archived subnet record(s). After
-purging, these records will be gone forever — there is no recovery."*
+_The alternative interim — posting the rendered `Count` back and refusing on any change — was also not
+taken. It refuses work the operator can legitimately do, where the bound simply does the right amount
+of it, and the bounded `DELETE` is a clustered-index seek that never touches the uncommitted tail._
 
-**One admin, one session, two tabs, zero concurrency.** Tab 1 opens
-`/Subnet/PurgeAllDeletedSubnets`, which renders `permanently delete <strong>1</strong> archived subnet
-record(s)`. In tab 2 the same admin (or a Delete-role colleague) deletes `10.50.0.0/16` and its 10
-children, archiving 11 more rows. **Five seconds later** tab 1 submits the form it already had open:
-12 archive records destroyed, banner *"Permanently purged 12 deleted subnet record(s)"*, and the
-deleting tab's own success banner promised an archive that no longer exists.
+_Soundness of the bound, unchanged from the finding and re-checked: production is SQL Server only
+(`Program.cs` uses `UseSqlServer` on both paths), `Id` is `IDENTITY`, and `DELETE` — unlike
+`TRUNCATE` — never reseeds it, so any row archived after the GET necessarily has a higher `Id`._
 
-**Reproduction.** HEAD build, SQL Server 2022, catalogs `bastet_audit_207` / `bastet_audit_607`.
-Sequential, no overlap at all:
-
-```
-BEFORE:                Subnets=11 DeletedSubnets=1
-tab-1 page said:       permanently delete <strong>1</strong> archived subnet record(s)
-tab-2 delete HTTP=302  Subnets=0  DeletedSubnets=12
-(sleep 5)
-tab-1 purge  HTTP=302  banner: Permanently purged 12 deleted subnet record(s)
-FINAL:                 Subnets=0  DeletedSubnets=0
-```
-
-At 900 children the page said `1` and 902 rows were destroyed. Host-IP twin, same shape: page said
-`permanently delete 1 archived host IP record(s)`, another tab archived 4, five seconds later the
-stale form reported *"Permanently purged 5 deleted host IP record(s)"*.
-
-Second, concrete consequence: `HostIpController.cs:522` loads `DeletedSubnets` so
-`/HostIp/AllDeletedHostIps` can name the subnet each archived IP belonged to. Purging the subnet
-archive blinds the host-IP archive:
+_Verified live first, on the unfixed build, with the finding's own sequence — one admin, two tabs,
+zero concurrency, five seconds apart — then again on the fixed build:_
 
 ```
-before purge:  3 rows render "net-b (deleted)"  10.61.0.0  /24
-after purge:   3 rows render "Unknown"          "Unknown"  cidr 0
+                              unfixed (ff285cf)            fixed
+page promised                 1                            1
+hidden confirmedMaxId         absent - unbounded           1
+tab 2 archives 11 more        DeletedSubnets=12            DeletedSubnets=12
+tab 1 submits its open form   "Permanently purged 12"      "Permanently purged 1"
+DeletedSubnets remaining      0                            11
 ```
 
-No live data is touched, no corruption occurs (`DeletedSubnets` after each of eight runs was only ever
-0, 901 or 902 — never partial), and both sides are admin-gated; hence **low**. It is not info, because
-data really is destroyed unrecoverably (there is no restore path anywhere in the app, so the archive
-is the only record that a subnet existed, who deleted it and when) and the app itself already gates
-the same operation on the same count one HTTP request earlier — `GET` with an empty archive 302s away
-with *"There are no deleted subnet records to purge."*
+_Seven tests were added (`PurgeAllScopeTests`), covering both archives: the bounded purge leaves
+later-archived rows alone, a scope-less POST refuses and destroys nothing (`null`, `0`, `-1`), and the
+ordinary unchanged case still purges everything. They are load-bearing, proved the way the skill
+prescribes — in a scratch copy with **only** the `Where` bound reverted and the parameter kept, the two
+scope tests fail and the rest pass. The suite runs on SQLite, where a plain `INTEGER PRIMARY KEY`
+reuses the top rowid after a delete, so every assertion is about rows inserted while the archive is
+non-empty and never about IDs surviving a purge — the caveat the finding raised._
 
-**Fix.** *The finder's fix — wrapping both POSTs in `ExecuteWithSubnetLockAsync` — was built, run and
-measured **unsound**, independently by both verifiers. Do not add the lock.* It prevents nothing (the
-loss above needs no concurrency) and it converts the one ordering HEAD handles **correctly** into
-total loss:
+_Not addressed, and deliberately: that the purge POST does not require the confirmation page at all,
+since antiforgery tokens are per-session. That is on the watch list as by design, and it is a
+different question from scoping._
 
-```
-(HEAD,         purge at +109ms)  waited   12ms -> DeletedSubnets=901  B: "purged 1"
-(PATCHED-LOCK, purge at +108ms)  waited 1185ms -> DeletedSubnets=0    B: "purged 902"
-```
-
-A purge issued before the archive inserts finishes first and takes exactly the records the page
-promised; the lock parks it behind the entire delete.
-
-Bound the delete to the set the operator was shown — the finder's own cheaper interim, promoted to the
-fix:
-
-- `Models/ViewModels/PurgeAllViewModels.cs`: add `public int MaxId { get; set; }` to both view models.
-- GET: `int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;` into the model.
-- View: `<input type="hidden" name="confirmedMaxId" value="@Model.MaxId" />`.
-- POST: `PurgeAllDeletedSubnetsConfirmed(string confirmation, int? confirmedMaxId)` →
-  `context.DeletedSubnets.Where(d => d.Id <= confirmedMaxId).ExecuteDeleteAsync()`. Same for
-  `DeletedHostIpAssignments`.
-- Bind it as `int?` and re-render the confirmation when it is null or `<= 0` — otherwise a POST
-  without the field silently reports *"Permanently purged 0 deleted subnet record(s)"* and does
-  nothing. (One verifier hit this by accident.)
-
-Soundness of the bound: production is SQL Server only (`Program.cs:72` and `:79` are both
-`UseSqlServer`), `Id` is `IDENTITY`, and `DELETE` — unlike `TRUNCATE` — never reseeds it, so any row
-archived after the GET necessarily has `Id > MaxId`. Measured on the patched build:
-
-```
-purge at +108ms  confirmedMaxId=10825  waited 22ms -> DeletedSubnets=901  B: "purged 1"
-purge at +458ms  confirmedMaxId=11727  waited 13ms -> DeletedSubnets=901  B: "purged 1"
-sequential       confirmedMaxId=12629             -> DeletedSubnets=901  B: "purged 1"
-```
-
-Free side effect visible in those timings: the bounded `DELETE` is a clustered-index seek that never
-touches the uncommitted tail rows, so the purge stops blocking (13-22 ms versus 285-696 ms).
-
-**Cheaper interim, no schema or view-model change, and it keeps "Purge All" meaning all:** post the
-rendered `Count` back as a hidden field and refuse when
-`await context.DeletedSubnets.CountAsync() != confirmedCount`, redirecting to the GET with *"the
-archive changed since this page was rendered — review and confirm again."* Rows are only ever **added**
-to these two tables outside the purge itself, so count equality is a reliable optimistic check.
-
-`grep -rn "PurgeAll" test/` returns 0 hits, so there is no test fallout. **Caveat for whoever writes
-the regression test:** the suite is SQLite, where a plain `INTEGER PRIMARY KEY` reuses the highest
-rowid after the max row is deleted, so a SQLite test must not assume monotonicity across a purge —
-assert on rows inserted while the archive is non-empty.
+_Test count 683 → 690 (+7). `dotnet build --no-incremental` 0 warnings, 0 errors._
 
 ---
 
