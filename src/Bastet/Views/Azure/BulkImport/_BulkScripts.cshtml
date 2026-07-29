@@ -9,6 +9,7 @@
         let selectedSubscriptionName = "";
         let vnets = []; // [{ resourceId, name, ipv4AddressPrefixes:[], subnets:[{name, addressPrefix}] }]
         let lastSelection = null; // last BulkImportSelectionDto submitted
+        let previewSeq = 0;       // bumped per preview so a superseded response can be told apart
 
         // ---------------------------------------------------------------
         // Step navigation helpers
@@ -427,6 +428,11 @@
         }
 
         function loadPreview(selection) {
+            // Preview latency scales with (existing subnets x selected prefixes), so two previews
+            // can answer out of order. Commit posts lastSelection, which is set on the click - if a
+            // superseded response were allowed to repaint, the screen would show one plan while the
+            // button posted another, and the server re-plans what it is sent and cannot tell.
+            const seq = ++previewSeq;
             $.ajax({
                 url: '@Url.Action("BulkImportPreview", "Azure")',
                 type: "POST",
@@ -439,6 +445,9 @@
                     $("#bulk-preview-error").addClass("d-none");
                 },
                 success: function (result) {
+                    if (seq !== previewSeq) {
+                        return;
+                    }
                     if (!result.success) {
                         $("#bulk-preview-error-message").text(result.error || "Failed to build plan");
                         $("#bulk-preview-error").removeClass("d-none");
@@ -448,10 +457,20 @@
                     $("#bulk-preview-content").removeClass("d-none");
                 },
                 error: function (xhr, status, error) {
+                    // Without this a superseded request that fails paints its error over a current,
+                    // valid plan.
+                    if (seq !== previewSeq) {
+                        return;
+                    }
                     $("#bulk-preview-error-message").text("Error connecting to server: " + error);
                     $("#bulk-preview-error").removeClass("d-none");
                 },
                 complete: function () {
+                    // jQuery always runs complete, so a superseded request would otherwise hide the
+                    // spinner of one still in flight.
+                    if (seq !== previewSeq) {
+                        return;
+                    }
                     $("#bulk-preview-loading").addClass("d-none");
                 }
             });

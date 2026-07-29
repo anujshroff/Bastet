@@ -205,102 +205,49 @@ records, so the verification is the browser run above. `dotnet build --no-increm
 
 ## H3 [x1] — Bulk Azure import commits a plan the operator never saw: the preview pane renders the last response to arrive, Confirm posts the last selection clicked
 
-**Citation.** `src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:447` (`renderPlan(result.plan)`
-in `loadPreview`'s success handler), with `:387` (`lastSelection = selection`, set synchronously on
-the click) and `:543` (`$("#bulk-go-commit-btn").prop("disabled", !plan.canCommit)`).
+_H3 is fixed and committed, the same way and for the same reason as H2: `loadPreview` takes a
+sequence number from a module-level `previewSeq`, and `success`, `error` and `complete` all return
+early when they are not the newest request. A superseded plan can no longer repaint the pane, so
+`#bulk-go-commit-btn` can no longer be re-enabled from a plan the operator is not looking at, and the
+screen and `lastSelection` cannot describe different selections. Nothing server-side changed:
+`BulkCreateFromAzurePlan` re-plans what it is posted and is right to, since it has no way to know what
+was rendered._
 
-**Confidence.** Confirmed. `grep -n "abort\|seq"` over the whole 632-line file returns nothing: no
-sequence token, no retained jqXHR, no `.abort()`. `git log` on the file shows no guard was ever
-removed.
+_Both corrections the verifier made to the finder's fix were taken. Guarding `success` alone leaves a
+stale `error` painting "Error connecting to server:" over a current valid plan, and a stale `complete`
+hiding the spinner of a request still in flight. The `.abort()` interim was rejected for the reason
+recorded under H2 — placement-sensitive against the pinned jQuery 4.0.0 — and the two wizards now
+carry the identical guard, which is the point: they were diverging, and the reconcile wizard's
+`renderPlan`-sets-`lastPlan` arrangement was already correct._
 
-**Scenario.** An admin ticks VNet prefix `10.40.0.0/16` (`rig-vnet-gamma`) and presses *Next:
-Preview*. The preview is slow. Rather than wait they click the **step-2 pill** — which stays enabled
-during a load (`activateTab` never re-disables a visited pill, and `#bulk-back-to-selection-btn` sits
-*inside* `#bulk-preview-content`, which is `d-none` while the spinner runs, so the pill is the only
-route back) — untick gamma, tick `10.31.0.0/16` (`rig-vnet-beta`) with both its subnets and the
-"rename matched" switch, and press *Next: Preview* again.
-
-The second response renders first. The first response then lands and repaints the pane with the gamma
-plan, re-enabling *Continue to Commit* from **gamma's** `canCommit`. The operator approves that
-screen. Confirm Import posts `lastSelection`, which is **beta**.
-`SubnetController.BulkAzure.cs:60-75` re-plans the *posted* selection, finds it internally consistent,
-and commits it. It never sees the rendered plan, so it cannot detect the divergence. Step 4 shows no
-recap.
-
-**Wrong output.** Banner: *"Created 0 VNet target(s), 2 child subnet(s), renamed 1 target(s)"*. In
-`bastet_audit_204` the operator's hand-made `Prod Core 10.31.0.0/16` was **renamed** to
-`rig-vnet-beta` (description still "Hand made by the operator"), **permanently stamped** with
-`AzureResourceId`, and two children created under it. `10.40.0.0/16` — the plan actually on screen —
-was never created.
-
-**Reproduction.** Real Chromium against the live app on 127.0.0.1:5404. The **only** thing forced is
-arrival order: `page.route` on `**/Azure/BulkImportPreview` does `resp = await route.fetch()` (the
-live app answers with its own bytes), sleeps 6 s for request #1 only, then
-`route.fulfill(response=resp)`. Request #2 passes straight through. No source patched, no body
-altered.
+_Verified in real Chromium against the live app on 127.0.0.1:5813, SQL Server 2022, real ARM.
+`rig-h3-gamma` (10.40.0.0/16, no subnets) and `rig-h3-beta` (10.31.0.0/16, two subnets) in Azure, and
+a hand-made Bastet subnet `Prod Core` 10.31.0.0/16. Tick gamma, press Next: Preview, jump back through
+the still-enabled step-2 pill while it loads, tick beta, preview again. Only arrival order is forced:
+`page.route` fetches the live app's own bytes for preview #1, holds them 6 s, then fulfils; preview #2
+passes straight through._
 
 ```
-[t+ 1.53s] CLICK 1: ticked rig-vnet-gamma 10.40.0.0/16, pressing 'Next: Preview'
-[t+ 2.62s] clicked the step-2 pill; step2 pane visible = True     (request still in flight)
-[t+ 2.79s] CLICK 2: gamma unticked; ticked rig-vnet-beta 10.31.0.0/16 + 2 subnets + rename switch
-[t+ 3.08s] SCREEN after response #2: rig-vnet-beta / Exact match "Prod Core" -> rename
-[t+ 7.59s] preview RESPONSE #1 delivered (plan for rig-vnet-gamma)
-[t+10.64s] SCREEN: "New top-level create rig-vnet-gamma (10.40.0.0/16) / No child subnets selected."
-              commit button disabled? False
-[t+10.95s] COMMIT. POST body vNetPrefixes = [rig-vnet-beta 10.31.0.0/16 + mgmt + svc]
-
-1 | rig-vnet-beta      | 10.31.0.0/16 | arm=.../virtualNetworks/rig-vnet-beta | desc=Hand made by the operator
-2 | rig-snet-beta-mgmt | 10.31.1.0/24 | parent=1
-3 | rig-snet-beta-svc  | 10.31.2.0/24 | parent=1
+                       unfixed (ff285cf)                          fixed
+after the stale plan   pane: 'New top-level create rig-h3-gamma   pane: 'VNet "rig-h3-beta" - prefix
+lands                   (10.40.0.0/16) No child subnets            10.31.0.0/16 Exact match Bastet
+                        selected.'                                 subnet "Prod Core"'
+commit button          enabled, from GAMMA's canCommit            enabled, from BETA's canCommit
+Confirm posts          vNetPrefixes=[rig-h3-beta ...]             vNetPrefixes=[rig-h3-beta ...]
+screen vs payload      DIVERGENT                                  agree
+row 1 after commit     Prod Core stamped with beta's ARM id       Prod Core stamped with beta's ARM id
+                       while gamma was on screen; 10.40.0.0/16    - the plan that was reviewed
+                       never created
+page errors            []                                         []
 ```
 
-The ordering premise was then measured **with nothing forced at all**. `/Azure/BulkImportPreview` is
-`GetExistingSubnetsAsync()` plus several O(existing) passes per selected prefix, so latency scales
-with `existing x selected` — 39 ms at 20 000 subnets / 1 prefix, **7 247 ms** at 200 000 / 600. Two
-ordinary requests, heavy preview first, light preview `GAP` seconds later:
+_The write is identical in both columns, which is the whole point: unfixed, that write is the one the
+operator did **not** approve. `Prod Core` carries an `AzureResourceId` permanently either way —
+`DeletedSubnets` does not archive the column and there is no restore path — so the difference between
+the two runs is whether the operator agreed to it._
 
-```
-gap=1.0s -> light finished t+1.24s ; heavy finished t+5.15s   INVERTED=True
-gap=2.0s -> light finished t+2.24s ; heavy finished t+6.69s   INVERTED=True
-gap=3.0s -> light finished t+3.23s ; heavy finished t+5.92s   INVERTED=True
-```
-
-That is literally the "select all, too much, go back and pick one" flow. Separately, 310 concurrent
-preview pairs on a warm small deployment completed **102 out of order**: the application imposes no
-ordering whatsoever. On a small tree the precondition is a transient stall on request #1 — pool wait
-(G5 measured 15 s pool timeouts in this app), a cold load-balanced replica, a DB failover — which is
-exactly what makes an operator abandon the spinner, so the two conditions are correlated.
-
-Contrast, which is what makes this a defect rather than house style: the reconcile wizard sets
-`lastPlan = plan` **inside** `renderPlan` (`_ReconcileScripts.cshtml:205-206`), so its screen and its
-payload always come from one response.
-
-**Fix.** *The finder's fix was corrected as incomplete (it guarded `success` only) and its interim was
-corrected as placement-dependent.* A stale `error` is reachable today and paints *"Error connecting to
-server:"* over a current, valid plan — measured: `after response #2 rendered a valid plan:
-content=True errorPanel=False` then `after stale request #1 FAILED: content=True errorPanel=True`. A
-stale `complete` hides the spinner of a request still in flight (jQuery always runs `complete`).
-
-```js
-let previewSeq = 0;
-function loadPreview(selection) {
-    const seq = ++previewSeq;
-    $.ajax({
-        /* ... unchanged ... */
-        success:  function (result) { if (seq !== previewSeq) { return; } /* unchanged */ },
-        error:    function (xhr, status, error) { if (seq !== previewSeq) { return; } /* unchanged */ },
-        complete: function ()       { if (seq !== previewSeq) { return; }
-                                      $("#bulk-preview-loading").addClass("d-none"); }
-    });
-}
-```
-
-**Cheaper interim:** retain the jqXHR and `.abort()` it **at the top of `loadPreview`, before the new
-`$.ajax` call**, plus `if (status === "abort") { return; }` as the first line of `error`. The abort
-alone is only correct at that exact placement — measured with the abort reached after the new
-`beforeSend`, jQuery 4.0.0 fired `error(status=abort)` then `complete` and left
-`errorText='Error connecting to server: abort'` on screen. The `status === "abort"` line makes the
-interim placement-independent and costs one line.
+_Test count unchanged at 683 — no JS test harness exists, per the watch list; the browser run above is
+the verification. `dotnet build --no-incremental` 0 warnings, 0 errors._
 
 ---
 
