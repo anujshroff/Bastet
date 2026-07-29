@@ -156,118 +156,50 @@ _Test count 677 → 683 (+6). `dotnet build --no-incremental` 0 warnings, 0 erro
 
 ## H2 [x2] — Single-VNet import wizard has no staleness guard on `loadSubnets`, so an out-of-order response posts one VNet's subnets under another VNet's identity
 
-**Citation.** `src/Bastet/Views/Azure/Import/_ImportScripts.cshtml:250` (`loadSubnets`' `success`
-handler), against `:61-62` (identity written synchronously on click) and `:224` (`loadSubnets` keeps
-no token and no jqXHR).
+_H2 is fixed and committed. `loadSubnets` now takes a sequence number from a module-level
+`subnetSeq`, and **all three** jQuery callbacks return early when they are not the newest request:
+`success` so a superseded response cannot repaint rows under the current VNet's identity, `error` so a
+superseded transport failure cannot paint "Error connecting to server:" over a valid list, and
+`complete` so it cannot hide the spinner of a request still in flight. The accepted `success` also
+writes `#vnet-name` and `#vnet-resource-id` from its own arguments, so the identity always comes from
+the response that populated the rows rather than from the click that started it. `:61-62` were left in
+place, as the finding allows — `beforeSend` hides `#subnet-selection`, so the form is unreachable
+between the click and the accepted response, and what actually fixes the defect is the accepted
+response writing the identity._
 
-**Confidence.** Confirmed.
+_The finder's fix was taken with the verifier's correction, which was right: guarding `success` alone
+leaves both other legs reachable, and the `error` leak is not theoretical — it reproduced here on the
+first attempt. The `.abort()` interim was **not** taken. It is placement-sensitive against the pinned
+jQuery 4.0.0 (the aborted request's handlers run synchronously inside `.abort()`), so it is correct
+only at one exact call site or with an extra `status === "abort"` line; the sequence guard is the same
+size, needs no such caveat, and is what the reconcile wizard already does. The optional server-side
+prefix check was also not taken: it is a different finding's territory, sits on the watch list as a
+deliberate round-6 decision, and would need a conditional for the documented plain-JSON caller._
 
-**Scenario.** `#select-vnet-btn` writes the hidden `vnetName` / `vnetResourceId` fields synchronously
-at `:61-62` and then calls `loadSubnets(selectedVNetId)` at `:63`. The `success` handler at `:250`
-empties and rebuilds `#subnet-list` (`:254-255`) with **no** comparison against the currently selected
-VNet, and `/Azure/GetSubnets` does live per-VNet ARM reads, so latency varies.
-
-An admin on a Bastet subnet whose prefix is shared by two Azure VNets — a topology the source itself
-contemplates (*"Two VNets in one subscription may share a prefix"*,
-`SubnetController.Azure.cs:331-332`) — picks VNet A, goes back via the still-enabled step-2 pill,
-picks VNet B, and gets **A's subnet rows repainted over B's identity** when A's response lands last.
-`Views/Azure/Import/_SubnetList.cshtml` prints no VNet name on step 3, so nothing on screen
-contradicts it.
-
-Ticking a row and pressing Import posts children stamped with A's ARM ids alongside B's
-`vnetName`/`vnetResourceId`. The server accepts it — no site compares a child's `AzureResourceId`
-against `vnetResourceId`; the child stamp is a straight copy at `SubnetController.Azure.cs:409` — and
-reports success. The resulting row is unrepairable: the wizard refuses re-entry, G1 refuses a crafted
-relink, `Edit` cannot bind the column, and `DeletedSubnets` does not archive it. If the wrongly
-stamped VNet is later deleted in Azure, reconcile archives the parent **and its whole subtree**,
-including children that are alive in the other VNet.
-
-**Reproduction.** Live app on 127.0.0.1:5403, catalog `bastet_audit_203`, headless Chromium, real ARM,
-**no proxy and no injected delay** — the superseded response landed last on natural latency alone:
+_Verified in real Chromium against the live app on 127.0.0.1:5812, SQL Server 2022, real ARM, with two
+Azure VNets deliberately sharing `10.20.0.0/16` (`rig-h2-alpha` with three subnets, `rig-h2-twin` with
+one) and a hand-made Bastet subnet on the same prefix. Only the **arrival order** is manipulated —
+`page.route` fetches the live app's own bytes for request #1, holds them 5 s, then fulfils; request #2
+passes straight through. Async, so both are genuinely in flight._
 
 ```
-trial 2: resp-order=[(1.431,'rig-uip2-twin',200),(1.512,'rig-vnet-alpha',200)]
-         rows=['rig-snet-alpha-web','-app','-data','-import-only'] hidden vnetName='rig-uip2-twin' STALE=True
-...
-DELAY=0.0  trials=8  stale-repaints=5
+                              unfixed (ff285cf)                          fixed
+A superseded response last    rows alpha-web/app/data, identity          rows twin-only, identity
+                              'rig-h2-twin'   STALE_REPAINT=True         'rig-h2-twin'   False
+B superseded request fails    errorPanel True, "Error connecting         errorPanel False
+                              to server: " over valid twin rows
+C control, one pick           3 alpha rows, identity 'rig-h2-alpha'      identical
+page errors                   []                                        []
 ```
 
-Carried through to the write (again unmanipulated). Captured `POST /Subnet/BatchCreateChildSubnets`,
-URL-decoded:
+_The description each imported child carries still reads `selectedVNetName`, the click-time closure
+variable. Checked rather than assumed: `loadSubnets` is called from exactly one place, so under the
+guard the newest request is always the newest click and the two agree. Left alone to keep the change
+to the defect._
 
-```
-parentId=1  vnetName=rig-uip2-twin  isAzureImport=true
-vnetResourceId=.../virtualNetworks/rig-uip2-twin
-subnets[0].Name=rig-snet-alpha-web  subnets[0].NetworkAddress=10.20.1.0  subnets[0].Cidr=24
-subnets[0].Description=Imported from Azure VNet: rig-uip2-twin
-subnets[0].AzureResourceId=.../virtualNetworks/rig-vnet-alpha/subnets/rig-snet-alpha-web
--> 302 /Subnet/Details/1
-   "Successfully renamed parent subnet to 'rig-uip2-twin' and imported 1 child subnets."
-```
-
-Database (`bastet_audit_203`):
-
-```
-1 | rig-uip2-twin      | 10.20.0.0/16 | parent=- | arm=.../virtualNetworks/rig-uip2-twin
-2 | rig-snet-alpha-web | 10.20.1.0/24 | parent=1 | arm=.../virtualNetworks/rig-vnet-alpha/subnets/rig-snet-alpha-web
-```
-
-All three candidate correctors checked and silent: `POST /Azure/ReconcileScan` on the corrupted tree
-returned `items:[] reviewItems:[] warnings:[] canCommit:false` (both ARM ids exist, so the app's own
-consistency checker says nothing); `GET /Azure/Import/1` now 302s away with *"Subnet must not have any
-child subnets or host IP assignments"*; a crafted relink POST was refused by G1
-(`SubnetController.Azure.cs:338-350`).
-
-Window width, measured to bound severity: with a 1.5 s human-paced pause between the two clicks,
-**0 hits in 6** — `GetSubnets` answers in ~200 ms here, so the window is roughly the latency
-difference. `AzureService.GetCompatibleSubnets` still issues `vnetResource.Get()` **plus** a full
-`GetSubnets()` enumeration per VNet (the shape G3 deliberately left), so a VNet with hundreds of
-subnets, or a 429 with SDK retry backoff, puts it in multi-second territory.
-
-**Fix.** *The finder's fix was corrected as incomplete: it guarded `success` only.* The `error`
-handler (`:323-326`) and `complete` (`:327-329`) stay unguarded, so a superseded request that fails at
-the transport paints *"Error connecting to server: …"* over the current VNet's correctly rendered
-rows, and its `complete` hides `#subnet-loading` while the current request is still in flight.
-
-```js
-let subnetSeq = 0;
-function loadSubnets(vnetResourceId, vnetName) {
-    const seq = ++subnetSeq;
-    $.ajax({
-        url: '@Url.Action("GetSubnets", "Azure")',
-        type: "GET",
-        data: { vnetResourceId: vnetResourceId, subnetId: @Model.SubnetId },
-        dataType: "json",
-        beforeSend: function () { /* unchanged, incl. G10's reset */ },
-        success: function (result) {
-            if (seq !== subnetSeq) { return; }          // superseded - drop it
-            $("#vnet-name").val(vnetName);              // identity comes from the response
-            $("#vnet-resource-id").val(vnetResourceId); // that populated the rows
-            /* ...existing body... */
-        },
-        error: function (xhr, status, error) { if (seq !== subnetSeq) { return; } /* ...existing... */ },
-        complete: function () { if (seq !== subnetSeq) { return; } $("#subnet-loading").hide(); }
-    });
-}
-```
-
-with `:63` becoming `loadSubnets(selectedVNetId, selectedVNetName)`. `:61-62` may stay — `beforeSend`
-hides `#subnet-selection`, so the form is unreachable between the click and the accepted response;
-what fixes the defect is the **accepted response** writing the identity fields.
-
-**Cheaper interim:** retain the jqXHR and `.abort()` the previous one **at the very top of
-`loadSubnets`, before the new `$.ajax` call**. Verified against the pinned jQuery 4.0.0: the aborted
-request's handlers are dispatched synchronously inside `.abort()`
-(`['--about to call abort()--','error(abort)','complete','--abort() returned--']`), so the new
-request's `beforeSend` undoes them in the same task and nothing is painted. Placing the abort inside
-`beforeSend` instead reverses the order and leaves the red banner up — the interim is only correct as
-written, or with `if (status === "abort") { return; }` as the first line of `error`.
-
-**Optional defence-in-depth (not the finder's, and not the round-6 F1 check that was declined):** when
-`vnetResourceId` is supplied, require every child `AzureResourceId` to start with
-`vnetResourceId + "/subnets/"` (`OrdinalIgnoreCase`) and reject otherwise. Pure string test, no ARM
-round trip. It must be conditional on `vnetResourceId` being non-empty, because the documented plain
-JSON caller may post `AzureResourceId` without one.
+_Test count unchanged at 683 — there is no JS test harness in this repo, which the watch list already
+records, so the verification is the browser run above. `dotnet build --no-incremental` 0 warnings,
+0 errors._
 
 ---
 
