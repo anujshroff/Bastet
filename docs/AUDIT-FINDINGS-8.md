@@ -1,16 +1,56 @@
 # Bastet — Round-8 Audit Findings
 
-| | |
-|---|---|
-| Round | **8** (finding letter **H**) |
-| Target branch | `audit/round-8` |
-| Baseline HEAD | `ff285cf` — *"Audit 7 Cleanup (#150)"*, identical to `main` |
-| Build at baseline | `dotnet build --no-incremental` → 0 warnings, 0 errors |
-| Tests at baseline | `dotnet test` → **677 passed, 0 failed, 0 skipped** |
-| Working tree | clean at start and at finish |
-| Date | 2026-07-28 |
+| | Audit | After reconciliation |
+|---|---|---|
+| Round | **8** (finding letter **H**) | |
+| Branch | `audit/round-8` | one commit per finding |
+| HEAD | `ff285cf` — *"Audit 7 Cleanup (#150)"*, identical to `main` | |
+| Build | 0 warnings, 0 errors | **0 warnings, 0 errors** (clean rebuild, `bin`/`obj` deleted) |
+| Tests | 677 passed, 0 failed, 0 skipped | **690 passed, 0 failed, 0 skipped** (+13) |
+| Working tree | clean at start and at finish | clean |
+| Date | 2026-07-28 | 2026-07-29 |
 
 Every line number below was re-derived against the working tree at `ff285cf` while writing this file.
+
+**All seven findings were fixed — none was refuted on re-verification.** Each was reproduced against
+the unfixed build before being fixed and re-measured after, one commit per finding, each carrying its
+own struck entry. Two proposed fixes were rejected on evidence and replaced: H4's global subnet lock
+(measured to make a currently-correct ordering wrong) and H5's `DB_ID` probe (blind under
+`DENY VIEW ANY DATABASE`, and the wrong SQL type). Four more were extended from the finder's version
+after the verifiers found them incomplete.
+
+## Final verification sweep
+
+| | |
+|---|---|
+| Clean rebuild | `bin`/`obj` deleted, `dotnet build --no-incremental` → **0 warnings, 0 errors** |
+| Suite | **690 passed**, 0 failed, 0 skipped (677 baseline + 13) |
+| Live app | 28 assertions over subnet list, details, create, edit, delete, host IPs, all-host-IPs, deleted subnets, all-deleted-host-IPs, both purge pages, all three Azure wizards, 404 and 500 — **content asserted, not just status** |
+| Security headers | `X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy` present on a normal response **and** on `/Error/500` |
+| Azure end to end | 10 assertions against live ARM: subscriptions → discovery → single-VNet import → bulk preview and commit with a child subnet → reconcile scan → delete commit |
+| Reconciler discriminates | a resource the credential **cannot see** is withheld with a warning naming it; a **genuinely deleted** resource is still offered and deletable. Both checked — testing only the first would let an over-blocking regression pass |
+| Logs | **zero `fail:` lines.** Warnings all accounted for: the accepted unencrypted DataProtection key ring; EF's `QuerySplittingBehavior` and MARS-savepoint notices (both pre-existing); and `AzureService` logging a 403 on the withheld resource, which is the withholding path working by design |
+
+Two sweep observations that are **not** defects, recorded so a later round does not re-derive them:
+`GET /Azure/Import/{id}` 302s away for a subnet carrying host IPs — the documented entry gate — and a
+`WebRootPath was not found` warning appears only when the published app is launched with its working
+directory set elsewhere; run from its own publish directory the warning is absent and `/css/site.css`
+and `/js/site.js` serve 200.
+
+## Deliberately not done
+
+- **The global subnet lock on the two purge POSTs** (H4's originally proposed fix). Built, run and
+  measured unsound by both verifiers and again here; round 6 had already left it deliberately.
+- **A warnings block in `_StepConfirm.cshtml`** (H1). A real gap, still on the watch list, but a
+  separate change to a view H1 does not touch — and with the cascade guard no withheld row reaches
+  that screen.
+- **The server-side VNet-prefix check on child `AzureResourceId`s** (H2's optional hardening) and
+  **naming the pending link in the bulk preview's `ExactMatch` branch** (H7's optional extra). Both
+  are separate calls; the second is explicitly deferred by the finding itself.
+- **Tidying away `_SubnetCalculationScripts.cshtml`'s overlap arm**, which H6's fix leaves with no
+  reachable input. It is defence-in-depth for a case `findOptimalCidr` currently makes impossible.
+- **The purge POST not requiring its confirmation page at all.** Antiforgery tokens are per-session;
+  the watch list records this as by design, and it is a different question from scoping.
 
 ---
 
