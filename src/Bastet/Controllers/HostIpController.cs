@@ -599,14 +599,15 @@ public class HostIpController(
             return RedirectToAction(nameof(AllDeletedHostIps));
         }
 
-        return View(new PurgeAllDeletedHostIpsViewModel { Count = count });
+        int maxId = await context.DeletedHostIpAssignments.MaxAsync(d => (int?)d.Id) ?? 0;
+        return View(new PurgeAllDeletedHostIpsViewModel { Count = count, MaxId = maxId });
     }
 
     // POST: HostIp/PurgeAllDeletedHostIps
     [HttpPost, ActionName("PurgeAllDeletedHostIps")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> PurgeAllDeletedHostIpsConfirmed(string confirmation)
+    public async Task<IActionResult> PurgeAllDeletedHostIpsConfirmed(string confirmation, int? confirmedMaxId)
     {
         if (confirmation != "approved")
         {
@@ -614,7 +615,18 @@ public class HostIpController(
             return RedirectToAction(nameof(PurgeAllDeletedHostIps));
         }
 
-        int removed = await context.DeletedHostIpAssignments.ExecuteDeleteAsync();
+        // Same bound as the subnet archive, for the same reason - see the comment there.
+        if (confirmedMaxId is null or <= 0)
+        {
+            TempData["ErrorMessage"] =
+                "The purge scope was missing from the form. Review the archive and confirm again.";
+            return RedirectToAction(nameof(PurgeAllDeletedHostIps));
+        }
+
+        int removed = await context.DeletedHostIpAssignments
+            .Where(d => d.Id <= confirmedMaxId)
+            .ExecuteDeleteAsync();
+
         TempData["SuccessMessage"] = $"Permanently purged {removed} deleted host IP record(s).";
         return RedirectToAction(nameof(AllDeletedHostIps));
     }

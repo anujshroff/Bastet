@@ -9,6 +9,7 @@
         let selectedSubscriptionName = "";
         let vnets = []; // [{ resourceId, name, ipv4AddressPrefixes:[], subnets:[{name, addressPrefix}] }]
         let lastSelection = null; // last BulkImportSelectionDto submitted
+        let previewSeq = 0;       // bumped per preview so a superseded response can be told apart
 
         // ---------------------------------------------------------------
         // Step navigation helpers
@@ -427,6 +428,11 @@
         }
 
         function loadPreview(selection) {
+            // Preview latency scales with (existing subnets x selected prefixes), so two previews
+            // can answer out of order. Commit posts lastSelection, which is set on the click - if a
+            // superseded response were allowed to repaint, the screen would show one plan while the
+            // button posted another, and the server re-plans what it is sent and cannot tell.
+            const seq = ++previewSeq;
             $.ajax({
                 url: '@Url.Action("BulkImportPreview", "Azure")',
                 type: "POST",
@@ -439,6 +445,9 @@
                     $("#bulk-preview-error").addClass("d-none");
                 },
                 success: function (result) {
+                    if (seq !== previewSeq) {
+                        return;
+                    }
                     if (!result.success) {
                         $("#bulk-preview-error-message").text(result.error || "Failed to build plan");
                         $("#bulk-preview-error").removeClass("d-none");
@@ -448,10 +457,20 @@
                     $("#bulk-preview-content").removeClass("d-none");
                 },
                 error: function (xhr, status, error) {
+                    // Without this a superseded request that fails paints its error over a current,
+                    // valid plan.
+                    if (seq !== previewSeq) {
+                        return;
+                    }
                     $("#bulk-preview-error-message").text("Error connecting to server: " + error);
                     $("#bulk-preview-error").removeClass("d-none");
                 },
                 complete: function () {
+                    // jQuery always runs complete, so a superseded request would otherwise hide the
+                    // spinner of one still in flight.
+                    if (seq !== previewSeq) {
+                        return;
+                    }
                     $("#bulk-preview-loading").addClass("d-none");
                 }
             });
@@ -585,7 +604,12 @@
                 success: function (result) {
                     if (result && result.success) {
                         $("#bulk-commit-success-message").text(
-                            ` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s), marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
+                            // linkedTargets counts the existing Bastet subnets this commit stamped
+                            // with an ARM id. Without it a link-only import reports every counter as
+                            // zero, which is byte-identical to the banner for a commit that wrote
+                            // nothing at all. Counter order matches TempData["SuccessMessage"] so the
+                            // two summaries of one commit agree.
+                            ` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s), linked ${result.linkedTargets} existing target(s) to Azure, marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
                         );
                         $("#bulk-commit-success").removeClass("d-none");
                         $("#bulk-confirm-commit-btn").hide();

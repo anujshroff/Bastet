@@ -7,6 +7,12 @@
         let selectedVNetId = "";
         let selectedVNetName = "";
 
+        // Bumped on every loadSubnets call so a response that has been superseded can be told from
+        // the current one. /Azure/GetSubnets reads Azure per VNet, so two picks in quick succession
+        // can answer out of order, and the rows painted last would then describe a different VNet
+        // from the one the hidden identity fields name.
+        let subnetSeq = 0;
+
         // Escape Azure-derived strings before putting them in HTML (matches the Bulk/Reconcile wizards).
         function escapeHtml(s) {
             if (s === null || s === undefined) {
@@ -57,10 +63,11 @@
                 $("#step2").removeClass("show active");
                 $("#step3").addClass("show active");
 
-                // Load subnets for the selected VNet
+                // Load subnets for the selected VNet. The identity is passed in and re-written from
+                // the response that actually populates the rows, so the two can never disagree.
                 $("#vnet-name").val(selectedVNetName);
                 $("#vnet-resource-id").val(selectedVNetId);
-                loadSubnets(selectedVNetId);
+                loadSubnets(selectedVNetId, selectedVNetName);
             }
         });
         
@@ -221,7 +228,8 @@
         }
         
         // Load Subnets for selected VNet
-        function loadSubnets(vnetResourceId) {
+        function loadSubnets(vnetResourceId, vnetName) {
+            const seq = ++subnetSeq;
             $.ajax({
                 url: '@Url.Action("GetSubnets", "Azure")',
                 type: "GET",
@@ -248,6 +256,18 @@
                     $("#import-subnets-btn").prop("disabled", true);
                 },
                 success: function(result) {
+                    // A superseded response must not paint: its rows belong to a VNet the operator
+                    // has already moved off, and they would be submitted under the current VNet's
+                    // identity.
+                    if (seq !== subnetSeq) {
+                        return;
+                    }
+
+                    // The identity comes from the response that populated the rows, not from the
+                    // click that started it.
+                    $("#vnet-name").val(vnetName);
+                    $("#vnet-resource-id").val(vnetResourceId);
+
                     if (result.success) {
                         if (result.subnets && result.subnets.length > 0) {
                             // Clear and populate subnet list
@@ -321,10 +341,20 @@
                     }
                 },
                 error: function(xhr, status, error) {
+                    // A superseded request failing at the transport would otherwise paint its error
+                    // over the current VNet's correctly rendered rows.
+                    if (seq !== subnetSeq) {
+                        return;
+                    }
                     $("#subnet-error-message").text("Error connecting to server: " + error);
                     $("#subnet-error").removeClass("d-none");
                 },
                 complete: function() {
+                    // jQuery always runs complete, so without this a superseded request hides the
+                    // spinner of one that is still in flight.
+                    if (seq !== subnetSeq) {
+                        return;
+                    }
                     $("#subnet-loading").hide();
                 }
             });
