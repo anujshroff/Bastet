@@ -267,7 +267,16 @@ public partial class SubnetController : Controller
             List<int> createdSubnetIds = [];
             AzureImportSubnetViewModel? fullyEncompassingSubnet = null;
 
-            // Initial validation to ensure all subnets are individually valid
+            // One read of the tree for the whole batch. Every validation below works from this list,
+            // and each row created inside the batch is appended to it, so an entry that overlaps an
+            // earlier entry is still caught.
+            List<Subnet> treeCache = await LoadSubnetTreeForBatchAsync();
+
+            // Assign the parent and pick out the encompassing entry. Validation happens in the
+            // creation loop below rather than here: that pass sees rows created earlier in the same
+            // batch, so it catches everything a pass here would and more, and a failure anywhere
+            // rolls the whole transaction back either way. Validating twice doubled the cost of the
+            // batch for nothing.
             foreach (AzureImportSubnetViewModel subnet in subnets)
             {
                 // Ensure parent ID is set correctly
@@ -277,16 +286,6 @@ public partial class SubnetController : Controller
                 if (subnet.FullyEncompassesVNetPrefix)
                 {
                     fullyEncompassingSubnet = subnet;
-                    continue; // Not created as a child; it marks the parent fully allocated instead
-                }
-
-                // Use the extracted validation method
-                if (!await ValidateSubnetCreation(subnet))
-                {
-                    // Validation failed, rollback and return errors
-                    await transaction.RollbackAsync();
-                    return BatchCreateFailure(isAzureImport, parentId,
-                        ModelStateMessage("The import could not be applied."), BadRequest(ModelState));
                 }
             }
 
@@ -389,8 +388,9 @@ public partial class SubnetController : Controller
                         continue;
                     }
 
-                    // Validate again before adding to catch conflicts with previously added subnets in this batch
-                    if (!await ValidateSubnetCreation(subnet))
+                    // Validate before adding, against the batch's tree snapshot plus everything this
+                    // batch has already created, so conflicts with earlier entries are caught too.
+                    if (!await ValidateSubnetCreation(subnet, treeCache))
                     {
                         // Validation failed, rollback and return errors
                         await transaction.RollbackAsync();
@@ -414,6 +414,10 @@ public partial class SubnetController : Controller
 
                     context.Subnets.Add(newSubnet);
                     await context.SaveChangesAsync();
+
+                    // Keep the snapshot current, or the next entry in this batch could be created
+                    // overlapping this one.
+                    treeCache.Add(newSubnet);
 
                     createdSubnetIds.Add(newSubnet.Id);
                 }

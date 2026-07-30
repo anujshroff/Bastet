@@ -257,6 +257,74 @@ public class SubnetControllerAzureReconcileTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // The cascade guard must not depend on some other row being absent
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// A plan built entirely from prefix drift carries no absence claim, so there is nothing to ask
+    /// Azure about - but the cascade guard must still run. Here the drifted target's subtree holds a
+    /// review item, a row this very scan verified is still live in Azure, and archiving the target
+    /// would archive it too.
+    /// </summary>
+    /// <remarks>
+    /// Regression for the round-9 I1 defect: ConfirmProposedDeletionsAsync returned early when
+    /// absenceClaims was empty, which skipped ApplyConfirmations and with it the guard over
+    /// plan.ReviewItems. Whether the archive was refused then depended on some unrelated row
+    /// happening to be absent, so adding a stale subnet elsewhere in the tree changed the verdict
+    /// for these two rows. The guard must be reached on the strength of this subtree alone.
+    /// </remarks>
+    [Fact]
+    public async Task BulkDeleteStaleAzureSubnets_DriftOnlyPlanOverReviewItemDescendant_IsRefused()
+    {
+        // The seeded row is a VNetDeleted (absence) row; it would supply the absence claim whose
+        // absence is the whole point of this test.
+        _context.Subnets.RemoveRange(_context.Subnets);
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        const string HubId = $"/subscriptions/{SubId}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/hub";
+        const string FaId = $"/subscriptions/{SubId}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/fa";
+
+        _context.Subnets.AddRange(
+            new Subnet
+            {
+                Id = 10,
+                Name = "hub",
+                NetworkAddress = "10.96.0.0",
+                Cidr = 15,
+                AzureResourceId = HubId,
+                CreatedAt = DateTime.UtcNow
+            },
+            new Subnet
+            {
+                Id = 11,
+                Name = "fa",
+                NetworkAddress = "10.97.0.0",
+                Cidr = 16,
+                ParentSubnetId = 10,
+                IsFullyAllocated = true,
+                AzureResourceId = FaId,
+                CreatedAt = DateTime.UtcNow
+            });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        // hub drifted (Azure now carries 10.100.0.0/15, not 10.96.0.0/15) => VNetPrefixRemoved,
+        // which is drift, not absence. fa still carries its recorded prefix but no Azure subnet
+        // covers it any more => FullyAllocatingSubnetDeleted, a review item.
+        List<AzureVNetViewModel> vnets =
+        [
+            new() { ResourceId = HubId, Name = "hub", AddressPrefixes = ["10.100.0.0/15"] },
+            new() { ResourceId = FaId, Name = "fa", AddressPrefixes = ["10.97.0.0/16"] }
+        ];
+
+        IActionResult result = await Delete(Request("approved", 10), new MockAzureService(true, null, vnets));
+
+        _ = Assert.IsType<ConflictObjectResult>(result);
+        Assert.NotNull(await _context.Subnets.FindAsync([10], TestContext.Current.CancellationToken));
+        Assert.NotNull(await _context.Subnets.FindAsync([11], TestContext.Current.CancellationToken));
+        Assert.Empty(await _context.DeletedSubnets.ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    // -------------------------------------------------------------------------
     // Snapshot subtree ids - what the confirm dialog's dedup rests on
     // -------------------------------------------------------------------------
 

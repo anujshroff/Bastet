@@ -91,6 +91,45 @@ public class AccountControllerLogoutTests
         Assert.Equal("/Subnet/Details/5", signOut.Properties?.RedirectUri);
     }
 
+    /// <summary>
+    /// A local returnUrl that cannot legally be written as a header value must be dropped, not
+    /// carried into the response. Kestrel refuses any non-ASCII character when it writes
+    /// Response.Headers.Location, and the exception lands after the auth-cookie deletion has been
+    /// queued - so UseExceptionHandler clears the response, the Set-Cookie goes with it, and the user
+    /// gets a 500 while staying signed in.
+    /// </summary>
+    /// <remarks>
+    /// Regression for round 9's I6. Url.IsLocalUrl accepts all of these: its character check is
+    /// char.IsControl, which is category Cc only, so every non-ASCII character passes. The escapes are
+    /// spelled out rather than written literally so they survive diffs and tool round-trips.
+    /// </remarks>
+    [Theory]
+    [InlineData("/caf\u00E9")]                             // e-acute
+    [InlineData("/Subnet/Details/3?name=\u00DCbersicht")]   // U-umlaut
+    [InlineData("/price\u20AC")]                           // euro sign
+    [InlineData("/\u2028next")]                            // line separator; char.IsControl misses it
+    public async Task Logout_Production_ReturnUrlKestrelCannotWrite_RedirectsToSignedOutPage(string returnUrl)
+    {
+        AccountController controller = CreateController(isDevelopment: false);
+
+        IActionResult result = await controller.Logout(returnUrl);
+
+        SignOutResult signOut = Assert.IsType<SignOutResult>(result);
+        Assert.Equal(SignedOutPath, signOut.Properties?.RedirectUri);
+    }
+
+    /// <summary>The Development branch reads the same target, so it is fixed by the same guard.</summary>
+    [Fact]
+    public async Task Logout_Development_ReturnUrlKestrelCannotWrite_RedirectsToSignedOutPage()
+    {
+        AccountController controller = CreateController(isDevelopment: true, signOutRegistered: false);
+
+        IActionResult result = await controller.Logout("/caf\u00E9");
+
+        RedirectResult redirect = Assert.IsType<RedirectResult>(result);
+        Assert.Equal(SignedOutPath, redirect.Url);
+    }
+
     [Fact]
     public async Task Logout_Development_NonLocalReturnUrl_RedirectsToSignedOutPage()
     {
