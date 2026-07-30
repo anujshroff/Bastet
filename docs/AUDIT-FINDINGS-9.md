@@ -166,151 +166,59 @@ offered and deletable — is recorded in the final sweep rather than repeated he
 
 # Medium
 
-## I3 [x1] — Azure/batch child-subnet import re-reads the whole `Subnets` table twice per created child while holding the global write lock, so one ordinary import refuses every other write in the app
+_I3 is fixed and committed, with all three of the verifier's extensions taken. `ValidateSubnetCreation`
+gained an optional `List<Subnet>? treeCache` parameter used in place of its own unfiltered read
+(`SubnetController.Helpers.cs:234`), and the snapshot is loaded once per batch by a new
+`LoadSubnetTreeForBatchAsync` helper. The helper lives in `Helpers.cs` rather than at each call site —
+which is how the missing `using Microsoft.EntityFrameworkCore` in `SubnetController.Azure.cs` is avoided
+rather than papered over, and both batch paths need it anyway. Rows created inside a batch are appended
+to the snapshot: **children and created targets both**, in `BatchCreateChildSubnetsCore` and in
+`BulkCreateFromAzurePlanCore` (`BulkAzure.cs`), because `orderedItems` is sorted by CIDR ascending so a
+containing item runs first and appending only children would stop a later item seeing an earlier item's
+target. The duplicate lookup and the parent read inside the validator stay real queries — they must see
+the current transaction — and `AsNoTracking` is safe because cached rows are read only for Id, Name,
+NetworkAddress, Cidr and ParentSubnetId._
 
-**file:line** — `src/Bastet/Controllers/SubnetController.Helpers.cs:214`
-(`List<Subnet> allSubnets = await context.Subnets.ToListAsync();`).
-Called twice per child from `SubnetController.Azure.cs:284` (pre-flight) and `:393` (per child), inside
-the lock taken at `:233`.
+_The redundant **pre-flight** validation pass in `BatchCreateChildSubnetsCore` was dropped, which is the
+part that removes the shape rather than moving the threshold. The loop remains — it still assigns the
+parent and picks out the encompassing entry — but it no longer validates: the creation loop validates
+every entry against a snapshot that includes rows created earlier in the same batch, so it catches
+strictly more than a pass before any insert could, and any failure rolls the whole transaction back
+either way. That halves the batch from 2N tree passes to N._
 
-**Confidence: confirmed.** Votes 2/2.
-
-**Corrected by the verifiers:** severity **high → medium** and the citation re-anchored to
-`Helpers.cs:214` — ASP.NET Core's default `FormOptions.ValueCountLimit` caps one batch at **145
-children**, which bounds the outage at ~150 s instead of unbounded and invalidates the finder's
-200-children evidence rows; and the finder's hoist, while measured to work, is incomplete on three
-counts (see Fix).
-
-### Failure scenario
-
-`ValidateSubnetCreation` issues an unfiltered, tracking `context.Subnets.ToListAsync()` at
-`Helpers.cs:214` on every call. `BatchCreateChildSubnetsCore` calls it twice per submitted child — once
-in the pre-flight loop (`SubnetController.Azure.cs:284`) and once immediately before each insert
-(`:393`) — and the whole method runs inside `ExecuteWithSubnetLockAsync` (`:233`), i.e. holding the
-single global `Bastet:SubnetOperations` lock that gates **every** write in the application. An N-child
-import therefore performs **2N full-table loads**, serially, in one transaction, inside the global
-writer mutex.
-
-Concrete case on the live rig: a deployment holding 200,001 `Subnets` rows (round 8's own watch list
-sizes deployments at 20k-200k), an admin imports a 40-subnet Azure VNet — exactly what the wizard's
-"Select All Subnets" posts to `POST /Subnet/BatchCreateChildSubnets`. The import succeeds after
-**40.02 s** (one measurement) / **45.89 s** (the other verifier's box) of lock hold. Meanwhile three
-completely unrelated authorized writes are **refused with nothing written**:
-
-| rival request | result | wrong outcome |
-|---|---|---|
-| `POST /Subnet/Create` `10.101.5.0/24` | 200, form re-rendered | *"The operation timed out due to high concurrency. Please try again."* — reachable only from `catch (TimeoutException)` (`Create.cs:138`); `COUNT(*)` for the row = 0 |
-| `POST /Subnet/Delete/43` | 302 back to `/Subnet/Delete/43` at 30.01 s | the timeout branch (`Delete.cs:110-113`); row 43 still present, `DeletedSubnets` 0 |
-| `POST /HostIp/SetAllocationStatus` | 302 at 30.01 s | `IsFullyAllocated` still 0 |
-| `POST /Subnet/BulkCreateFromAzurePlan` | 503 at 30.07 s | *"another subnet operation is in progress"* |
-
-The 30 s budget is `DEFAULT_TIMEOUT_MS` (`src/Bastet/Services/Locking/SqlServerSubnetLockingService.cs:23`),
-a private const, and no production call site passes the optional `TimeSpan` — an operator cannot raise
-it. All ten lock sites share the one mutex, so the whole write surface is unavailable for the duration:
-subnet create/edit/delete, host-IP create/edit/delete, the allocation toggle, both Azure import commits
-and the reconcile archive. Reads are unaffected (`GET /Subnet` answered 200 in 2.87 s during a 40 s
-hold). Nothing in either request explains the failure: the importer sees success, the victim sees
-"high concurrency" when there was no concurrency to speak of.
-
-Cost is O(children x existing rows), so it degrades monotonically: the 30 s budget is crossed at
-roughly `children x rows ≈ 6e6` — about 120 children at 50k rows, 60 at 100k, 30 at 200k. The same
-construction is in the bulk-import commit, `BulkCreateFromAzurePlanCore`, one full-table load per
-created row (`SubnetController.BulkAzure.cs:214` target, `:291` child) inside the lock taken at `:45`.
-
-### How it was reproduced
-
-Own port 5305 / catalog `bastet_r9_vc6a` (and independently 5305-equivalent by the second verifier),
-HEAD built Release into a copy; the repository was never written to.
+_Measured on real SQL Server 2022 (container, 200 001 rows), HEAD versus the fix, same request bodies,
+app built Release from copies outside the repository:_
 
 ```
-# seed: 200,000 volume /32s in 172.16.0.0/12 + one import target 10.246.0.0/18 with no children
-docker exec bastet-audit-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$SA_PW" -C -N \
-  -d bastet_r9_vc6a -i /tmp/vc6a_seed.sql -v WANT=200000        # -> total_subnets 200001
-
-# one threading.Barrier: the shipped import POST plus rival writes delayed 0.4 s.
-# drive.py posts the exact 7 hidden inputs per child that _ImportScripts.cshtml:304-310 emits.
-python3 drive.py  40 1 10.104.0.0 0.4 26     # 40 x /26 + rival POST /Subnet/Create
-python3 drive2.py 40 1 10.106.0.0 0.4        # + BulkCreateFromAzurePlan + BulkDeleteStaleAzureSubnets
-python3 drive.py 145 1 10.108.0.0 0.4 26     # 145 = the most children one form post can carry
-python3 drive.py 160 1 10.103.0.0 0.4 26     # 160 -> refused by the form binder
-python3 parity.py 1                          # 6 guard cases, HEAD vs patched, byte-compared
+40  children:  29 994 ms -> 3 158 ms   rival POST /Subnet/Create 29 991 ms -> 2 983 ms (both 302)
+120 children:  87 537 ms -> 4 957 ms   rival REFUSED at 30 587 ms (200 text/html, the form re-rendered
+                                       with "The operation timed out due to high concurrency")
+                                       -> succeeds in 4 887 ms with a 302
+unfiltered whole-table Subnets reads during a 40-child import: ~84 -> ~5
+                                       (the batch's own 2N loads collapse to 1; the rest are ordinary
+                                        page reads outside the lock)
+both builds created all 120 children, correctly parented
 ```
 
-Observed:
+_The 145-child figure from the audit was not re-measured: the driver here emits 8 hidden inputs per
+child where the wizard emits 7, so `FormOptions.ValueCountLimit` refused the post at 145 and 120 was
+used instead. That is a property of the harness, not of the application, and 120 already crosses the
+30 s budget on HEAD._
 
-```
-Kestrel: "POST /Subnet/BatchCreateChildSubnets - 302 0 - 44122.3909ms"
-         "POST /Subnet/Create - 200 - text/html - 44098.6210ms"   (200 text/html = the form re-rendered
-                                                                   with the error, not the 302 of success)
-EF log census, one 40-child import: 291 Executed DbCommand, 41 INSERT INTO [Subnets], and exactly 80
-unfiltered "SELECT [s].[Id], ... FROM [Subnets] AS [s]" with no WHERE = 2N whole-table loads.
-Sum of Executed DbCommand durations: 208 ms -> the 40 s is client-side materialization and change
-tracking burned while holding the mutex, not SQL time.
+_One test added, `BatchCreateChildSubnets_EntryContainedInAnEarlierEntry_ReturnsValidationError` in
+`test/Bastet.Tests/SubnetManagement/SubnetControllerBatchCreateTests.cs`. The existing
+`BatchCreateChildSubnets_OverlappingSubnets_ReturnsValidationError` posts two **identical** entries, which
+the unique `{NetworkAddress, Cidr}` lookup catches without the snapshot; the new one posts an entry
+**contained in** an earlier entry, which only the appended snapshot can catch. It was proven to pin that
+append by removing `treeCache.Add(newSubnet)` and re-running: the contained row was created and the
+assertion failed. Build 0 warnings / 0 errors; suite **693 → 694**._
 
-same request body, table size the only variable:
-  201 rows / 20 children   0.61 s      50,001 / 20    6.43 s      50,001 / 120  28.70 s (rival scraped in)
-  200,001 / 10            10.45 s      200,001 / 40  45.89 s      200,001 / 145 142.20 s (rival refused)
-refusals land at exactly 30.005 s = DEFAULT_TIMEOUT_MS.
-
-160 children -> HTTP 400 {"":["Failed to read the request form. Form value count limit 1024 exceeded."]}
-                before any lock is taken.  145 accepted / 146 rejected.
-```
-
-Patched build (hoisted tree cache), same tree and same bodies:
-
-```
-200,001 / 40   45.89 s -> 3.86 s   rival POST /Subnet/Create succeeded in 3.80 s
-200,001 / 145 142.20 s -> 9.02 s   rival succeeded in 8.93 s
-second verifier, independently: 40.02 s -> 3.74 s, and ALL THREE rivals succeeded
-  (Create 302 -> /Subnet/Details/200246; Delete 302 -> /Subnet i.e. the Index success branch, row
-   archived; SetAllocationStatus wrote IsFullyAllocated=1)
-guard parity byte-identical to HEAD on all six cases; full rollback on each refusal
-dotnet test 690/690; build 0 warnings 0 errors
-```
-
-Timing spread is acknowledged: one verifier's holds ran ~35% longer than the other's on the same box,
-and a refused `Create` sometimes returns later than 30 s because the re-rendered form builds a parent
-dropdown of 200k `<option>` elements. The linear `children x rows` shape is identical across six data
-points on each box, so the conclusion is robust to load.
-
-### Fix
-
-Hoist the tree read out of the per-child loop: give `ValidateSubnetCreation` an optional pre-loaded
-tree (`List<Subnet>? treeCache = null`, used in place of the `Helpers.cs:214` query), load it once with
-`AsNoTracking()` at the top of `BatchCreateChildSubnetsCore`, and append each newly created row
-(`Id`/`Name`/`NetworkAddress`/`Cidr`/`ParentSubnetId`) to that list right after its `SaveChangesAsync`
-so batch-internal overlap detection keeps working. `AsNoTracking` is safe: `bestParent` and
-`potentialChildSubnet` are read only for `.Id`/`.Name`/`.NetworkAddress`/`.Cidr`, never mutated, and
-the two tracked reads at `Helpers.cs:137` and `:256` are untouched. The duplicate check at
-`Helpers.cs:201` must stay a real indexed query — it uses the unique `{NetworkAddress, Cidr}` index and
-sees rows inserted earlier in the same transaction.
-
-Three things the finder's version gets wrong, all measured:
-
-1. **It does not compile as described.** `SubnetController.Azure.cs` has no
-   `using Microsoft.EntityFrameworkCore;`, so `context.Subnets.AsNoTracking()` fails with CS1061. Add
-   the using, or load the cache through a small private helper in `Helpers.cs` (which already has the
-   using) — better, because both batch paths need it.
-2. **The bulk sibling is under-specified.** In `BulkCreateFromAzurePlanCore` the cache must be appended
-   for **created target subnets** (`SubnetController.BulkAzure.cs:241`) as well as created children
-   (`:316`). `orderedItems` is sorted by `PrefixCidr` ascending (`:98`) precisely so a containing item
-   runs first; append only children and a later item stops seeing an earlier item's freshly created
-   target. The `ExactMatch` branch (rename `:147`, link `:181`) needs no append — it changes neither
-   `NetworkAddress` nor `Cidr` — but the cached row then carries the pre-rename `Name`, so an error
-   message quoting `bestParent.Name` can print a stale name. Cosmetic; worth a comment.
-3. **It moves the threshold rather than removing the shape.** Even hoisted, `Azure.cs:271-291` and
-   `:384-419` each run `ValidateSubnetCreation` over every entry, so the batch still makes 2N in-memory
-   passes over the whole tree — 3.74 s at 40 children / 200k rows, extrapolating to ~13 s at the
-   145-child ceiling. Complete it by dropping the redundant **pre-flight** pass at `:271-291` (keep the
-   per-child pass at `:384-419`, which is the one that sees rows created earlier in the batch, and keep
-   the encompassing-entry validation at `:301-326`), or by indexing the cached tree (bucket by /8 or
-   /16, or sort by network integer) so each validation is a bounded lookup. With the pre-flight pass
-   removed the batch drops from 2N scans to N.
-
-**Interim** (free, but not a fix): add `AsNoTracking()` to the single query at `Helpers.cs:214`.
-Measured `40.02 s -> 33.69 s` (16%) at 200k/40, and `32.63 s -> 28.48 s` / `15.74 s -> 12.24 s` on a
-50k tree — inside the claimed 13-22%. All three rivals were **still refused** at 30.02 s. Take it as an
-improvement, never as the fix.
+_The audit's **interim** (`AsNoTracking()` alone on the single query) was not taken — it was measured in
+the audit to leave all three rival writes refused, and the real fix landed. The cosmetic note the
+verifier flagged stands: on the `ExactMatch` branch the cached row keeps its pre-rename `Name`, so an
+error message quoting `bestParent.Name` can print a stale name; it is commented at the cache load and
+left alone. Also unchanged and still on the watch list: nothing checks a cancellation token on the batch
+import, so an operator who gives up does not shorten the hold._
 
 ---
 

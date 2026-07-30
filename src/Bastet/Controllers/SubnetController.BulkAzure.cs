@@ -97,6 +97,15 @@ public partial class SubnetController : Controller
             // is a safe, deterministic order regardless.
             List<BulkImportPlanItem> orderedItems = [.. plan.Items.OrderBy(i => i.PrefixCidr)];
 
+            // One read of the tree for the whole commit, appended to as rows are created - see
+            // LoadSubnetTreeForBatchAsync. Both created targets and created children must be appended:
+            // orderedItems is sorted by CIDR ascending precisely so a containing item runs first, so
+            // appending only children would stop a later item seeing an earlier item's target. The
+            // ExactMatch branch needs no append - it changes neither NetworkAddress nor Cidr - though
+            // the cached row then keeps its pre-rename Name, which only affects the wording of an
+            // error message that quotes it.
+            List<Subnet> treeCache = await LoadSubnetTreeForBatchAsync();
+
             foreach (BulkImportPlanItem item in orderedItems)
             {
                 Subnet targetSubnet;
@@ -211,7 +220,7 @@ public partial class SubnetController : Controller
                         AzureResourceId = sanitizedVNetResourceId
                     };
 
-                    if (!await ValidateSubnetCreation(targetVm))
+                    if (!await ValidateSubnetCreation(targetVm, treeCache))
                     {
                         await transaction.RollbackAsync();
                         // The wizard reads error/globalErrors/itemErrors; a bare ModelState carries
@@ -240,6 +249,7 @@ public partial class SubnetController : Controller
                     };
                     context.Subnets.Add(targetSubnet);
                     await context.SaveChangesAsync();
+                    treeCache.Add(targetSubnet);
                     totalTargetsCreated++;
                 }
 
@@ -288,7 +298,7 @@ public partial class SubnetController : Controller
                         AzureResourceId = sanitizedChildResourceId
                     };
 
-                    if (!await ValidateSubnetCreation(childVm))
+                    if (!await ValidateSubnetCreation(childVm, treeCache))
                     {
                         await transaction.RollbackAsync();
                         // See the target path above: same contract, same reason.
@@ -315,6 +325,7 @@ public partial class SubnetController : Controller
                     };
                     context.Subnets.Add(newChild);
                     await context.SaveChangesAsync();
+                    treeCache.Add(newChild);
                     totalSubnetsCreated++;
                 }
             }
