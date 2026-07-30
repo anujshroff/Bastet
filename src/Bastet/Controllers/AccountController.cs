@@ -1,4 +1,5 @@
 using Bastet.Services;
+using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -31,7 +32,18 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
         // Never trust a caller-supplied absolute URL: it becomes the OIDC post-logout redirect, and
         // how strictly that is validated varies by IdP product and deployment. Local paths only;
         // everything else lands on the anonymous SignedOut page instead of an auto re-challenge.
-        string target = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl)
+        //
+        // IsLocalUrl is not enough on its own. Its character check is char.IsControl - category Cc
+        // only - so every non-ASCII character passes, and this value is written straight into the
+        // Location header. Kestrel refuses to write one ("Invalid non-ASCII or control character in
+        // header"), and it throws *after* the auth-cookie deletion has been queued: the exception
+        // handler clears the response, the Set-Cookie is discarded with it, and sign-out answers 500
+        // with the session still alive. HttpHeaderValue.IsValid is the project's existing test for
+        // exactly this Kestrel rule. Nothing the app itself generates is affected - every URL it
+        // builds is ASCII.
+        string target = !string.IsNullOrEmpty(returnUrl)
+                && Url.IsLocalUrl(returnUrl)
+                && HttpHeaderValue.IsValid(returnUrl)
             ? returnUrl
             : Url.Action(nameof(SignedOut), "Account") ?? "/Account/SignedOut";
 

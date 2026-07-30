@@ -297,138 +297,47 @@ and the brief lists it as never to be re-proposed. The ordering alone closes it.
 
 ---
 
-## I6 [x1] — Logout accepts a `returnUrl` Kestrel cannot write into `Location`, so sign-out answers 500 with the session cookie intact
+_I6 is fixed and committed as the audit prescribed: `HttpHeaderValue.IsValid(returnUrl)` is now a third
+conjunct on the same guard (`AccountController.cs:44-48`), so a local path that cannot legally be written
+as a header value falls back to the anonymous `SignedOut` page and sign-out still completes. One line,
+reusing `Services/Security/HttpHeaderValue.cs` — written for exactly this Kestrel rule — and it fixes the
+Production and Development branches together because both read `target`. It cannot narrow anything that
+works today: every URL the app itself generates is ASCII._
 
-**file:line** — `src/Bastet/Controllers/AccountController.cs:34` (the single
-`!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl)` guard, whose `target` feeds both the
-Production `SignOut` at `:55-58` and the Development `Redirect` at `:62`).
+_The audit's diff needed one correction, of exactly the kind it flagged on I3: written as
+`Bastet.Services.Security.HttpHeaderValue.IsValid(...)` it compiles, but as `HttpHeaderValue.IsValid(...)`
+it does not — `AccountController.cs` had no `using Bastet.Services.Security;`. The using was added rather
+than fully qualifying the call, to match how the rest of the file reads. The build caught it (CS0103)._
 
-**Confidence: confirmed.** Votes 2/2.
-
-**Corrected by the verifiers:** severity **medium → low** (the app never generates a triggering URL —
-`_Layout.cshtml:77` and `Account/AccessDenied.cshtml:14` are the only logout links and neither sends a
-`returnUrl` — and recovery is one click on the nav item); the finder's *"logout silently does not log
-out"* is wrong, the user sees a red "Server Error" page; and its explanation of the green suite is
-half wrong — the `IUrlHelper.IsLocalUrl` mock returns exactly what the real helper returns for a
-non-ASCII input, so it is *sufficient* to pin this defect. What hides it is that no test in the suite
-writes an HTTP header.
-
-### Failure scenario
-
-`Url.IsLocalUrl` is the only test applied to the caller-supplied `returnUrl`, and its character check
-is `char.IsControl` — category Cc only — so every non-ASCII character passes. That raw value reaches a
-response header, which Kestrel refuses to write.
-
-Concrete input, anonymous, no session needed: `GET /Account/Logout?returnUrl=/caf%C3%A9`. Also
-reproduced with the euro sign, Cyrillic, an emoji, U+2028, and the realistic shapes
-`/Subnet?q=café` and `/Subnet/Details/3?name=Übersicht`.
-
-In **Production** the value becomes `SignOut(new AuthenticationProperties { RedirectUri = target },
-Cookies, OIDC)`. `CookieAuthenticationHandler.HandleSignOutAsync` appends the auth-cookie deletion
-**and then** assigns `Response.Headers.Location`, which throws
-`InvalidOperationException: Invalid non-ASCII or control character in header: 0x00E9`.
-`UseExceptionHandler("/Error")` catches it and calls `Response.Clear()`, discarding the `Set-Cookie`
-that would have deleted `.AspNetCore.Cookies`; the OIDC end-session redirect is never issued at all.
-
-Wrong output: **HTTP 500** with the generic "Server Error" page, **zero `Set-Cookie` headers and no
-`Location`**. Proven with a genuine cookie-auth session (a harness-only `TestSignIn`/`RigMintCookie`
-action added to a scratch copy; `Logout` itself untouched): the control `?returnUrl=/Subnet` returns
-302, empties the cookie jar, and `GET /Subnet` afterwards is 302 to the IdP; the defect
-`?returnUrl=/caf%C3%A9` returns 500, the jar **still holds** `.AspNetCore.Cookies`, and `GET /Subnet`
-afterwards is **200** with `/Account/Roles` still rendering `harness-user` / `Admin`. `AddCookie`
-(`Program.cs:198-205`) configures no `SessionStore`, so the ticket is entirely self-contained in the
-cookie and that discarded `Set-Cookie` is the only revocation mechanism — the user stays signed in for
-the remaining sliding hour of `ExpireTimeSpan`, and the IdP session is untouched. The same request in
-Development 500s from `Redirect(target)` at `:62`.
-
-No upstream guard: `Logout` is `[AllowAnonymous]` and deliberately has no antiforgery token, and
-`GlobalSanitizationFilter.SanitizeObject` returns immediately for `typeof(string)`, so a top-level
-`string? returnUrl` is never touched. This is the **non-ASCII half only** — header injection and open
-redirect are correctly refused (`/%0d%0aX-Injected:%20yes`, `/%09evil.example`, `/%00abc`,
-`//evil.example`, `https://evil.example` all still 302 to the IdP end-session with the cookie
-deletion). It is also **not** a re-file of round 7's G8, which was the missing sign-out handler in
-Development.
-
-The codebase already contains the exact predicate needed — `Services/Security/HttpHeaderValue.IsValid`,
-whose doc comment says *"Kestrel rejects any non-ASCII or control character (tab excepted) when it
-writes response headers"* — and `Program.cs:483` applies it to the one **config** value written to a
-header, but nothing applies it to the one **caller-supplied** value written to a header.
-
-### How it was reproduced
-
-`git archive HEAD | tar -x` into scratch (repository never written to), `dotnet build --no-incremental`
-→ 0 warnings, then `dotnet run --no-build --no-launch-profile` with
-`ASPNETCORE_ENVIRONMENT=Production`, `ASPNETCORE_URLS=http://localhost:5300`, catalog
-`bastet_r9_vc1a`, `BASTET_OIDC_*` pointed at the rig tenant. Production confirmed: anonymous
-`GET /Subnet` → 302 to `login.microsoftonline.com/.../oauth2/v2.0/authorize`.
+_Live on the rig, Development arm — which reproduces the mechanism with no IdP, since `Redirect(target)`
+writes the same `Location` header:_
 
 ```
-curl -D - -H 'Cookie: .AspNetCore.Cookies=fakevalue; extra=1' 'http://localhost:5300/Account/Logout?returnUrl=/Subnet'
-curl -D - -H 'Cookie: .AspNetCore.Cookies=fakevalue; extra=1' 'http://localhost:5300/Account/Logout?returnUrl=/caf%C3%A9'
-# matrix over 8 non-ASCII shapes + the bounding set /%0d%0aX-Injected:%20yes /%09evil.example /%00abc
-#   //evil.example https%3A%2F%2Fevil.example /Subnet %7E%2FSubnet no-returnUrl
-# real-session proof, second copy with one harness-only sign-in action:
-COOKIE=$(curl -D - -o /dev/null http://localhost:5300/Account/TestSignIn | grep -oP '^Set-Cookie: \.AspNetCore\.Cookies=\K[^;]+')
-printf '# Netscape HTTP Cookie File\nlocalhost\tFALSE\t/\tFALSE\t2000000000\t.AspNetCore.Cookies\t%s\n' "$COOKIE" > jar-def.txt
-curl -b jar-def.txt -c jar-def.txt 'http://localhost:5300/Account/Logout?returnUrl=/caf%C3%A9'
-curl -b jar-def.txt http://localhost:5300/Subnet
+                                        unfixed          fixed
+?returnUrl=/Subnet                      302 -> /Subnet   302 -> /Subnet          (control, preserved)
+?returnUrl=/caf%C3%A9                   500              302 -> /Account/SignedOut
+?returnUrl=/price%E2%82%AC              500              302 -> /Account/SignedOut
+?returnUrl=%2F%0D%0AX-Injected:%20yes   302 -> SignedOut 302 -> SignedOut        (already refused)
+?returnUrl=//evil.example               302 -> SignedOut 302 -> SignedOut        (already refused)
+"Invalid non-ASCII" lines in the log    2                0
 ```
 
-Observed:
+_Five tests added to `test/Bastet.Tests/Security/AccountControllerLogoutTests.cs`: a four-case theory over
+e-acute, U-umlaut, the euro sign and U+2028 for the Production branch, plus one Development case. All five
+were confirmed failing against the unfixed tree first. The non-ASCII characters are written as `\u00E9`
+style escapes rather than literals, so they survive diffs and tool round-trips — the file is pure ASCII.
+Build 0 warnings / 0 errors; suite **694 → 699**._
 
-```
-control: HTTP/1.1 302 Found
-         Set-Cookie: .AspNetCore.Cookies=; expires=Thu, 01 Jan 1970 ...; secure; samesite=lax; httponly
-         Location: https://login.microsoftonline.com/.../oauth2/v2.0/logout?post_logout_redirect_uri=...
-defect:  HTTP/1.1 500 Internal Server Error, Content-Type: text/html, NO Set-Cookie, NO Location
-  prod.log: System.InvalidOperationException: Invalid non-ASCII or control character in header: 0x00E9
-    at HttpHeaders.ThrowInvalidHeaderCharacter -> HttpResponseHeaders...set_Location
-    -> CookieAuthenticationHandler.ApplyHeaders -> HandleSignOutAsync -> SignOutResult.ExecuteAsync
-matrix: 500 with setcookies=0 for all 8 non-ASCII shapes (log shows 0x2028 for U+2028, so char.IsControl
-        really does miss it); 302 with cookie deletion + IdP Location for all 5 bounding inputs and all
-        3 controls
-real session: mint -> 411-byte cookie; GET /Subnet 200; /Account/Roles renders harness-user / Admin
-  control logout -> 302, jar has 0 .AspNetCore.Cookies, then GET /Subnet -> 302 (signed out)
-  defect  logout -> 500, jar STILL has .AspNetCore.Cookies, then GET /Subnet -> 200, roles still rendered
-  (independently repeated in real Chromium, which stores the Secure cookie because localhost is trustworthy)
-Development arm: ?returnUrl=/Subnet -> 302 ; ?returnUrl=/caf%C3%A9 -> 500 (text/plain developer page)
-fix leg: build 0 warnings; dotnet test 690 passed / 0 failed; every previously-500 input -> 302 with
-  setcookies=1; every previously-refused input still refused; grep -c "Invalid non-ASCII" fixed.log = 0;
-  cookie-jar run -> 302, jar emptied, subsequent /Subnet -> 302.  Adding two [InlineData] cases to the
-  existing theory fails 2/692 on pristine HEAD and passes 692/692 with the fix.
-```
-
-Also swept for sibling paths: 16 other endpoints with non-ASCII path/query/route input produced no
-header exception (the framework's own `QueryString.Create` / `PathString.ToUriComponent` percent-encode),
-and `AccountController.cs:62` is the only other `Redirect(` in `src/`, reading the same `target`.
-Logout is the unique site where a raw caller string reaches `Response.Headers.Location`.
-
-### Fix
-
-Add the project's own header-legality check as a second conjunct on the same guard, so a value that
-cannot be written as a header falls back to the anonymous `SignedOut` page and sign-out still completes:
-
-```csharp
-string target = !string.IsNullOrEmpty(returnUrl)
-        && Url.IsLocalUrl(returnUrl)
-        && Bastet.Services.Security.HttpHeaderValue.IsValid(returnUrl)
-    ? returnUrl
-    : Url.Action(nameof(SignedOut), "Account") ?? "/Account/SignedOut";
-```
-
-One line, reusing `Services/Security/HttpHeaderValue.cs` — written for precisely this Kestrel rule and
-already used at `Program.cs:483` — and it cannot narrow anything that works today, because every URL
-the app itself generates is ASCII. It fixes both the Production and Development branches, since both
-read `target`. Extend `HttpHeaderValueTests` with a non-ASCII case and drop the `IsLocalUrl` mock in
-`AccountControllerLogoutTests` for one test that passes `/café` through the real helper.
-
-If internationalized return paths must actually be honoured rather than dropped, percent-encode
-instead — but only *after* `IsLocalUrl` has passed, and over the path and query segments rather than the
-whole string, so `?`, `&`, `=` and `/` survive.
-
-**No interim is cheaper** — the conjunct above *is* the one-line change. The only weaker alternative,
-wrapping the tail of `Logout` in a `try/catch` that falls through to `/Account/SignedOut`, is strictly
-more code and leaves an exception in the log on every occurrence.
+_Two of the audit's suggestions were not needed. `HttpHeaderValueTests` **already** covers non-ASCII
+(`'self' https://café.example.com` and curly quotes are in its reject theory), so there was nothing to
+extend. Dropping the `IUrlHelper.IsLocalUrl` mock in favour of the real helper for one case was skipped:
+the audit established that the mock returns exactly what the real helper returns for non-ASCII input, so
+it already pins the defect, and standing up a real `UrlHelper` needs an `ActionContext` with routing for
+no additional pinning power. The percent-encoding alternative — honouring internationalized paths instead
+of dropping them — was **not** taken; it is more code for a case the application never generates, and the
+audit lists it as an option rather than a recommendation. Also unchanged: `GlobalSanitizationFilter` still
+returns immediately for `typeof(string)`, so a top-level `string?` parameter is never sanitized. That is
+on the watch list and is how this value arrives raw._
 
 ---
 
