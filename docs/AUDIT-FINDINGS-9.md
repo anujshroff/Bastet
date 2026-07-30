@@ -1,16 +1,68 @@
 # Bastet — Round-9 Audit Findings
 
-| | |
-|---|---|
-| Round | **9** (finding letter **I** — findings are `I1` … `I8`) |
-| Branch | `audit/round-9` |
-| HEAD | `a8f669b` — *"Audit 8 Cleanup (#152)"*, identical tree to `main` |
-| Build | `dotnet build --no-incremental` → **0 warnings, 0 errors** |
-| Tests | **690 passed**, 0 failed, 0 skipped |
-| Working tree | clean at start and at finish — this file is the round's only change |
-| Date | 2026-07-29 |
+| | Audit | After reconciliation |
+|---|---|---|
+| Round | **9** (finding letter **I** — findings are `I1` … `I8`) | |
+| Branch | `audit/round-9` | one commit per finding |
+| HEAD | `a8f669b` — *"Audit 8 Cleanup (#152)"*, identical tree to `main` | |
+| Build | **0 warnings, 0 errors** | **0 warnings, 0 errors** (clean rebuild, `bin`/`obj` deleted) |
+| Tests | **690 passed**, 0 failed, 0 skipped | **716 passed**, 0 failed, 0 skipped (+26) |
+| Working tree | clean at start and at finish | clean |
+| Date | 2026-07-29 | 2026-07-29 |
 
-Every line number below was re-derived against the working tree at `a8f669b` while writing this file.
+Every line number in the original findings was re-derived against the working tree at `a8f669b`; the
+struck entries below cite the **post-fix** lines.
+
+**All eight findings were fixed — none was refuted on re-verification.** Each was reproduced against the
+unfixed build before being fixed and re-measured after, one commit per finding, each carrying its own
+struck entry. The reproductions were not taken on trust: I3's 87 s lock hold and refused rival write,
+I4's three response orderings in real Chromium, I5's 153-of-340 under-stating renders, I6's live 500s and
+I7's four Production callback failures were all re-run against HEAD first, and every regression test was
+confirmed failing before its fix landed.
+
+**Three of the audit's proposed fixes were rejected or corrected on evidence, and four suggestions were
+declined** — each recorded in the relevant struck entry. Two are worth surfacing here because they look
+reasonable and will be re-proposed: I6's diff does not compile as written (`AccountController.cs` had no
+`using Bastet.Services.Security;`, caught as CS0103), and I3's fix needed all three of its verifier's
+extensions before the outage actually cleared.
+
+### Final verification sweep
+
+- **Clean rebuild** with `bin`/`obj` deleted: 0 warnings, 0 errors. **Full suite: 716 passed**, 0 failed,
+  0 skipped (690 → 716, +26; no test was deleted or disabled).
+- **Real app against real SQL Server 2022**, every major area requested and asserted on **content**, not
+  status codes: **21 of 21 passed** — subnet list/create/details/edit/delete, host-IP
+  list/create/edit/delete, per-subnet and global deleted-host-IP listings, deleted subnets, both purge
+  confirmation pages, all three Azure wizards, roles, access-denied and error pages. The
+  delete → archive → purge flow was driven through the app's own forms, and both purge pages were
+  confirmed to state exactly the scope their form posts.
+- **Security headers** still ride on a normal 200 **and** on the error page:
+  `X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy: frame-ancestors 'none'`,
+  `X-Frame-Options: DENY`, `Cache-Control: no-store,no-cache`.
+- **Log read and classified: 0 `fail:` lines, 0 unhandled exceptions.** Seven `warn:` lines, all
+  expected and all pre-existing: three `Azure credential validation failed` (the sweep deliberately ran
+  with no Azure credentials, so `DefaultAzureCredential` fell through to Managed Identity), three EF
+  `QuerySplittingBehavior` advisories, and one DataProtection `No XML encryptor configured` — the last is
+  on the watch list as accepted. Both non-Azure warnings were confirmed present on unfixed builds too,
+  and the round added no `Include` anywhere.
+- **Azure end to end against live ARM** through the application's own `DefaultAzureCredential` path:
+  subscriptions → VNet discovery → bulk preview → commit (2 targets created) → reconcile scan → delete
+  commit. Both counter-tests pass, which is what shows the reconciler **discriminates** rather than
+  merely blocks: a genuinely deleted VNet was still offered and archived (`warnings:[]`,
+  `subnetsArchived:1`), while a descendant the credential cannot read was **withheld and named** in the
+  warning and its stale ancestor withheld by the cascade guard, with the delete refused and both rows
+  surviving. All rig fixtures were torn down and both resource groups re-listed empty.
+
+### Deliberately not done
+
+- I1's optional service-level second cascade guard — the controller fix is measured sufficient for both
+  `ReviewItems` statuses.
+- I2's warning-only interim, I3's `AsNoTracking`-only interim, I4's button-as-mutex interim, I5's lock,
+  I6's percent-encoding alternative, I7's `SkipUnrecognizedRequests`, I8's `long`-arithmetic interim —
+  each superseded by the real fix, and I4's and I5's are unsound besides.
+- `_StepConfirm.cshtml` still has no warnings block; nothing checks a cancellation token on the batch
+  import; the `AccessDeniedPath` asymmetry between the cookie and OIDC handlers is unchanged. All three
+  remain on the watch list.
 
 ---
 
