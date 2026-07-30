@@ -222,136 +222,39 @@ import, so an operator who gives up does not shorten the hold._
 
 ---
 
-## I4 [x2] — Reconcile wizard's `runScan` has no staleness guard, so a superseded scan paints its stale-subnet table and its "nothing to clean up" clean bill on top of the current scan's "Nothing was checked" failure panel
+_I4 is fixed and committed, exactly as proposed. `runScan` now takes a sequence number
+(`let scanSeq = 0;` beside `lastPlan`, `const seq = ++scanSeq;` as its first statement) and its
+`complete`, `success` and `error` callbacks each open with `if (seq !== scanSeq) { return; }` — the same
+shape `_ImportScripts.cshtml` and `_BulkScripts.cshtml` already carry, so the third wizard no longer
+differs from its siblings. `renderPlan` additionally clears `#rec-scan-error` where it reveals
+`#rec-scan-content`, which is safe because both `showScanError` branches return before that line._
 
-**file:line** — `src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:148` (`function runScan()`),
-callbacks at `:161` `complete`, `:164` `success`, `:171` `error`.
-
-**Confidence: confirmed.**
-
-**Corrected by the verifier:** the proposed fix is sound and complete (built, measured, reverted,
-re-measured), but the proposed **interim is unsound and was dropped** — its stated premise
-("`#rec-scan-btn` is the only caller, so no second scan can be in flight") is false, because
-`$("#rec-subscription-select").on("change")` at `:127-129` unconditionally re-enables the button.
-
-### Failure scenario
-
-`runScan()` fires `POST /Azure/ReconcileScan` with no request sequence number, and its `complete`
-(`:161`), `success` (`:164`) and `error` (`:171`) callbacks all act unconditionally — whichever response
-arrives last wins. This is the exact defect round 8 fixed in the other two wizards with `subnetSeq`
-(`_ImportScripts.cshtml`) and `previewSeq` (`_BulkScripts.cshtml`). `#rec-scan-error` is hidden in
-exactly one place, `runScan`'s own `beforeSend` (`:157`); `renderPlan` (`:205`) never clears it. So when
-a slow scan lands after a newer scan has failed, both panels are on screen at once.
-
-Concrete run, two genuinely stale rows seeded (`rig-r9-orphan-gone` `10.90.9.0/24`,
-`rig-r9-orphan-novnet` `10.90.10.0/24`): the operator clicks "Next: Scan", sees nothing happen (a real
-ARM-backed scan of 32 proposed rows measured 0.90-1.46 s here, and a real deployment is slower — one
-ARM listing plus one direct read per proposed row), uses the still-enabled step-1 pill and clicks Scan
-again; the second request dies on the wire (dropped connection, proxy 502, or ARM 429, which
-`GetVNetInventory` turns into `scanSucceeded:false` → the same `showScanError` path). Step 2 then renders
-
-> **Nothing was checked.** Error connecting to server: … Because Azure could not be read, BASTET cannot
-> tell which resources still exist, so nothing is offered for deletion. Fix the connection and scan
-> again.
-
-and, directly beneath it, the fully populated *"These BASTET subnets no longer match Azure"* table with
-both rows, live checkboxes and an enabled "Next: Confirm deletion" button. `_StepReview.cshtml:10-11`
-states the opposite as the design contract: *"Shown when the scan itself failed. No rows and no delete
-option are rendered in that case: an unanswered question must never look like 'everything was
-deleted'."*
-
-With zero stale rows the same reorder produces the mirror-image lie: the green *"Everything imported
-from this subscription still exists in Azure. There is nothing to clean up."* banner (`:259`) under
-"Nothing was checked" — breaking the invariant its own comment asserts at `:252-257` (*"a statement of
-fact, so it may only appear when the scan actually established that"*).
-
-The operator can then walk straight through — `lastPlan` (`:206`) and `confirmedIds` (`:314`) come from
-the superseded plan — and the archive proceeds (`DeletedSubnets` archives no `AzureResourceId` and has
-no restore path). What is **not** wrong is *which* rows get archived: `BulkDeleteStaleAzureSubnets`
-re-scans and re-confirms every posted id (`SubnetController.AzureReconcile.cs:55-92`), so a row the
-newest scan would withhold is refused with 409. The destructive direction fails closed. The defect is
-that the wizard renders a delete affordance, a clean bill of health and a confirmation screen from a
-scan it has itself declared failed, and performs an irreversible archive from that screen.
-
-The reverse ordering is also wrong and was **not** in the candidate: a superseded *failure* landing
-after a valid plan paints "Nothing was checked" over 2 live rows, marks the step-2 pill
-`nav-link active disabled`, and `showScanError` → `invalidateScan()` nulls `lastPlan` — so ticking rows
-enables "Next: Confirm deletion" but clicking it hits the bare `return` at `:307` and nothing happens.
-That is the "permanently live, inert button" pathology the comment at `:66-71` records as already fixed
-once for the delete button.
-
-### How it was reproduced
-
-Own pristine instance (`rsync -a --exclude .git --exclude bin --exclude obj` out of the repo, then
-`dotnet build`, `dotnet run --no-build --no-launch-profile` on `http://localhost:5396`,
-`BASTET_AZURE_IMPORT=true`, SP1 creds, catalog `bastet_r9_vc7a_b`, seeded with
-`rig/seed-reconcile-fixture.sql`), driven by real Chromium via the rig's Playwright.
+_Verified in real headless Chromium against the shipped view, unfixed build then fixed, with
+`requestAnimationFrame` stubbed. The two scan responses were fabricated by route interception rather
+than driven through ARM: the defect is entirely in the client's ordering, so no Azure was needed, and
+the reachable two-gesture path (Scan → step-1 pill → Scan) was used rather than a double-click. The
+served page carried **0** occurrences of `scanSeq` before and **5** after._
 
 ```
-repro_c.py   # NO interception at all: counts real ReconcileScan requests for (a) a plain double-click
-             # and (b) Scan -> click #rec-step1-tab -> Scan
-repro_a.py   # holds scan #1's REAL 200 (route.fetch then fulfill later; response bytes unaltered) and
-             # drops scan #2's connection; snapshots the panels before and after release; then
-             # Select all -> Next: Confirm -> type "approved" -> Delete.  Run twice: with the two
-             # stale rows, and with them already archived (clean-bill variant)
-repro_b.py   # reverse ordering: scan #1 held then dropped, scan #2 answered immediately
+                     unfixed                                    fixed
+error-last     scanError=True  scanContent=True  rows=2   scanError=True  scanContent=False rows=0
+clean-bill     scanError=True  nothingStale=True          scanError=True  nothingStale=False
+success-last   scanError=True  over 2 live rows           scanError=False plan intact, no error painted
 ```
 
-Observed:
+_So on HEAD the failure panel and a populated stale-subnet table were on screen together, and in the
+zero-stale variant the green "there is nothing to clean up" banner rendered underneath "Nothing was
+checked". Both are gone. The **reverse** ordering — a superseded failure landing after a valid plan,
+which the audit noted was not part of the original candidate — is fixed by the same guard: the valid
+plan survives untouched._
 
-```
-repro_c (no interception): mode=dblclick -> 1 request (gap 0 ms)
-                          mode=pill     -> 2 requests (gap 215 ms)
-real scan latency, 32 proposed rows: 1.46 s / 0.90 s / 1.30 s
-
-repro_a, error-last, HEAD source:
-[1.52] scan#1 real 200, 1135 bytes -- HOLDING delivery
-[1.94] scan#2 -> dropping connection ; FAIL ReconcileScan net::ERR_CONNECTION_FAILED
-[3.94] after scan #2 failed:            scanErrorVisible=True  scanContentVisible=False staleRows=[]
-[6.95] after superseded scan #1 painted: scanErrorVisible=True scanContentVisible=True
-       staleSectionVisible=True staleRows=[['','rig-r9-orphan-gone','10.90.9.0/24','Subnet deleted',...],
-                                           ['','rig-r9-orphan-novnet','10.90.10.0/24','Subnet deleted',...]]
-walked on: goConfirmDisabled=False -> step3Active=True count=2 -> "Warning! You are about to delete 2
-subnet(s) that no longer match Azure." -> POST {"subnetIds":[3,4],"confirmation":"approved"} -> 200
-{"targetsDeleted":2,"subnetsArchived":2}; DeletedSubnets gained OriginalId 3 and 4, DeletedBy dev@example.com
-
-clean-bill variant: scanErrorVisible=True scanContentVisible=True nothingStaleVisible=True
-  -> " Nothing was checked. / ... / Everything imported from this subscription still exists in Azure.
-       There is nothing to clean up."
-
-repro_b, success-last: after the superseded failure landed -> scanErrorVisible=True,
-  scanContentVisible=True, rows still both, step2pill "nav-link active disabled",
-  "after select-all goConfirmDisabled=False" but "step3 active = False"  (enabled button, inert)
-```
-
-Fix leg (proposed diff applied to the private copy; page served 5 occurrences of `scanSeq`):
-error-last → `scanErrorVisible=True scanContentVisible=False staleRows=[]`; success-last → the valid
-plan intact, no error painted, `step3 active = True`. Reverted the view to HEAD, rebuilt (0
-occurrences of `scanSeq`), re-ran: broken again exactly as above.
-
-### Fix
-
-Give `runScan` the guard the other two wizards already carry. Add `let scanSeq = 0;` beside `lastPlan`
-(`:9`), `const seq = ++scanSeq;` as the first line of `runScan` (`:149`), and open `complete` (`:161`),
-`success` (`:164`) and `error` (`:171`) with `if (seq !== scanSeq) { return; }` — byte-for-byte the
-shape at `_BulkScripts.cshtml:448/462/471`. For defence in depth, have `renderPlan` clear the failure
-panel where it reveals the content: add `$("#rec-scan-error").addClass("d-none");` next to
-`$("#rec-scan-content").removeClass("d-none");` at `:275`, so the success path does not depend on its
-own `beforeSend` having run last. That addition is safe because `renderPlan`'s `showScanError` branches
-(`:210`, `:216`) return before reaching `:275`.
-
-Complete for this wizard: `loadSubscriptions` (`:82`) has a single load-time caller (`:452`) so cannot
-reorder, and the commit POST (`:376`) disables its own button in `beforeSend` (`:396`).
-
-**No interim.** The finder's two-line "make the button the mutex" (disable `#rec-scan-btn` in
-`beforeSend`, re-enable in `complete`) does not close the window: `$("#rec-subscription-select").on("change")`
-at `:127-129` unconditionally does `$("#rec-scan-btn").prop("disabled", !$(this).val())`, so an
-operator who clicks the step-1 pill mid-scan and picks a **different** subscription re-enables the
-button and starts a second overlapping scan — and that variant is worse, because
-`selectedSubscriptionId` then names subscription B while the repainted table describes A. (This is a
-code-level correction; the rig has one subscription, so a second real `change` event could not be
-fired.) A sound interim would need an in-flight flag the change handler respects, which is the seq
-guard with extra steps. Ship the seq guard.
+_The audit's **interim** was not taken, and its premise is worth recording because it looks reasonable:
+disabling `#rec-scan-btn` for the scan's duration does not close the window, because
+`$("#rec-subscription-select").on("change")` unconditionally re-enables it, so an operator who returns
+to step 1 mid-scan and picks a different subscription starts a second overlapping scan — and that
+variant is worse, since `selectedSubscriptionId` then names one subscription while the repainted table
+describes another. No test ships with this fix: there is still no JS test harness, which the watch list
+records, so the browser measurement above is the evidence. Suite unchanged at **694**; build 0 warnings._
 
 ---
 

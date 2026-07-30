@@ -7,6 +7,7 @@
         let selectedSubscriptionId = "";
         let selectedSubscriptionName = "";
         let lastPlan = null;
+        let scanSeq = 0;          // bumped per scan so a superseded response can be told apart
         // The exact subnets the confirm step was built from. The deletion posts these rather than
         // whatever the review checkboxes hold at click time, so it can only ever delete what the
         // confirmation screen listed.
@@ -146,6 +147,12 @@
         // ------------------------------------------------------------------
 
         function runScan() {
+            // The step-1 pill stays enabled during a scan, and the subscription select's change
+            // handler re-enables the scan button, so two scans really can be in flight. Whichever
+            // response arrives last would otherwise win: a superseded plan can paint its stale-subnet
+            // table and its "nothing to clean up" banner over a newer scan's failure panel, and the
+            // archive is reachable from that screen. Same guard the import and bulk wizards carry.
+            const seq = ++scanSeq;
             $.ajax({
                 url: "@Url.Action("ReconcileScan", "Azure")",
                 type: "POST",
@@ -159,9 +166,17 @@
                     $("#rec-scan-content").addClass("d-none");
                 },
                 complete: function () {
+                    // jQuery always runs complete, so a superseded request would otherwise hide the
+                    // spinner of one still in flight.
+                    if (seq !== scanSeq) {
+                        return;
+                    }
                     $("#rec-scan-loading").addClass("d-none");
                 },
                 success: function (result) {
+                    if (seq !== scanSeq) {
+                        return;
+                    }
                     if (!result.success) {
                         showScanError(result.error || "The scan failed.");
                         return;
@@ -169,6 +184,12 @@
                     renderPlan(result.plan);
                 },
                 error: function (xhr, status, error) {
+                    // Without this a superseded request that fails paints its error over a current,
+                    // valid plan - and leaves an enabled button that does nothing, because
+                    // showScanError nulls lastPlan.
+                    if (seq !== scanSeq) {
+                        return;
+                    }
                     showScanError("Error connecting to server: " + error);
                 }
             });
@@ -272,6 +293,10 @@
             updateGoConfirmBtn();
             // A re-scan clears the selection, so anything already confirmed refers to the old plan.
             invalidateConfirmation();
+            // Defence in depth: clear the failure panel where the content is revealed, so a valid
+            // plan never renders underneath a "Nothing was checked" message left by an earlier scan.
+            // Safe here because the showScanError branches above return before reaching this point.
+            $("#rec-scan-error").addClass("d-none");
             $("#rec-scan-content").removeClass("d-none");
         }
 
