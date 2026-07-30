@@ -1,0 +1,18 @@
+@{
+    ViewData["Title"] = "Sign-in Not Completed";
+}
+
+<div class="text-center">
+    <h1>Sign-in Not Completed</h1>
+    <p class="lead">You were not signed in.</p>
+    <p>This usually means one of the following:</p>
+    <ul class="list-unstyled">
+        <li>the sign-in prompt was cancelled, or consent was declined;</li>
+        <li>the sign-in page was left open too long, so it expired;</li>
+        <li>sign-in was finished in another tab or window, or this page was reloaded.</li>
+    </ul>
+    <p>Nothing is wrong with your account, and nothing was changed.</p>
+    <p>
+        <a asp-controller="Home" asp-action="Index" class="btn btn-primary">Try signing in again</a>
+    </p>
+</div>

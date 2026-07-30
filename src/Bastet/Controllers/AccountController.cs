@@ -83,6 +83,21 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
     public IActionResult SignedOut() =>
         User.Identity?.IsAuthenticated == true ? RedirectToAction("Index", "Home") : View();
 
+    /// <summary>
+    /// Where a failed OIDC sign-in lands. Declining the consent prompt, an expired or already-used
+    /// correlation cookie and a reloaded callback are all routine events, not server faults.
+    /// </summary>
+    /// <remarks>
+    /// Anonymous, and it must stay that way: it is reached from the OpenIdConnect handler's
+    /// OnRemoteFailure, i.e. precisely when authentication did not happen. Challenging here would
+    /// bounce the user straight back into the flow that just failed, which for a declined consent
+    /// prompt is a loop. Deliberately not <c>AccessDenied</c>: that page tells the user their account
+    /// lacks the necessary roles, which is untrue for every cause but one.
+    /// </remarks>
+    [AllowAnonymous]
+    public IActionResult SignInFailed() =>
+        User.Identity?.IsAuthenticated == true ? RedirectToAction("Index", "Home") : View();
+
     [Authorize]
     public IActionResult Roles()
     {

@@ -241,6 +241,32 @@ else
                  [.. properties.GetTokens().Where(token => token.Name == "id_token")]);
              return Task.CompletedTask;
          };
+
+         // Declined or pending consent, an expired or already-consumed correlation cookie and a
+         // replayed callback are all normal events, not server faults. Left unhandled they escape
+         // RemoteAuthenticationHandler as AuthenticationFailureException, so UseExceptionHandler
+         // answers HTTP 500 "An unexpected error occurred on the server" - telling a user who simply
+         // pressed Cancel that the server broke - and writes a stack trace at Error level for
+         // anything an anonymous caller can post to /signin-oidc.
+         //
+         // The framework's own escape hatch does not apply: OpenIdConnectHandler only redirects on
+         // access_denied when AccessDeniedPath is set on *these* options, and the only AccessDeniedPath
+         // in the tree belongs to the cookie handler. The destination here is a dedicated page rather
+         // than AccessDenied, because that page states the account lacks the necessary roles, which is
+         // untrue for every cause but a declined consent prompt.
+         options.Events.OnRemoteFailure = context =>
+         {
+             // The message, not the exception object: passing context.Failure re-creates the same
+             // ten-line stack trace per anonymous request, merely relabelled as a warning.
+             context.HttpContext.RequestServices
+                 .GetRequiredService<ILoggerFactory>()
+                 .CreateLogger("Bastet.Authentication")
+                 .LogWarning("OIDC sign-in did not complete: {Reason}", context.Failure?.Message);
+
+             context.Response.Redirect("/Account/SignInFailed");
+             context.HandleResponse();
+             return Task.CompletedTask;
+         };
      });
 }
 

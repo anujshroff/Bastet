@@ -341,149 +341,48 @@ on the watch list and is how this value arrives raw._
 
 ---
 
-## I7 [x1] — No `OnRemoteFailure` handler: every OIDC callback failure (declined consent, expired correlation cookie, reloaded callback) answers HTTP 500 with an unhandled exception
+_I7 is fixed and committed, taking the verifier's correction rather than the finder's original.
+`OnRemoteFailure` is assigned beside `OnTicketReceived` (`Program.cs:257`), logs the failure **message**
+at Warning — not `context.Failure`, which would re-create the same ten-line stack trace per anonymous
+request merely relabelled — then redirects and calls `HandleResponse()`. The destination is a new
+`[AllowAnonymous] SignInFailed()` action (`AccountController.cs:98`) with
+`Views/Account/SignInFailed.cshtml`, **not** `AccessDenied`: that page states the account lacks the
+necessary roles, which is untrue for three of the four triggers. Like `SignedOut`, it redirects home if
+the caller somehow arrives authenticated._
 
-**file:line** — `src/Bastet/Program.cs:237` (`options.Events.OnTicketReceived`, the **only** event
-assigned in the `AddOpenIdConnect` block at `:207-244`).
-
-**Confidence: confirmed.** Votes 2/2.
-
-**Corrected by the verifiers:** severity **medium → low**; the finder's *"no in-app way forward … stuck
-until they clear cookies manually"* is **false** (the 500 body carries `<a href="/">Return to Home</a>`
-and `GET /` immediately re-challenges with a fresh correlation cookie — measured); *"unbounded log
-volume"* is bounded at ~10 lines / ~1 kB per request; and the proposed fix's **destination is wrong for
-3 of the 4 triggers** and was replaced (see Fix).
-
-### Failure scenario
-
-Non-Development deployments authenticate via the OpenIdConnect handler at `Program.cs:207-244`. The only
-event wired up is `OnTicketReceived` (`:237`); `OnRemoteFailure` is never set (`grep -rn
-"OnRemoteFailure|AuthenticationFailureException|RemoteFailure|SkipUnrecognizedRequests"` over `src/`,
-`test/` and `docs/` returns nothing), so `RemoteAuthenticationHandler` rethrows and
-`UseExceptionHandler("/Error")` (`:506`) answers 500. The framework's escape hatch is not wired either:
-`OpenIdConnectHandler.HandleAccessDeniedErrorAsync` redirects only when `AccessDeniedPath` is set on
-the **OpenIdConnect** options, and the tree's only `AccessDeniedPath` is the **cookie** handler's
-(`:200`) — the same one-handler-over trap round 4's D38 documented.
-
-`/signin-oidc` is claimed inside `UseAuthentication`, i.e. before `UseAuthorization`, routing, model
-binding and antiforgery, so the `RequireAuthenticatedUser()` fallback policy, every `[Authorize]` and
-every validator are downstream of the throw and stop nothing.
-
-Four routine triggers, all reproduced live against a Production instance pointed at real Entra
-metadata:
-
-| trigger | what the user did | result |
-|---|---|---|
-| `error=access_denied&error_description=AADSTS65004…&state=<valid>` posted back to `/signin-oidc` | clicked **Cancel / Decline** at the Microsoft prompt (`response_mode=form_post`, which the challenge really requests) | 500, `OpenIdConnectProtocolException` — correlation validated first, so this is not a mislabelled correlation failure |
-| same POST with the `Cookie` header omitted | left the sign-in page open past the correlation cookie's **15-minute** lifetime, or finished in another tab | 500, `AuthenticationFailureException: Correlation failed` |
-| same POST with a consumed `code` | reloaded or bookmarked the callback URL | 500 both attempts, `invalid_grant AADSTS9002313` from the real Entra token endpoint |
-| bare `GET /signin-oidc` | anything anonymous | 500, `message.State is null or empty` |
-
-The page reads *"Server Error / Status Code: 500 / An unexpected error occurred on the server."* — the
-user is told the server broke when they simply declined. Each occurrence also writes a `fail:`-level
-"An unhandled exception has occurred" entry with a stack trace, which Production's
-`SetMinimumLevel(Warning)` does not filter, so an unauthenticated caller can generate Error-level log
-volume on a public path at will (measured 1030 bytes/request; 20 anonymous GETs → 20 x 500 and exactly
-200 log lines). Not reachable in Development, where `DevAuthHandler` replaces the OIDC handler
-entirely — which is why eight rounds driven on the Development instance could not see it.
-
-Nothing leaks and nothing is written: all security headers are present on the 500
-(`X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy: frame-ancestors 'none'`,
-`X-Frame-Options: DENY`, `Cache-Control: no-cache,no-store`) and the body is generic; authentication
-still fails closed. `/signout-callback-oidc`, `/signout-callback-oidc?state=garbage`, `/signout-oidc`
-and `/signout-oidc?sid=x` all answer 200 anonymously and throw nothing, so the gap is `/signin-oidc`
-only.
-
-### How it was reproduced
-
-Own Production instance of the unmodified tree on port 5301, catalog `bastet_r9_vc2a`,
-`BASTET_OIDC_CLIENT_ID=bastet-probe`, `BASTET_OIDC_AUTHORITY=https://login.microsoftonline.com/<rig
-tenant>/v2.0`, `dotnet run --no-build --no-launch-profile`; nothing written into the repository.
-A genuine challenge was captured first, then the callback replayed. Correlation and nonce cookies are
-`secure`, so they were delivered by an explicit `Cookie` header rather than curl's jar — otherwise
-every probe would silently have become the correlation-failure case.
+_Measured against a Production instance pointed at the **real** Entra metadata for the rig tenant, with a
+genuine challenge captured first (390-char state, real correlation and nonce cookies) and the callback
+then replayed:_
 
 ```
-curl -s -c oidc1.txt -D h1.txt -o /dev/null http://localhost:5301/Subnet
-STATE=$(grep -oP '^Location: \K.*' h1.txt | grep -oP '(?<=[?&])state=\K[^&]*')
-CORR=$(awk '$6 ~ /^\.AspNetCore\.Correlation\./ {print $6"="$7}' oidc1.txt)
-NONCE=$(awk '$6 ~ /^\.AspNetCore\.OpenIdConnect\.Nonce\./ {print $6"="$7}' oidc1.txt)
-
-(1) curl -i http://localhost:5301/signin-oidc
-(2) curl -X POST http://localhost:5301/signin-oidc -H "Cookie: $CORR; $NONCE" \
-      --data-urlencode error=access_denied \
-      --data-urlencode "error_description=AADSTS65004: User declined to consent to access the app." \
-      --data-urlencode "state=$STATE"
-(3) same POST with code=<stale code> instead of error=..., run twice
-(4) same POST with the Cookie header omitted
-(5) curl -i http://localhost:5301/                     # is there a way forward after the 500?
-(6) for i in $(seq 1 20); do curl -o /dev/null -w '%{http_code} ' .../signin-oidc; done
+                                     unfixed   fixed
+bare GET /signin-oidc                500       302 -> /Account/SignInFailed
+declined consent (access_denied)     500       302 -> /Account/SignInFailed
+missing correlation cookie           500       302 -> /Account/SignInFailed
+garbage state                        500       302 -> /Account/SignInFailed
+GET /Account/SignInFailed            302       200 "Sign-in Not Completed / You were not signed in"
+unhandled-exception log entries      4         0
+OIDC warning entries                 0         4
+total log lines for the run          50        18
 ```
 
-Observed:
+_The consumed-`code` trigger (`invalid_grant AADSTS9002313`) was not re-run — it needs a real
+authorization code, which requires an interactive sign-in — but it reaches `OnRemoteFailure` by the same
+path as the other three, all of which were reproduced._
 
-```
-challenge is real: 302 to .../oauth2/v2.0/authorize?...&response_mode=form_post&state=CfDJ8...
-  Set-Cookie .AspNetCore.Correlation.* path=/signin-oidc secure samesite=none, expires exactly 15 min out
-(1) 500, <title>Server Error - BASTET</title>;  AuthenticationFailureException: ... message.State is null or empty
-(2) 500;  fail: OpenIdConnectHandler[12] "Message contains error: 'access_denied'..." THEN
-          ExceptionHandlerMiddleware[1] ---> OpenIdConnectProtocolException: ... 'AADSTS65004...'
-          (no "Correlation failed" line -> correlation validated, the failure came after it)
-(3) 500 both attempts; ---> OpenIdConnectProtocolException 'invalid_grant' AADSTS9002313
-          at OpenIdConnectHandler.RedeemAuthorizationCodeAsync
-(4) 500; ---> AuthenticationFailureException: Correlation failed.
-(5) the 500 body contains <a href="/" class="btn btn-primary">Return to Home</a>, and GET / answers 302
-    to the authorize endpoint with exactly 1 fresh Set-Cookie: .AspNetCore.Correlation.*
-(6) 20 x 500 and exactly 200 log lines (~10 lines with a stack trace per anonymous request, at Error level)
+_The allow-list dependency the audit flagged is real and was proven, not assumed:
+`test/Bastet.Tests/Security/ControllerAuthorizationTests.cs` gates every `[AllowAnonymous]` action, and
+with the `AccountController.SignInFailed` entry removed the suite fails two rows — "is marked
+[AllowAnonymous] but is not in the allow-list" — then passes 134/134 with it restored. Build 0 warnings /
+0 errors; suite **699 → 702** (+3: the new action is enumerated by that theory)._
 
-fix switch (B), the finder's version verbatim: all triggers -> 302 /Account/AccessDenied, unhandled
-  exceptions 0 -- but that page reads "You do not have permission to access this resource. Your account
-  doesn't have the necessary roles..." which is false for 3 of the 4 triggers
-fix switch (C), the correction below: all four triggers -> 302 /Account/SignInFailed, that page 200s with
-  "Sign-in Not Completed / You were not signed in. / Try signing in again", unhandled exceptions 0,
-  4 failures cost 19 log lines total.  Build: 0 warnings, 0 errors.
-```
-
-### Fix
-
-Assign `OnRemoteFailure` beside `OnTicketReceived` and take over the response, but send the user to a
-**dedicated anonymous page**, not to `AccessDenied`:
-
-```csharp
-// in the AddOpenIdConnect options block, beside OnTicketReceived (Program.cs:237-243)
-options.Events.OnRemoteFailure = context =>
-{
-    // Declined or pending consent, an expired/consumed correlation cookie and a replayed callback
-    // are normal events, not server faults. Unhandled they escape RemoteAuthenticationHandler as
-    // AuthenticationFailureException, so UseExceptionHandler answers HTTP 500 "An unexpected error
-    // occurred on the server" and writes a stack trace at Error level for anything an anonymous
-    // caller can send to /signin-oidc.
-    context.HttpContext.RequestServices
-        .GetRequiredService<ILoggerFactory>()
-        .CreateLogger("Bastet.Authentication")
-        .LogWarning("OIDC sign-in did not complete: {Reason}", context.Failure?.Message);
-    context.Response.Redirect("/Account/SignInFailed");
-    context.HandleResponse();
-    return Task.CompletedTask;
-};
-```
-
-Log the **message**, not the exception object: passing `context.Failure` re-creates the 10-line stack
-trace per anonymous request, just relabelled Warning. Then in `AccountController` (which already hosts
-`AccessDenied`/`SignedOut`) add an `[AllowAnonymous] SignInFailed()` action with a doc comment stating
-why it must not challenge, and `Views/Account/SignInFailed.cshtml`: *"Sign-in Not Completed / You were
-not signed in."* plus the three causes in plain words and a "Try signing in again" link to `/`.
-
-**Do not forget the allow-list.** `test/Bastet.Tests/Security/ControllerAuthorizationTests.cs` asserts
-that every `[AllowAnonymous]` action appears in its `AllowedAnonymousActions` list with a reason
-(*"is marked [AllowAnonymous] but is not in the allow-list"*), so add `["AccountController.SignInFailed"]`
-there or the suite fails. That is a whole test file the "diff to the options block" framing does not
-mention.
-
-**Interim** (`options.SkipUnrecognizedRequests = true;`) closes only the unauthenticated half —
-measured: the bare `GET /signin-oidc` stops 500ing and falls through to a normal challenge. The
-declined-consent callback still returned 500 under it, because that failure happens after state and
-correlation have both validated. Not worth taking on its own.
+_The audit's **interim** (`options.SkipUnrecognizedRequests = true`) was not taken: it closes only the
+unauthenticated half, and the declined-consent callback still 500s under it because that failure happens
+after state and correlation have both validated. Nothing else changed — authentication still fails closed,
+and the framework's own escape hatch remains unavailable because
+`OpenIdConnectHandler.HandleAccessDeniedErrorAsync` only redirects when `AccessDeniedPath` is set on the
+**OpenIdConnect** options while the tree's only one belongs to the **cookie** handler. That asymmetry is
+left as it is and stays on the watch list._
 
 ---
 
