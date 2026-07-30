@@ -386,128 +386,42 @@ left as it is and stays on the watch list._
 
 ---
 
-## I8 [x2] — `AllHostIps` and `AllDeletedHostIps` never clamp `page` to the last page: an over-range page renders an inverted "Showing 51-40 of 40" banner over an empty table, and a very large one overflows the `int` skip and serves page 1's rows
+_I8 is fixed and committed with the audit's clamp, in both twins: once `totalCount` is known,
+`int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));` then
+`page = Math.Clamp(page, 1, totalPages);`, placed before the `Skip`/`Take` and before `CurrentPage` is
+set — `HostIpController.cs:481-482` (`AllHostIps`) and `:533-534` (`AllDeletedHostIps`). No view change
+was needed: both views derive their banner and pager from `CurrentPage`, so clamping it makes the label,
+the rows and the pager agree by construction. Post-clamp `(page-1)*pageSize <= totalCount`, so the `int`
+overflow is structurally gone rather than merely bounded._
 
-**file:line** — `src/Bastet/Controllers/HostIpController.cs:476` (`.Skip((page - 1) * pageSize)` in
-`AllHostIps`) and the twin at `:526` (`AllDeletedHostIps`); the floors are `:444` / `:509` and
-`totalCount` is computed at `:472` / `:518`. `grep -rn "Skip((page"` returns exactly those two sites.
-
-**Confidence: confirmed.**
-
-**Corrected by the verifier:** nothing in the finding itself — but note that its **fix and its interim
-choose opposite semantics** (the clamp shows the *last* page; the interim shows a correctly *empty*
-page), and the interim leaves the inverted banner in place, so it closes only the wrong-rows half. Take
-the clamp; do not ship the interim as the whole fix.
-
-### Failure scenario
-
-`page` is only floored (`page = Math.Max(1, page)`) and never clamped to the number of pages, and the
-skip is computed in `int` with `pageSize = 50`. `TotalPages` exists on both view models
-(`AllHostIpViewModels.cs:12`, `AllDeletedHostIpViewModels.cs:12`) but is consulted only by the pager
-arms, never to bound `page`. The views recompute the same unclamped product from `Model.CurrentPage`
-(`AllHostIps.cshtml:23`, `AllDeletedHostIps.cshtml:34`) and clamp only the *end* of the range, so the
-range inverts.
-
-With 4 host IPs and `GET /HostIp/AllHostIps?page=45000000`: `(45000000-1)*50 = 2,249,999,950` overflows
-`int` to `-2,044,967,346`; `Enumerable.Skip` treats a negative count as 0, so the action returns the
-**first** 50 rows while `CurrentPage` stays 45000000, and the header renders
-`Showing -2044967345--2044967296 of 4`. The wrongness is not just the label: it is inconsistent with the
-correct behaviour on the same endpoint — `?page=2` on the same 4-row dataset correctly returns zero
-rows, `?page=45000000` returns page 1. Both listings are affected and both are
-`[Authorize(Policy = "RequireViewRole")]`.
-
-Reachable with **zero URL editing**: the app's own pager emitted `href="/HostIp/AllDeletedHostIps?page=2"`
-for both Next and Last while the archive held 61 rows, and `?page=2` then correctly read
-*"Showing 51-61 of 61"* with 11 rows. A second admin submitted the Purge All form it already had open
-(`confirmedMaxId=40`, rendered by the app); H4's shipped scoping left 21 rows; reloading the *same
-pager-supplied URL* returned 200 with *"Showing 51-21 of 21 deleted host IP assignment(s)."* over a
-table containing only its header row.
-
-No unhandled exception, no write, no disclosure — the rows the overflow serves are page 1's rows the
-same caller already sees at `?page=1` — and the pager emits only First/Previous/Next/Last, so there is
-no unbounded loop. Impact is a self-contradictory page: it asserts N records exist and shows none, or
-claims a negative range while showing page 1. `grep -rniE "paginat|CurrentPage|Skip\(\(page"` over
-`docs/` returns zero hits, so no prior round considered and left this.
-
-### How it was reproduced
-
-Pristine `a8f669b` build, own instance on port 5302 against catalog `bastet_r9_vc3a` (4 live host IPs
-in one /24; archive seeded then grown to 61 by SQL). Repository never modified.
+_Reproduced and re-measured live, unfixed then fixed, four live host IPs (one page):_
 
 ```
-# (A) label inversion, driven entirely through the app's own forms - no URL editing
-curl -s -c $J http://localhost:5302/HostIp/PurgeAllDeletedHostIps        # archive 40, confirmedMaxId=40
-#   ... 21 more rows archived -> 61 ...
-curl -s -b $J http://localhost:5302/HostIp/AllDeletedHostIps             # pager emits ?page=2 for Next/Last
-curl -s -b $J "http://localhost:5302/HostIp/AllDeletedHostIps?page=2"    # correct: 51-61 of 61, 11 rows
-curl -s -b $J -X POST http://localhost:5302/HostIp/PurgeAllDeletedHostIps \
-     -H "RequestVerificationToken: $TOKEN" --data-urlencode "__RequestVerificationToken=$TOKEN" \
-     --data-urlencode "confirmation=approved" --data-urlencode "confirmedMaxId=40"
-curl -s -b $J "http://localhost:5302/HostIp/AllDeletedHostIps?page=2"    # reload of the SAME pager URL
-
-# (B) int overflow
-for u in "AllHostIps?page=1" "AllHostIps?page=2" "AllHostIps?page=45000000" "AllHostIps?page=999999999" \
-         "AllHostIps?page=2147483647" "AllHostIps?page=0" "AllHostIps?page=-5" \
-         "AllDeletedHostIps?page=45000000"; do ... done
-
-# (C) real Chromium (Playwright), capturing console + pageerror
-# (D) clamp applied in a copy: dotnet build --no-incremental ; dotnet test ; re-run (B)
+                 unfixed banner                          fixed banner        rows unfixed -> fixed
+page=1           Showing 1-4 of 4                        Showing 1-4 of 4    4 -> 4
+page=2           Showing 51-4 of 4                       Showing 1-4 of 4    0 -> 4
+page=45000000    Showing -2044967345--2044967296 of 4     Showing 1-4 of 4    4 -> 4   (page 1's rows)
+page=2147483647  Showing -99--50 of 4                    Showing 1-4 of 4    4 -> 4
 ```
 
-Observed:
+_The intended behaviour change is real and worth stating: `?page=2` on a four-row set now renders page 1
+rather than an empty page 2. That is the only way the label, the rows and the pager can agree, and it is
+what the audit's fix chose._
 
-```
-(A) POST -> 302 ; SELECT COUNT(*) FROM DeletedHostIpAssignments = 21 (was 61)
-    reload of the unchanged pager-supplied URL -> http=200
-      BANNER: "Showing 51-21 of 21 deleted host IP assignment(s)."
-      data rows (<td><code>): 0 ;  <tr> occurrences: 1 (the header row only)
-      pager: First -> ?page=1, Previous -> ?page=1, Next disabled, Last disabled
+_Fourteen tests added in a new
+`test/Bastet.Tests/HostIpManagement/HostIpPaginationClampTests.cs`: over-range pages on both listings
+(including `45000000`, `999999999` and `int.MaxValue`), the last real page of a 61-row archive served
+intact at 11 rows, page 3 of that archive clamping back to page 2, an empty listing staying on page 1, the
+existing lower bound still flooring `0`/`-5`/`int.MinValue`, and a guard that pins `PageSize` at 50 so the
+arithmetic above cannot silently stop meaning what it says. Nine of the fourteen were confirmed failing
+against the unfixed tree first. Build 0 warnings / 0 errors; suite **702 → 716**._
 
-(B) AllDeletedHostIps?page=1        200 datarows=40  [Showing 1-40 of 40]
-    AllDeletedHostIps?page=2        200 datarows=0   [Showing 51-40 of 40]     <- inverted, empty
-    AllHostIps?page=2               200 datarows=0   [Showing 51-4 of 4]       <- correctly empty
-    AllHostIps?page=45000000        200 datarows=4   [Showing -2044967345--2044967296 of 4]  <- page 1's rows
-    AllDeletedHostIps?page=45000000 200 datarows=40  [Showing -2044967345--2044967296 of 40]
-    AllHostIps?page=999999999       200 datarows=4   [Showing -1539607651--1539607602 of 4]
-    AllHostIps?page=2147483647      200 datarows=4   [Showing -99--50 of 4]
-    AllHostIps?page=0 and ?page=-5  200 datarows=4   [Showing 1-4 of 4]        (lower bound is fine)
-
-(C) Chromium: status 200, banner " Showing -2044967345--2044967296 of 4 host IP assignment(s).",
-    4 tbody rows rendered, console errors/warnings []  (screenshots kept in the verifier's scratch dir)
-
-(D) build 0 warnings 0 errors; dotnet test 690 passed / 0 failed / 0 skipped (no test pins either action).
-    Fixed build, 61-row archive: page=1 -> 50 rows "1-50 of 61"; page=2 -> 11 rows "51-61 of 61";
-    page=3 and page=45000000 -> 11 rows "51-61 of 61". 4-row live set: every out-of-range value renders
-    "Showing 1-4 of 4" with 4 rows and an all-disabled pager. No negative range survives anywhere.
-```
-
-### Fix
-
-Clamp the requested page to the real range once `totalCount` is known, and use the clamped value for
-both the query and the view model so the label, the rows and the pager agree:
-
-```csharp
-int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
-page = Math.Clamp(page, 1, totalPages);
-```
-
-placed before the `Skip`/`Take` and before `CurrentPage = page`. Apply to both
-`HostIpController.cs:441-499` and `:506-588`, which are twins. `Math.Clamp` cannot throw because
-`Math.Max(1, …)` guarantees `totalPages >= 1`, and post-clamp `(page-1)*pageSize <= totalCount`, so the
-overflow is structurally gone. No view change is needed — the views derive from the now-clamped
-`CurrentPage`. Note the intended behaviour change: `?page=2` on a 4-row set becomes page 1 rather than
-an empty page 2, which is the only way label, rows and pager can agree.
-
-**Interim** (one line at each of `:476` and `:526`, no restructuring) — do the arithmetic in `long` and
-cap it, so an absurd page becomes a correctly *empty* page instead of page 1:
-
-```csharp
-.Skip((int)Math.Min((long)(page - 1) * pageSize, totalCount))
-```
-
-(`totalCount` is already computed a few lines above in both actions, and `page >= 1` is guaranteed so
-there is no underflow). This closes the wrong-rows half only; the header label still reads oddly until
-the clamp lands.
+_The audit's **interim** was deliberately not taken, on its own advice: doing the arithmetic in `long`
+and capping the skip closes only the wrong-rows half and chooses the opposite semantics from the clamp
+(a correctly empty page rather than the last page), leaving the inverted banner in place. Shipping both
+would have been contradictory. Nothing else was touched — no unhandled exception, no write and no
+disclosure was ever involved, and the rows the overflow served were rows the same caller could already
+see at `?page=1`._
 
 ---
 
