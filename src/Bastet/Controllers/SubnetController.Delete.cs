@@ -274,14 +274,21 @@ public partial class SubnetController : Controller
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> PurgeAllDeletedSubnets()
     {
-        int count = await context.DeletedSubnets.CountAsync();
+        // Bound first, then count inside the bound. Counting first and reading the bound afterwards
+        // are two round trips, and anything archived between them lands inside the bound the POST
+        // carries while sitting outside the count this page prints - so the purge destroys records the
+        // operator was never shown, irreversibly. Id is IDENTITY and nothing else deletes from this
+        // table, so COUNT(Id <= maxId) is exactly the POST's scope. This also removes the variant
+        // where a concurrent purge left count > 0 beside maxId == 0 and the POST then refused the
+        // operator's own form: maxId == 0 now implies count == 0, so the honest redirect fires.
+        int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;
+        int count = await context.DeletedSubnets.CountAsync(d => d.Id <= maxId);
         if (count == 0)
         {
             TempData["ErrorMessage"] = "There are no deleted subnet records to purge.";
             return RedirectToAction(nameof(DeletedSubnets));
         }
 
-        int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;
         return View(new PurgeAllDeletedSubnetsViewModel { Count = count, MaxId = maxId });
     }
 

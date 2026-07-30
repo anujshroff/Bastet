@@ -592,14 +592,16 @@ public class HostIpController(
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> PurgeAllDeletedHostIps()
     {
-        int count = await context.DeletedHostIpAssignments.CountAsync();
+        // Bound first, then count inside it - see PurgeAllDeletedSubnets for why the other order lets
+        // the purge destroy records the confirmation page never counted.
+        int maxId = await context.DeletedHostIpAssignments.MaxAsync(d => (int?)d.Id) ?? 0;
+        int count = await context.DeletedHostIpAssignments.CountAsync(d => d.Id <= maxId);
         if (count == 0)
         {
             TempData["ErrorMessage"] = "There are no deleted host IP records to purge.";
             return RedirectToAction(nameof(AllDeletedHostIps));
         }
 
-        int maxId = await context.DeletedHostIpAssignments.MaxAsync(d => (int?)d.Id) ?? 0;
         return View(new PurgeAllDeletedHostIpsViewModel { Count = count, MaxId = maxId });
     }
 

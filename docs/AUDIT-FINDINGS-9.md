@@ -260,107 +260,40 @@ records, so the browser measurement above is the evidence. Suite unchanged at **
 
 # Low
 
-## I5 [x1] — "Purge All" counts the archive before it computes the bound it posts, so the purge destroys more records than the confirmation page states
+_I5 is fixed and committed as the two-line reorder the audit prescribed, in both twins: the bound is read
+first and the count is taken inside it — `SubnetController.Delete.cs:284-285` and
+`HostIpController.cs:597-598`. The rendered count now equals the POST's scope by construction, with no
+lock and no extra query, and the `count > 0` beside `confirmedMaxId = 0` variant closes for free because
+`maxId == 0` now implies `count == 0`._
 
-**file:line** — `src/Bastet/Controllers/SubnetController.Delete.cs:277` (`CountAsync()`) versus `:284`
-(`MaxAsync`); identical twin at `src/Bastet/Controllers/HostIpController.cs:595` / `:602`.
-
-**Confidence: confirmed.** Votes 2/2.
-
-**Corrected by a verifier:** the harm framing. The view comment (*"anything archived while the operator
-was reading it survives"*) is **not** violated — the bound is a snapshot taken at purge-GET render
-time, which is H4's deliberate design. What is violated is the XML doc at `PurgeAllViewModels.cs:4-6`
-(*"so the purge destroys exactly the records the operator was shown a count of"*): the count printed on
-an irreversible confirmation screen can be lower than what the purge destroys.
-
-### Failure scenario
-
-H4 bounds the purge to `Id <= confirmedMaxId`. The GET breaks its own invariant with its query order:
-`count` is read at `Delete.cs:277` and `maxId` only at `:284`, in a separate round trip. Anything
-archived between the two is **inside the bound and outside the count**, so the POST at `:314-316`
-destroys rows the page never mentioned — permanently, since `DeletedSubnets` is the only copy and there
-is no restore path. `Id` is IDENTITY and nothing else in the tree deletes from `DeletedSubnets` (the
-only other writer is `ArchiveSubnetSubtreeAsync` at `:214`), so `COUNT(*) WHERE Id <= maxId` is the
-true scope.
-
-Archives arrive in bursts, atomically: `ArchiveSubnetSubtreeAsync` (`:171`) queues a whole subtree and
-`DeleteConfirmedCore` (`:132-142`) commits it in one transaction, so a single ordinary cascade delete
-lands its entire batch in the gap or not at all.
-
-End to end on HEAD, one captured render: the page said *"You are about to permanently delete **6200**
-archived subnet record(s)"* with `<input name="confirmedMaxId" value="6400">`; posting that exact form
-answered 302 to `/Subnet/DeletedSubnets` with *"Permanently purged **6400** deleted subnet
-record(s)."*; `SELECT COUNT(*) FROM DeletedSubnets WHERE Id<=6400` = **0**, min surviving `Id` = 6401.
-200 archive records destroyed that the page never counted. The host-IP twin behaves identically: page
-stated **7800**, form posted `confirmedMaxId=8100`, banner *"Permanently purged 8100 deleted host IP
-record(s)."*, min surviving `Id` = 8101.
-
-A second manifestation of the same window: when a *concurrent* admin's purge lands in the gap, the GET
-renders `count > 0` beside `confirmedMaxId=0` (1398 of 2630 renders under that workload), and the POST
-guard at `:307` then refuses the operator's own form with *"The purge scope was missing from the
-form"* — although the form carried exactly what the GET rendered.
-
-### How it was reproduced
-
-Own HEAD build and own instance on port 5307, catalog `bastet_r9_vc8a`; the repository was never
-touched.
+_Reproduced and re-measured on real SQL Server 2022, 6 threads rendering the purge page for 25 s against
+a writer committing 200 transactions of 500 archive rows each (bursts, because
+`ArchiveSubnetSubtreeAsync` commits a whole subtree at once), scoring every distinct render against
+`COUNT(*) WHERE Id <= confirmedMaxId` — valid after the fact because nothing deletes from the table
+during the run:_
 
 ```
-cp -a /home/anuj/code/Bastet/. $W/head/ ; rm -rf $W/head/**/{bin,obj} ; dotnet build --no-incremental
-ASPNETCORE_URLS=http://localhost:5307 BASTET_CONNECTION_STRING="...Database=bastet_r9_vc8a..." \
-  BASTET_AUTO_MIGRATE=true dotnet run --no-build --no-launch-profile
-
-# writer inside the SQL container: 300 x { BEGIN TRAN; INSERT ... TOP (500) ...; COMMIT; WAITFOR '00:00:00.120' }
-sqlcmd -d bastet_r9_vc8a -i /tmp/insert_burst.sql
-# 6 threads GET /Subnet/PurgeAllDeletedSubnets, scraping the stated count and the hidden confirmedMaxId
-$RIG/pw/bin/python $W/poll2.py 30 6 $W/pairs_head2.csv
-# true scope per captured render:
-SELECT COUNT(*) pairs, SUM(CASE WHEN s.true_scope > p.stated THEN 1 ELSE 0 END) under_stating,
-       MAX(s.true_scope-p.stated) max_excess
-  FROM #p p CROSS APPLY (SELECT COUNT(*) AS true_scope FROM DeletedSubnets d WHERE d.Id <= p.maxid) s;
-# and the same race driven by 40 real POST /Subnet/Delete/{id} cascades (parent + 100 children)
+HEAD   340 distinct renders   153 under-state the true scope   0 over-state   max excess exactly 500
+fixed  188 distinct renders     0 under-state                  0 over-state   max excess 0
 ```
 
-Observed:
+_Max excess of exactly 500 is one whole archive transaction landing inside the bound and outside the
+count. On the fixed build both purge pages still redirect on an empty archive with the honest message
+("There are no deleted subnet records to purge." / "...host IP records..."), checked by following the
+302 on each twin._
 
-```
-HEAD: 296 distinct renders - 67 under-state the true purge scope, 229 exact, 0 over-state,
-      max excess exactly 500 (one whole archive transaction inside the bound, outside the count)
-with REAL cascade deletes as the writer: 9 of 40 landed in the window, each under-stating by exactly
-      the whole 101-row batch (e.g. stated 30000 / confirmedMaxId 30101)
-quiescent control: 1676 renders, ZERO divergence  -> not an artefact of the harness
-window measured at ~0.6 ms on a 2,000-row archive and several ms at 30,000 rows (it widens with archive
-      size: rows appended past the COUNT scan's position are missed without blocking it)
-end to end: stated 6200 / posted 6400 -> banner "Permanently purged 6400"; COUNT WHERE Id<=6400 = 0
-host-IP twin: stated 7800 / posted 8100 -> banner "Permanently purged 8100"; min surviving Id 8101
-concurrent-purge variant: 1398 of 2630 renders had count>0 with confirmedMaxId=0
+_No test ships with this fix, and that is a deliberate call rather than an omission: on any static
+dataset `COUNT(*)` and `COUNT(Id <= MAX(Id))` are equal by definition, so a unit test over a fixed
+archive passes identically before and after and would pin nothing. The defect only exists between two
+round trips, which needs a concurrent writer — hence the rig measurement above. Suite unchanged at
+**694**; build 0 warnings._
 
-patched (MaxAsync first, then CountAsync(d => d.Id <= maxId), both twins), identical workload:
-  231 distinct renders, 0 disagreeing, max_abs_diff 0
-  build 0 warnings; dotnet test 690 passed / 0 failed / 0 skipped
-  empty archive still redirects with "There are no deleted subnet records to purge." / "...host IP records..."
-  quiescent renders exact on a non-contiguous Id space left by a prior purge
-```
-
-### Fix
-
-Read the bound first, then count inside it, in both twins:
-
-```csharp
-int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;
-int count = await context.DeletedSubnets.CountAsync(d => d.Id <= maxId);
-if (count == 0) { ... }
-```
-
-and the same at `HostIpController.cs:595-603` against `DeletedHostIpAssignments`. The rendered count
-then equals the POST's scope by construction, with no lock and no extra query. It also closes the
-`count > 0` beside `confirmedMaxId=0` variant for free (`maxId == 0` now implies `count == 0`, so the
-honest "there are no deleted records to purge" redirect fires).
-
-**No interim** — the fix is a two-line reorder in each twin. **Do not reach for a lock or a
-transaction:** round 8 measured `ExecuteWithSubnetLockAsync` on these POSTs to make a
-currently-correct ordering wrong, and the brief lists it as never to be re-proposed. The ordering alone
-closes it.
+_The verifier's correction to the harm framing is kept: the view comment ("anything archived while the
+operator was reading it survives") was **not** violated — the bound is a render-time snapshot, which is
+H4's deliberate design. What was violated is the XML doc at `PurgeAllViewModels.cs:4-6`, that the purge
+destroys exactly the records the operator was shown a count of. **No lock and no transaction** was added:
+round 8 measured `ExecuteWithSubnetLockAsync` on these POSTs to make a currently-correct ordering wrong,
+and the brief lists it as never to be re-proposed. The ordering alone closes it._
 
 ---
 
