@@ -466,6 +466,49 @@ public class AzureReconcilerTests
         Assert.Empty(plan.ReviewItems);
     }
 
+    /// <summary>
+    /// Out of scope must not mean unprotected. A descendant belonging to another subscription is
+    /// skipped by the scan, so nothing is known about it - and archiving its stale ancestor would
+    /// destroy it anyway, because archiving a target takes its whole subtree. The ancestor has to be
+    /// withheld and the reason has to name it.
+    /// </summary>
+    /// <remarks>
+    /// Regression for round 9's I2. <see cref="SubnetFromOtherSubscription_Ignored"/> uses a
+    /// standalone row with no ancestor, so it passes with or without this guard; the defect only
+    /// appears in a multi-subscription tree.
+    /// </remarks>
+    [Fact]
+    public void StaleAncestorOverOtherSubscriptionDescendant_IsWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            // Ancestor's VNet is absent from the inventory => VNetDeleted, and its subtree holds row 2.
+            Linked(1, "parent-stale", "10.90.0.0", 15, VNetId("vnet-gone"), descendants: 1, descendantIds: [2]),
+            // Child lives in another subscription, so this scan never evaluates it.
+            Linked(2, "child-othersub", "10.90.1.0", 24, SubnetId("vnet-visible", "snet-web", OtherSubId)));
+
+        Assert.Empty(plan.Items);
+        Assert.Contains(plan.Warnings, w => w.Contains("different subscription") && w.Contains("'parent-stale'"));
+    }
+
+    /// <summary>
+    /// The mirror of the above: the guard must not withhold a target whose subtree holds no
+    /// foreign-subscription row, or the reconciler stops doing its job.
+    /// </summary>
+    [Fact]
+    public void StaleTargetWithNoOtherSubscriptionDescendant_IsStillOffered()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "parent-stale", "10.90.0.0", 15, VNetId("vnet-gone")),
+            // Unrelated foreign-subscription row, not beneath the target.
+            Linked(2, "elsewhere", "172.16.0.0", 16, VNetId("vnet-z", OtherSubId)));
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(1, item.SubnetId);
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("different subscription"));
+    }
+
     [Fact]
     public void ResourceIdCasingDiffers_TreatedAsLive()
     {

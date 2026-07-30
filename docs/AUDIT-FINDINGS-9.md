@@ -138,106 +138,29 @@ on the watch list, where I1 sharpens why it is not a substitute for the guard._
 
 ---
 
-## I2 [x2] — An Azure-linked descendant belonging to another subscription is skipped by `BuildPlan` and never joins the protected set, so a stale ancestor archives it unexamined and unmentioned
+_I2 is fixed and committed, as the audit proposed and with no correction needed. `BuildPlan` now
+collects every row it skips for belonging to another subscription into a `notCovered` set
+(`AzureReconciler.cs:55`, populated at `:85`) and passes it to a second
+`WithholdTargetsWhoseCascadeIsBlocked` call at `:136-140`, so an ancestor whose subtree holds one is
+withheld and the warning names it. The message is worded separately from the `liveLinked` one on
+purpose: these rows were never read, so saying they "still exist in Azure" would assert something the
+scan did not establish — the same distinction the code already draws between `NotVisible` and
+`Unknown`._
 
-**file:line** — `src/Bastet/Services/Azure/AzureReconciler.cs:77`
-(`if (!BelongsToSubscription(snapshot.AzureResourceId, subscriptionId)) { continue; }`, block `:77-80`).
+_Two tests, both in `test/Bastet.Tests/Azure/AzureReconcilerTests.cs`.
+`StaleAncestorOverOtherSubscriptionDescendant_IsWithheld` builds the multi-subscription tree the
+existing `SubnetFromOtherSubscription_Ignored` never exercises — that one uses a standalone row with no
+ancestor, so it passes with or without the guard — and was confirmed failing against the unfixed tree
+(`Assert.Empty() Failure: Collection was not empty`; the ancestor was still on offer).
+`StaleTargetWithNoOtherSubscriptionDescendant_IsStillOffered` is the over-withholding control and
+passed **before** the fix as well as after, which is what makes the pair meaningful rather than
+vacuous. Build 0 warnings / 0 errors; suite **691 → 693**._
 
-**Confidence: confirmed.** No verifier correction — the proposed fix was built and measured, including
-an over-withholding control.
-
-### Failure scenario
-
-`BuildPlan` `continue`s at `:77` for any snapshot whose `AzureResourceId` does not sit under the
-scanned subscription ("out of scope, not stale"). Such a row is therefore not evaluated, not added to
-`liveLinked` (`:109`), not an `Item`, and not a `ReviewItem` — so it appears in **none** of the sets
-passed to `WithholdTargetsWhoseCascadeIsBlocked` (`:124` `liveLinked`; `:232-238` `notVisible ∪ unknown
-∪ stillLive ∪ ReviewItems`). Its ancestor is still offered for deletion, and archiving the ancestor
-archives it. Azure was never asked about it — which is exactly the `unknown` state the code
-deliberately protects at `:189-196` ("an unanswered question is not a deletion"). Here it is not
-protected, and the plan does not even mention the row.
-
-Real inputs, live rig: Bastet row 1 `vc5a-parent-stale` `10.90.0.0/15` linked to a VNet that was never
-created → `VNetDeleted`, offered. Child row 2 `vc5a-child-othersub` `10.90.1.0/24` linked to
-`/subscriptions/11111111-2222-3333-4444-555555555555/resourceGroups/bastet-visible/providers/Microsoft.Network/virtualNetworks/rig-r9-vnet-visible/subnets/rig-r9-snet-web`
-— a real, live Azure subnet under a second subscription GUID.
-
-`POST /Azure/ReconcileScan` answers `canCommit:true`, `warnings:[]`, `reviewItems:[]`, one item
-(`1`, `VNetDeleted`, `descendantSubnetIds:[2]`). Row 2 is named nowhere.
-`POST /Subnet/BulkDeleteStaleAzureSubnets {subnetIds:[1]}` answers **200**
-`{"targetsDeleted":1,"subnetsArchived":2}` and archives row 2, destroying its `AzureResourceId`
-(`DeletedSubnets` has zero `%Azure%` columns) with no restore path.
-
-This is not a hand-built tree shape. `BulkCreateFromAzurePlan` performs **no ARM read** — it re-plans
-against the database and trusts the posted ids (`SubnetController.BulkAzure.cs:100-121`, `:265-288`) —
-and `FindDeepestContainer` (`AzureBulkImportPlanner.cs:329-349`) parents purely on address containment
-with no subscription test. Multi-subscription estates plus hub/supernet reservations are the ordinary
-enterprise shape, and `GET /Azure/GetSubscriptions` feeds the wizard every subscription the credential
-can see. A VNet moved between subscriptions after import (`az resource move` rewrites the subscription
-GUID in the resource id) produces the same row.
-
-### How it was reproduced
-
-Own instance from unmodified `a8f669b` on port 5334, catalog `bastet_r9_vc5a2`, SP1 through the
-production `DefaultAzureCredential` path (`AZURE_TOKEN_CREDENTIALS` unset, `BASTET_AZURE_IMPORT=true`).
-
-```
-# leg 1 - minimal contrast, two seeded rows
-POST /Azure/ReconcileScan            (subscriptionId=f0e8d6db-..., subscriptionName=Main)
-POST /Subnet/BulkDeleteStaleAzureSubnets {"subnetIds":[1],"confirmation":"approved", ...}
-# control - ONE token changed, nothing else
-UPDATE Subnets SET AzureResourceId=REPLACE(AzureResourceId,'11111111-2222-3333-4444-555555555555',
-                                                            'f0e8d6db-...') WHERE Id=2;
-# leg 2 - tree shape produced by the app's own write path
-POST /Azure/BulkImportPreview   (foreign-subscription VNet prod-spoke-vnet 10.89.0.0/16 + child prod-app 10.89.1.0/24)
-POST /Subnet/BulkCreateFromAzurePlan
-POST /Azure/ReconcileScan ; POST /Subnet/BulkDeleteStaleAzureSubnets {"subnetIds":[3], ...}
-SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('DeletedSubnets') AND name LIKE '%Azure%';
-```
-
-Observed:
-
-```
-leg 1 scan   -> canCommit True, globalErrors [], warnings [], reviewItems [],
-                ITEM 1 vc5a-parent-stale VNetDeleted descIds=[2] hostIps=0     (row 2 named nowhere)
-leg 1 delete -> HTTP 200 {"success":true,"targetsDeleted":1,"subnetsArchived":2,"hostIpsArchived":0}
-                Subnets: no rows. DeletedSubnets: OriginalId 2 vc5a-child-othersub, OriginalId 1 vc5a-parent-stale
-CONTROL      -> canCommit False, warnings ["1 subnet(s) were withheld from deletion because archiving
-                them would also archive Azure-linked subnet(s) beneath them that still exist in Azure:
-                'vc5a-parent-stale'."] ; delete -> HTTP 409, Subnets=2, DeletedSubnets=0
-leg 2        -> BulkImportPreview canCommit True, targetType AutoCreateChild, parent hub-reservation, errors []
-                BulkCreateFromAzurePlan HTTP 200 {"createdTargets":1,"createdChildSubnets":1}
-                rows: 3 hub-reservation 10.88.0.0/13 (sub f0e8d6db) ; 4 prod-spoke-vnet 10.89.0.0/16 parent 3
-                      (sub 11111111) ; 5 prod-app 10.89.1.0/24 parent 4 (sub 11111111)   - no warning, no check
-                scan -> ITEM 3 hub-reservation VNetPrefixRemoved descIds=[4,5], warnings []
-                delete {"subnetIds":[3]} -> HTTP 200 {"subnetsArchived":3}; DeletedSubnets holds 5, 4, 3
-SCHEMA       -> 0   (DeletedSubnets carries no AzureResourceId column)
-```
-
-Fix leg: build 0 warnings / 0 errors, `dotnet test` **690/690**. Patched build on the identical leg-1
-seed → `canCommit False`, `warnings ["1 subnet(s) were withheld from deletion because archiving them
-would also archive Azure-linked subnet(s) beneath them that belong to a different subscription and were
-not checked by this scan: 'vc5a-parent-stale'."]`, delete → **409**, both rows intact.
-Over-withholding control on the patched build (live root, one live child, one genuinely-deleted child,
-plus an unrelated standalone foreign-subscription row) → `canCommit True`, `warnings []`, exactly the
-one genuinely-deleted orphan offered. The reconciler still does its job.
-
-The only synthetic element is that the second subscription GUID names no real subscription — irrelevant
-to the executed path, because `BelongsToSubscription` (`:395`) is a pure `StartsWith("/subscriptions/{id}/")`
-test that returns false and `continue`s before any ARM interaction.
-
-### Fix
-
-In `BuildPlan`, collect the ids skipped at `:77` into a `notCovered` `HashSet<int>` and pass it to
-`WithholdTargetsWhoseCascadeIsBlocked` alongside the existing `liveLinked` pass, with its own message —
-*"archiving them would also archive Azure-linked subnet(s) beneath them that belong to a different
-subscription and were not checked by this scan"*. Same shape as the two existing calls, so nothing new
-is invented and the row is named in the warning.
-
-**Interim** (cheaper, non-blocking, does not prevent the loss): when a plan item's
-`DescendantSubnetIds` intersects the skipped set, add a `plan.Warnings` entry naming the descendant and
-its subscription. The review screen renders `plan.warnings` already, so this removes the silence
-without changing any verdict.
+_The audit's **interim** (a `plan.Warnings` entry when a plan item's `DescendantSubnetIds` intersects
+the skipped set) was **not** taken: it removes the silence without changing the verdict, so the row is
+still destroyed, and the real guard is the same shape as two calls already in the method. Live-ARM
+confirmation of both I1 and I2 — including the counter-test that a genuinely deleted resource is still
+offered and deletable — is recorded in the final sweep rather than repeated here._
 
 ---
 

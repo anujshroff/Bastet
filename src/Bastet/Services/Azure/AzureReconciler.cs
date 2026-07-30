@@ -49,6 +49,11 @@ namespace Bastet.Services.Azure
             // target sitting above one is never offered for deletion: see the cascade guard below.
             HashSet<int> liveLinked = [];
 
+            // Subnets this scan skipped because they belong to another subscription. Out of scope is
+            // not the same as unprotected: nothing was established about these rows, yet archiving an
+            // ancestor archives them all the same, so they get their own cascade guard below.
+            HashSet<int> notCovered = [];
+
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
                 if (!string.IsNullOrEmpty(vnet.ResourceId))
@@ -73,9 +78,11 @@ namespace Bastet.Services.Azure
                 }
 
                 // Only reconcile what this scan actually covers. A subnet belonging to another
-                // subscription is out of scope, not stale.
+                // subscription is out of scope, not stale - but it still has to be protected from an
+                // ancestor's cascade, because an unasked question is not a deletion either.
                 if (!BelongsToSubscription(snapshot.AzureResourceId, subscriptionId))
                 {
+                    notCovered.Add(snapshot.Id);
                     continue;
                 }
 
@@ -124,6 +131,13 @@ namespace Bastet.Services.Azure
             WithholdTargetsWhoseCascadeIsBlocked(
                 plan, liveLinked,
                 "archiving them would also archive Azure-linked subnet(s) beneath them that still exist in Azure");
+
+            // Separately worded on purpose: these rows were never read, so claiming they "still exist
+            // in Azure" would assert something this scan did not establish.
+            WithholdTargetsWhoseCascadeIsBlocked(
+                plan, notCovered,
+                "archiving them would also archive Azure-linked subnet(s) beneath them that belong to a "
+                + "different subscription and were not checked by this scan");
 
             // An empty subscription and a subscription we failed to enumerate properly look the same
             // from here, and the consequence of being wrong is deleting everything.
