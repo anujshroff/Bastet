@@ -108,173 +108,33 @@ None.
 
 # High
 
-## I1 [x2] — Reconcile's review-item cascade guard is skipped whenever the plan holds no absence-status item, so a prefix-drift target archives a descendant the same scan verified live in Azure
+_I1 is fixed and committed. `ConfirmProposedDeletionsAsync` no longer returns when the plan carries no
+absence claim: it substitutes an empty confirmation map and calls `ApplyConfirmations` anyway
+(`AzureController.cs:377-392`). The cascade guard over `plan.ReviewItems` therefore runs on the strength
+of the target's own subtree instead of on whether some unrelated row happens to be absent, and the ARM
+round trip is still skipped when there is nothing to ask — so a healthy scan costs no extra calls. An
+empty map is safe because a non-absence item takes the `!IsAbsenceStatus` → keep path at
+`AzureReconciler.cs:166`._
 
-**file:line** — `src/Bastet/Controllers/AzureController.cs:381` (`if (absenceClaims.Length == 0) { return; }`).
-The guard it skips is `src/Bastet/Services/Azure/AzureReconciler.cs:240-242`.
+_Verified as the audit prescribed: the drift-only pair now answers **409 Conflict** with both rows
+intact where HEAD answered **200 `subnetsArchived:2`**. The regression test drives the **controller**,
+not the reconciler — `BulkDeleteStaleAzureSubnets_DriftOnlyPlanOverReviewItemDescendant_IsRefused` in
+`test/Bastet.Tests/Azure/SubnetControllerAzureReconcileTests.cs`, which seeds a `VNetPrefixRemoved`
+target over a `FullyAllocatingSubnetDeleted` descendant and asserts the archive is refused. Confirmed
+failing against the unfixed tree first (`Expected ConflictObjectResult, Actual OkObjectResult` — the
+archive had already happened), passing after. Build 0 warnings / 0 errors; suite **690 → 691**._
 
-**Confidence: confirmed.**
-
-**Corrected by the verifier:** the finder's fix parts 2 and 3 were **measured wrong and replaced** —
-its proposed reconciler-level regression test *passes* against pristine HEAD, its `liveLinked`
-widening covers only one of the two `ReviewItems` statuses, and its "cheaper interim" is strictly
-*more* expensive than the real fix (it breaks an existing test's arrange). Severity and citation stand.
-
-### Failure scenario
-
-Round 8's H1 shipped two cascade guards. The second — over `notVisible ∪ unknown ∪ stillLive ∪
-plan.ReviewItems` at `AzureReconciler.cs:240-242` — lives inside `ApplyConfirmations`, and
-`ApplyConfirmations` has exactly one production caller: `AzureController.ConfirmProposedDeletionsAsync`,
-which returns at `AzureController.cs:381-384` when no plan item carries an absence status.
-`VNetPrefixRemoved` and `SubnetPrefixChanged` are not absence statuses, so **a plan whose items are all
-drift never runs that guard at all.**
-
-The first guard (`AzureReconciler.cs:124-126`) cannot cover the gap: `liveLinked` is populated only on
-the `item is null` branch at `:103-111`, whereas `FullyAllocatingSubnetDeleted` is emitted at `:322`
-*after* `EvaluateVNetLevel` has positively verified that both the VNet and the recorded prefix are
-live, and is routed to `plan.ReviewItems` instead. A review-item descendant is therefore in **neither**
-protected set on a drift-only plan.
-
-Real inputs, all rows written by the shipped import path and all drift produced by ordinary Azure
-operations. Two Azure VNets in `bastet-visible`: `rig-r9-vc4a-hub` (`10.96.0.0/15`, no subnets) and
-`rig-r9-vc4a-fa` (`10.97.0.0/16`, one subnet `rig-r9-vc4a-fa-all` covering the whole prefix). Two
-posts to `/Subnet/BulkCreateFromAzurePlan` produced Bastet id 8 `rig-r9-vc4a-hub` `10.96.0.0/15` and
-id 9 `rig-r9-vc4a-fa` `10.97.0.0/16` auto-nested as its child with `IsFullyAllocated=1`. Then, in
-Azure only: delete the covering subnet, and widen the hub's address space `10.96.0.0/15` →
-`10.100.0.0/15`.
-
-`POST /Azure/ReconcileScan` answers `canCommit:true`, `warnings:[]`, one item (`8`,
-`VNetPrefixRemoved`, `descendantSubnetIds:[9]`) and one review item (`9`,
-`FullyAllocatingSubnetDeleted`, *"Nothing needs deleting; review whether it should still be marked
-fully allocated."*). `POST /Subnet/BulkDeleteStaleAzureSubnets {subnetIds:[8],confirmation:"approved"}`
-answers **200** `{"targetsDeleted":1,"subnetsArchived":2}`. `Subnets` is then empty and
-`DeletedSubnets` holds both rows — while `az network vnet show rig-r9-vc4a-fa` still returns
-`prefixes:["10.97.0.0/16"], provisioningState Succeeded`. The row destroyed is one whose VNet and
-exact prefix the same scan had just verified live, and `DeletedSubnets` carries no `AzureResourceId`
-column and there is no restore path.
-
-The decisive A/B: with one entirely unrelated absence-status row added elsewhere in the tree, the
-identical pair scans as `warnings:["1 subnet(s) were withheld from deletion because archiving them
-would also archive subnet(s) beneath them that were withheld from deletion: 'vc4a-outer'."]` and the
-identical delete POST answers **409 Conflict**, nothing archived. Same tree, same Azure state, opposite
-safety verdict, decided by whether some *other* subnet happens to be stale.
-
-There is no second line of defence: `SubnetController.AzureReconcile.cs:74` calls the same
-`ConfirmProposedDeletionsAsync` and takes the same early return. **Both** `plan.ReviewItems` statuses
-are affected — the `UnrecognisedResourceId` variant reproduces identically at HEAD (`warnings:[]`,
-`canCommit:true`, then 200 `subnetsArchived:2`).
-
-In Chromium the operator gets no signal at all: `#rec-scan-warnings` stays `d-none` (warnings is
-empty), the stale table offers the ancestor with only *"Also archives 1 child subnet(s)"*, the confirm
-screen names only the ancestor (`"vc4a-inner" in body` → **False**), and the separate review table
-asserts *"Nothing here can be fixed by deleting anything … BASTET will not change them
-automatically"* about the very row about to be archived. The two tables are never cross-referenced.
-
-### How it was reproduced
-
-Own port 5303, own catalog `bastet_r9_vc4a`, app run from an unmodified `a8f669b` export with SP1
-credentials and `AZURE_TOKEN_CREDENTIALS` unset (real `DefaultAzureCredential` → real ARM).
-
-```
-# organic leg - no hand-written SQL anywhere
-az network vnet create -g bastet-visible -n rig-r9-vc4a-hub --address-prefixes 10.96.0.0/15
-az network vnet create -g bastet-visible -n rig-r9-vc4a-fa  --address-prefixes 10.97.0.0/16 \
-    --subnet-name rig-r9-vc4a-fa-all --subnet-prefixes 10.97.0.0/16
-POST /Subnet/BulkCreateFromAzurePlan   (hub, no subnets)   -> {"success":true,"createdTargets":1,"fullyAllocatedTargets":0}
-POST /Subnet/BulkCreateFromAzurePlan   (fa + its subnet)   -> {"success":true,"createdTargets":1,"fullyAllocatedTargets":1}
-POST /Azure/ReconcileScan                                  -> canCommit False, items [], reviewItems [], warnings []
-az network vnet subnet delete -g bastet-visible --vnet-name rig-r9-vc4a-fa -n rig-r9-vc4a-fa-all
-az network vnet update       -g bastet-visible -n rig-r9-vc4a-hub --address-prefixes 10.100.0.0/15
-POST /Azure/ReconcileScan
-POST /Subnet/BulkDeleteStaleAzureSubnets {"subnetIds":[8],"confirmation":"approved", ...}
-sqlcmd: SELECT COUNT(*) FROM dbo.Subnets; SELECT OriginalId,Name,OriginalParentId FROM dbo.DeletedSubnets
-```
-
-Observed, after the two Azure edits:
-
-```
-planner-written rows: 8|rig-r9-vc4a-hub|10.96.0.0|15|NULL|0    9|rig-r9-vc4a-fa|10.97.0.0|16|8|1
-scan   -> canCommit True, warnings []
-  ITEM   8 rig-r9-vc4a-hub VNetPrefixRemoved [9]  "VNet 'rig-r9-vc4a-hub' still exists but no longer
-                                                   has the address prefix 10.96.0.0/15."
-  REVIEW 9 rig-r9-vc4a-fa FullyAllocatingSubnetDeleted  "...no Azure subnet in VNet 'rig-r9-vc4a-fa'
-                                                   covers 10.97.0.0/16 any more. Nothing needs deleting..."
-delete -> HTTP/1.1 200 OK {"success":true,"targetsDeleted":1,"subnetsArchived":2,"hostIpsArchived":0}
-SQL    -> Subnets 0 rows; DeletedSubnets 8 rig-r9-vc4a-hub, 9 rig-r9-vc4a-fa (OriginalParentId 8)
-az network vnet show rig-r9-vc4a-fa -> prefixes ["10.97.0.0/16"], provisioningState Succeeded
-```
-
-A/B control (only difference: one unrelated `SubnetDeleted` row `172.31.7.0/24` in a separate root) →
-`warnings ["1 subnet(s) were withheld … 'vc4a-outer'."]`, and the identical delete POST → **409
-Conflict**, *"1 of the selected subnet(s) are no longer reported as deleted in Azure. Nothing was
-deleted."*, `Subnets` untouched, `DeletedSubnets` 0.
-
-Chromium (`requestAnimationFrame` deleted first): warnings panel `is_visible False`, class
-`alert alert-warning d-none`; one offered checkbox; confirm count 1, cascade *"This also archives 1
-child subnet(s) and 0 host IP assignment(s)"*; `"vc4a-inner" in body` → **False**; commit banner
-*"Deleted 1 stale subnet(s), archiving 2 subnet(s)…"*. Live schema: `DeletedSubnets` has 14 columns
-(`Id … ModifiedBy`) — no `AzureResourceId`, no `IsFullyAllocated`.
-
-Fix measured on the patched build: scan → `canCommit False`, `warnings ["…withheld… 'vc4a-outer'."]`,
-identical delete POST → **409** with both rows intact; same for the `UnrecognisedResourceId` variant;
-the rig's own `seed-reconcile-fixture.sql` still yields its documented baseline (2 orphans proposed,
-live control not proposed, `warnings []`).
-
-### Fix
-
-Make the guard unconditional by skipping only the ARM round trip. In
-`AzureController.ConfirmProposedDeletionsAsync`, replace the early return at `:381-384`:
-
-```csharp
-// No absence claim means nothing to ask Azure about, so the ARM round trip is skipped - but
-// ApplyConfirmations must still run: it also applies the cascade guard that protects review
-// items, and those are independent of any confirmation.
-IReadOnlyDictionary<string, AzureResourceConfirmation> confirmations =
-    absenceClaims.Length == 0
-        ? new Dictionary<string, AzureResourceConfirmation>(StringComparer.OrdinalIgnoreCase)
-        : await azureService.ConfirmResourcesAsync(absenceClaims);
-
-reconciler.ApplyConfirmations(plan, confirmations);
-```
-
-Measured sufficient on its own: 0 warnings / 0 errors, `dotnet test` **690/690 with no test edits at
-all**, both `ReviewItems` statuses now withheld on both the scan and the delete path, and no ARM calls
-added — so "a healthy scan costs nothing" is preserved. An empty map is safe because a non-absence item
-takes the `!IsAbsenceStatus` → keep path at `AzureReconciler.cs:166-170`.
-
-**Do not take the finder's part 2 as written.** "Add `FullyAllocatingSubnetDeleted` rows to
-`liveLinked`" covers only one of the two `ReviewItems` statuses; the `UnrecognisedResourceId`
-descendant was reproduced being archived identically, and that status is never verified live so it does
-not belong in `liveLinked`. If service-level defence-in-depth is still wanted, add a **second,
-separately-worded** call after `AzureReconciler.cs:124-126` rather than widening the `liveLinked` one:
-
-```csharp
-WithholdTargetsWhoseCascadeIsBlocked(
-    plan, [.. plan.ReviewItems.Select(i => i.SubnetId)],
-    "archiving them would also archive subnet(s) beneath them that need review rather than deletion");
-```
-
-— which keeps the existing warning honest, since `UnrecognisedResourceId` rows were never shown to
-"still exist in Azure".
-
-**Do not take the finder's part 3 as written.** The proposed reconciler-level regression test
-(drift-only `plan.Items`, review-item descendant, `ApplyConfirmations` with no confirmations) was built
-and run against pristine HEAD source: it **passes**, because `ApplyConfirmations` is itself correct. The
-defect is at the seam, so the regression test must drive the **controller**.
-`test/Bastet.Tests/Azure/SubnetControllerAzureReconcileTests.cs` already calls
-`_controller.BulkDeleteStaleAzureSubnets(...)` directly (line 96) and is the right home; there is no
-`InternalsVisibleTo` anywhere, so `ConfirmProposedDeletionsAsync` is not callable from a test and the
-public action is the only route. Assert that a plan whose only item is `VNetPrefixRemoved` over a
-review-item descendant is refused and that the descendant row survives.
-
-**Interim: there is none cheaper.** The finder's proposed one-liner at `AzureReconciler.cs:124` —
-passing `[.. liveLinked, .. plan.ReviewItems.Select(i => i.SubnetId)]` — was measured to fail
-`AzureReconcilerTests.ApplyConfirmations_TargetWhoseDescendantIsAReviewItem_IsAlsoWithheld` at
-`AzureReconcilerTests.cs:866` (`Assert.Single() Failure: The collection was empty`), because that
-test's arrange asserts `Assert.Single(plan.Items)` *before* calling `ApplyConfirmations` and the guard
-now fires earlier. It therefore costs a test edit the controller fix does not. The usual display-only
-stopgap also does not apply: `plan.Warnings` is empty in this scenario, so adding the missing warnings
-block to `_StepConfirm.cshtml` would render nothing.
+_Three of the audit's suggestions were **not** taken, all for the reasons its own verifier recorded.
+Part 2 (widen `liveLinked` with `FullyAllocatingSubnetDeleted` rows) covers only one of the two
+`ReviewItems` statuses and would put `UnrecognisedResourceId` rows in a set whose warning claims they
+"still exist in Azure", which was never established for them. Part 3's reconciler-level test passes
+against pristine HEAD, so it pins nothing. The proposed interim at `AzureReconciler.cs:124` breaks
+`AzureReconcilerTests.ApplyConfirmations_TargetWhoseDescendantIsAReviewItem_IsAlsoWithheld`, whose
+arrange asserts `Assert.Single(plan.Items)` before `ApplyConfirmations` runs. The optional service-level
+second `WithholdTargetsWhoseCascadeIsBlocked` call was **deliberately not added**: the controller fix is
+measured sufficient for both `ReviewItems` statuses, and a second guard with its own wording is new
+surface for no measured gain. `_StepConfirm.cshtml` still has no warnings block — unchanged, and noted
+on the watch list, where I1 sharpens why it is not a substitute for the guard._
 
 ---
 
