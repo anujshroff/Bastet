@@ -1,17 +1,74 @@
 # Bastet - Round-11 Audit Findings
 
-| | Value |
-|---|---|
-| Round | **11** (finding letter **K** - findings are `K1` ... `K5`) |
-| Branch | `audit/round-11` |
-| HEAD | `09cee3d` - *"Audit 10 Cleanup (#155)"* |
-| Build | **0 warnings, 0 errors** |
-| Tests | **730 passed**, 0 failed, 0 skipped |
-| Date | 2026-08-01 |
+| | Audit | After reconciliation |
+|---|---|---|
+| Round | **11** (finding letter **K** - findings are `K1` ... `K5`) | |
+| Branch | `audit/round-11` | one commit per finding |
+| HEAD | `09cee3d` - *"Audit 10 Cleanup (#155)"* | |
+| Build | **0 warnings, 0 errors** | **0 warnings, 0 errors** (clean rebuild, `bin`/`obj` deleted) |
+| Tests | **730 passed**, 0 failed, 0 skipped | **738 passed**, 0 failed, 0 skipped (+8) |
+| Working tree | clean at start and at finish | clean |
+| Date | 2026-08-01 | 2026-08-01 |
 
-Every line number below was re-derived against the working tree at `09cee3d` by at least one verifier,
-and every surviving finding was reproduced against a live rig - real SQL Server, the real application,
-a real browser, and two Azure service principals with disjoint RBAC over two resource groups.
+Every line number in the original findings was re-derived against the working tree at `09cee3d` by at
+least one verifier, and every surviving finding was reproduced against a live rig. The struck entries
+below cite the **post-fix** lines.
+
+**All five findings were fixed - none was refuted on re-verification.** Each was reproduced against an
+unfixed publish before being fixed and re-measured after, one commit per finding, each carrying its own
+struck entry. Four of the five (`K1`-`K4`) sit on the J2 bulk-import surface round 10 introduced.
+
+**Three of the five proposed fixes were corrected on evidence**, and one correction was found here
+rather than by the audit:
+
+- **`K3` needed more than the null guard.** With the dereference guarded, a null list *element* still
+  produced a **409** rather than the promised 400: the planner returns no items when it records a
+  global error, so the valid prefix beside the null one was described as "no longer produces a target"
+  - a divergence manufactured by the malformed body. The divergence check now yields when
+  `plan.GlobalErrors` is non-empty, which preserves round 10's 409-before-400 ordering wherever both
+  are meaningful.
+- **`K5`'s proposed label was wrong for a `/32`** and was replaced with one that discriminates: RFC
+  3021 covers 31-bit point-to-point prefixes and says nothing about `/32`, which has no broadcast
+  because it is a single host.
+- **`K4`'s and `K2`'s cheaper interims were both declined**, and `K4`'s dependency on `K2` was
+  honoured rather than noted - numeric order meant `K2` shipped first, so `K4`'s new divergence message
+  was verified actually rendering rather than being dead text.
+
+### Final verification sweep
+
+- **Clean rebuild** with `bin`/`obj` deleted: 0 warnings, 0 errors. **Full suite: 738 passed**, 0
+  failed, 0 skipped (730 -> 738, +8; no test was deleted or disabled).
+- **Real app against real SQL Server 2022**, every major area asserted on **content**, not status
+  codes: **22 of 22 passed** - subnet list/details/create/edit/delete, host IPs and their edit form,
+  per-subnet and global deleted-host-IP listings, deleted subnets, the purge confirmation, all three
+  Azure wizards, roles, access-denied, the error pages, and `K5`'s `/31` label beside a `/24` control.
+  Security headers still ride on a normal 200.
+- **Log read and classified:** zero `fail:` lines and zero exceptions. Four warnings, both classes
+  expected and neither introduced by this round: three EF `MultipleCollectionIncludeWarning`
+  advisories from the two-collection `Include` in the delete path (present at `09cee3d`), and one
+  DataProtection "no XML encryptor configured", which is a local-rig artefact with no certificate
+  configured.
+- **Both Azure surfaces driven end to end against live ARM** with two service principals holding
+  **disjoint RBAC at resource-group scope** (each `Owner` on its own group, `AuthorizationFailed` on
+  the other - verified before anything was measured). Discovery, bulk preview and commit, the
+  approved-plan 409 in three separate shapes, reconcile scan and reconcile delete commit all
+  exercised. Both counter-tests pass, so the reconciler **discriminates** rather than merely blocking:
+  a resource the credential cannot see was **withheld** with a warning naming it, while a genuinely
+  deleted resource was still **offered and deleted** - and the unreadable row survived that delete.
+
+### Deliberately not done
+
+- **`K1`'s belt-and-braces variant** - also disabling `#bulk-confirm-commit-btn` inside
+  `invalidatePlan()`. The button is unreachable because its pane is never activated, measured, so
+  nothing follows from it.
+- **`K2` does not fix `#bulk-back-to-preview-btn`**, which still repaints the stale plan after a 409.
+  The error panel now tells the truth; the button beside it still shows a plan contradicting it. It is
+  on the watch list.
+- **The three interims the findings proposed** were each declined with a recorded reason: `K1`'s
+  leaves the silent leg open, `K2`'s ships the same array twice on the wire, `K4`'s deletes deliberate
+  naming behaviour and closes nothing structurally.
+- **No test ships for `K1` or `K2`.** Both are view-embedded JavaScript with no unit-testable seam -
+  the position round 10 took for J5 and J9 - and both were driven in real headless Chromium instead.
 
 ---
 
