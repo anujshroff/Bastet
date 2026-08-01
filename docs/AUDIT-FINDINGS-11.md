@@ -73,127 +73,45 @@ is recorded in the finding.
 
 # Medium
 
-## K1 - Bulk import wizard leaves the Commit step reachable across a re-preview, bypassing round 10's approved-plan (J2) check and silently adopting a subnet the operator never selected
+_K1 is fixed and committed, exactly as proposed: `invalidatePlan()` is now the first statement in
+`#bulk-go-preview-btn`'s click handler. Ordering is load-bearing twice and is preserved — it nulls
+`lastSelection`, so it precedes the reassignment, and it re-disables `#step3-tab`, so it precedes
+`activateTab("step3")`. Step 4 is now reachable only through `#bulk-go-commit-btn`, which `renderPlan`
+enables only when `plan.canCommit`, i.e. only from a plan that was actually rendered._
 
-`[x1]` &nbsp;|&nbsp; **Severity: medium** &nbsp;|&nbsp; **Confidence: confirmed** &nbsp;|&nbsp;
-`src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:410`
+_Reproduced first on an unfixed publish of `09cee3d` on its own port and catalog, driven headless
+against real ARM. **Before:** one click of *Continue to Commit* left `step4-tab disabled: False` for the
+page's life; after an aborted re-preview both the pill click and the confirm click were **accepted**,
+the commit body carried **`expected: [null, null]`** — no expectation at all, so J2's check could not
+fire — and the import succeeded with *"linked 1 existing target(s) to Azure"*. The out-of-band row
+`created-by-another-admin` came back stamped
+`AzureResourceId=/subscriptions/.../virtualNetworks/rig-vnet-visible-2`, which no screen in the
+application can clear. **After:** `step4-tab disabled: True`, Playwright **refuses** both clicks, **no
+POST is issued at all**, and the row keeps an empty `AzureResourceId`. Leg C (the click landing while
+the second preview is still in flight — the silent leg, with no log line) closes identically._
 
-### The defect
+_Two non-regression legs measured on the same build. The **J2 control** — same race, no re-preview —
+still stamps `expected` and still answers **409 "The plan changed since it was previewed"**, so the
+guard this finding is about is untouched. A **benign re-preview that succeeds** still re-opens step 4
+through *Continue to Commit* and commits normally (2 targets, 3 child subnets), so the fix does not
+strand an operator who simply previewed twice. Zero `pageerror`s across every run; `invalidatePlan` is
+a hoisted `function` declaration, so this is not the round-10 J9 temporal-dead-zone shape._
 
-`#bulk-go-preview-btn`'s click handler (`:410-415`) is exactly:
+_No test ships with this. It is view-embedded JavaScript with no unit-testable seam — the position
+round 10 took for J5 and J9 — and the browser runs above are the verification. Suite unchanged at
+**730**._
 
-```js
-const selection = buildSelectionFromUI();
-lastSelection = selection;
-activateTab("step3");
-loadPreview(selection);
-```
+_Rejections, both on the verifier's measurement. The **cheaper interim was not taken**: calling
+`invalidatePlan()` from `loadPreview`'s error handler and `!result.success` branch closes legs A and B
+but leaves **leg C** open, and leg C is the one that stamps an expectation from a plan the operator
+never saw with no warning line at all — it closes the loud legs and leaves the silent one. And this was
+**not** "fixed" server-side by refusing a null `Expected`: `SubnetController.BulkAzure.cs:85-90` records
+that as a deliberate round-10 decision so the documented direct JSON API keeps working._
 
-It never calls `invalidatePlan()` (`:29-33`), which is the **only** writer that re-adds `disabled` to
-`#step3-tab` / `#step4-tab` and disables `#bulk-go-commit-btn`. Its four callers are the subscription
-change (`:100`), `loadVNets`' `beforeSend` (`:126`), the selection-change handler (`:332`) and the
-rename switch (`:336`) - not the preview button. `activateTab` only un-disables the tab it is handed.
-`#bulk-confirm-commit-btn` carries no `disabled` attribute in markup (`_StepCommit.cshtml:30`).
-
-So **one** click of *Continue to Commit* un-disables the step-4 pill for the rest of the page's life,
-and every later re-preview leaves it live while `lastSelection` has already been replaced by a fresh
-object that `attachApprovedOutcomes` (`:508-533`, which runs only inside `loadPreview`'s `success`
-handler after `result.success`) has not stamped. `DescribeApprovedPlanDivergences`
-(`SubnetController.BulkAzure.cs:83-91`) treats a null `Expected` as an *unverified* commit, logs a
-warning, and lets it through - a deliberate round-10 decision so the documented direct JSON API keeps
-working.
-
-The other two wizards do re-lock: `#rec-scan-btn` calls `invalidateScan()` before `runScan()`
-(`_ReconcileScripts.cshtml:140`), and `loadSubnets`/`loadVNets` reset their forward buttons in
-`beforeSend` (`_ImportScripts.cshtml:201`, `:264-265`).
-
-### Failure scenario
-
-App credentialed as SP_A. (1) Tick VNet `rig-vnet-visible-2` prefix `10.111.0.0/16` plus its Azure
-subnet `rig-sn-vis2-core`; the preview renders **"New top-level create rig-vnet-visible-2
-(10.111.0.0/16)"**. (2) Click *Continue to Commit* - step 4 is now permanently unlocked. (3) Click the
-step-2 pill, change nothing, click *Go to Preview* again. (4) That preview does not render. (5)
-Another admin creates `10.111.0.0/16` in Bastet in the meantime. (6) Click the still-enabled step-4
-pill, click *Confirm Import*.
-
-**Wrong output:** the commit succeeds. The banner reads *"Created 0 VNet target(s), 1 child subnet(s),
-... linked 1 existing target(s) to Azure"*. The unrelated subnet `created-by-another-admin`
-(`10.111.0.0/16`) is stamped with
-`AzureResourceId = /subscriptions/.../virtualNetworks/rig-vnet-visible-2` and the Azure child is
-created underneath it. That is verbatim the outcome J2 exists to refuse - and it is unrecoverable
-through the UI: no unlink view exists, `EditSubnetViewModel` does not carry `AzureResourceId`, a CIDR
-edit then throws, and the row plus its whole subtree is pulled into the reconcile wizard's deletion
-scope.
-
-### Reproduction
-
-Three legs, all on a pristine `09cee3d` publish, driven headless by Playwright against real ARM:
-
-- **Leg A - re-preview aborted (network blip).** `step4-tab disabled: False`, pill click ACCEPTED,
-  confirm ACCEPTED. Posted body carried **no `expected` key anywhere**. Server log:
-  `warn: Bulk Azure import: 1 of 1 selected prefix(es) carried no previewed outcome, so the re-derived
-  plan for them was not compared against anything the operator approved.` DB after:
-  `created-by-another-admin | 10.111.0.0 | 16 | .../virtualNetworks/rig-vnet-visible-2` plus the child.
-- **Leg B - no network manipulation at all.** The second preview answered with the byte-identical body
-  `AzureController.BulkImportPreview`'s own catch block emits (`:276`,
-  `{"success":false,"error":"Failed to build the import preview. Details have been logged."}`). Same
-  outcome. This kills the objection that the leg needs an artificial transport failure - any exception
-  in `GetExistingSubnetsAsync`/`BuildPlan` reaches it.
-- **Leg C - in-flight, no failure.** The operator clicks the still-lit step-4 pill while preview #2 is
-  in flight; the preview lands behind them and stamps
-  `"expected":{"targetType":"ExactMatch","existingTargetSubnetId":1,...}` from a plan they never saw.
-  Commit adopts with **no 409 and no warning line at all** - completely silent, and therefore worse
-  than leg A.
-
-**The control is what makes this a bypass rather than a re-file of J2.** Same fixture, same
-out-of-band insert while the operator sits on step 4, but *without* the second preview: the posted
-body carries `"expected":{"targetType":"AutoCreateTopLevel",...}` and the server answers
-`409 Commit failed: The plan changed since it was previewed, so nothing was imported.` DB after:
-`created-by-another-admin` with an **empty** `AzureResourceId`. J2 works; the re-preview turns it off.
-
-### Fix
-
-In `_BulkScripts.cshtml:410`, call `invalidatePlan()` first. Ordering is load-bearing twice over -
-`invalidatePlan()` nulls `lastSelection`, so it must precede the reassignment, and it re-disables
-`#step3-tab`, so it must precede `activateTab("step3")`:
-
-```js
-$("#bulk-go-preview-btn").on("click", function () {
-    const selection = buildSelectionFromUI();
-    invalidatePlan();          // re-locks #step3-tab/#step4-tab and #bulk-go-commit-btn
-    lastSelection = selection;
-    activateTab("step3");      // re-opens step 3 only
-    loadPreview(selection);
-});
-```
-
-Step 4 then becomes reachable only via `#bulk-go-commit-btn`, which `renderPlan` enables only when
-`plan.canCommit` - i.e. only from a plan that was actually rendered.
-
-**Built and measured, not reasoned.** `dotnet build -c Release --no-incremental` -> 0 warnings, 0
-errors; published and driven with the identical scripts. All three legs close: `step4-tab disabled =
-True`, `pointer-events: none`, both the pill click and the confirm click refused by Playwright, **no
-POST issued**, and the out-of-band row keeps an empty `AzureResourceId`. `invalidatePlan` is a hoisted
-`function` declaration, so this is not the round-10 J9 temporal-dead-zone shape; Chromium logged zero
-`pageerror`s across four scripted runs. Two non-regression checks both pass: the ordinary
-single-preview commit still writes correctly with `expected` stamped, and a re-preview that
-**succeeds** still re-opens step 4 through *Continue to Commit* and commits - the fix does not strand
-the operator after a benign re-preview. Zero C# impact; view-embedded JS with no unit-testable seam
-(the position round 10 took for J5/J9), so it must be driven in a browser rather than unit-tested.
-
-### Fix corrections
-
-- **The cheaper interim is worse than the finding admits.** Calling `invalidatePlan()` from
-  `loadPreview`'s `error` handler and `!result.success` branch (mirroring `showScanError` in
-  `_ReconcileScripts.cshtml:199`) closes legs A and B but leaves **leg C** open - and leg C is the one
-  that stamps an expectation from an unseen plan with **no log line at all**. The interim closes the
-  loud legs and leaves the silent one. **Take the click-handler version only.**
-- **Do not "fix" this server-side by refusing a null `Expected`.** `SubnetController.BulkAzure.cs:85-90`
-  documents that as a deliberate round-10 decision to keep the direct JSON API working.
-- **Residue, not a defect in the fix:** on the patched build `#bulk-confirm-commit-btn` still reads
-  `disabled: False` after a failed re-preview. It is unreachable because the step-4 pane is never
-  activated, so nothing follows from it - but a belt-and-braces variant would also
-  `prop("disabled", true)` that button inside `invalidatePlan()`.
+_Residue, deliberately not changed: `#bulk-confirm-commit-btn` still reads `disabled: False` after a
+failed re-preview. Nothing follows from it because the step-4 pane is never activated — measured, the
+click is refused — and adding `prop("disabled", true)` for it inside `invalidatePlan()` is
+belt-and-braces beyond the defect. Noted here so the next round does not re-derive it._
 
 ---
 

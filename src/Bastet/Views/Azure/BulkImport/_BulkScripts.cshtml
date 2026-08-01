@@ -409,6 +409,20 @@
         // ---------------------------------------------------------------
         $("#bulk-go-preview-btn").on("click", function () {
             const selection = buildSelectionFromUI();
+
+            // Re-lock the later steps before re-previewing. A pill stays clickable once its step has
+            // been visited, and invalidatePlan is the only writer that puts the disabled state back -
+            // so without this, one visit to Commit left step 4 live for the rest of the page's life.
+            // Every later preview then ran with the commit button still armed over a plan that had
+            // not been rendered: if the preview failed, or simply had not landed yet, the operator
+            // could confirm an import whose plan they never saw, and the approved-plan check would
+            // not fire because the fresh selection had never been stamped with an expectation.
+            //
+            // Ordering is load-bearing twice: invalidatePlan nulls lastSelection, so it must run
+            // before the reassignment below, and it re-disables #step3-tab, so it must run before
+            // activateTab re-opens that one step.
+            invalidatePlan();
+
             lastSelection = selection;
             activateTab("step3");
             loadPreview(selection);
