@@ -423,87 +423,46 @@ these fields._
 
 ---
 
-## J9 [x1] - Bulk import greys out Azure-subnet rows whose parent prefix is blocked, but prints no badge and no reason for them
+_J9 is fixed and committed, but **not with the fix as written, which does not run**. It declares
+`const subnetBlockedByPrefix` at the reason site and reads it in the label built above — a temporal
+dead zone. Razor never parses the embedded script, so the project builds at 0 warnings and then throws
+`ReferenceError: Cannot access 'subnetBlockedByPrefix' before initialization` inside `renderVNetTree`,
+before `#bulk-vnet-selection` is un-hidden: step 2 spins forever with zero checkboxes, strictly worse
+than the defect it repairs. Both verifiers built it independently and hit the identical failure._
 
-**Severity:** info (filed low; one verifier corrected it down, the other left it as filed) |
-**Confidence:** confirmed | **Cite:**
-`src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:238` (the reason condition), `:232` (the disabled
-condition), `:161` (`availabilityBadge` returning `""` for `"Available"`)
+_Taken instead, the verifier's smaller and more complete repair: the declaration is hoisted to just
+after `$subnetDiv` is created, and `reasonHtml(subnet.reason)` is appended **unconditionally** with the
+prefix-blocked sentence added only when the row has no reason of its own. That removes the
+`if (!subnet.isSelectable)` branch rather than adding one, and it fixes the sibling case the proposed
+fix misses — the guard also swallowed the reason of a *selectable* row, and `AnnotateSubnet` produces
+exactly one: the encompassing subnet's "Covers the whole VNet prefix, so it marks the target fully
+allocated instead of being created."_
 
-**What goes wrong.** `:232` disables a subnet checkbox when `!subnet.isSelectable ||
-!prefixInfo.isSelectable`, but `:238-240` appends the explanatory reason only when
-`!subnet.isSelectable`, and the badge helper returns the empty string for `Available`. So the rows
-disabled **because their VNet prefix is blocked** render as a greyed-out checkbox with no badge and no
-text - while the sibling row directly above them, disabled by the same line of code, carries both. That
-asymmetry is the signature of `:238` not being updated when the `|| !prefixInfo.isSelectable` cascade was
-added at `:232`; the in-file comment at `:229-231` documents the cascade and says nothing about
-suppressing the reason.
+_The badge is deliberately **not** the red "Cannot import". The legend defines that as conflicting with
+something already in BASTET, which is untrue of a row whose own status is Available and which is
+unselectable only because its prefix is; reusing it would trade one legend inaccuracy for another. A
+distinct neutral "Blocked by VNet prefix" badge is used instead._
 
-This is also the steady state after any successful bulk import: the imported parent then has children, so
-`AnnotatePrefix` returns `Blocked` on every later run while any Azure subnet added since is `Available`.
+_Measured in real headless Chromium against real ARM, before and after, with a DOM dump of every row.
+Fixtures: Azure VNet `rec-vnet-blk` 10.60.0.0/16 with `rec-b1` 10.60.1.0/24 and `rec-b2` 10.60.2.0/24,
+against a Bastet `10.60.0.0/16` that already has a child — so the prefix annotates Blocked while
+`rec-b2` stays Available, which is J9's exact shape. **Before:** `bulk-subnet-0-0-1`
+`disabled=true badges=[] reason=(NONE)`, beside a sibling disabled by the same line of code carrying
+both a badge and a full sentence. **After:** `badges=['Blocked by VNet prefix']` and
+*"Its VNet prefix cannot be imported, so this subnet cannot be either."*, while `bulk-subnet-0-0-0`
+keeps its own specific reason rather than being overwritten by the generic one, and the selectable
+rows are unchanged. **0 console errors and 0 page errors**, and the wizard still previews and commits
+end to end (1 VNet target, 2 child subnets). The tree renders — which is the whole point, given how
+the proposed fix failed._
 
-**Reproduction.** Real ARM, real headless Chromium, DOM dump of `#bulk-vnet-tree .form-check`:
+_No test ships with this: it is view-embedded JavaScript with no unit-testable seam, and the browser
+run is the verification. Suite unchanged at **730**._
 
-```
-bulk-prefix-3-0   disabled=true  badges=[10.60.0.0/16, Cannot import]
-                  reason="Bastet subnet 'Rig Parent 10.60' already has child subnets. Already imported?"
-bulk-subnet-3-0-0 disabled=true  badges=[Cannot import]
-                  reason="Bastet subnet 'child-of-1060' already uses 10.60.1.0/24."
-bulk-subnet-3-0-1 disabled=true  badges=[]  reason=(NONE)     <- rig-subnet-beta 10.60.2.0/24
-bulk-subnet-4-0-0..3 disabled=true badges=[] reason=(NONE)    <- gamma2/delta2/eps2/zeta2
-CONSOLE_ERRORS: 0
-
-server payload for those rows: "statusName":"Available","reason":null,"isSelectable":true
-"Hide unavailable" ON: both 10.60 cards vanish entirely; EMPTY_STATE "(none)" - no explanation either way.
-select-all then preview: zero blocked rows submitted -> display-only defect.
-```
-
-**Two of the finding's claims are corrected, both narrowing it.** (1) It says six rows; it is **five** -
-the sixth (`rig-full-span`) needs the 10.92 VNet imported first and renders **enabled** from the stated
-inputs. (2) *"Zero explanation ... cannot tell them apart from rows unclickable by accident"* is too
-strong: each such row sits indented inside its prefix's own card, directly beneath a red **Cannot import**
-badge and a full sentence of reason, and the two can never be separated. The legend framing is the weakest
-part of the finding: `_StepSelection.cshtml:8` is a badge glossary, not an invariant, and it is **already**
-loose in the other direction at HEAD - a `Will update existing` prefix is neither greyed nor unselectable
-(measured: `bulk-prefix-1-0 | disabled=false`).
-
-**Fix - UNSOUND AS WRITTEN. It does not run.** The fix declares
-`const subnetBlockedByPrefix` at the reason site (`:238`) and references it in the label built at
-`:233-236` - a temporal dead zone. Razor never parses the embedded JS, so the project **builds clean**,
-and then:
-
-```
-SELECTION_VISIBLE: False   LOADING_VISIBLE: True   TREE_ROWS: 0   ENABLED PREFIXES: 0
-PAGEERROR: ReferenceError: Cannot access 'subnetBlockedByPrefix' before initialization
-    at Object.<anonymous> (/Azure/BulkImport:574:40) at renderVNetTree (:520:15) at Object.success (:481:21)
-```
-
-`renderVNetTree` throws before `#bulk-vnet-selection` is un-`d-none`d, so step 2 of the bulk wizard spins
-forever with zero checkboxes - strictly worse than the defect it repairs. Both verifiers built it
-independently and hit the identical failure.
-
-**Repair, built and measured:** hoist the declaration to just after `const $subnetDiv = ...`, before the
-checkbox and label. All five rows then render `badges=[Cannot import]` plus *"Its VNet prefix cannot be
-imported, so this subnet cannot be either."*, `rig-subnet-alpha` keeps its own specific reason, the
-preview still builds the correct plan for the selectable VNets, and console errors are 0.
-
-**Three further notes.**
-
-- **The fix misses its own sibling case.** The `if (!subnet.isSelectable)` guard also swallows the reason
-  of a *selectable* subnet, and `AnnotateSubnet` produces exactly one: the encompassing subnet, whose
-  reason is *"Covers the whole VNet prefix, so it marks the target fully allocated instead of being
-  created."* Measured `reason=(NONE)` on screen **before and after** the proposed fix. The smaller and more
-  complete change is to append `reasonHtml(subnet.reason)` unconditionally and add the prefix-blocked
-  sentence only when the row has no reason of its own - which also removes the extra branch.
-- The `else if (subnetBlockedByPrefix)` is redundant inside the else (`subnet.isSelectable` is necessarily
-  true there), and reusing the `bg-danger` **Cannot import** badge trades one legend inaccuracy for
-  another - the legend defines that badge as *"conflicts with something already in BASTET"*, which is false
-  for `rig-subnet-beta`. A distinct badge would keep the legend honest.
-- The cheaper interim (soften the legend at `_StepSelection.cshtml:8`) is fine but incomplete: any legend
-  rewrite must fix **both** directions, not only add the "sits under a greyed prefix" clause.
-
-No sibling call site: `isSelectable` appears in exactly one view, and the only other `prop('disabled'`
-view is the unrelated CIDR calculator.
+_The finding's two self-corrections were confirmed rather than taken on trust: it is five rows, not
+six, and the legend framing was the weakest part of it — `_StepSelection.cshtml:8` is a badge glossary,
+not an invariant, and it is already loose in the other direction at HEAD. The cheaper interim
+(softening the legend) was **not** taken; it is incomplete on its own terms, since any legend rewrite
+would have to fix both directions._
 
 ---
 
