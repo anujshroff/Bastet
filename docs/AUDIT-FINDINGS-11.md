@@ -150,125 +150,42 @@ Always rebuild before believing a browser measurement of a `.cshtml` change._
 
 ---
 
-## K3 - J2's approved-plan divergence check dereferences a caller-supplied collection, turning two malformed bulk-import bodies from a modelled 400 into an unhandled 500
+_K3 is fixed and committed. `DescribeApprovedPlanDivergences` now copies `selection.VNetPrefixes ?? []`
+into a local, skips a null element with a comment rather than counting it, and the third dereference
+inside the `LogWarning` reads the local. The guard is in place rather than reordered, exactly as the
+finding argued: the 409 is deliberately raised before the `CanCommit` 400, and moving it after would
+report "this plan cannot be committed" in place of "the plan changed since you approved it" whenever
+both apply. A null entry is **not** counted as `unverified` — it is a malformed request, not an
+unchecked one, and the planner already names it._
 
-`[x2]` &nbsp;|&nbsp; **Severity: low** &nbsp;|&nbsp; **Confidence: confirmed** &nbsp;|&nbsp;
-`src/Bastet/Controllers/SubnetController.BulkAzure.cs:78`
+_**One thing the finding did not anticipate, found by the test rather than by reading.** With the null
+dereference guarded, body (B) still did not produce the promised 400 — it produced a **409**. When the
+planner records a global error it returns no items, so the *valid* prefix alongside the null one is
+described as "no longer produces a target to import": a divergence manufactured by the malformed body
+rather than by the tree moving. The divergence check is therefore skipped when
+`plan.GlobalErrors.Count > 0`, so the planner's own message reaches the caller. Round 10's
+409-before-400 ordering is preserved wherever both are meaningful — a plan failing only on per-item
+errors is still reported as diverged first._
 
-### The defect
+_Measured live on two publishes. **Before:** `{"vNetPrefixes":null}`, `{"vNetPrefixes":[null]}` and
+`{"vNetPrefixes":[<valid>,null]}` all returned **HTTP 500** with
+`System.NullReferenceException ... at DescribeApprovedPlanDivergences`. **After:** all three return
+**400** with the planner's own wording — *"No VNet address prefixes were selected."* for (A) and
+*"A selected VNet prefix was empty."* for (B). Both controls are byte-identical either side: an empty
+list still 400s, and a valid selection with no `Expected` still returns `200 createdTargets:1`._
 
-`DescribeApprovedPlanDivergences` walks `selection.VNetPrefixes` (`:78`), indexes it and reads
-`selected.Expected` (`:80-81`), and reads `.Count` again inside a `LogWarning` (`:148`) - all before
-any null guard. The DTO declares `List<BulkImportSelectedVNetPrefixDto> VNetPrefixes { get; set; } = []`
-(`AzureBulkImportViewModels.cs:244`), but **System.Text.Json overwrites that initialiser with null
-when the body carries an explicit null** - the same trap this codebase already documents and guards at
-`SubnetController.AzureReconcile.cs:46-50` for the sibling endpoint.
+_Because the ordering changed, J2's own path was re-verified rather than assumed: a valid selection
+whose plan genuinely diverged still answers **409** with identical `differences` wording, and K2's
+rendering still shows both sentences._
 
-The call site at `:167` sits **outside** `BulkCreateFromAzurePlanCore`'s transaction `try` (which opens
-after the `CanCommit` check), and the public action's own `try` catches only `TimeoutException`, so
-nothing intercepts it.
+_Two regression tests added (`SubnetControllerBulkAzureImportTests`), 730 → **732**. Both confirmed
+failing against the unfixed code with the defect's own signature — `System.NullReferenceException`,
+not an unrelated assertion._
 
-### Failure scenario
-
-`POST /Subnet/BulkCreateFromAzurePlan` (RequireAdminRole, antiforgery token supplied) with either:
-
-- **(A)** `{"subscriptionId":"<sub>","vNetPrefixes":null}`
-- **(B)** `{"subscriptionId":"<sub>","vNetPrefixes":[{...valid prefix...},null]}`
-
-**Expected** (and pre-round-10 actual): HTTP 400 with the planner's own wording - *"No VNet address
-prefixes were selected."* for (A), *"A selected VNet prefix was empty."* for (B).
-`AzureBulkImportPlanner.BuildPlan` explicitly guards both shapes (`:37`, `:50`) and records a global
-error, and the pre-existing `if (!plan.CanCommit)` arm turns that into a modelled 400.
-
-**Actual:** HTTP 500, unhandled `NullReferenceException`. For the documented direct JSON API the
-response stops being JSON - an HTML error page in Production, a stack trace in Development. For the
-browser wizard the `$.ajax` error handler's `JSON.parse` fails and `showCommitError` falls back to the
-literal string *"Server error: 500"* (`_BulkScripts.cshtml:680-683`), so the operator loses the
-planner's actual message. Nothing is written - the crash pre-empts a refusal, not a write. The global
-subnet lock is released correctly (verified: the next normal commit returned 200 in 0.026 s, and
-`sys.dm_tran_locks` shows 0 application locks).
-
-**Reachability:** not from the wizard (`buildSelectionFromUI` never emits a null entry). Reachable
-from the documented direct JSON API - which this method's own comment at `:83-86` says must keep
-working - and from any crafted Admin request.
-
-### Reproduction
-
-Pristine `09cee3d` publish, token scraped from `/Azure/BulkImport`:
-
-```
-{"vNetPrefixes":null}                    -> HTTP 500
-  System.NullReferenceException: Object reference not set to an instance of an object.
-     at Bastet.Controllers.SubnetController.DescribeApprovedPlanDivergences(...)
-        in .../SubnetController.BulkAzure.cs:line 78
-{"vNetPrefixes":[null]}                  -> HTTP 500, same exception, line 81
-{"vNetPrefixes":[<valid 10.110.0.0/16>,null]} -> HTTP 500, same exception, line 81
-{"vNetPrefixes":[]}            (control) -> HTTP 400 {"success":false,"globalErrors":["No VNet address
-                                            prefixes were selected."],"itemErrors":[]}
-/Azure/BulkImportPreview, same bodies    -> HTTP 200 with globalErrors (preview is unaffected)
-```
-
-**Regression pinned to J2:** `git show dcc15ab:src/Bastet/Controllers/SubnetController.BulkAzure.cs`
-goes straight from `planner.BuildPlan(...)` to `if (!plan.CanCommit)`; `DescribeApprovedPlanDivergences`
-did not exist, and there is no other dereference of `VNetPrefixes` anywhere in `Controllers/`.
-Building and running the parent commit confirmed both bodies produce the modelled 400 there.
-
-### Fix
-
-Null-guard the walk **in place** rather than reordering the checks - the 409 is deliberately raised
-before the `CanCommit` `BadRequest` (round-10 J2), and moving it after would report *"this plan cannot
-be committed"* in place of *"the plan changed since you approved it"* whenever both apply.
-
-```csharp
-// System.Text.Json overwrites the DTO's collection initialiser with null when the body
-// carries an explicit null, and a list element can itself be null - AzureBulkImportPlanner
-// guards both (:37, :50) and records a global error. This walk runs before the CanCommit
-// check that reports those errors, so it has to survive them.
-List<BulkImportSelectedVNetPrefixDto> selectedPrefixes = selection.VNetPrefixes ?? [];
-
-for (int index = 0; index < selectedPrefixes.Count; index++)
-{
-    BulkImportSelectedVNetPrefixDto? selected = selectedPrefixes[index];
-    if (selected is null)
-    {
-        // Already reported by the planner as a global error; nothing to compare.
-        continue;
-    }
-
-    BulkImportExpectedTargetDto? expected = selected.Expected;
-```
-
-and change the third dereference at `:148` (`selection.VNetPrefixes.Count` inside the `LogWarning`) to
-`selectedPrefixes.Count`.
-
-**Do NOT count a null entry as `unverified++`** - it is not an unverified commit, it is a malformed
-one, and the planner already names it. Doing so would also log an "unverified commit" for a request
-about to be refused as malformed.
-
-**Built and measured:** 0 warnings / 0 errors (the `?? []` on a non-nullable-declared property does
-**not** trip nullable analysis, which is where this could have failed the repo's warnings bar);
-**730 passed, 0 failed**; all three malformed bodies answer 400 with the planner's own wording; and
-both paths it sits in front of are byte-identical to the unpatched build - a valid selection with no
-`Expected` still returns `200 createdTargets:1`, and a valid selection with a wrong `Expected` still
-returns J2's 409 with identical `differences` wording.
-
-### Fix corrections
-
-- **The cheaper interim is partial and should not be mistaken for the fix.** Adding the sibling
-  endpoint's guard to the public action, immediately after the existing `selection is null` check at
-  `:36-39` -
-
-  ```csharp
-  if (selection.VNetPrefixes is null or { Count: 0 })
-  {
-      return BadRequest(new { success = false, error = "No VNet address prefixes were selected." });
-  }
-  ```
-
-  mirroring `SubnetController.AzureReconcile.cs:50` - closes body **(A)** only. Body **(B)**, a null
-  element inside a non-empty list, still 500s.
-- **Apply by content, not by line number.** The `:75-81` and `:148` citations are correct at `09cee3d`
-  but shift once the comment block is inserted.
+_The cheaper interim was **not** taken. Adding the sibling endpoint's
+`selection.VNetPrefixes is null or { Count: 0 }` guard to the public action closes body (A) only; a
+null element inside a non-empty list still threw. Applied by content rather than by line number, as
+the finding advised, since the inserted comment block shifts the cited lines._
 
 ---
 

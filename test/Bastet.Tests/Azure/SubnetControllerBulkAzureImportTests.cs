@@ -219,6 +219,46 @@ public class SubnetControllerBulkAzureImportTests : IDisposable
         Assert.Equal(VNetId, adopted.AzureResourceId);
     }
 
+    /// <summary>
+    /// A malformed body must come back as the planner's modelled 400, not as an unhandled 500.
+    /// </summary>
+    /// <remarks>
+    /// Round-11 K3. The approved-plan comparison walks <c>selection.VNetPrefixes</c> and reads each
+    /// element before any null guard. System.Text.Json overwrites a collection initialiser with null
+    /// when the body carries an explicit null, and a list element can itself be null - the planner
+    /// guards both and records a global error, but this walk runs *before* the CanCommit check that
+    /// reports them, so it has to survive them. Without the guard both shapes threw
+    /// NullReferenceException from a point outside the transaction's try, where the action's own
+    /// catch handles only TimeoutException: the documented direct JSON API stopped returning JSON at
+    /// all, and the wizard fell back to the literal string "Server error: 500", losing the planner's
+    /// actual message.
+    /// </remarks>
+    [Fact]
+    public async Task BulkCreateFromAzurePlan_NullPrefixCollection_IsABadRequestNotAServerError()
+    {
+        BulkImportSelectionDto selection = Selection(ApprovedNewTopLevel());
+        selection.VNetPrefixes = null!;
+
+        IActionResult result = await Commit(selection);
+
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("No VNet address prefixes were selected.",
+            System.Text.Json.JsonSerializer.Serialize(bad.Value), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BulkCreateFromAzurePlan_NullPrefixElement_IsABadRequestNotAServerError()
+    {
+        BulkImportSelectionDto selection = Selection(ApprovedNewTopLevel());
+        selection.VNetPrefixes.Add(null!);
+
+        IActionResult result = await Commit(selection);
+
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("A selected VNet prefix was empty.",
+            System.Text.Json.JsonSerializer.Serialize(bad.Value), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task BulkCreateFromAzurePlan_NoApprovedOutcome_IsNotRefused()
     {

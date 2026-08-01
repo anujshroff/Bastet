@@ -75,9 +75,27 @@ public partial class SubnetController : Controller
         List<string> differences = [];
         int unverified = 0;
 
-        for (int index = 0; index < selection.VNetPrefixes.Count; index++)
+        // System.Text.Json overwrites the DTO's collection initialiser with null when the body
+        // carries an explicit null, and a list element can itself be null. AzureBulkImportPlanner
+        // guards both shapes and records a global error - but this walk runs before the CanCommit
+        // check that turns those into a modelled 400, so it has to survive them. Without this the
+        // two shapes threw from outside the transaction's try, where the action catches only
+        // TimeoutException: the documented JSON API stopped answering JSON and the wizard showed
+        // "Server error: 500" in place of the planner's own message.
+        List<BulkImportSelectedVNetPrefixDto> selectedPrefixes = selection.VNetPrefixes ?? [];
+
+        for (int index = 0; index < selectedPrefixes.Count; index++)
         {
-            BulkImportSelectedVNetPrefixDto selected = selection.VNetPrefixes[index];
+            BulkImportSelectedVNetPrefixDto? selected = selectedPrefixes[index];
+
+            if (selected is null)
+            {
+                // Already reported by the planner as a global error. Deliberately not counted as an
+                // unverified commit: it is a malformed request, not an unchecked one, and logging it
+                // as unverified would describe a request that is about to be refused outright.
+                continue;
+            }
+
             BulkImportExpectedTargetDto? expected = selected.Expected;
 
             if (expected is null)
@@ -145,7 +163,7 @@ public partial class SubnetController : Controller
                 "Bulk Azure import: {Unverified} of {Total} selected prefix(es) carried no previewed outcome, "
                 + "so the re-derived plan for them was not compared against anything the operator approved.",
                 unverified,
-                selection.VNetPrefixes.Count);
+                selectedPrefixes.Count);
         }
 
         return differences;
@@ -164,7 +182,17 @@ public partial class SubnetController : Controller
         // Re-deriving the plan protects against committing a stale one, but on its own it also
         // silently commits a *different* one when the tree moved under the operator. Refuse that,
         // the way BulkDeleteStaleAzureSubnets already refuses a scan whose verdict has changed.
-        List<string> divergences = DescribeApprovedPlanDivergences(selection, plan);
+        //
+        // Skipped when the planner recorded a global error, because then it produced no items and
+        // every selected prefix would be described as "no longer produces a target to import" - a
+        // divergence manufactured by the malformed body rather than by the tree moving. The
+        // planner's own message is the useful answer there, and the BadRequest below carries it.
+        // The 409-before-400 ordering still holds wherever both are meaningful: a plan that fails
+        // only on per-item errors is still reported as diverged first.
+        List<string> divergences = plan.GlobalErrors.Count > 0
+            ? []
+            : DescribeApprovedPlanDivergences(selection, plan);
+
         if (divergences.Count > 0)
         {
             return Conflict(new
