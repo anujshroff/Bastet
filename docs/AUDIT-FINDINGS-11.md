@@ -117,99 +117,36 @@ belt-and-braces beyond the defect. Noted here so the next round does not re-deri
 
 # Low
 
-## K2 - The bulk import 409's divergence list is computed, serialised to the browser, and discarded - the un-fixed twin of the reconcile wizard's `warnings` rendering
+_K2 is fixed and committed with the client-side version: `showCommitError` now renders
+`payload.differences` as `<li>`s after the `itemErrors` block, using `.text()` to match the two blocks
+either side. This is the same treatment the reconcile wizard's `showCommitError` already gives its
+409's `warnings`._
 
-`[x2]` &nbsp;|&nbsp; **Severity: low** &nbsp;|&nbsp; **Confidence: confirmed** &nbsp;|&nbsp;
-`src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:691`
+_Measured before and after against two publishes on separate ports and catalogs, with the colliding
+subnet created through `/Subnet/Create` from a second cookie jar while the plan was on screen.
+**Before:** the server answered 409 with
+`differences: ["10.110.0.0/16: the preview showed a different action; it now resolves to ExactMatch.",
+"10.110.0.0/16: it now targets existing Bastet subnet N."]` and the rendered
+`#bulk-commit-error-list` was **empty** — every sentence the server built was dropped. **After:** the
+identical 409 renders both sentences as list items beneath the generic message. Zero `pageerror`s in
+both runs, and the refusal itself is unchanged, so nothing was written either way._
 
-### The defect
+_The cheaper interim was **not** taken. Emitting `globalErrors = divergences` server-side alongside
+`differences` does render, and it avoids touching a `.cshtml` — a real consideration given round 10
+lost two fixes to view-embedded JS — but it ships the same array twice on the wire and fixes only this
+one 409 rather than the client's inability to render a `differences` body at all. The client fix was
+verified in a browser, which is the mitigation the interim was trying to avoid needing._
 
-Round 10's J2 added `DescribeApprovedPlanDivergences` (`SubnetController.BulkAzure.cs:73-152`). When
-the re-derived plan disagrees with what the operator approved, `BulkCreateFromAzurePlanCore` answers
-409 with `{success, error, differences:[...]}` (`:167-176`). The only consumer of that body is
-`commitImport`'s `error` handler (`:680-684`), which calls `showCommitError(payload)`.
-`showCommitError` (`:691-711`) renders `payload.error` (`:695`), `payload.globalErrors` (`:697-699`)
-and `payload.itemErrors` (`:700-708`) - and the 409 carries neither of the last two. **Every sentence
-the server built is dropped on the floor.** `grep -rn 'differences' src/Bastet/Views
-src/Bastet/wwwroot` returns nothing.
+_Not closed by this change, and deliberately left: `#bulk-back-to-preview-btn` still repaints the
+stale plan after a 409, so the button beside the now-truthful error panel still shows a plan that
+contradicts it. That is a separate defect on the same screen and is recorded in the watch list rather
+than fixed here. Suite unchanged at **730** — no test asserts on this view's DOM, and the block is
+purely additive._
 
-The reconcile wizard's `showCommitError` (`Views/Azure/Reconcile/_ReconcileScripts.cshtml:453-475`)
-was extended to render `payload.warnings` for precisely this reason, with the comment *"The 409
-carries no globalErrors - the reason a row was withheld travels in warnings, and without this the
-operator sees only 'no longer reported as deleted'"*. This is that same fix, not applied to the bulk
-wizard.
-
-### Failure scenario
-
-Empty Bastet tree. Bulk-import wizard, tick VNet `rig-vnet-visible` prefix `10.110.0.0/16` plus both
-Azure subnets; the preview says *"New top-level create rig-vnet-visible (10.110.0.0/16)"*. A second
-admin then creates `10.110.0.0/16` by hand. Pressing *Confirm Import* gives a 409 whose body says the
-commit would have **adopted someone else's subnet rather than creating one** - the exact outcome J2
-exists to surface. What renders is only the generic sentence and an empty `<ul>`.
-
-The refusal itself is correct and nothing is written, so this is a lost-diagnostic defect, not data
-loss.
-
-### Reproduction
-
-Real headless Chromium against a pristine `09cee3d` publish, with the colliding subnet created through
-`/Subnet/Create` in a second tab:
-
-```
----- SERVER 409 BODY ----
-{"success":false,"error":"The plan changed since it was previewed, so nothing was imported. Re-run the
- preview, review what it now says, and confirm again.","differences":["10.110.0.0/16: the preview
- showed a different action; it now resolves to ExactMatch.","10.110.0.0/16: it now targets existing
- Bastet subnet 1."]}
-
----- WHAT THE OPERATOR SEES ----
-error-message span: 'The plan changed since it was previewed, so nothing was imported. Re-run the
- preview, review what it now says, and confirm again.'
-error list items: []
-```
-
-**The information is nowhere else on screen** - this was the hunt that was expected to kill the
-finding and made it worse instead. Driving the recovery path the error message itself prescribes
-("Re-run the preview, review what it now says"), clicking `#bulk-back-to-preview-btn` - the only other
-button on the commit step - repaints nothing and leaves step 3 showing the **stale** plan, *"New
-top-level create rig-vnet-visible (10.110.0.0/16)"*, which flatly contradicts the refusal that just
-fired. Only going back to step 2 and pressing *Preview* again re-derives, and even then the delta the
-server had already computed is not shown.
-
-### Fix
-
-In `showCommitError` (`_BulkScripts.cshtml:691`), after the `globalErrors` block:
-
-```js
-if (payload && payload.differences && payload.differences.length > 0) {
-    $.each(payload.differences, function (i, d) { $list.append($('<li></li>').text(d)); });
-}
-```
-
-`.text()`, not `.html()`, matching the two blocks either side.
-
-**Built, published and driven.** Patched build renders both divergence sentences as `<li>`s,
-`pageerrors: []`, and a clean happy-path import still shows its success banner with the error panel
-hidden. `dotnet test` on the patched copy: **730 passed, 0 failed**. No TDZ hazard - `$list` is
-declared at `:696` and the insertion is below it. No sibling call site is missed: `showCommitError`
-has exactly two callers (`:677` and `:683`), the block is purely additive, and the other two
-`Conflict(...)` sites in `SubnetController.BulkAzure.cs` (`:255`, `:293`) carry only `error` and
-already render correctly.
-
-### Fix corrections
-
-- **Cheaper interim - sound but strictly inferior.** In `BulkCreateFromAzurePlanCore`
-  (`SubnetController.BulkAzure.cs:171-176`) also emit the list under the key the client already
-  renders: `globalErrors = divergences` beside `differences = divergences`. One line of server code,
-  no `.cshtml` edit (which matters - round 10 lost two fixes to view-embedded JS that builds at 0
-  warnings and throws at runtime), keeps the documented `differences` key for the direct JSON API, and
-  needs no browser verification. The shipped pin
-  `BulkCreateFromAzurePlan_TargetAdoptedAfterPreview_ConflictNamesTheDivergence` still passes with a
-  duplicated list. It ships the same array twice on the wire and fixes only this one 409 rather than
-  the client's inability to render a `differences` body at all - **prefer the client fix**.
-- **Not closed by either version:** `#bulk-back-to-preview-btn` still repaints the stale plan after a
-  409. The fix makes the error panel tell the truth; the button next to it still shows a plan
-  contradicting it.
+_One process note worth carrying forward: Razor views are compiled into the assembly, so a
+`dotnet run --no-build` restart serves the previous view. The first "after" run reported an empty list
+because it was still serving the pre-fix build; rebuilding and re-running produced the result above.
+Always rebuild before believing a browser measurement of a `.cshtml` change._
 
 ---
 
