@@ -184,6 +184,49 @@ namespace Bastet.Models.ViewModels
         /// Selected Azure subnets that fall under this VNet prefix
         /// </summary>
         public List<BulkImportSelectedSubnetDto> Subnets { get; set; } = [];
+
+        /// <summary>
+        /// What the preview told the operator would happen to this prefix, round-tripped so the
+        /// commit can refuse a plan that is no longer the plan they approved. Null when the caller
+        /// did not preview - see <see cref="BulkImportExpectedTargetDto"/>.
+        /// </summary>
+        public BulkImportExpectedTargetDto? Expected { get; set; }
+    }
+
+    /// <summary>
+    /// The outcome the preview displayed for one VNet prefix.
+    /// </summary>
+    /// <remarks>
+    /// The commit re-derives its plan against the tree as it is at commit time, which is what stops a
+    /// stale preview from writing stale decisions. But re-deriving also silently *changes* the
+    /// decision when the tree moved underneath the operator: a subnet created between preview and
+    /// commit turns "create a new top-level subnet" into "adopt that subnet", stamping it with the
+    /// VNet's Azure resource id - which no screen in the application can clear. Carrying the approved
+    /// outcome back lets the commit tell those apart and refuse the second.
+    /// <para>
+    /// Every field here is a bool, an int or a closed enum name except <see cref="NewName"/>. The
+    /// nested selection list is not visited by <c>GlobalSanitizationFilter</c>, so nothing on this
+    /// type is echoed back in the conflict response - divergences are described from the server's own
+    /// re-derived plan instead.
+    /// </para>
+    /// </remarks>
+    public class BulkImportExpectedTargetDto
+    {
+        /// <summary>
+        /// <see cref="BulkImportTargetType"/> by name. Compared by name rather than ordinal so
+        /// reordering the enum cannot silently turn a divergence into a match.
+        /// </summary>
+        public string? TargetType { get; set; }
+
+        public int? ExistingTargetSubnetId { get; set; }
+
+        public int? AutoCreateParentSubnetId { get; set; }
+
+        public bool WillRename { get; set; }
+
+        public string? NewName { get; set; }
+
+        public bool WillMarkFullyAllocated { get; set; }
     }
 
     /// <summary>

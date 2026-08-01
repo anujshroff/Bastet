@@ -21,8 +21,7 @@ namespace Bastet.Controllers
             // Check environment variable
             if (!IsAzureImportEnabled())
             {
-                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
+                return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
             // Get the subnet
@@ -33,8 +32,7 @@ namespace Bastet.Controllers
 
             if (subnet == null)
             {
-                TempData["ErrorPageMessage"] = $"Subnet with ID {id} could not be found.";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+                return this.RedirectToErrorPage(404, $"Subnet with ID {id} could not be found.");
             }
 
             // Check if subnet has no children or host IPs and is not fully allocated
@@ -181,8 +179,7 @@ namespace Bastet.Controllers
         {
             if (!IsAzureImportEnabled())
             {
-                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
+                return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
             BulkImportInitialViewModel viewModel = new() { IsFeatureEnabled = true };
@@ -289,8 +286,7 @@ namespace Bastet.Controllers
         {
             if (!IsAzureImportEnabled())
             {
-                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
+                return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
             AzureReconcileInitialViewModel viewModel = new() { IsFeatureEnabled = true };

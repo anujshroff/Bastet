@@ -219,6 +219,12 @@
                         $.each(shownSubnets, function (sIdx, subnet) {
                             const subnetId = `bulk-subnet-${vIdx}-${pIdx}-${sIdx}`;
                             const $subnetDiv = $('<div class="form-check"></div>');
+                            // Declared here, ahead of the label and the reason below that both read
+                            // it. Referencing a `const` earlier in the block than its declaration is
+                            // a temporal dead zone, and Razor does not parse embedded script - so it
+                            // would build at 0 warnings and then throw inside this render loop,
+                            // leaving step 2 spinning with no checkboxes at all.
+                            const subnetBlockedByPrefix = subnet.isSelectable && !prefixInfo.isSelectable;
                             const $subnetCheckbox = $('<input type="checkbox" class="form-check-input bulk-subnet-checkbox">')
                                 .attr('id', subnetId)
                                 .attr('data-vnet-idx', vIdx)
@@ -233,10 +239,28 @@
                             const $subnetLabel = $('<label class="form-check-label"></label>')
                                 .attr('for', subnetId)
                                 .html(`${escapeHtml(subnet.name)} <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>`
-                                    + availabilityBadge(subnet.statusName));
+                                    + availabilityBadge(subnet.statusName)
+                                    // Its own status is Available - it is only unselectable because
+                                    // its prefix is. Deliberately not the red "Cannot import" badge,
+                                    // which the legend defines as conflicting with something already
+                                    // in BASTET; that is untrue here and would trade one inaccurate
+                                    // legend entry for another.
+                                    + (subnetBlockedByPrefix
+                                        ? '<span class="badge bg-secondary ms-1">Blocked by VNet prefix</span>'
+                                        : ""));
                             $subnetDiv.append($subnetCheckbox).append($subnetLabel);
-                            if (!subnet.isSelectable) {
-                                $subnetDiv.append(reasonHtml(subnet.reason));
+
+                            // Unconditional. The old !isSelectable guard also swallowed the reason of
+                            // a *selectable* row, and AnnotateSubnet produces exactly one: the
+                            // encompassing subnet, whose "Covers the whole VNet prefix..." explains
+                            // why it marks the target fully allocated instead of being created.
+                            $subnetDiv.append(reasonHtml(subnet.reason));
+
+                            // Only when the row has nothing more specific to say, so a subnet with
+                            // its own conflict keeps that reason rather than this generic one.
+                            if (subnetBlockedByPrefix && !subnet.reason) {
+                                $subnetDiv.append(reasonHtml(
+                                    "Its VNet prefix cannot be imported, so this subnet cannot be either."));
                             }
                             $subList.append($subnetDiv);
                         });
@@ -453,6 +477,11 @@
                         $("#bulk-preview-error").removeClass("d-none");
                         return;
                     }
+                    // Record what this preview promised for each prefix, on the very object the
+                    // commit posts. The commit re-plans server-side and refuses anything that no
+                    // longer matches, so a subnet created by someone else while this screen is up
+                    // cannot be silently adopted instead of a new one being created.
+                    attachApprovedOutcomes(selection, result.plan);
                     renderPlan(result.plan);
                     $("#bulk-preview-content").removeClass("d-none");
                 },
@@ -473,6 +502,34 @@
                     }
                     $("#bulk-preview-loading").addClass("d-none");
                 }
+            });
+        }
+
+        // Copies each planned outcome onto the matching selected prefix, so the commit can send back
+        // what was approved. Only the plan's own decision fields are carried - the server describes
+        // any divergence from its own re-derived plan and never echoes these values.
+        function attachApprovedOutcomes(selection, plan) {
+            const planned = {};
+            $.each((plan && plan.items) || [], function (i, item) {
+                planned[item.vNetResourceId + "|" + item.vNetPrefix] = item;
+            });
+
+            $.each((selection && selection.vNetPrefixes) || [], function (i, prefix) {
+                const item = planned[prefix.vNetResourceId + "|" + prefix.addressPrefix];
+                if (!item) {
+                    // No plan item means nothing was approved for it; the server treats a missing
+                    // expectation as unverified rather than as agreement.
+                    prefix.expected = null;
+                    return;
+                }
+                prefix.expected = {
+                    targetType: item.targetTypeName,
+                    existingTargetSubnetId: typeof item.existingTargetSubnetId === "number" ? item.existingTargetSubnetId : null,
+                    autoCreateParentSubnetId: typeof item.autoCreateParentSubnetId === "number" ? item.autoCreateParentSubnetId : null,
+                    willRename: item.willRename === true,
+                    newName: typeof item.newName === "string" ? item.newName : null,
+                    willMarkFullyAllocated: item.willMarkFullyAllocated === true
+                };
             });
         }
 

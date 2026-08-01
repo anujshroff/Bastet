@@ -3,6 +3,7 @@ using Bastet.Models.ViewModels;
 using Bastet.Services.Azure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Controllers;
 
@@ -126,6 +127,13 @@ public partial class SubnetController : Controller
 
                     HashSet<int> alreadyArchived = [];
 
+                    // Read the tree once for the whole batch rather than twice per target. Every
+                    // target's subtree is archived from this one snapshot: subtrees are disjoint, so
+                    // rows removed by an earlier target are never named by a later one. Tracking, not
+                    // AsNoTracking - ArchiveSubnetSubtreeAsync removes these very instances, and a
+                    // detached duplicate throws once a target has descendants.
+                    List<Subnet> subnetTree = await context.Subnets.ToListAsync();
+
                     foreach (int subnetId in ordered)
                     {
                         if (alreadyArchived.Contains(subnetId))
@@ -140,21 +148,26 @@ public partial class SubnetController : Controller
                             continue;
                         }
 
-                        List<Subnet> descendants = await GetAllDescendantsOrdered(subnetId);
-                        (int archivedSubnets, int archivedHostIps) = await ArchiveSubnetSubtreeAsync(subnet);
+                        List<int> archivedIds = [];
+                        (int archivedSubnets, int archivedHostIps) =
+                            await ArchiveSubnetSubtreeAsync(subnet, subnetTree, archivedIds);
 
-                        foreach (Subnet descendant in descendants)
+                        // Covers the target itself as well as its descendants.
+                        foreach (int archivedId in archivedIds)
                         {
-                            alreadyArchived.Add(descendant.Id);
+                            alreadyArchived.Add(archivedId);
                         }
 
-                        alreadyArchived.Add(subnetId);
                         subnetsArchived += archivedSubnets;
                         hostIpsArchived += archivedHostIps;
                         targetsDeleted++;
-
-                        await context.SaveChangesAsync();
                     }
+
+                    // One save for the batch. It was per-target, which re-ran DetectChanges over
+                    // every tracked entity once per target while holding the global write lock; the
+                    // whole loop is a single transaction committed just below, so nothing between
+                    // iterations needs the rows flushed.
+                    await context.SaveChangesAsync();
 
                     await transaction.CommitAsync();
                     return null;

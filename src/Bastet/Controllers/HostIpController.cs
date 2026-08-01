@@ -567,8 +567,6 @@ public class HostIpController(
             {
                 // Subnet still exists
                 viewModel.SubnetName = subnet.Name;
-                viewModel.NetworkAddress = subnet.NetworkAddress;
-                viewModel.Cidr = subnet.Cidr;
             }
             else
             {
@@ -577,15 +575,11 @@ public class HostIpController(
                 if (deletedSubnet != null)
                 {
                     viewModel.SubnetName = $"{deletedSubnet.Name} (deleted)";
-                    viewModel.NetworkAddress = deletedSubnet.NetworkAddress;
-                    viewModel.Cidr = deletedSubnet.Cidr;
                 }
                 else
                 {
                     // No information available
                     viewModel.SubnetName = "Unknown";
-                    viewModel.NetworkAddress = "Unknown";
-                    viewModel.Cidr = 0;
                 }
             }
 

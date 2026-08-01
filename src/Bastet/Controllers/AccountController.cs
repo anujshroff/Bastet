@@ -8,7 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Bastet.Controllers;
 
-public class AccountController(IWebHostEnvironment environment, IUserContextService userContextService) : Controller
+public class AccountController(
+    IWebHostEnvironment environment,
+    IUserContextService userContextService,
+    ILogger<AccountController> logger) : Controller
 {
     /// <summary>
     /// Anonymous: this is the configured AccessDeniedPath, so it must be reachable by a user who
@@ -63,11 +66,38 @@ public class AccountController(IWebHostEnvironment environment, IUserContextServ
         // If we're in production, also sign out from the identity provider
         if (!environment.IsDevelopment())
         {
-            // Redirect to OIDC provider for logout
-            return SignOut(
-                new AuthenticationProperties { RedirectUri = target },
-                CookieAuthenticationDefaults.AuthenticationScheme,
-                OpenIdConnectDefaults.AuthenticationScheme);
+            // The local session is ended first, and separately, so it does not depend on a remote
+            // round trip succeeding. Returning SignOut(...) performed both legs during *result*
+            // execution, after the action had returned: when the OIDC handler could not fetch the
+            // discovery document it threw IDX20803 there, UseExceptionHandler called Response.Clear()
+            // - taking every queued Set-Cookie with it - and sign-out answered 500 with the session
+            // still alive. Every other failure in that window fails closed; that one failed open.
+            //
+            // RedirectUri is passed to the cookie leg too. CookieAuthenticationDefaults.LogoutPath is
+            // /Account/Logout, which is this very path, so without it HandleSignOutAsync takes its
+            // redirect branch with a null RedirectUri and writes a self-redirect - harmless today
+            // only because both exits below overwrite Location.
+            AuthenticationProperties properties = new() { RedirectUri = target };
+
+            await HttpContext.SignOutAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme, properties);
+
+            try
+            {
+                await HttpContext.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme, properties);
+
+                // The handler has written the redirect to the IdP's end-session endpoint itself.
+                return new EmptyResult();
+            }
+            catch (Exception ex)
+            {
+                // The IdP being unreachable must not keep a privileged session alive. The local
+                // sign-out above has already happened and its Set-Cookie is not at risk, because
+                // nothing here throws out of result execution.
+                logger.LogWarning(ex,
+                    "Signing out of the identity provider failed; the local session was still ended.");
+                return Redirect(target);
+            }
         }
 
         // In development, just redirect to the specified URL or the signed-out page

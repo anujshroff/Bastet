@@ -190,6 +190,15 @@
                     $("#vnet-selection").addClass("d-none");
                     $("#vnet-error").addClass("d-none");
                     $("#no-vnets").addClass("d-none");
+                    // The success branch empties the dropdown and re-appends the placeholder, which
+                    // resets the select's value without firing `change` - and the change handler is
+                    // the only thing that touches this button's disabled state. Re-entering step 2
+                    // therefore left "Next: Select Subnets" fully saturated and clickable over a
+                    // placeholder, and clicking it fell through the `if (selectedVNetId)` guard: no
+                    // request, no step change, no message. Same placement and reason as
+                    // loadSubnets' beforeSend below, so the wizard has one rule rather than two
+                    // that disagree, and it also covers the error and no-vnets branches.
+                    $("#select-vnet-btn").prop("disabled", true);
                 },
                 success: function(result) {
                     if (result.success) {

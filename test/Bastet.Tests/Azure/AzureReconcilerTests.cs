@@ -492,6 +492,78 @@ public class AzureReconcilerTests
     }
 
     /// <summary>
+    /// A link that is not a parseable ARM ID at all must be classified, not silently skipped.
+    /// </summary>
+    /// <remarks>
+    /// Round-10 J7. The subscription-scope test ran before the three-way recognition, and
+    /// BelongsToSubscription is a StartsWith over "/subscriptions/{id}/" - so a value that names no
+    /// subscription failed it for *every* subscription, went to notCovered, and never reached the
+    /// UnrecognisedResourceId arm that exists precisely for it. The row was then reported in no list
+    /// on any scan, and rescanning a different subscription could never surface it either.
+    /// <para>
+    /// The existing <c>UnrecognisedResourceId_IsReviewedNotOfferedForDeletion</c> theory uses only
+    /// IDs prefixed with the scanned subscription, so it pinned exactly the half that already worked.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("not-an-arm-id")]
+    // Names the scanned subscription but has no trailing slash, so StartsWith("/subscriptions/{id}/")
+    // fails while the row's own text contradicts a "different subscription" verdict outright.
+    [InlineData($"/subscriptions/{SubId}")]
+    public void UnparseableResourceId_IsReviewed_NotSilentlySkipped(string resourceId)
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "broken-link", "10.90.0.0", 16, resourceId));
+
+        Assert.Empty(plan.Items);
+
+        AzureReconcileItem item = Assert.Single(plan.ReviewItems);
+        Assert.Equal(1, item.SubnetId);
+        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, item.Status);
+    }
+
+    /// <summary>
+    /// And beneath a stale ancestor, the ancestor is still withheld - but not for a reason that is
+    /// false and cannot be acted on.
+    /// </summary>
+    /// <remarks>
+    /// Round-10 J7's second consequence. The cascade guard reported that the descendant "belongs to a
+    /// different subscription", which is untrue of a row naming no subscription, and unactionable
+    /// because the offending child was named nowhere in the response. The child now appears in
+    /// ReviewItems, so the operator is finally told which row to correct.
+    /// </remarks>
+    [Fact]
+    public void StaleAncestorOverUnparseableDescendant_IsWithheldWithoutBlamingASubscription()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.0.0.0/16"])),
+            Linked(1, "parent-stale", "10.90.0.0", 15, VNetId("vnet-gone"), descendants: 1, descendantIds: [2]),
+            Linked(2, "child-broken", "10.90.1.0", 24, "not-an-arm-id"));
+
+        // The row to correct is now named, where before it appeared in no list at all.
+        AzureReconcileItem review = Assert.Single(plan.ReviewItems);
+        Assert.Equal(2, review.SubnetId);
+        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, review.Status);
+
+        // Not withheld on a claim about a subscription the row does not name.
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("different subscription"));
+
+        // Protection is unchanged, it just arrives by the review-item guard rather than the
+        // not-covered one: the ancestor is withheld once Azure confirms its VNet really is gone,
+        // which is the point at which the delete path asks.
+        _ = Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-gone")] = AzureResourceConfirmation.Deleted
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.Contains(plan.Warnings, w => w.Contains("'parent-stale'"));
+    }
+
+    /// <summary>
     /// The mirror of the above: the guard must not withhold a target whose subtree holds no
     /// foreign-subscription row, or the reconciler stops doing its job.
     /// </summary>
