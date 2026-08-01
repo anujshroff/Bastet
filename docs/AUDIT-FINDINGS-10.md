@@ -198,89 +198,32 @@ refusing `ExactMatch` onto an unlinked row would break the adopt path that
 
 # Low
 
-## J3 [x1] - Error page binds its status code from the POST body, so a caller picks the status of any re-executed bodiless 4xx
+_J3 is fixed and committed. `HttpStatusCodeHandler` is now parameterless and reads the status off
+`RouteData`, falling back to the status already on the response. The verifier's recommendation was
+taken over the finding's own `[FromRoute]` suggestion, because `[FromRoute]` closes only three of the
+four legs: when the form reader throws, MVC abandons binding for **every** source, not just the form,
+so the NUL-byte and malformed-multipart posts would still have arrived as `statusCode = 0` and been
+turned into 500 by the out-of-range guard._
 
-**Severity:** low (filed medium; **corrected down by both verifiers**) | **Confidence:** confirmed |
-**Cite:** `src/Bastet/Controllers/ErrorController.cs:17`
+_Measured against the live app on real SQL Server, Development, before and after. Laundering:
+`POST /Subnet/Create Name=x&statusCode=404` **404 → 400**, `statusCode=451` **451 → 400**,
+`POST /No/Such/Path statusCode=451` **451 → 404**; the control with no field was 400 throughout.
+Unreadable body: `Name=x%00y` **500 → 400**, with the page text going from *"Status Code: 0"* to
+*"Status Code: 400"*. Nothing else moved: `GET /Subnet/Details/99999` followed still lands on 404,
+`/Error/409` still answers 409, and `/Error/200` still answers 500, so the deliberate guard against a
+caller-supplied route segment reaching a 2xx is intact._
 
-**What goes wrong.** `UseStatusCodePagesWithReExecute("/Error/{0}")` (`Program.cs:524` Development,
-`:529` Production) re-executes the pipeline for the **same** request - same method, same body - with the
-path rewritten to `/Error/<real status>`. `HttpStatusCodeHandler(int statusCode)` binds through MVC's
-default composite value provider, where `FormValueProviderFactory` precedes `RouteValueProviderFactory`.
-A form field named `statusCode` in the original POST body therefore **beats the route segment the
-middleware just set**. The guard at `:32` only clamps outside 400-599, so 400 -> 404 passes untouched.
+_The four `ErrorControllerTests` call sites were updated through a single `Invoke` helper that sets
+the route value, rather than four separate edits — the action is no longer callable with an argument,
+which is the point. One regression test added for the leg that motivated the parameterless variant
+(`HttpStatusCodeHandler_NoRouteValue_UsesTheStatusAlreadyOnTheResponse`), 723 → **724**._
 
-Two legs survive verification:
-
-- **Status laundering of empty-bodied framework statuses.** An authenticated user posting
-  `Name=x&statusCode=404` to `/Subnet/Create` with a stale antiforgery token gets **404 Not Found** on
-  the wire and in the request log, though the framework produced 400. `POST /No/Such/Path` with
-  `statusCode=451` answers **451**. Anonymous in Production: `POST /Error/404` with `statusCode=451`
-  answers **451**.
-- **A malformed form becomes a server fault, with no attacker at all.** `Name=x%00y` (a NUL in any form
-  value) makes `FormPipeReader` throw, `CompositeValueProvider.TryCreateAsync` abandons binding for every
-  parameter, `statusCode = 0`, and the `:32` guard turns that into **500 Internal Server Error** with the
-  page printing *"Status Code: 0"*. The same happens for a malformed multipart POST (bad boundary,
-  truncated upload) - an ordinary client bug reported as a server fault.
-
-**The two verifiers disagree on the 403 leg, and the disagreement matters.** The finding's headline is
-that a View-role user's 403 launders into 404, hiding an authorization denial from log analysis. That
-leg was only ever reproduced on a rig copy whose `DevAuthHandler` reads roles from an `X-Rig-Roles`
-header. On the **shipped** build the second verifier established no launderable bodiless 401/403 exists:
-Development's `DevAuthHandler` issues Admin (`DevAuthHandler.cs:31`), satisfying all four policies;
-Production's cookie handler sets `AccessDeniedPath` (`Program.cs:200`), so a Forbid is a 302; and the
-three literal `StatusCode(403, <json>)` sites write a body, which `StatusCodePagesMiddleware` skips.
-Measured both ways on one endpoint: `POST /Subnet/BatchCreateChildSubnets` **with** a valid token
-returns 400 with `{"subnets":[...]}` unlaundered; **without** a token (empty-bodied 400) returns 451.
-Treat the 403 leg as mechanism-only until a deployment that emits a bodiless 403 is demonstrated.
-
-Two further legs were **struck** as pre-existing and already documented: `POST /Error/451` answering 451
-and `GET /Error/200` answering 500 with *"Status Code: 200"* both happen through the **route** alone, and
-round 7 recorded that the route segment is caller-supplied (`ErrorControllerTests.cs:99-101` pins it).
-Only the framework-generated-4xx half is new ground.
-
-**Reproduction.** Pristine shipped DLL, Development, no source modification:
-
-```
-POST /Subnet/Create  Name=x                -> HTTP/1.1 400 Bad Request        (control, "Status Code: 400")
-POST /Subnet/Create  Name=x&statusCode=404 -> HTTP/1.1 404 Not Found          ("Resource Not Found")
-POST /Subnet/Create  Name=x&statusCode=451 -> HTTP/1.1 451 Unavailable For Legal Reasons
-POST /Subnet/Create  Name=x%00y            -> HTTP/1.1 500                    ("Status Code: 0")
-POST /No/Such/Path   statusCode=451        -> 451     (404 without the field)
-GET  /Error/404?statusCode=451             -> 404     (query loses to route; only the form wins)
-malformed multipart on a 400 path          -> 500     ("Status Code: 0")
-
-app log, antiforgery leg:  "Executing StatusCodeResult, setting HTTP status code 400"
-                        -> "Executing endpoint '...ErrorController.HttpStatusCodeHandler'"
-                        -> "Request finished HTTP/1.1 POST .../Subnet/Create - 404"
-Production (anonymous):  POST /Error/404 statusCode=451 -> 451 ; a=x%00b -> 500
-```
-
-Note the log line is Development-only evidence: `Program.cs:22` pins `Microsoft.AspNetCore` to `Warning`
-outside Development, and a Production instance logged **0** `Request finished` / `Authorization failed`
-lines across the same requests. The wire-level relabelling is what stands.
-
-**Why low.** No data change, no disclosure, no privilege change, no XSS (`@Model.StatusCode` is an
-`int`), no cross-user effect (`Cache-Control: no-store,no-cache`), and the caller cannot reach 2xx or
-3xx. A caller relabels *their own* failed request.
-
-**Fix.** `public IActionResult HttpStatusCodeHandler([FromRoute] int statusCode)`. Built and driven:
-closes the laundering completely (400 stays 400, `POST /No/Such` stays 404), leaves the redirect path
-intact (`GET /Subnet/Details/99999` followed -> 404, `GET /Error/409` -> 409), builds 0/0, **716 passed,
-0 failed** - the four `ErrorControllerTests` call sites that invoke `HttpStatusCodeHandler(int)` directly
-still compile.
-
-**Verifier correction - INCOMPLETE against the finding's own scenario 4.** `[FromRoute]` does **not** fix
-the unreadable-form leg: when the form reader throws, binding is abandoned for every source, so the NUL
-and malformed-multipart POSTs are still 500 *"Status Code: 0"*. Closing that too needs the value read
-outside model binding - a parameterless signature with
-`int statusCode = int.TryParse(RouteData.Values["statusCode"] as string, out int r) ? r : Response.StatusCode;`
-- which was built and verified to fix all four legs (NUL POST -> 400, page says *"Status Code: 400"*) but
-breaks the four test call sites with `error CS1501: No overload for method 'HttpStatusCodeHandler' takes
-1 arguments` (`ErrorControllerTests.cs:32, 46, 94, 112`). Recommendation: take the parameterless variant
-plus the four one-line test updates; take `[FromRoute]` alone if only the laundering is in scope. No
-sibling call site is missed either way - the eleven `RedirectToAction(..., new { statusCode = N })` sites
-generate `/Error/N` and are followed by a fresh GET with no form body.
+_Scope, unchanged from the finding: the 403-laundering leg was **not** treated as live. The second
+verifier established the shipped build emits no launderable bodiless 401/403 — Development's
+`DevAuthHandler` issues Admin, Production's cookie handler has `AccessDeniedPath` so a Forbid is a
+302, and the three literal `StatusCode(403, <json>)` sites write a body, which
+`StatusCodePagesMiddleware` skips. The fix closes it as mechanism regardless; no deployment emitting
+such a response was demonstrated, and none was invented to justify a wider change._
 
 ---
 

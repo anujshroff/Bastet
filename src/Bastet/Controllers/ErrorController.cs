@@ -14,8 +14,26 @@ namespace Bastet.Controllers;
 public class ErrorController : Controller
 {
     [Route("/Error/{statusCode}")]
-    public IActionResult HttpStatusCodeHandler(int statusCode)
+    public IActionResult HttpStatusCodeHandler()
     {
+        // Read straight off the route rather than bound as a parameter. UseStatusCodePagesWithReExecute
+        // re-executes the pipeline for the SAME request - same method, same body - having rewritten
+        // the path, and MVC's default composite value provider puts FormValueProviderFactory ahead of
+        // RouteValueProviderFactory. A form field named statusCode in the original POST body therefore
+        // outranked the route segment the middleware had just set, letting a caller relabel their own
+        // failed request: posting statusCode=404 to a request the framework answered 400 with put 404
+        // on the wire and in the request log.
+        //
+        // Binding also failed in the other direction. When the body cannot be read at all - a NUL byte
+        // in any form value, a malformed multipart boundary - FormPipeReader throws and binding is
+        // abandoned for every source, so the parameter arrived as 0 and the guard below turned an
+        // ordinary client mistake into 500 "Status Code: 0". The route value survives both, because it
+        // is what the middleware set and it does not depend on parsing the body.
+        int statusCode = RouteData.Values.TryGetValue("statusCode", out object? routeValue)
+                         && int.TryParse(routeValue as string, out int statusFromRoute)
+            ? statusFromRoute
+            : Response.StatusCode;
+
         // The message is read from TempData (set server-side by the redirecting action), never from
         // the query string - otherwise anyone could craft /Error/400?errorMessage=... and show
         // arbitrary text under this origin. Falls back to the per-status default below.

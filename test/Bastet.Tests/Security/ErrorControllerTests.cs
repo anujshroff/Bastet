@@ -5,7 +5,9 @@ using Bastet.Services;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Globalization;
 
 namespace Bastet.Tests.Security;
 
@@ -24,12 +26,29 @@ public class ErrorControllerTests
         return controller;
     }
 
+    /// <summary>
+    /// Invokes the action the way routing does, with the status as a route value.
+    /// </summary>
+    /// <remarks>
+    /// It is deliberately not an action parameter. UseStatusCodePagesWithReExecute re-executes the
+    /// same request, body included, and the default composite value provider reads form values before
+    /// route values - so a form field named statusCode used to outrank the segment the middleware had
+    /// just set, and a caller could relabel their own failed request's status.
+    /// </remarks>
+    private static IActionResult Invoke(ErrorController controller, int statusCode)
+    {
+        controller.ControllerContext.RouteData = new RouteData();
+        controller.ControllerContext.RouteData.Values["statusCode"] =
+            statusCode.ToString(CultureInfo.InvariantCulture);
+        return controller.HttpStatusCodeHandler();
+    }
+
     [Fact]
     public void HttpStatusCodeHandler_NoTempData_UsesPerStatusDefault()
     {
         ErrorController controller = CreateController();
 
-        IActionResult result = controller.HttpStatusCodeHandler(404);
+        IActionResult result = Invoke(controller, 404);
 
         ViewResult view = Assert.IsType<ViewResult>(result);
         Assert.Equal("NotFound", view.ViewName);
@@ -43,7 +62,7 @@ public class ErrorControllerTests
         ErrorController controller = CreateController();
         controller.TempData["ErrorPageMessage"] = "Subnet with ID 5 could not be found.";
 
-        IActionResult result = controller.HttpStatusCodeHandler(404);
+        IActionResult result = Invoke(controller, 404);
 
         ViewResult view = Assert.IsType<ViewResult>(result);
         ErrorViewModel model = Assert.IsType<ErrorViewModel>(view.Model);
@@ -91,7 +110,7 @@ public class ErrorControllerTests
     {
         ErrorController controller = CreateController();
 
-        _ = controller.HttpStatusCodeHandler(statusCode);
+        _ = Invoke(controller, statusCode);
 
         Assert.Equal(statusCode, controller.Response.StatusCode);
     }
@@ -109,9 +128,37 @@ public class ErrorControllerTests
     {
         ErrorController controller = CreateController();
 
-        _ = controller.HttpStatusCodeHandler(statusCode);
+        _ = Invoke(controller, statusCode);
 
         Assert.Equal(500, controller.Response.StatusCode);
+    }
+
+    /// <summary>
+    /// When the route value is missing the status must come from the response the middleware already
+    /// set, not from a defaulted zero.
+    /// </summary>
+    /// <remarks>
+    /// Round-10 J3, the leg that <c>[FromRoute]</c> alone would not have closed. A NUL byte in any
+    /// form value - or a malformed multipart boundary - makes FormPipeReader throw, and MVC then
+    /// abandons binding for *every* source rather than just the form. A bound parameter arrived as 0,
+    /// which the out-of-range guard turned into 500 "Status Code: 0": an ordinary client mistake
+    /// reported as a server fault. Reading the route directly and falling back to the response status
+    /// keeps a 400 a 400.
+    /// </remarks>
+    [Fact]
+    public void HttpStatusCodeHandler_NoRouteValue_UsesTheStatusAlreadyOnTheResponse()
+    {
+        ErrorController controller = CreateController();
+        controller.ControllerContext.RouteData = new RouteData();
+        controller.Response.StatusCode = 400;
+
+        IActionResult result = controller.HttpStatusCodeHandler();
+
+        ViewResult view = Assert.IsType<ViewResult>(result);
+        Assert.Equal("BadRequest", view.ViewName);
+        Assert.Equal(400, controller.Response.StatusCode);
+        ErrorViewModel model = Assert.IsType<ErrorViewModel>(view.Model);
+        Assert.Equal(400, model.StatusCode);
     }
 
     [Fact]
