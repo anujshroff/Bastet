@@ -152,111 +152,47 @@ N+1 at `Delete.cs:182-192` was left alone (measured 22.50 s → 22.74 s, i.e. no
 
 ---
 
-## J2 [x2] - Bulk Azure import commits a re-derived plan without checking it still matches the plan the operator approved
+_J2 is fixed and committed. `BulkImportSelectedVNetPrefixDto` gained an optional `Expected`
+(`BulkImportExpectedTargetDto`: target type by name, the two target subnet ids, the rename pair and
+the fully-allocated flag), the bulk wizard stashes each previewed outcome onto the very object the
+commit posts (`attachApprovedOutcomes`, new client state — the finding's claim that the wizard already
+holds this in `lastPlan` is false, that exists only in `_ReconcileScripts.cshtml`), and
+`BulkCreateFromAzurePlanCore` compares the re-derived plan against it immediately after `BuildPlan`,
+answering **409** with the differences and writing nothing — the same discipline
+`BulkDeleteStaleAzureSubnets` already applies._
 
-**Severity:** medium | **Confidence:** confirmed | **Cite:**
-`src/Bastet/Controllers/SubnetController.BulkAzure.cs:62` (the re-plan), `:156` (rename write),
-`:190` (the ARM-id stamp)
+_**Two decisions the finding left open.** The expectation stays optional, so the documented direct
+JSON API keeps working; a prefix that carries none is counted and written to the log as an unverified
+commit rather than passing silently, which is the verifier's "log it" option. And because
+`GlobalSanitizationFilter` does not descend into the nested selection list, **nothing from the caller
+is echoed into the 409 body** — every divergence is described from the server's own re-derived plan,
+targets are labelled with the plan's parsed `PrefixNetworkAddress/PrefixCidr`, a prefix with no plan
+item is identified by its position in the submitted list, and a changed rename target is reported as
+"the name has changed" without repeating it. A test pins that the caller's description string does not
+come back._
 
-**What goes wrong.** Admin opens `/Azure/BulkImport`, selects VNet `rig-jb-div` (10.151.0.0/16) and
-previews. Step 3 renders *"New top-level - create rig-jb-div (10.151.0.0/16)"*. While that screen is up,
-a second admin creates an unrelated Bastet subnet `10.151.0.0/16` named `Finance-Prod-Reserved`
-(description *"Reserved by the network team. Not an Azure VNet."*, no Azure link) through the ordinary
-`/Subnet/Create` form. The first admin clicks **Confirm Import** on a screen that says *"apply the plan
-to Bastet"*.
+_Measured on the live rig — real ARM (`rec-vnet-div` 10.151.0.0/16 with two subnets), real headless
+Chromium, real SQL Server. Control: preview then commit with no interference imports normally
+(1 target, 2 children), 0 console errors, 0 page errors. Interleaved: with the plan on screen showing
+"New top-level — create rec-vnet-div", a second admin creates `10.151.0.0/16` by hand through
+`/Subnet/Create`; the commit now answers **409** "The plan changed since it was previewed, so nothing
+was imported", and the hand-made row survives with `AzureResourceId` still null — unadopted, unstamped
+and unrenamed, where before it was adopted. The audit's own diagnostic that "the preview and commit
+request bodies are byte-identical on the wire" is no longer true: the commit now carries the approved
+outcome._
 
-`BulkCreateFromAzurePlanCore` re-runs the planner against the now-changed tree (`:61-62`), gets a
-different plan - `TargetType` flips from `AutoCreateTopLevel` to `ExactMatch` - and executes **that**
-plan with no comparison against what was approved. The commit posts the *selection*, never the plan: the
-preview and commit request bodies are byte-identical on the wire. It stamps
-`AzureResourceId=/subscriptions/<sub>/.../virtualNetworks/rig-jb-div` onto `Finance-Prod-Reserved`
-(`:190`) and parents the Azure children under it; with the rename box ticked it also overwrites the
-operator's name (`:156`).
+_Five regression tests added (`SubnetControllerBulkAzureImportTests`), 718 → **723**. Two pin the
+refusal and the divergence message; three pin what must NOT break — an unchanged plan still commits,
+an adoption that was itself previewed and approved still commits (the advertised adopt path, which the
+finding correctly says a blanket server-side rule would have broken), and a caller with no expectation
+is not refused. Confirmed failing against unfixed code by reverting only the guard hunk while keeping
+the DTO, so the failure is behavioural rather than a compile error: both refusal tests returned
+`OkObjectResult` — the commit adopting the subnet — instead of `ConflictObjectResult`._
 
-**Wrong output, and it is irreversible in-app:** `AzureResourceId` is written only by the two import
-paths and **never cleared**; `EditSubnetViewModel` does not carry the field and `Views/Subnet/Edit.cshtml`
-never mentions it, so there is no unlink. The row's CIDR also becomes uneditable
-(`SubnetController.Edit.cs:92` throws when the field is non-empty). The row is now inside the reconcile
-wizard's deletion scope, and when the VNet is later deleted in Azure it is archived - into a
-`DeletedSubnets` table with no `AzureResourceId` column and no restore path anywhere in the app.
-
-**The sibling destructive endpoint does the opposite on this exact class of divergence:**
-`SubnetController.AzureReconcile.cs:77-92` rebuilds the plan and returns **409 Conflict**, deleting
-nothing. The single-VNet wizard is immune because `BatchCreateChildSubnetsCore(int parentId, ...)` pins
-its target with `FindAsync(parentId)`.
-
-**Reproduction.** Real headless Chromium driving the real wizard against real ARM, verifier's own
-catalog and instances; `interleave.sh` is the second admin.
-
-```
-PLAN_SHOWN:   VNet "rig-v10c2-div" - prefix 10.152.0.0/16  New top-level  create rig-v10c2-div ...
-INTERLEAVE:   hand-create HTTP 302 | 1 Finance-Prod-Reserved 10.152.0.0/16 arm=<null>
-PLAN_STILL_SHOWN: (unchanged - the screen never repaints)
-COMMIT_SCREEN: "Click the button below to apply the plan to Bastet. This is performed in a single
-                transaction; if anything fails, no changes are saved."  Confirm Import
-POSTED_TO BulkCreateFromAzurePlan: <byte-identical to the preview post>
-COMMIT_RESULT: SUCCESS[Bulk import completed. Created 0 VNet target(s), 2 child subnet(s), renamed 0
-                target(s), linked 1 existing target(s) to Azure, ...]
-CONSOLE_ERRORS: 0
-
-DB after:  1 | Finance-Prod-Reserved | 10.152.0.0/16 | desc='Reserved by the network team...'
-               arm=/subscriptions/.../virtualNetworks/rig-v10c2-div
-           2,3 | rig-v10c2-s1, rig-v10c2-s2 | parent=1
-
-Approved plan, in machine form:
-  ITEM prefix=10.152.0.0/16 targetType=2 (AutoCreateTopLevel) existingTargetSubnetId=None
-Executed plan: ExactMatch onto subnet 1.
-```
-
-Consequence chain, run to the end: `az network vnet delete` -> `ResourceNotFound`;
-`POST /Azure/ReconcileScan` -> `id=1 Finance-Prod-Reserved 10.152.0.0/16 status=VNetDeleted
-descendants=2`; `POST /Subnet/BulkDeleteStaleAzureSubnets {subnetIds:[1]}` -> 200
-`{"targetsDeleted":1,"subnetsArchived":3}`; `SELECT` over `10.152.*` -> 0 rows; `DeletedSubnets` holds
-`Finance-Prod-Reserved` with its original description and **no** `AzureResourceId` column. Rename
-variant: same commit returned `renamedTargets:1, linkedTargets:1` and the row became `rig-v10c2-div`
-with the operator's description preserved - proving it is the same row. Sibling asymmetry, same session:
-`POST /Subnet/BulkDeleteStaleAzureSubnets {subnetIds:[99]}` -> **409**, nothing deleted.
-
-Control: three concurrent identical commits gave 1x200 and 2x400 (*"already exists in Bastet"*), so the
-lock and the re-plan do work - the gap is specifically that nothing compares the re-derived plan with
-the approved one.
-
-**Fix.** Make the commit refuse a plan that is not the plan that was approved, exactly as
-`BulkDeleteStaleAzureSubnets` already does. Add an optional per-prefix expectation to
-`BulkImportSelectionDto` (`{vNetResourceId, addressPrefix, targetType, existingTargetSubnetId,
-autoCreateParentSubnetId, willRename, newName, willMarkFullyAllocated}`), populated by the wizard from
-the preview response; compare each re-derived item against its expectation immediately after `BuildPlan`
-at `:62` and return **409 Conflict** listing the differences. **Cheaper interim:** send and compare only
-`targetType` and `existingTargetSubnetId` - about fifteen lines each side, and it does close the
-reproduced case (approved `AutoCreateTopLevel`/null vs re-derived `ExactMatch`/1 diverges on both
-fields).
-
-**Verifier correction - INCOMPLETE.** The shape is right and the DTO is a plain POCO
-(`AzureBulkImportViewModels.cs:192-208`), so an added nullable property breaks no caller. Two problems:
-
-1. **A stated premise is false.** The fix says the wizard already holds the preview response *"in
-   `lastPlan` (`_BulkScripts.cshtml` renderPlan/commitImport)"*. `grep -n lastPlan` over that file
-   returns **nothing** - `lastPlan` exists only in `_ReconcileScripts.cshtml`. The bulk wizard's state is
-   `lastSelection` and `previewSeq`. `renderPlan(result.plan)` does receive the plan, so stashing it is a
-   two-line addition - but the fix must say it is *adding* client state, not reusing it.
-2. **It is weaker than the precedent it invokes, in the way that matters.**
-   `BulkDeleteStaleAzureSubnets` takes ids only and re-derives server-side; the client cannot opt out.
-   Making the expectation optional so *"leaving the field null keeps the documented direct-JSON-API
-   behaviour unchanged"* means the server is safe only when the client volunteers to be checked - a
-   browser holding a cached older script, or any direct caller, keeps today's behaviour on the Admin-only
-   endpoint that is dangerous precisely because it writes. If the field must stay optional, the null case
-   needs its own recorded decision (log it, or refuse server-side the narrow `ExactMatch`-onto-a-row-that-
-   was-not-in-the-approved-plan case), not silence.
-3. Not mentioned by the fix: the nested expectation object arrives **unsanitized**, because
-   `GlobalSanitizationFilter` does not descend into the nested selection list. Harmless while it is only
-   compared, but it must not be echoed into the 409 body unescaped.
-
-**Both of the fix's rejections are correct and were checked.** *"Re-run the preview at commit time"* is
-the same defect one step later - the operator has already left the preview screen. And a server-only
-rule *"refuse ExactMatch onto a subnet not already linked to this VNet"* really would break the
-advertised adopt path: `AzureBulkImportPlanner.cs:225-226` sets `WillUpdateExisting` with reason *"Will
-import into existing Bastet subnet"* for exactly the unlinked case, and that is what the wizard renders
-as selectable.
+_Not done: the finding's two rejected alternatives were left rejected, and its reasoning confirmed.
+Re-running the preview at commit time is the same defect one step later, and a server-only rule
+refusing `ExactMatch` onto an unlinked row would break the adopt path that
+`AzureBulkImportPlanner.cs:225-226` advertises as selectable._
 
 ---
 

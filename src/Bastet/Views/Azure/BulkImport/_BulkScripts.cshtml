@@ -453,6 +453,11 @@
                         $("#bulk-preview-error").removeClass("d-none");
                         return;
                     }
+                    // Record what this preview promised for each prefix, on the very object the
+                    // commit posts. The commit re-plans server-side and refuses anything that no
+                    // longer matches, so a subnet created by someone else while this screen is up
+                    // cannot be silently adopted instead of a new one being created.
+                    attachApprovedOutcomes(selection, result.plan);
                     renderPlan(result.plan);
                     $("#bulk-preview-content").removeClass("d-none");
                 },
@@ -473,6 +478,34 @@
                     }
                     $("#bulk-preview-loading").addClass("d-none");
                 }
+            });
+        }
+
+        // Copies each planned outcome onto the matching selected prefix, so the commit can send back
+        // what was approved. Only the plan's own decision fields are carried - the server describes
+        // any divergence from its own re-derived plan and never echoes these values.
+        function attachApprovedOutcomes(selection, plan) {
+            const planned = {};
+            $.each((plan && plan.items) || [], function (i, item) {
+                planned[item.vNetResourceId + "|" + item.vNetPrefix] = item;
+            });
+
+            $.each((selection && selection.vNetPrefixes) || [], function (i, prefix) {
+                const item = planned[prefix.vNetResourceId + "|" + prefix.addressPrefix];
+                if (!item) {
+                    // No plan item means nothing was approved for it; the server treats a missing
+                    // expectation as unverified rather than as agreement.
+                    prefix.expected = null;
+                    return;
+                }
+                prefix.expected = {
+                    targetType: item.targetTypeName,
+                    existingTargetSubnetId: typeof item.existingTargetSubnetId === "number" ? item.existingTargetSubnetId : null,
+                    autoCreateParentSubnetId: typeof item.autoCreateParentSubnetId === "number" ? item.autoCreateParentSubnetId : null,
+                    willRename: item.willRename === true,
+                    newName: typeof item.newName === "string" ? item.newName : null,
+                    willMarkFullyAllocated: item.willMarkFullyAllocated === true
+                };
             });
         }
 

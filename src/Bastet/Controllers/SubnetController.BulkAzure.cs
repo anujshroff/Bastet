@@ -51,6 +51,106 @@ public partial class SubnetController : Controller
         }
     }
 
+    /// <summary>
+    /// Compares the plan just re-derived at commit time against the outcome the preview showed the
+    /// operator, and describes every way they disagree.
+    /// </summary>
+    /// <remarks>
+    /// Round-10 J2. The commit posts the *selection*, not the plan, so the preview and commit request
+    /// bodies were byte-identical on the wire and nothing noticed when the re-derived plan differed.
+    /// A subnet created by another admin while the preview was on screen flipped the target from
+    /// AutoCreateTopLevel to ExactMatch, and the commit adopted it: stamped with the VNet's
+    /// AzureResourceId (which no view can clear), renamed if the rename box was ticked, and thereby
+    /// pulled into the reconcile wizard's deletion scope.
+    /// <para>
+    /// Nothing from the caller is echoed into the result. Divergences are described from the plan the
+    /// server just built, because <c>GlobalSanitizationFilter</c> does not descend into the nested
+    /// selection list and so nothing on the expectation has been sanitized. Where a selected prefix
+    /// produces no plan item at all there is no server-derived text to name it by, so it is
+    /// identified by its position in the submitted list.
+    /// </para>
+    /// </remarks>
+    private List<string> DescribeApprovedPlanDivergences(BulkImportSelectionDto selection, BulkImportPlanViewModel plan)
+    {
+        List<string> differences = [];
+        int unverified = 0;
+
+        for (int index = 0; index < selection.VNetPrefixes.Count; index++)
+        {
+            BulkImportSelectedVNetPrefixDto selected = selection.VNetPrefixes[index];
+            BulkImportExpectedTargetDto? expected = selected.Expected;
+
+            if (expected is null)
+            {
+                // A caller that did not preview has approved nothing, so there is nothing to compare
+                // against. Deliberately not refused: the endpoint is documented as a direct JSON API
+                // and refusing here would break it. Recorded instead, so an unverified commit is
+                // visible in the log rather than indistinguishable from a checked one.
+                unverified++;
+                continue;
+            }
+
+            BulkImportPlanItem? item = plan.Items.FirstOrDefault(i =>
+                string.Equals(i.VNetResourceId, selected.VNetResourceId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(i.VNetPrefix, selected.AddressPrefix, StringComparison.OrdinalIgnoreCase));
+
+            if (item is null)
+            {
+                differences.Add($"Selected prefix #{index + 1} no longer produces a target to import.");
+                continue;
+            }
+
+            // Server-derived and format-constrained, unlike the names round-tripped by the browser.
+            string label = $"{item.PrefixNetworkAddress}/{item.PrefixCidr}";
+
+            if (!Enum.TryParse(expected.TargetType, out BulkImportTargetType expectedTargetType)
+                || expectedTargetType != item.TargetType)
+            {
+                differences.Add($"{label}: the preview showed a different action; it now resolves to {item.TargetTypeName}.");
+            }
+
+            if (expected.ExistingTargetSubnetId != item.ExistingTargetSubnetId)
+            {
+                differences.Add(item.ExistingTargetSubnetId is null
+                    ? $"{label}: the preview matched an existing Bastet subnet; it no longer does."
+                    : $"{label}: it now targets existing Bastet subnet {item.ExistingTargetSubnetId}.");
+            }
+
+            if (expected.AutoCreateParentSubnetId != item.AutoCreateParentSubnetId)
+            {
+                differences.Add(item.AutoCreateParentSubnetId is null
+                    ? $"{label}: it would no longer be created under a parent subnet."
+                    : $"{label}: it would now be created under subnet {item.AutoCreateParentSubnetId}.");
+            }
+
+            if (expected.WillRename != item.WillRename)
+            {
+                differences.Add($"{label}: renaming the target changed to {item.WillRename}.");
+            }
+            else if (item.WillRename && !string.Equals(expected.NewName, item.NewName, StringComparison.Ordinal))
+            {
+                // The name itself is caller-supplied, so say that it differs without repeating it.
+                differences.Add($"{label}: the name the target would be renamed to has changed.");
+            }
+
+            if (expected.WillMarkFullyAllocated != item.WillMarkFullyAllocated)
+            {
+                differences.Add($"{label}: marking the target fully allocated changed to {item.WillMarkFullyAllocated}.");
+            }
+        }
+
+        if (unverified > 0)
+        {
+            logger.LogWarning(
+                "Bulk Azure import: {Unverified} of {Total} selected prefix(es) carried no previewed outcome, "
+                + "so the re-derived plan for them was not compared against anything the operator approved.",
+                unverified,
+                selection.VNetPrefixes.Count);
+        }
+
+        return differences;
+    }
+
     private async Task<IActionResult> BulkCreateFromAzurePlanCore(
         BulkImportSelectionDto selection,
         IAzureBulkImportPlanner planner,
@@ -60,6 +160,21 @@ public partial class SubnetController : Controller
         // Re-build the plan against the current Bastet tree right now
         IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
         BulkImportPlanViewModel plan = planner.BuildPlan(selection, existing);
+
+        // Re-deriving the plan protects against committing a stale one, but on its own it also
+        // silently commits a *different* one when the tree moved under the operator. Refuse that,
+        // the way BulkDeleteStaleAzureSubnets already refuses a scan whose verdict has changed.
+        List<string> divergences = DescribeApprovedPlanDivergences(selection, plan);
+        if (divergences.Count > 0)
+        {
+            return Conflict(new
+            {
+                success = false,
+                error = "The plan changed since it was previewed, so nothing was imported. "
+                        + "Re-run the preview, review what it now says, and confirm again.",
+                differences = divergences
+            });
+        }
 
         if (!plan.CanCommit)
         {
