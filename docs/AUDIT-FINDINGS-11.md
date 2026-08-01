@@ -228,97 +228,38 @@ not compared: both are selection-derived and cannot move, so comparing them woul
 
 # Info
 
-## K5 - Subnet Details prints a broadcast address for `/31` and `/32`, contradicting the app's own RFC 3021 rule and a host IP listed on the same page
+_K5 is fixed and committed. `SubnetController.Read.cs` computes `BroadcastAddress` only below `/31`,
+and `_NetworkInformation.cshtml` renders a label that **discriminates the two cases** rather than the
+single one the finding proposed._
 
-`[x1]` &nbsp;|&nbsp; **Severity: info** (filed low; corrected down on measurement - see below)
-&nbsp;|&nbsp; **Confidence: confirmed** &nbsp;|&nbsp;
-`src/Bastet/Controllers/SubnetController.Read.cs:63`
+_The proposed `"None (RFC 3021)"` label was rejected on the verifier's correction and confirmed here:
+RFC 3021 is about 31-bit point-to-point prefixes and says nothing about `/32`, which has no broadcast
+because it is a single host — the distinction the app's own comment in `HostIpValidationService`
+already draws. Labelling both would have replaced one false statement with a differently false one.
+The view now prints *"None (RFC 3021 point-to-point)"* for a `/31` and *"None (single host)"* for a
+`/32`, which also stops `string.Empty` doing duty as a display sentinel._
 
-### The defect
+_Measured on two publishes against the same catalog, with every row created through the ordinary Create
+and HostIp forms. **Before:** `/31 10.211.0.0` printed *"Broadcast Address 10.211.0.1"* while also
+reporting *Usable 2* and listing `10.211.0.1` as an assigned host IP on the same page; `/32
+10.212.0.0` printed its own network address as the broadcast. **After:** the two render as
+*"None (RFC 3021 point-to-point)"* and *"None (single host)"*. The `/30` control is byte-identical
+either side — still `10.213.0.3`, and assigning it as a host IP is still refused with *"Cannot assign
+the broadcast address as a host IP"*, so the guard did not reach below `/31`._
 
-`SubnetController.Read.cs:63` sets `BroadcastAddress = ipUtilityService.CalculateBroadcastAddress(...)`
-with no CIDR test. `HostIpValidationService.ValidateNewHostIp:70` applies the network/broadcast
-reservation only when `subnet.Cidr < 31`, so both `/31` addresses and the single `/32` address are
-legitimately assignable, and `IpUtilityService.CalculateUsableIpAddresses:105-110` documents `/31` as
-2 usable and `/32` as 1.
+_Four regression tests added (`SubnetDetailsBroadcastAddressTests`), 734 → **738**: two pinning that
+`/31` and `/32` carry no broadcast address, and two controls pinning that `/30` and `/24` still do.
+The first two were confirmed failing against unfixed code with the defect's own values — `/32`
+returning `10.212.0.0`, its own network address._
 
-### Failure scenario
-
-Create `10.211.0.0/31` and assign both addresses as host IPs (the app accepts them). `GET
-/Subnet/Details/{id}` then renders, **in one document**: *"Broadcast Address 10.211.0.1"*, *"Usable IP
-Addresses 2"*, and a Host IP Assignments row *"10.211.0.1 p2p-b"*. The page labels an assigned, legally
-assignable host address as the subnet's broadcast address. For a `/32` (`10.212.0.0/32`) it prints
-*"Broadcast Address 10.212.0.0"* - the subnet's only address, also assignable and assigned, so the
-Network Address and Broadcast Address rows print the identical string.
-
-Control: on a `/30`, `POST /HostIp/Create` for the broadcast address is refused (*"Cannot assign the
-broadcast address as a host IP"*, no row written) and the page correctly prints it as the broadcast.
-
-### Reproduction
-
-Driven through the real Create and HostIp forms (no direct SQL writes):
-
-```
-HOSTIP subnet=1 ip=10.211.0.0 -> 302 ; ip=10.211.0.1 -> 302 ; subnet=2 ip=10.212.0.0 -> 302
-HOSTIP subnet=3 ip=10.213.0.3 -> 200 (refused: "Cannot assign the broadcast address as a host IP")
-
-/Subnet/Details/1  /31  Subnet Mask 255.255.255.254  Broadcast Address 10.211.0.1  Total 2  Usable 2
-                   ...Host IP Assignments: 10.211.0.0 p2p-a | 10.211.0.1 p2p-b
-/Subnet/Details/2  /32  Subnet Mask 255.255.255.255  Broadcast Address 10.212.0.0  Total 1  Usable 1
-/Subnet/Details/3  /30  Broadcast Address 10.213.0.3  Total 4  Usable 2          (correct, control)
-```
-
-Nothing is written wrong and nothing is blocked - the harm is entirely a misread, which is why the
-severity was corrected from low to info. The two verifiers disagreed here: one held low on the
-precedent of round 5's E13 (an RFC-3021 display contradiction on the same page, filed low), the other
-corrected to info on the precedent of round 10's J8 (a page stating a wrong network fact about a row
-on the same screen, filed info) after measuring that no operator action is refused or misdirected.
-**Info stands.** What is genuinely defensible, and was verified, is the self-contradiction: one card
-says Total 2 / Usable 2 and then names one of those two the broadcast, and the card below names it as
-an assignment.
-
-### Fix
-
-At `SubnetController.Read.cs:63`, compute it only below `/31`:
-
-```csharp
-BroadcastAddress = subnet.Cidr < 31
-    ? ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)
-    : string.Empty,
-```
-
-and render the empty case in `src/Bastet/Views/Subnet/Details/_NetworkInformation.cshtml:19`.
-`SubnetDetailsViewModel.BroadcastAddress` (`SubnetViewModels.cs:101`) has exactly one consumer - that
-one `<dd>` - and no test in `test/` mentions the view model, so nothing else moves.
-
-**Built and driven side by side** against the same catalog: 0 warnings / 0 errors, **730 passed**, the
-`/31` and `/32` flip while the `/30` is byte-identical. The Razor `@(...)` expression is compiled at
-build, so this is not the J9 shape.
-
-**Cheaper interim, no controller change:** gate the two lines in `_NetworkInformation.cshtml:18-19` on
-`@if (Model.Cidr < 31)`, which the view can do because `Model.Cidr` is already on the view model. It
-leaves the value computed and unused **and silently drops the row from the definition list**, so the
-card loses a label rather than answering the question - the controller-side version is preferable.
-
-### Fix corrections
-
-- **The proposed label is wrong for a `/32`.** RFC 3021 is *"Using 31-Bit Prefixes on IPv4
-  Point-to-Point Links"* and says nothing about `/32`; a `/32` has no broadcast because it is a single
-  host - exactly the distinction the app's own comment at `HostIpValidationService.cs:65-69` already
-  draws. Rendering `"None (RFC 3021)"` for a `/32` replaces one false statement with a differently
-  false one. Discriminate on `Model.Cidr`, e.g.
-  `@(Model.Cidr == 31 ? "None (RFC 3021 point-to-point)" : Model.Cidr == 32 ? "None (single host)" : Model.BroadcastAddress)`,
-  which also removes the reliance on `string.Empty` as an out-of-band sentinel.
-- **The finding's claim that `Read.cs:63` is "the one call site with no guard" is false**, and this
-  matters because it is the reason the fix must not be generalised. Four other call sites are also
-  unguarded: `HostIpController.cs:104`, `:140`, `:182` - all benign, because they build the
-  `SubnetRange` string and `"10.211.0.0 - 10.211.0.1"` is the correct range for a `/31` (verified in
-  the rendered Create page) - and `HostIpValidationService.cs:161`, which is **permanently-accepted
-  item 5** and out of scope.
-- **Do NOT "fix" this inside `IpUtilityService.CalculateBroadcastAddress`.**
-  `HostIpValidationService.cs:327` deliberately calls it for `newCidr < 31` only,
-  `SubnetPropertyCalculationTests` pins its current `/31` and `/32` return values, and it would break
-  the three `HostIpController` range strings.
+_Two things deliberately not done, both on the verifier's corrections. The **cheaper interim** — gating
+the two lines in the view on `@if (Model.Cidr < 31)` — was not taken: it silently drops the row from
+the definition list, so the card loses a label rather than answering the question. And the guard was
+**not** pushed into `IpUtilityService.CalculateBroadcastAddress`: `SubnetPropertyCalculationTests`
+pins its current `/31` and `/32` return values, `HostIpValidationService` deliberately calls it for
+`newCidr < 31` only, and three `HostIpController` range strings depend on today's behaviour — the
+finding's claim that `Read.cs` was "the one call site with no guard" is false, and those four other
+sites are correct as they are._
 
 ---
 
