@@ -542,7 +542,11 @@
                     autoCreateParentSubnetId: typeof item.autoCreateParentSubnetId === "number" ? item.autoCreateParentSubnetId : null,
                     willRename: item.willRename === true,
                     newName: typeof item.newName === "string" ? item.newName : null,
-                    willMarkFullyAllocated: item.willMarkFullyAllocated === true
+                    willMarkFullyAllocated: item.willMarkFullyAllocated === true,
+                    // The names actually on screen. Defensive `|| []` because this runs in a preview
+                    // success handler: a TypeError here would leave step 3 blank with the commit
+                    // button live over a stale plan.
+                    childNames: (item.childSubnets || []).map(function (c) { return c.name; })
                 };
             });
         }

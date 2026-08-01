@@ -220,6 +220,74 @@ public class SubnetControllerBulkAzureImportTests : IDisposable
     }
 
     /// <summary>
+    /// A concurrent rename that moves the planned child names must be refused, not committed.
+    /// </summary>
+    /// <remarks>
+    /// Round-11 K4. The approved-plan expectation carried the target's identity but nothing about
+    /// the children the commit actually writes. <c>BuildPlanItem</c> seeds its disambiguation set
+    /// from the existing tree, so renaming the matched Bastet subnet moves <c>DisambiguateName</c>'s
+    /// output while every compared field stays equal - the commit returned 200 and wrote a child
+    /// under a name the operator never saw. Here the preview approves the disambiguated
+    /// "rig-div (rig-div-vnet)"; the rename removes the collision, so the plan would now write the
+    /// bare "rig-div".
+    /// </remarks>
+    [Fact]
+    public async Task BulkCreateFromAzurePlan_ChildNamesMovedByAConcurrentRename_IsRefused()
+    {
+        // An existing Bastet subnet that the VNet prefix matches exactly, whose name collides with
+        // the incoming Azure child and so forces the child to be disambiguated.
+        await AddSubnetAsync("rig-div", "10.151.0.0", 16);
+        int existingId = (await _context.Subnets.SingleAsync(TestContext.Current.CancellationToken)).Id;
+
+        BulkImportSelectionDto selection = Selection(new BulkImportExpectedTargetDto
+        {
+            TargetType = nameof(BulkImportTargetType.ExactMatch),
+            ExistingTargetSubnetId = existingId,
+            WillRename = false,
+            WillMarkFullyAllocated = false,
+            // What the preview displayed, with the child disambiguated against the target's name.
+            ChildNames = ["rig-div (rig-div)"]
+        });
+        selection.VNetPrefixes[0].Subnets =
+        [
+            new BulkImportSelectedSubnetDto
+            {
+                Name = "rig-div",
+                AddressPrefix = "10.151.1.0/24",
+                AzureResourceId = VNetId + "/subnets/rig-div"
+            }
+        ];
+
+        // The second admin renames the target, so the collision - and the disambiguation - is gone.
+        Subnet target = await _context.Subnets.SingleAsync(TestContext.Current.CancellationToken);
+        target.Name = "renamed-by-someone-else";
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IActionResult result = await Commit(selection);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Contains("child subnet names have changed",
+            System.Text.Json.JsonSerializer.Serialize(conflict.Value), StringComparison.Ordinal);
+
+        // Nothing was written: the child does not exist under either name.
+        Assert.Equal(1, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// A caller that did not preview still carries no child names, and must not be refused for it.
+    /// </summary>
+    [Fact]
+    public async Task BulkCreateFromAzurePlan_NoChildNamesSupplied_IsNotRefused()
+    {
+        BulkImportSelectionDto selection = Selection(ApprovedNewTopLevel());
+        Assert.Null(selection.VNetPrefixes[0].Expected!.ChildNames);
+
+        IActionResult result = await Commit(selection);
+
+        _ = Assert.IsType<OkObjectResult>(result);
+    }
+
+    /// <summary>
     /// A malformed body must come back as the planner's modelled 400, not as an unhandled 500.
     /// </summary>
     /// <remarks>

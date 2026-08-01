@@ -189,127 +189,40 @@ the finding advised, since the inserted comment block shifts the cited lines._
 
 ---
 
-## K4 - The approved-plan expectation carries no child-subnet information, so the commit can create imported children under names the preview never showed and no 409 fires
+_K4 is fixed and committed with the `ChildNames` version. `BulkImportExpectedTargetDto` gained
+`List<string>? ChildNames`, `attachApprovedOutcomes` stamps
+`(item.childSubnets || []).map(function (c) { return c.name; })` — the defensive `|| []` and the
+`function` form both taken as advised, since this runs in a preview success handler where a TypeError
+would leave step 3 blank with the commit button live — and `DescribeApprovedPlanDivergences` compares
+the list after the `WillMarkFullyAllocated` check, guarded on null so a caller that never previewed
+keeps the optional contract. Neither list is repeated in the message, following the same rule the
+`NewName` check uses, because these names are caller-influenced and nothing here is sanitized._
 
-`[x1]` &nbsp;|&nbsp; **Severity: low** &nbsp;|&nbsp; **Confidence: confirmed** &nbsp;|&nbsp;
-`src/Bastet/Controllers/SubnetController.BulkAzure.cs:136`
+_Measured in a real browser against real ARM, before and after, with the target renamed through the
+ordinary Edit page while the plan sat on screen. The preview displayed
+*"Create rig-sn-vis-app (rig-vnet-visible) 10.110.1.0/24 (was rig-sn-vis-app)"* in both runs.
+**Before:** the commit returned **200** with `differences: null` and the child was written — under the
+bare `rig-sn-vis-app`, a string that appeared nowhere on the preview screen. **After:** the identical
+race returns **409** with
+`differences: ["10.110.0.0/16: the child subnet names have changed."]`, and nothing is written._
 
-### The defect
+_**The finding's warning that this message would be dead text was acted on rather than noted.** K2 was
+fixed first, in numeric order, so the same run shows the sentence actually rendered in
+`#bulk-commit-error-list` rather than an empty list beneath the generic refusal. Zero `pageerror`s in
+both runs._
 
-`BulkImportExpectedTargetDto` (`Models/ViewModels/AzureBulkImportViewModels.cs:213-230`) carries only
-`TargetType`, `ExistingTargetSubnetId`, `AutoCreateParentSubnetId`, `WillRename`, `NewName` and
-`WillMarkFullyAllocated`, and `DescribeApprovedPlanDivergences` (`:93-140`) compares exactly those six.
-**`BulkImportPlanItem.ChildSubnets` - the rows the commit actually writes - is compared against
-nothing.**
+_Two regression tests added, 732 → **734**: the rename race, and a pin that a caller supplying no
+child names is still not refused. The rename test was confirmed failing with **only** the comparison
+hunk reverted — `OkObjectResult` where `ConflictObjectResult` was expected, i.e. the commit going
+through and writing the moved name — so it fails for the defect's own reason, not a compile error._
 
-Child names are not selection-only. `AzureBulkImportPlanner.BuildPlanItem` seeds `usedNames` from the
-**existing tree** (`usedNames.Add(targetExistingName)` at `:491-493`, where `targetExistingName` is
-`exact.Name`), so `DisambiguateName`'s output moves when another admin renames the matched Bastet
-subnet. Every other tree-dependent way the target can move (a different id, a flipped `TargetType`, a
-flipped `WillRename`) is already caught by the existing six checks; child naming is the one that is
-not.
-
-### Failure scenario
-
-Bastet holds subnet 13, `rig-ktdown-web`, at `10.172.0.0/16`. The operator previews importing Azure
-VNet `rig-ktdown-v2` (`10.172.0.0/16`, subnets `rig-ktdown-web` `10.172.1.0/24` and `rig-ktdown-db`
-`10.172.2.0/24`). The preview promises children `["rig-ktdown-web (rig-ktdown-v2)", "rig-ktdown-db"]` -
-the first disambiguated because it collides with the target's own name. Another admin renames subnet
-13 to `renamed-by-someone-else` through the ordinary Edit page. The operator confirms.
-
-Every compared field is unchanged (`ExactMatch` / 13 / null / `WillRename=false` /
-`WillMarkFullyAllocated=false`), so **no divergence is reported, the commit returns 200, and the child
-is written as `rig-ktdown-web`** - a name the operator never approved and never saw.
-
-The same mechanism runs in reverse and is if anything sharper: with the preview approving
-`["rig-sn-vis-app","rig-sn-vis-data"]` and the target then renamed **to** `rig-sn-vis-app`, the commit
-writes the child as `rig-sn-vis-app (rig-vnet-visible)` - a string that appeared nowhere on the preview
-screen.
-
-Consequence is confined to `Name`: address space, parentage, `AzureResourceId` and the child count are
-all selection-derived and still server-validated, disambiguation still runs at commit so the written
-names stay internally consistent, reconcile keys on `AzureResourceId` rather than `Name`, and `Name` is
-freely editable afterwards. That is why this is low.
-
-### Reproduction
-
-Driven both through the real wizard in headless Chromium and through the documented JSON endpoints,
-against real Azure VNets:
-
-```
-B. WHAT THE OPERATOR SEES ON STEP 3:
-   Exact match Bastet subnet "rig-sn-vis-app" (10.110.0.0/16)
-   Child Azure subnets:
-    Create rig-sn-vis-app (rig-vnet-visible) 10.110.1.0/24 (was "rig-sn-vis-app")
-    Create rig-sn-vis-data 10.110.2.0/24
-C. second admin renamed subnet 1
-D. POSTED expected: {"targetType":"ExactMatch","existingTargetSubnetId":1,"autoCreateParentSubnetId":
-   null,"willRename":false,"newName":null,"willMarkFullyAllocated":false}   <-- no child information
-E. COMMIT RESPONSE: 200 {"success":true,...,"createdChildSubnets":2,"linkedTargets":1,...}
-
-=== FINAL TREE ===
-1|renamed-by-someone-else|10.110.0.0|16|NULL
-2|rig-sn-vis-app|10.110.1.0|24|1        <-- screen said "rig-sn-vis-app (rig-vnet-visible)"
-3|rig-sn-vis-data|10.110.2.0|24|1
-```
-
-No 409, no warning. A control run with no concurrent rename writes exactly the previewed names, so the
-rename is the sole cause.
-
-### Fix
-
-Add the planned children to the expectation and compare them:
-
-- give `BulkImportExpectedTargetDto` a `public List<string>? ChildNames { get; set; }`;
-- have `attachApprovedOutcomes` stamp `childNames: (item.childSubnets || []).map(function (c) { return c.name; })`;
-- in `DescribeApprovedPlanDivergences`, **after the `WillMarkFullyAllocated` check at `:136-139`**, add
-  a guarded comparison:
-
-  ```csharp
-  expected.ChildNames is not null
-      && !expected.ChildNames.SequenceEqual(item.ChildSubnets.Select(c => c.Name), StringComparer.Ordinal)
-  ```
-
-  reporting `$"{label}: the child subnet names have changed."` **without repeating either list** - the
-  same rule the existing `NewName` check at `:130-134` follows, because the names are
-  caller-influenced.
-
-The `expected.ChildNames is not null` guard preserves the optional/unverified contract round 10 chose
-for the direct JSON API. Do **not** compare `OriginalAzureName` or the child address prefixes: those
-come from the selection and cannot move, so comparing them adds no coverage.
-
-**Built and driven.** 0 warnings / 0 errors, **730 passed** (existing tests construct the DTO without
-the new field, get null, and are skipped by the guard). Against the rename race the patched build
-answers `409 ... "differences":["10.110.0.0/16: the child subnet names have changed."]` and writes
-nothing; the unmutated control still commits 200 with byte-identical rows; zero page JS errors, so
-this is not another J9-shaped build-clean/runtime-throw. There is no sibling call site to miss -
-`DescribeApprovedPlanDivergences` has exactly one caller (`:167`) and `attachApprovedOutcomes` exactly
-one (`loadPreview`'s success handler). Child order follows the posted selection, the same object at
-preview and commit, so ordering cannot drift into a spurious 409.
-
-### Fix corrections
-
-- **The new message is dead text until `K2` is fixed.** `showCommitError` never renders
-  `differences`; measured on the patched build, the panel showed only the generic *"The plan changed
-  since it was previewed..."* sentence with an empty `#bulk-commit-error-list`. The write is correctly
-  refused, so the hole is closed - but **fix `K2` in the same change**, or the operator is told a plan
-  changed without being told how.
-- **Use `(item.childSubnets || []).map(...)`, not the bare form.** `ChildSubnets` is a non-nullable
-  `List<>` so the bare form works today, but this is a preview success handler: a `TypeError` there
-  leaves step 3 blank with the commit button live on a stale plan - the round-10 J9 shape. The guard
-  costs one token. Match house style with `function (c) { return c.name; }`; the file uses no arrow
-  functions.
-- **Do NOT take the cheaper interim.** It was proposed as: seed `usedNames` in `BuildPlanItem` only
-  from the post-rename name, i.e. drop `usedNames.Add(targetExistingName)` at `:491-493`. It does work
-  mechanically (it builds, keeps 730 green, no shipped test pins child-vs-target disambiguation, and
-  the remaining seeds are selection-derived so `ChildSubnets` becomes a pure function of the
-  selection) - but it pays for a verification gap by deleting deliberate product behaviour that the
-  code comment at `:490` exists to explain, and it lets a child be created with the exact name of its
-  own parent. It also fixes nothing structurally: the expectation still carries no child information,
-  so the next tree-dependent input to child planning reopens the same hole silently. **Take the
-  `ChildNames` version only.**
-- The finding's own citation of `:93` points at the plan-item lookup, not the comparison block; the
-  insertion point is `:136-139`.
+_The cheaper interim was **not** taken, and its rejection is confirmed. Dropping
+`usedNames.Add(targetExistingName)` from `BuildPlanItem` does work mechanically, but it pays for a
+verification gap by deleting deliberate product behaviour the comment beside it exists to explain, it
+lets a child be created with the exact name of its own parent, and it fixes nothing structurally — the
+expectation would still carry no child information, so the next tree-dependent input to child planning
+reopens the same hole silently. `OriginalAzureName` and the child address prefixes are deliberately
+not compared: both are selection-derived and cannot move, so comparing them would add no coverage._
 
 ---
 

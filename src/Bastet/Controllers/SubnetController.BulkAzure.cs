@@ -155,6 +155,19 @@ public partial class SubnetController : Controller
             {
                 differences.Add($"{label}: marking the target fully allocated changed to {item.WillMarkFullyAllocated}.");
             }
+
+            // The children are what the commit actually writes, and their names are not
+            // selection-only: BuildPlanItem seeds disambiguation from the existing tree, so a
+            // concurrent rename of the matched subnet moves them while every field above stays
+            // equal. Guarded on null so a caller that did not preview keeps the optional contract.
+            // Neither list is repeated in the message - the same rule the NewName check follows,
+            // because these names are caller-influenced and nothing here has been sanitized.
+            if (expected.ChildNames is not null
+                && !expected.ChildNames.SequenceEqual(
+                    item.ChildSubnets.Select(c => c.Name), StringComparer.Ordinal))
+            {
+                differences.Add($"{label}: the child subnet names have changed.");
+            }
         }
 
         if (unverified > 0)
