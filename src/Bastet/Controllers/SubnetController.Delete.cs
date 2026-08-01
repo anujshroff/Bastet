@@ -167,12 +167,25 @@ public partial class SubnetController : Controller
     /// archived atomically. Entities are queued deepest-first because the self-referencing FK is
     /// Restrict, so a parent cannot be removed before its children.
     /// </remarks>
+    /// <param name="subnet">The root of the subtree to archive.</param>
+    /// <param name="treeCache">
+    /// An already-loaded, <b>tracking</b> copy of the Subnets table - see
+    /// <see cref="GetAllDescendantsOrdered"/>. Lets a caller archiving several subtrees read the
+    /// table once rather than once per subtree.
+    /// </param>
+    /// <param name="archivedSubnetIds">
+    /// Receives the id of every subnet archived here, so a caller looping over targets can skip ones
+    /// already cascaded away without re-walking the tree to find out.
+    /// </param>
     /// <returns>How many subnets and host IP assignments were archived.</returns>
-    private async Task<(int SubnetsArchived, int HostIpsArchived)> ArchiveSubnetSubtreeAsync(Subnet subnet)
+    private async Task<(int SubnetsArchived, int HostIpsArchived)> ArchiveSubnetSubtreeAsync(
+        Subnet subnet, List<Subnet>? treeCache = null, List<int>? archivedSubnetIds = null)
     {
         // Deepest first, with the subnet itself processed last
-        List<Subnet> toDelete = await GetAllDescendantsOrdered(subnet.Id);
+        List<Subnet> toDelete = await GetAllDescendantsOrdered(subnet.Id, treeCache);
         toDelete.Add(subnet);
+
+        archivedSubnetIds?.AddRange(toDelete.Select(s => s.Id));
 
         string? deletedBy = userContextService.GetCurrentUsername();
         DateTime deletedAt = DateTime.UtcNow;

@@ -119,115 +119,36 @@ already refuted.
 
 # Medium
 
-## J1 [x2] - Azure reconcile bulk delete holds the global write lock for O(selected targets x total subnets), refusing every other write in the deployment
+_J1 is fixed and committed. All three parts were taken: `GetAllDescendantsOrdered`
+(`SubnetController.Helpers.cs`) and `ArchiveSubnetSubtreeAsync` (`SubnetController.Delete.cs`) each
+gained an optional `treeCache`, the archive path also fills an optional `archivedSubnetIds` so the
+reconcile loop no longer needs its own descendant walk, the redundant `GetAllDescendantsOrdered` call
+in the loop is gone, and the per-target `SaveChangesAsync` moved to a single save after the loop. The
+missing `using Microsoft.EntityFrameworkCore;` was added, as the verifier warned. **The cache is a
+tracking read**, and the two XML doc blocks say why rather than leaving it to be rediscovered: the
+verifier's `AsNoTracking` trap was reproduced here before the fix was written — built that way the
+request returns the 500 path (`ObjectResult`, "another instance with the same key value is already
+being tracked") on the first target with descendants._
 
-**Severity:** medium | **Confidence:** confirmed | **Cite:**
-`src/Bastet/Controllers/SubnetController.AzureReconcile.cs:156` (the per-target save), `:143` (the
-redundant tree read), `:113` (the lock)
+_Measured on a nested rig rather than the finding's flat 200-leaf benchmark, which by construction
+cannot see the tracking fault: six targets, each a root/child/grandchild subtree with a host IP,
+alongside 200 unrelated subnets. Unfiltered whole-table `Subnets` reads went **13 → 2** (13 = 1 + 2
+per target, exactly the formula the finding gives), with the outcome byte-identical before and
+after — 218 subnets before, 200 remaining, 18 archived, 6 host IPs archived. The lock-hold and
+rival-write timings in the finding were not re-measured at 66,000-subnet scale; the read count is the
+mechanism, and it is now flat in target count._
 
-Found by four beats (`azure`, `locking`, `regression`, `deadcode`) across passes A, B and deep - seven
-raw reports, one defect.
+_Two regression tests added (`SubnetControllerAzureReconcileScalingTests`), 716 → **718**. The scaling
+test deliberately asserts that the read count for 2 targets **equals** the count for 8 rather than
+pinning a magic number — an exact count would break on unrelated query changes while still admitting
+the defect back. Confirmed failing against unfixed code with the defect's own signature (expected 5,
+actual 17) before the fix landed. The second test pins nested-subtree-with-host-IP archiving, which is
+what the tracking requirement protects._
 
-**What goes wrong.** An Admin runs the reconcile wizard against a subscription with 200 stale
-Azure-linked subnets in an instance holding 65,996 subnets, ticks `#rec-select-all`
-(`_StepReview.cshtml:44` - there is no cap on the `[FromBody]` id list) and clicks delete.
-`POST /Subnet/BulkDeleteStaleAzureSubnets` takes 59-68 s, of which ~55 s is inside
-`ExecuteWithSubnetLockAsync`. Two O(table) terms run **once per selected target, inside the lock**:
-
-1. `ArchiveSubnetSubtreeAsync` -> `GetAllDescendantsOrdered` (`Delete.cs:174` -> `Helpers.cs:55`) issues
-   `context.Subnets.ToListAsync()` - a **tracking** read of the entire `Subnets` table - and `:143`
-   issues a second, redundant one whose result is the identical list `ArchiveSubnetSubtreeAsync` already
-   computes and throws away. 401 whole-table reads in one request.
-2. Because that tracking read leaves all 66,000 entities in the change tracker, the per-target
-   `await context.SaveChangesAsync()` at `:156` runs `DetectChanges` over all of them, 200 times. That
-   save alone accounted for 49.9 s of the in-lock time.
-
-Nothing needs the per-target save - it is all one transaction committed at `:159`.
-
-**Wrong output:** a legitimate second user's write is **refused**, not merely delayed. Server-side SQL
-time is negligible (~21 ms for the 25 reads in a 12-target control); the cost is client-side
-materialisation and `DetectChanges`.
-
-**Reproduction.** Verifier's own catalog `bastet_vc1p`, two Bastet processes (5541, 5542) on it, seeded
-`10.0.0.0/8 -> 256 x /16 -> 65,536 x /24` plus 200 Azure-linked /28 ghosts whose `AzureResourceId` names
-non-existent subnets under a real VNet, so `ConfirmProposedDeletionsAsync` gets a genuine ARM 404 per
-row. `POST /Azure/ReconcileScan` returned 200 items.
-
-```
-DELETE_HTTP=200 DELETE_TIME=67.936699
-{"success":true,"redirectUrl":"/Subnet","targetsDeleted":200,"subnetsArchived":200,"hostIpsArchived":0}
-
-rival1 (+2s,  port 5542) wait=1.669  http=302   -- fired before the lock was taken
-rival2 (+20s, port 5542) wait=30.359 http=200   -- REFUSED: page contains
-        'The operation timed out due to high concurrency. Please try again.'   (Create.cs:138)
-rival3 (+45s, port 5542) wait=23.612 http=302
-
-sys.dm_tran_locks, 1 Hz, during that request:
-  01:23:09.110  97|X|GRANT|0:[Bastet:SubnetOperations]:(b83d66a6)
-  01:23:24.598  97|X|GRANT|...  109|X|WAIT|0:[Bastet:SubnetOperations]:(b83d66a6)
-  01:24:11.425  97|X|GRANT|...  126|X|WAIT|...
-  -> 57 consecutive GRANT samples for session 97; 27 WAIT samples for the two rivals.
-
-EF command log (Development already sets Database.Command=Information):
-  401 whole-table 'FROM [Subnets] AS [s]' reads = 1 outside the lock + 2 per target inside it
-  12-target control, same 65,995-row table: exactly 25 = 1 + 2x12, DEL12_TIME=7.259461
-```
-
-The rivals were issued against **a separate process on the same catalog**, so this is the `sp_getapplock`
-and not an in-process gate. Scaling was measured independently on three rigs and is linear in
-targets x tree size: 256/512/1024/4096 targets -> 1.40 / 3.06 / 7.20 / 93.67 s; and with the *same* 1024
-targets, padding the table with rows that are never selected, archived or read took 7.28 s (pad 0) to
-43.47 s (pad 7000) - the signature of an unfiltered `ToListAsync`. A single 5,000-child subtree delete on
-the same 200k tree took 23.3 s, i.e. the cost is the scans, not the archiving. The lock plumbing itself
-is sound: holding `Bastet:SubnetOperations` from an external `sqlcmd` session made a far-instance
-`POST /Subnet/Create` fail at exactly 30.038 s while `GET /Subnet` still answered 200 in 0.093 s.
-
-**Fix.** (a) give `GetAllDescendantsOrdered` an optional `List<Subnet>? treeCache`
-(`Helpers.cs:52-55`, `treeCache ?? await context.Subnets.ToListAsync()`) and thread it through
-`ArchiveSubnetSubtreeAsync` (`Delete.cs:171,174`); load the tree once before the reconcile loop and pass
-it - subtrees are disjoint, so a snapshot taken before the first archive still names every later
-target's descendants. (b) have `ArchiveSubnetSubtreeAsync` fill an optional `List<int>?
-archivedSubnetIds` from the `toDelete` list it already builds, and delete the redundant call at `:143`.
-(c) move `await context.SaveChangesAsync()` from `:156` to after the loop - it is already one
-transaction, and `alreadyArchived` already skips any target cascaded away, so `FindAsync` never has to
-observe a deleted row. Measured: 67.9 s -> 5.81 s, 401 reads -> 2, rival create 30.3 s REFUSED -> 0.4 s
-succeeded, output byte-identical (`targetsDeleted:200, subnetsArchived:200, hostIpsArchived:0`), suite
-716/716.
-
-**Verifier correction - the fix as written is INCOMPLETE, and each gap bites.**
-
-1. **The cache must be a TRACKING read, and the finding never says so.** It says to thread the cache
-   *"exactly the way I3 threaded `LoadSubnetTreeForBatchAsync`"*, and that helper (`Helpers.cs:129-130`)
-   is `AsNoTracking()` - the only such helper in the file, so that is what an implementer will write.
-   Built that way it passes the 200-flat-leaf benchmark in 5.95 s and then 500s on the first target that
-   has descendants:
-   ```
-   {"success":false,"error":"The delete failed and no changes were saved. Details have been logged."}
-     System.InvalidOperationException: The instance of entity type 'Subnet' cannot be tracked because
-     another instance with the same key value for {'Id'} is already being tracked.
-        at InternalDbSet`1.Remove(TEntity entity)
-        at ...ArchiveSubnetSubtreeAsync(...) SubnetController.Delete.cs:line 233
-   ```
-   Cause: the per-subnet host-IP `Include` at `Delete.cs:184-186` tracks a fresh instance of every
-   descendant, and `Remove` is then called on the detached cached instance. **A flat leaf-only benchmark
-   - which is exactly the finding's 200-target scenario - cannot see this.**
-2. **It does not compile as described.** `SubnetController.AzureReconcile.cs` has no
-   `using Microsoft.EntityFrameworkCore;`, so `await context.Subnets.ToListAsync()` before the loop
-   gives `error CS0411`. Round 9 recorded this same trap against I3's fix; the finding repeats it.
-
-With a tracking cache and that `using`, both the flat and the nested cases pass and match HEAD exactly
-(nested: `targetsDeleted:1, subnetsArchived:3, hostIpsArchived:1`, identical archive rows).
-
-**Cheaper interim - sound exactly as stated, and if only one thing ships this is it.** Move
-`await context.SaveChangesAsync()` from `:156` to after the loop. One line, no signature change, builds
-clean, byte-identical output: 67.9 s -> 28.5 s, and all three rivals lifted from refused/queued to
-succeeding. Parts (a)+(b) alone are worth little - the save is the dominant term.
-
-**Two candidate fixes were built, measured, and are NOT worth taking.** Removing only the redundant
-`:143` read: 59.4 s -> 57.3 s (401 -> 201 reads; the saves still dominate). Replacing the per-subnet
-host-IP `Include` N+1 at `Delete.cs:182-192` with a single `WHERE SubnetId IN (...)`: a 20,081-subnet
-root delete went 22.50 s -> 22.74 s, i.e. nothing, despite removing 20,081 round trips. Do not re-propose
-either.
+_Not done, on the finding's own evidence: the redundant `:143` read was not removed on its own (59.4 s
+→ 57.3 s alone — it is only worth taking as part of this change), and the per-subnet host-IP `Include`
+N+1 at `Delete.cs:182-192` was left alone (measured 22.50 s → 22.74 s, i.e. nothing, despite removing
+20,081 round trips). Both remain on the watch list as measured dead ends._
 
 ---
 

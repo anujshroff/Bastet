@@ -48,11 +48,26 @@ public partial class SubnetController : Controller
         return descendantCount;
     }
 
-    // Helper method to get all descendants ordered for deletion (deepest children first)
-    private async Task<List<Subnet>> GetAllDescendantsOrdered(int subnetId)
+    /// <summary>
+    /// Gets all descendants of <paramref name="subnetId"/> ordered for deletion (deepest first).
+    /// </summary>
+    /// <param name="subnetId">The subnet whose descendants are wanted.</param>
+    /// <param name="treeCache">
+    /// An already-loaded copy of the whole Subnets table, so a caller archiving several subtrees in
+    /// one transaction reads the table once instead of once per subtree. Subtrees are disjoint, so a
+    /// snapshot taken before the first archive still names every later target's descendants.
+    /// <para>
+    /// It MUST be a tracking read. <see cref="ArchiveSubnetSubtreeAsync"/> calls
+    /// <c>context.Subnets.Remove</c> on the instances this returns, while loading host IPs tracks a
+    /// fresh instance of every descendant; removing a detached duplicate throws "another instance
+    /// with the same key value is already being tracked". A flat, leaf-only workload never reaches
+    /// that path, so this cannot be left to a benchmark to catch.
+    /// </para>
+    /// </param>
+    private async Task<List<Subnet>> GetAllDescendantsOrdered(int subnetId, List<Subnet>? treeCache = null)
     {
         // Start with all subnets
-        List<Subnet> allSubnets = await context.Subnets.ToListAsync();
+        List<Subnet> allSubnets = treeCache ?? await context.Subnets.ToListAsync();
 
         // Create a dictionary for faster lookup
         Dictionary<int, Subnet> subnetDict = allSubnets.ToDictionary(s => s.Id);
