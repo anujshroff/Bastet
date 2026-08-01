@@ -332,122 +332,50 @@ help when the trigger is the IdP being unavailable at process start._
 
 ---
 
-## J7 [x1] - Reconcile scopes a subnet by subscription before it recognises its resource ID, so a corrupt Azure link is never classified and the cascade guard blames a subscription that does not exist
+_J7 is fixed and committed, as proposed. The three-way recognition now runs **before** the
+subscription-scope test in `BuildPlan`: a link that is neither a VNet nor a subnet id goes straight to
+`ReviewItems` and `continue`s, and the remaining branch is a two-way conditional. Written that way on
+the verifier's warning — simply deleting the `else` arm leaves `AzureReconcileItem? item;` unassigned
+on one path and does not compile._
 
-**Severity:** low (filed medium; **corrected down by both verifiers** - both consequences are diagnostic,
-nothing is destroyed and nothing becomes deletable) | **Confidence:** confirmed | **Cite:**
-`src/Bastet/Services/Azure/AzureReconciler.cs:83`
+_Why it mattered: `BelongsToSubscription` is a `StartsWith` over `"/subscriptions/{id}/"`, so a value
+that names no subscription failed it for **every** subscription, landed in `notCovered`, and never
+reached the `UnrecognisedResourceId` arm that exists precisely for it. The row was reported in no list
+on any scan, and rescanning a different subscription could never surface it either._
 
-**What goes wrong.** A Bastet subnet carries an `AzureResourceId` that is not a parseable ARM id - a
-typo, a truncated value, a migrated string. `AzureResourceId` is free text on the entity
-(`AzureResourceIdentity.cs:26` says so verbatim) and the only write-side check on the import paths is a
-length check, so the app's **own** Admin API will write one: `POST /Subnet/BatchCreateChildSubnets` with
-`subnets[0].AzureResourceId=this-is-not-an-arm-id` returned `{"success":true,"subnetIds":[2]}` and
-persisted it verbatim. No hand-edited row is required.
+_Measured live against real ARM through the app's own endpoints. The corrupt row was created by the
+application itself, not hand-edited: `POST /Subnet/BatchCreateChildSubnets` with
+`subnets[0].AzureResourceId=this-is-not-an-arm-id` returned `{"success":true,"subnetIds":[7]}` and
+persisted it verbatim, confirming the finding's claim that the only write-side check is length. A real
+`POST /Azure/ReconcileScan` then returned `reviewItems: [(7, UnrecognisedResourceId, "The recorded
+Azure resource ID names neither a VNet nor a subnet...")]` with `items` empty and no warnings — where
+before the fix that row appeared in **neither** list._
 
-In `BuildPlan` the subscription-scope test at `:83` runs **before** the three-way recognition at
-`:94-108`. `BelongsToSubscription` is `resourceId.StartsWith($"/subscriptions/{subscriptionId}/")`, so
-such a row fails it for **every** subscription id, is added to `notCovered` and `continue`d. It never
-reaches the `UnrecognisedResourceId` arm at `:105-107` that exists precisely for it - whose own comment
-says *"It is reported for review instead, so the operator can correct the row rather than have it
-silently offered for archival."*
+_Three regression cases added (`UnparseableResourceId_IsReviewed_NotSilentlySkipped` for both
+`not-an-arm-id` and the truncated `/subscriptions/<scanned-sub>` shape, plus
+`StaleAncestorOverUnparseableDescendant_IsWithheldWithoutBlamingASubscription`), 727 → **730**. All
+three confirmed failing against the unfixed reconciler with "collection was empty" — the ReviewItems
+list the row never reached. The existing
+`UnrecognisedResourceId_IsReviewedNotOfferedForDeletion` theory uses only ids prefixed with the
+scanned subscription, so it pinned exactly the half that already worked._
 
-Two wrong outputs:
+_One correction to the finding, found while writing the test rather than by reading. It says the
+ancestor "stays withheld after the fix"; that is true, but **not at `BuildPlan` time**. The
+review-item cascade guard runs inside `ApplyConfirmations` (round 9's I1 design), so the ancestor is
+still in `plan.Items` after the scan and is withheld only once Azure confirms its VNet is gone — which
+is the point at which the delete path asks. The test asserts it through `ApplyConfirmations` for that
+reason, and confirms the honest wording replaces the false "belongs to a different subscription"._
 
-- **(A)** With no Azure-linked ancestor the scan returns empty `items`, `reviewItems`, `warnings` and
-  `globalErrors`, so the wizard renders its nothing-to-clean banner over a subnet the scan never
-  classified.
-- **(B)** With such a row beneath a stale ancestor, `dcc15ab`'s new `notCovered` guard (`:137-140`)
-  withholds the ancestor with *"...would also archive Azure-linked subnet(s) beneath them that **belong
-  to a different subscription** and were not checked by this scan: 'stale-parent'."* That is **false** -
-  the child names no subscription at all - and unactionable: the offending child is named nowhere in the
-  response, and rescanning any other subscription will never surface it. The reconcile delete then answers
-  409 with the same false reason.
+_The three tests the brief flagged as arrange-sensitive
+(`ApplyConfirmations_TargetWhoseDescendantIsAReviewItem_IsAlsoWithheld`,
+`SubnetFromOtherSubscription_Ignored`, `StaleAncestorOverOtherSubscriptionDescendant_IsWithheld`) all
+survive unchanged, and a genuine other-subscription descendant still produces the "different
+subscription" warning, so I2's regression path is intact._
 
-**Reproduction.** All state created through real HTTP endpoints, then one scan over one tree with two
-rows that are both "neither a VNet nor a subnet":
-
-```
-items       : []
-reviewItems : [(3, 'control-storage-acct', 'UnrecognisedResourceId',
-                'The recorded Azure resource ID names neither a VNet nor a subnet, so nothing can be
-                 established about it. Correct or clear the link on this subnet.')]
-Row 2 (AzureResourceId='this-is-not-an-arm-id') appears in NEITHER list. Only the prefix differs.
-
-Under a stale ancestor:
-  warnings: ["1 subnet(s) were withheld from deletion because archiving them would also archive
-             Azure-linked subnet(s) beneath them that belong to a different subscription and were not
-             checked by this scan: 'rig-vnet-gone-vc11'."]
-  POST /Subnet/BulkDeleteStaleAzureSubnets {subnetIds:[4]} -> HTTP 409, same warning, DeletedSubnets = 0
-
-Real Chromium, standalone broken row:
-  SCAN-ERROR panel visible=False ; STALE/REVIEW sections visible=False
-  NOTHING-TO-CLEAN BANNER visible=True
-    "Everything imported from this subscription still exists in Azure. There is nothing to clean up."
-  CONSOLE_ERRORS: 0
-```
-
-**Widened by one verifier:** a **truncated** id that names the scanned subscription itself
-(`/subscriptions/<scanned-guid>`, no trailing slash) is skipped identically and produces the same
-"different subscription" warning - which is then not merely unestablished but directly contradicted by
-the row's own content.
-
-**Two of the finding's claims are corrected, both narrowing it.** (1) The banner text quoted in the
-finding (*"Everything still exists in Azure..."*) exists only in a code comment; the rendered banner is
-subscription-scoped, and the defect case is byte-identical to a genuine other-subscription row, which is
-the shipped, deliberate design. So (A) is better stated as *"a row that is in no subscription is reported
-in no scan"* than as a false clean bill. (2) *"The stale ancestor can never be archived through the app"*
-is **false**: `POST /Subnet/Delete/{id}` with `confirmation=approved` archived it immediately - the
-ordinary delete page carries no Azure gate. The 409 is confined to the reconcile path, and it fires
-identically on the *correct* control case, i.e. that refusal is the intended protection.
-
-**Fix - SOUND.** Recognise the resource ID before scoping it: hoist the type test above `:83`, report an
-unrecognised id as a `ReviewItems` entry, and `continue`; the `else` arm at `:103-108` then collapses.
-
-```csharp
-bool recognised = AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)
-                  || AzureResourceIdentity.IsAzureVNet(snapshot.AzureResourceId);
-if (!recognised) { plan.ReviewItems.Add(Item(snapshot, AzureReconcileStatus.UnrecognisedResourceId, true,
-        "The recorded Azure resource ID names neither a VNet nor a subnet, so nothing can be established "
-        + "about it. Correct or clear the link on this subnet.")); continue; }
-if (!BelongsToSubscription(snapshot.AzureResourceId, subscriptionId)) { notCovered.Add(snapshot.Id); continue; }
-```
-
-Built by both verifiers: 0 warnings / 0 errors, **716/716** - including the three tests the brief flags
-as arrange-sensitive (`ApplyConfirmations_TargetWhoseDescendantIsAReviewItem_IsAlsoWithheld`,
-`SubnetFromOtherSubscription_Ignored`, `StaleAncestorOverOtherSubscriptionDescendant_IsWithheld`), which
-survive because this moves *classification*, not a guard, and their helpers emit parseable ARM ids. Live:
-the broken child lands in `reviewItems`, the ancestor is still withheld with the honest wording
-(*"...subnet(s) beneath them that were withheld from deletion"*), and a genuine other-subscription
-descendant still produces the "different subscription" warning, so I2's regression path is intact.
-
-Two caveats on implementation, from measurement rather than reading:
-
-- **Write it as a two-way `if/else`.** Simply deleting the `else` arm leaves `AzureReconcileItem? item;`
-  unassigned on one path and will not compile.
-- **Do not oversell it.** The ancestor stays withheld after the fix and the 409 would still be returned;
-  what the fix buys is that the operator is finally told *which row to correct*, so the dead end becomes
-  escapable. A broken link now appears on every subscription's scan instead of none - which is correct,
-  because it is in no subscription - and it lands in `ReviewItems`, which is never offered for deletion.
-
-**The proposed cheaper interim is UNSOUND - do not ship it.** It adds a second
-`WithholdTargetsWhoseCascadeIsBlocked` call with its own wording. That method returns early on
-`if (protectedSubnetIds.Count == 0 || plan.Items.Count == 0)` (`:269`) and its first act on firing is
-`plan.Items.RemoveAll(blocked.Contains)` (`:282`), so on an ancestor whose subtree holds **both** an
-unrecognised row and a genuine foreign-subscription row, whichever guard runs first empties `plan.Items`
-and the second returns silently - the new reason is swallowed and the operator still reads only "a
-different subscription". Observed live. It also re-proposes the shape round 9 struck under I1 (*"a second
-guard with its own wording is new surface for no measured gain"*) for strictly less benefit than the
-two-line reorder.
-
-**Regression test** (proposed and confirmed to fail on HEAD, pass on the patch): mirror
-`StaleAncestorOverOtherSubscriptionDescendant_IsWithheld` with a `Linked(...)` whose resource id is
-`"not-an-arm-id"`, asserting `Assert.Single(plan.ReviewItems)` and
-`Assert.DoesNotContain(plan.Warnings, w => w.Contains("different subscription"))`. Add a second case for
-the truncated `/subscriptions/<scanned-sub>` shape - that is the one where the shipped warning
-contradicts the row's own text. Note the existing
-`UnrecognisedResourceId_IsReviewedNotOfferedForDeletion` theory uses only ids prefixed with the scanned
-subscription, so it pins exactly the half that works.
+_The proposed cheaper interim was **not** taken, and its rejection is confirmed: a second
+`WithholdTargetsWhoseCascadeIsBlocked` call returns early when `plan.Items` is empty and empties
+`plan.Items` on firing, so whichever guard runs first swallows the other's reason. It also re-proposes
+the shape round 9 struck under I1._
 
 ---
 
