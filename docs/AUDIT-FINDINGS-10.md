@@ -293,123 +293,42 @@ side effect and reintroduce the synthetic-event pattern round 4's D1 removed._
 
 ---
 
-## J6 [x1] - Production sign-out answers 500 and silently discards the session-cookie deletion when the OIDC discovery document is unavailable
+_J6 is fixed and committed, with all three of the verifier's corrections the fix itself omitted. The
+local session is now ended first and separately — `await HttpContext.SignOutAsync(cookie, properties)`
+— then the OIDC leg runs inside a `try`, returning `EmptyResult` on success and `Redirect(target)` if
+it throws. Doing it in the action rather than returning `SignOut(...)` is the whole point: as a
+`SignOutResult` both legs ran during **result execution**, after the action had returned, where
+nothing could intercept the throw and `UseExceptionHandler`'s `Response.Clear()` discarded every
+queued `Set-Cookie` with it._
 
-**Severity:** low (filed medium; **corrected down by both verifiers** to match round 9's I6, which shipped
-the byte-identical consequence at low) | **Confidence:** confirmed | **Cite:**
-`src/Bastet/Controllers/AccountController.cs:67`
+_The corrections: **(1)** `AuthenticationProperties` is passed to the **cookie** leg too —
+`CookieAuthenticationDefaults.LogoutPath` is `/Account/Logout`, this very path, so without it
+`HandleSignOutAsync` takes its redirect branch with a null `RedirectUri` and writes a self-redirect,
+correct today only by accident because both exits overwrite `Location`. **(2)**
+`ILogger<AccountController>` is injected and the swallowed exception is logged at warning, matching
+`Program.cs`'s `Bastet.Authentication` warning for the sign-in half; the controller previously had no
+logger at all. **(3)** The nine round-9 I6 pins were **rewritten in this commit**, not deleted._
 
-**What goes wrong.** Round 9's I6 fixed one way for `GET /Account/Logout` to answer 500 with the session
-still alive (a non-ASCII `returnUrl` reaching the Location header). The same failure mode survives at the
-sibling statement the fix did not touch, and needs no crafted input.
+_Measured with two Production instances of the same build differing only in the fix, both pointed at
+an authority with nothing listening, so discovery can never succeed — a genuine same-branch control
+rather than a Development comparison, which returns through a different branch. **Unfixed:**
+`GET /Account/Logout` → **HTTP 500 with zero `Set-Cookie` headers**; the browser keeps its ticket.
+**Fixed:** → **HTTP 302 `Location: /Account/SignedOut`** carrying
+`.AspNetCore.Cookies=; expires=Thu, 01 Jan 1970 ...; secure; samesite=lax; httponly`, and
+`/Account/SignedOut` renders 200 anonymously during the outage. Fail-open became fail-closed._
 
-Preconditions: Production, `BASTET_OIDC_AUTHORITY` configured, and the process has not yet successfully
-fetched `{authority}/.well-known/openid-configuration` - i.e. it started or restarted during an IdP
-outage, a DNS/firewall change, or a misconfigured authority. `Program.cs` never touches the discovery
-document at startup, so a Production process starts happily against an unreachable authority, and the
-user's ticket survives the restart because the DataProtection key ring is DB-persisted
-(`Program.cs:115-119`).
+_The nine pins now assert on the mocked `IAuthenticationService` rather than on
+`SignOutResult.Properties.RedirectUri`, which no longer exists — same guarantee, one layer down,
+through a small `LogoutHarness` that captures the properties handed to each scheme. All four
+`NonLocalOrMissingReturnUrl` cases, `LocalReturnUrl_IsPreserved` and all four
+`ReturnUrlKestrelCannotWrite` cases survive, so round 9's I6 protection is intact. Two tests added: the
+unreachable-IdP case (the regression test this finding needed and did not propose) and one pinning
+that the cookie leg carries the redirect target. 725 → **727**._
 
-A user with a valid `.AspNetCore.Cookies` ticket clicks Logout. `:51-54` queues a `Set-Cookie` deletion
-for every request cookie; `:67-70` returns
-`SignOut(props, CookieAuthenticationDefaults.AuthenticationScheme, OpenIdConnectDefaults.AuthenticationScheme)`.
-The cookie handler queues its own deletion, then `OpenIdConnectHandler.SignOutAsync` throws
-`IDX20803`. Because `SignOut(...)` is an `IActionResult`, the throw happens during **result execution**,
-after the action returned, so nothing in the action can intercept it - and `UseExceptionHandler("/Error")`
-calls `Response.Clear()`, taking every queued `Set-Cookie` with it (the source says so at
-`Program.cs:539-546`).
-
-**Wrong output:** HTTP 500 with **zero** `Set-Cookie` headers. The browser keeps its ticket, the cookie
-handler validates it locally without contacting the IdP, and a privileged session the operator explicitly
-asked to end keeps running for up to the 1 h sliding expiry.
-
-**Reproduction.** Two Production instances of the **same** pristine DLL, differing only in whether
-discovery resolves - a genuine same-branch control, unlike a Development comparison which returns through
-`Redirect(target)` at `:74`:
-
-```
-A. discovery never fetched:
-   HTTP/1.1 500 Internal Server Error ; set-cookie count: 0
-   System.InvalidOperationException: IDX20803: Unable to obtain configuration from ... Connection refused
-     at ConfigurationManager`1.GetConfigurationAsync
-     at OpenIdConnectHandler.SignOutAsync
-     at AuthenticationService.SignOutAsync
-     at Microsoft.AspNetCore.Mvc.SignOutResult.ExecuteAsync(HttpContext httpContext)
-     at ExceptionHandlerMiddlewareImpl
-
-B. same build, discovery reachable:
-   HTTP/1.1 302 Found ; Location: https://.../endsession?post_logout_redirect_uri=...
-   Set-Cookie: .AspNetCore.Cookies=; expires=Thu, 01 Jan 1970 ...; secure; samesite=lax; httponly
-
-C. scoping: kill the IdP AFTER B has cached the document, repeat -> still 302 + Set-Cookie.
-```
-
-One verifier went further and minted a genuine `.AspNetCore.Cookies` ticket against the same DB-persisted
-key ring: `GET /Account/Roles` 200 rendering the user before Logout, 500 with zero `Set-Cookie` on Logout,
-**200 again after** on the same jar, and the surviving session still reached the Admin-gated
-`/HostIp/PurgeAllDeletedHostIps` (302 to the "nothing archived" redirect *inside* the action, where an
-unauthorized request 500s).
-
-**Why low, honestly stated.** The window is narrow and self-sealing - one successful discovery fetch
-anywhere in the process's life closes it permanently. Inside that window the deployment is already
-comprehensively broken: an unauthenticated `GET /` also returns 500 through the OIDC *challenge*, so
-nobody can sign in at all, and the user sees a 500 page rather than a signed-out page (the finding's
-*"while believing they signed out"* is overstated). What keeps it a real finding: every other 500 in that
-window fails **closed**; this one fails **open**.
-
-**Fix.** Do not let the local session teardown depend on the remote round trip, and do not perform the
-remote leg as an `IActionResult`:
-
-```csharp
-if (!environment.IsDevelopment())
-{
-    await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    try
-    {
-        await HttpContext.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme,
-            new AuthenticationProperties { RedirectUri = target });
-        return new EmptyResult();
-    }
-    catch (Exception)
-    {
-        return Redirect(target);
-    }
-}
-```
-
-Built: 0 warnings / 0 errors, no missing using. Patched build against an unreachable authority: **302
-Location: /Account/SignedOut** with the deletion header present, and `/Account/SignedOut` renders 200
-anonymously during the outage. Healthy path byte-equivalent to HEAD (same 302 to the real
-`end_session_endpoint`, same two `Set-Cookie` headers). The finding is right that a `try` around
-`SignOut(...)` as currently written would be unreachable code, and right that all three cheaper interims
-fail (queue-order changes are all erased by `Response.Clear()`; pre-loading discovery at startup does not
-help, because the trigger *is* the IdP being unavailable at process start).
-
-**Verifier correction - INCOMPLETE.**
-
-1. **It breaks 9 of the 716 shipped tests, and the fix does not mention them.** `dotnet test` on the
-   patched copy: `total: 716, failed: 9, succeeded: 707`. All nine are in
-   `test/Bastet.Tests/Security/AccountControllerLogoutTests.cs` - the four
-   `Logout_Production_NonLocalOrMissingReturnUrl_RedirectsToSignedOutPage` cases (`:79`),
-   `Logout_Production_LocalReturnUrl_IsPreserved` (`:90`) and the four
-   `Logout_Production_ReturnUrlKestrelCannotWrite_RedirectsToSignedOutPage` cases (`:117`), each
-   `Assert.IsType() Failure: Expected typeof(SignOutResult), Actual typeof(EmptyResult)`. **These are
-   round 9's own I6 regression pins**, and they read `signOut.Properties.RedirectUri` - the only place
-   `target` is pinned. They must be rewritten in the same commit to assert on the mocked
-   `IAuthenticationService.SignOutAsync(context, OpenIdConnectDefaults.AuthenticationScheme, props)` (the
-   mock already exists in that file's helper and captures the properties), plus a new case that makes the
-   mock throw and asserts a `RedirectResult` to `SignedOutPath` - the regression test this finding
-   actually needs and does not propose.
-2. **The cookie leg should carry `AuthenticationProperties`.** `CookieAuthenticationDefaults.LogoutPath`
-   is `/Account/Logout`, which equals the request path, so `HandleSignOutAsync` takes its redirect branch
-   with a null `RedirectUri` and writes `Location: /Account/Logout` - a self-redirect. Harmless today only
-   because both exits overwrite `Location`, i.e. the fix is correct by accident. Pass
-   `new AuthenticationProperties { RedirectUri = target }` to the cookie leg too.
-3. `catch (Exception)` also swallows `OperationCanceledException` on a client abort and is silent.
-   `AccountController` has no logger; add `ILogger<AccountController>` to the primary constructor to
-   match `Program.cs:257-268`'s `Bastet.Authentication` warning for the sign-in half.
-
-No sibling call site: `SignOut(` appears exactly once in `src/`.
+_The finding's own judgements were confirmed rather than taken on trust: a `try` around `SignOut(...)`
+as written really would be unreachable code, and all three cheaper interims really do fail —
+queue-order changes are all erased by `Response.Clear()`, and pre-loading discovery at startup cannot
+help when the trigger is the IdP being unavailable at process start._
 
 ---
 
