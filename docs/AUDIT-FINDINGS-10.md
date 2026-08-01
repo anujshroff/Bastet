@@ -381,96 +381,45 @@ the shape round 9 struck under I1._
 
 # Info
 
-## J8 [x1] - Deleted-host-IP archive pages print the subnet's CURRENT prefix, so an archived address is shown inside a range that never contained it
+_J8 is fixed and committed, but **the proposed fix was declined**. Adding `OriginalNetworkAddress` and
+`OriginalCidr` to `DeletedHostIpAssignment` plus a migration is disproportionate to an info-severity
+display defect, and the verifier measured three unresolved problems with it: declared non-nullable the
+migration backfills `('', 0)` and every pre-upgrade row renders as `NAME (/0)`; the page-level header
+on the per-subnet view has no single truthful value once rows in one subnet were archived at different
+prefixes; and "populate them in both writers" is not a field copy, because the prefix is not on
+`HostIpAssignment` — `DeleteConfirmed` would need an extra read inside the open transaction and
+`ArchiveSubnetSubtreeAsync` a lookup keyed on `hostIp.SubnetId`._
 
-**Severity:** info (filed low; one verifier left it as filed, the second corrected it down after finding
-no consumer of the field beyond two Razor templates) | **Confidence:** confirmed | **Cite:**
-`src/Bastet/Controllers/HostIpController.cs:570` (live-subnet branch), `:580-581` (archived branch),
-`Models/DeletedHostIpAssignment.cs:21`
+_Taken instead: the verifier's own "only cheap and fully correct variant" — **drop the parenthetical
+range** from `AllDeletedHostIps.cshtml`. The subnet name and the `OriginalSubnetId` link are enough to
+navigate, and the column stops making a containment claim it has no data to support. A comment records
+why the range is absent, so it is not helpfully restored later._
 
-**What goes wrong.** Create `ARCHTEST = 10.150.0.0/24`, assign `10.150.0.200`, delete that host IP (it is
-archived), then narrow `ARCHTEST` to `/25` - which `Subnet/Edit` allows, because
-`ValidateSubnetCidrChangeWithHostIps` returns early when the subnet has **no live host IPs**, and
-deleting the address is precisely what empties that collection. `/HostIp/AllDeletedHostIps` then renders
-`10.150.0.200 | oldhost | ARCHTEST (10.150.0.0/25)` under a column headed **"Original Subnet"**.
-`10.150.0.200` is not in `10.150.0.0/25`. The archive row has no prefix column - only `OriginalSubnetId` -
-so the view has nothing truthful to print and re-derives it at render time.
+_Reproduced first, through ordinary UI posts only. `ARCHTEST` created as `10.150.0.0/24`,
+`10.150.0.200` assigned and deleted, then the subnet narrowed to `/25` — accepted with no validation
+error, because `ValidateSubnetCidrChangeWithHostIps` returns early when a subnet has no **live** host
+IPs, and deleting the address is precisely what empties that collection. `/HostIp/AllDeletedHostIps`
+then rendered `10.150.0.200 | oldhost | ARCHTEST (10.150.0.0/25)`, and a containment test on the
+printed range returned **False**. After the fix the same row reads `ARCHTEST`, with no range printed
+and the "Original Subnet" column header intact._
 
-That the pairing is read as a containment claim is not interpretation: `Views/HostIp/AllHostIps.cshtml:53`
-renders **live** assignments with the byte-identical string `@hostIp.SubnetName
-(@hostIp.NetworkAddress/@hostIp.Cidr)`, where containment is guaranteed by validation. And the displayed
-pairing is unconstructible - re-creating it is refused with *"IP address 10.150.0.200 is outside the
-subnet range 10.150.0.0/25"*.
+_**Orphan sweep.** Removing the only consumer left `AllDeletedHostIpItemViewModel.NetworkAddress` and
+`.Cidr` dead — nothing else reads them, no test asserts them — so both properties and their three
+population sites in `HostIpController` were removed in the same commit. The compiler reports none of
+this. `DeletedHostIpListViewModel.NetworkAddress/Cidr` are a **different** view model and are still
+live in `DeletedHostIps/_Header.cshtml`; they were left alone._
 
-**The finding's own diagnosis of the mechanism is wrong, and the defect is broader than filed.** It claims
-the column is internally inconsistent - live rows showing current values, archived rows showing historical
-ones. Both verifiers built the archived branch and it is wrong in exactly the same way: `SUBB` archived at
-`/24`, narrowed to `/25`, then deleted, prints `SUBB (deleted) (10.151.0.0/25)` over `10.151.0.200`. Both
-branches print the subnet's **last-known** prefix; neither branch has the datum. The prefix at
-host-IP-deletion time is never stored anywhere.
+_The per-subnet page header was deliberately not changed. It reads as a present-tense description of
+the subnet being viewed rather than a per-row historical claim, and it is the one place a single
+page-level prefix is defensible; verified still rendering
+"...for subnet ARCHTEST (10.150.0.0/25)". The load-bearing wrongness was the per-row pairing under an
+explicitly historical column, and that is what was removed._
 
-**Reproduction.** Every step an ordinary UI POST; four archived rows on one page, each printed range
-containment-tested:
-
-```
-step 4  POST /Subnet/Edit/1 Cidr=25  -> HTTP 302 -> /Subnet/Details/1   (accepted, no validation error)
-        SQL: ARCHTEST 10.150.0.0/25 ; LiveHostIps = 0
-
-GET /HostIp/AllDeletedHostIps:
-  IP            | "Original Subnet"                  | IP in printed range?
-  10.170.0.200  | ARCH3 (deleted) (10.170.0.0/24)    | True
-  10.160.0.10   | ARCH2 (deleted) (10.160.0.0/25)    | True
-  10.160.0.200  | ARCH2 (deleted) (10.160.0.0/25)    | False   <- archived branch
-  10.150.0.200  | ARCHTEST (10.150.0.0/25)           | False   <- live branch, as filed
-
-GET /HostIp/DeletedHostIps?subnetId=2 header:
-  "View previously deleted host IP assignments for subnet ARCH2 (10.160.0.0/25)"
-  over rows 10.160.0.10 and 10.160.0.200 - true original prefixes /25 and /24 respectively.
-
-archive row: Id 1 | OriginalIP 10.150.0.200 | Name oldhost | OriginalSubnetId 1   (no prefix column)
-POST /HostIp/Create SubnetId=1 IP=10.150.0.200 -> 200 with
-  "IP address 10.150.0.200 is outside the subnet range 10.150.0.0/25"
-```
-
-**Why info.** Nothing computes with these fields - `grep` shows the only consumers of
-`AllDeletedHostIpItemViewModel.NetworkAddress/Cidr` and `DeletedHostIpListViewModel.NetworkAddress/Cidr`
-are the two Razor templates; no test asserts them, nothing writes from them. Every load-bearing audit fact
-on the row is correct and the parenthetical is decoration. The one action a misled operator might take is
-refused with an accurate message. The per-subnet page's header is also soft - it reads as a present-tense
-description of the subnet you are viewing, and `_HostIpTable.cshtml` carries no per-row prefix at all; the
-load-bearing wrongness is `AllDeletedHostIps.cshtml:65` under an explicitly historical column header.
-
-**Fix.** Stamp the prefix onto the archive row instead of re-deriving it: add `OriginalNetworkAddress`
-(nvarchar(15)) and `OriginalCidr` (int) to `DeletedHostIpAssignment` plus a migration, populate them in
-both archive writers, and read them in the views. The two writers named are the only two -
-`HostIpController.cs:397-408` (`OriginalSubnetId` at `:401`) and
-`SubnetController.Delete.cs:196-207`; `grep` finds no third.
-
-**Verifier correction - INCOMPLETE on three counts, and the interim is UNSOUND.**
-
-1. **No backfill and no nullability decision.** Declared non-nullable, the migration fills existing rows
-   with `('', 0)` and `AllDeletedHostIps.cshtml:63` - which guards on `SubnetName != "Unknown"`, not on the
-   prefix - renders every pre-upgrade row as `NAME (/0)`. That exact output was measured. Make both columns
-   nullable and suppress the parenthetical when null, or backfill in the migration.
-2. **The `:688-692` call site is not well-defined.** `DeletedHostIpListViewModel`
-   (`DeletedHostIpViewModels.cs:6-14`) carries **one** page-level prefix used in
-   `DeletedHostIps/_Header.cshtml:5`, above N rows that can each now carry a different original prefix -
-   measured: `ARCH2`'s two rows, archived at `/24` and `/25`. There is no single value to put there.
-   Either move the prefix onto the per-row view model with a new column in `_HostIpTable.cshtml`, or leave
-   that header describing the live subnet and relabel it.
-3. **"Populate them in both writers" is not a field copy** - the prefix is not on `HostIpAssignment`. In
-   `DeleteConfirmed` the row comes from `FindAsync(ip)` with no `Include` and no subnet loaded, so it needs
-   an extra read inside the open transaction; in `ArchiveSubnetSubtreeAsync` `allHostIps` is a **flat** list
-   across the whole subtree, so it needs a lookup keyed on `hostIp.SubnetId` (`toDelete` already holds
-   every subnet).
-
-**The interim was built and produces worse output than the defect.** Dropping the assignment at
-`:570-571` renders `ARCHTEST (/0)` - the view has no discriminator to suppress the parenthetical. And the
-branch the interim deliberately keeps is equally false (`SUBB (deleted) (10.151.0.0/25)` over
-`10.151.0.200`), so "render the prefix only when it came from the archive" preserves the defect one row
-up rather than removing it. **The only cheap and fully correct variant is the fix's own last alternative:
-drop the parenthetical range from `AllDeletedHostIps.cshtml:65` altogether, or relabel it as the subnet's
-*current* range.** The subnet name plus the `OriginalSubnetId` link is enough to navigate.
+_The interim the finding proposed was **not** taken and is confirmed unsound: dropping only the
+live-subnet assignment renders `ARCHTEST (/0)`, because the view has no discriminator with which to
+suppress the parenthetical, and the archived branch it preserves is false in exactly the same way
+(`SUBB (deleted) (10.151.0.0/25)` over `10.151.0.200`). Suite unchanged at **730** — no test asserted
+these fields._
 
 ---
 
