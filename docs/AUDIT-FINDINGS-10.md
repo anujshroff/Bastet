@@ -1,16 +1,75 @@
 # Bastet - Round-10 Audit Findings
 
-| | |
-|---|---|
-| Round | **10** (finding letter **J** - findings are `J1` ... `J9`) |
-| Target branch | `audit/round-10` |
-| HEAD | `dcc15ab` - *"Audit 9 Cleanup (#154)"*, identical tree to `main` |
-| Build | **0 warnings, 0 errors** |
-| Tests | **716 passed**, 0 failed, 0 skipped |
-| Date | 2026-07-31 |
+| | Audit | After reconciliation |
+|---|---|---|
+| Round | **10** (finding letter **J** - findings are `J1` ... `J9`) | |
+| Branch | `audit/round-10` | one commit per finding |
+| HEAD | `dcc15ab` - *"Audit 9 Cleanup (#154)"*, identical tree to `main` | |
+| Build | **0 warnings, 0 errors** | **0 warnings, 0 errors** (clean rebuild, `bin`/`obj` deleted) |
+| Tests | **716 passed**, 0 failed, 0 skipped | **730 passed**, 0 failed, 0 skipped (+14) |
+| Working tree | clean at start and at finish | clean |
+| Date | 2026-07-31 | 2026-08-01 |
 
-Every line number below was re-derived against the working tree at `dcc15ab` by at least one verifier.
-Round-9 citations have already moved; re-derive these before acting on them.
+Every line number in the original findings was re-derived against the working tree at `dcc15ab` by at
+least one verifier. The struck entries below cite the **post-fix** lines.
+
+**All nine findings were fixed - none was refuted on re-verification.** Each was reproduced against the
+unfixed build before being fixed and re-measured afterwards, one commit per finding, each carrying its
+own struck entry.
+
+**Seven of the nine proposed fixes were rejected or corrected on evidence**, which the audit had itself
+predicted; every rejection is recorded in the relevant struck entry. Four are worth surfacing here
+because they look reasonable and will be re-proposed:
+
+- **J9's fix does not run.** It declares a `const` at the reason site and reads it in the label built
+  above - a temporal dead zone. Razor does not parse embedded JS, so it builds at 0 warnings and then
+  throws `ReferenceError` inside the render loop, leaving step 2 of the bulk wizard spinning with zero
+  checkboxes.
+- **J1's cache must be a TRACKING read.** The finding says to copy `LoadSubnetTreeForBatchAsync`,
+  which is `AsNoTracking`; built that way the request 500s on the first target that has descendants,
+  and a flat leaf-only benchmark - which is the finding's own 200-target scenario - cannot see it.
+- **J4's proposed guard fixes the wrong variant.** An `IStatusCodeReExecuteFeature` check closes the
+  re-execute leg and leaves redirect-vs-redirect open, which is the path an operator actually hits.
+- **J8's schema change was declined** as disproportionate to an info finding, and its interim produces
+  worse output than the defect (`NAME (/0)`).
+
+### Final verification sweep
+
+- **Clean rebuild** with `bin`/`obj` deleted: 0 warnings, 0 errors. **Full suite: 730 passed**, 0
+  failed, 0 skipped (716 -> 730, +14; no test was deleted or disabled). Nine of round 9's I6 pins were
+  rewritten rather than removed, and still assert the same guarantee one layer down.
+- **Real app against real SQL Server 2022**, every major area asserted on **content**, not status
+  codes: **21 of 21 passed** - subnet list/details/create/edit/delete, host IP list and edit,
+  per-subnet and global deleted-host-IP listings, deleted subnets, the purge confirmation, all three
+  Azure wizards, roles, access-denied, and the error pages. Security headers still ride on a normal
+  200 (`X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy: frame-ancestors 'none'`).
+- **Log read and classified:** zero `fail:` lines and zero exceptions across the whole sweep. The only
+  warnings are three identical EF `MultipleCollectionIncludeWarning` advisories from the two-collection
+  `Include` in the delete path - pre-existing at `dcc15ab` and untouched by this round.
+- **Both Azure surfaces driven end to end against live ARM** with two service principals holding
+  **disjoint RBAC at resource-group scope** (each `Owner` on its own group, `AuthorizationFailed` on
+  the other - verified before anything was measured, since a subscription-scoped assignment would have
+  made the whole experiment vacuous). Discovery, single-VNet import, bulk preview and commit, the
+  bulk-commit 409 divergence case, reconcile scan and reconcile delete commit all exercised. Both
+  counter-tests pass, so the reconciler **discriminates** rather than merely blocking: a resource the
+  credential cannot see was **withheld** with a warning naming it and stating that Azure denied access,
+  while a genuinely deleted resource was still **offered and deleted** (`targetsDeleted: 1`) - and the
+  unreadable row survived that delete.
+
+### Deliberately not done
+
+- **J8's two new columns and migration.** Declined; the parenthetical range was removed instead. See
+  J8's struck entry for the three unresolved problems the schema change carries.
+- **J4's structural fix** - answering in place from the eleven redirect sites rather than round-tripping
+  a diagnostic through a single-slot cookie. All three observed variants are closed without
+  restructuring eleven actions' return types for a low-severity finding; the round-9 watch-list item
+  stands.
+- **The measured dead ends were left alone**: the `:143` redundant read on its own, the per-subnet
+  host-IP `Include` N+1, a second `WithholdTargetsWhoseCascadeIsBlocked` call, `wwwroot/favicon.ico`,
+  and `trigger("change")`. Each is recorded in the watch list with the measurement that killed it.
+- **No test was written for J5 or J9.** Both are view-embedded JavaScript with no unit-testable seam;
+  the repo has no harness for driving a Razor script block, and both were verified in real headless
+  Chromium instead.
 
 ---
 
