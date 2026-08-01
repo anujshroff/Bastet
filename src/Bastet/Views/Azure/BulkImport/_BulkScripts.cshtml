@@ -409,6 +409,20 @@
         // ---------------------------------------------------------------
         $("#bulk-go-preview-btn").on("click", function () {
             const selection = buildSelectionFromUI();
+
+            // Re-lock the later steps before re-previewing. A pill stays clickable once its step has
+            // been visited, and invalidatePlan is the only writer that puts the disabled state back -
+            // so without this, one visit to Commit left step 4 live for the rest of the page's life.
+            // Every later preview then ran with the commit button still armed over a plan that had
+            // not been rendered: if the preview failed, or simply had not landed yet, the operator
+            // could confirm an import whose plan they never saw, and the approved-plan check would
+            // not fire because the fresh selection had never been stamped with an expectation.
+            //
+            // Ordering is load-bearing twice: invalidatePlan nulls lastSelection, so it must run
+            // before the reassignment below, and it re-disables #step3-tab, so it must run before
+            // activateTab re-opens that one step.
+            invalidatePlan();
+
             lastSelection = selection;
             activateTab("step3");
             loadPreview(selection);
@@ -528,7 +542,11 @@
                     autoCreateParentSubnetId: typeof item.autoCreateParentSubnetId === "number" ? item.autoCreateParentSubnetId : null,
                     willRename: item.willRename === true,
                     newName: typeof item.newName === "string" ? item.newName : null,
-                    willMarkFullyAllocated: item.willMarkFullyAllocated === true
+                    willMarkFullyAllocated: item.willMarkFullyAllocated === true,
+                    // The names actually on screen. Defensive `|| []` because this runs in a preview
+                    // success handler: a TypeError here would leave step 3 blank with the commit
+                    // button live over a stale plan.
+                    childNames: (item.childSubnets || []).map(function (c) { return c.name; })
                 };
             });
         }
@@ -705,6 +723,15 @@
                         });
                     }
                 });
+            }
+            // The approved-plan 409 carries neither globalErrors nor itemErrors - the reason the
+            // commit was refused travels in `differences`, and without this the operator is told the
+            // plan changed but never told how, with the delta the server had already computed
+            // dropped on the floor. The reconcile wizard renders its own 409's `warnings` for
+            // exactly this reason. .text(), not .html(): these sentences name caller-influenced
+            // values and the blocks either side encode too.
+            if (payload && payload.differences && payload.differences.length > 0) {
+                $.each(payload.differences, function (i, d) { $list.append($('<li></li>').text(d)); });
             }
             $("#bulk-commit-error").removeClass("d-none");
             $("#bulk-confirm-commit-btn").prop("disabled", false);

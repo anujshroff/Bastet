@@ -60,7 +60,14 @@ public partial class SubnetController : Controller
             IsFullyAllocated = subnet.IsFullyAllocated,
             // Calculate subnet properties
             SubnetMask = ipUtilityService.CalculateSubnetMask(subnet.Cidr),
-            BroadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr),
+            // Only below /31. A /31 has no broadcast address (RFC 3021 gives both addresses to the
+            // link) and a /32 is a single host, and this application agrees: HostIpValidationService
+            // applies the network/broadcast reservation only when Cidr < 31, so both /31 addresses
+            // and the single /32 address are assignable - and were being assigned while this card
+            // named one of them the broadcast, on the same page that listed it as a host IP.
+            BroadcastAddress = subnet.Cidr < 31
+                ? ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)
+                : string.Empty,
             TotalIpAddresses = ipUtilityService.CalculateTotalIpAddresses(subnet.Cidr),
             UsableIpAddresses = ipUtilityService.CalculateUsableIpAddresses(subnet.Cidr),
             // Include children, ordered by network address

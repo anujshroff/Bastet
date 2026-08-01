@@ -227,6 +227,23 @@ namespace Bastet.Models.ViewModels
         public string? NewName { get; set; }
 
         public bool WillMarkFullyAllocated { get; set; }
+
+        /// <summary>
+        /// The child subnet names the preview displayed, in the order it displayed them.
+        /// </summary>
+        /// <remarks>
+        /// Child names are not selection-only, which is why they need carrying back.
+        /// <c>BuildPlanItem</c> seeds its disambiguation set from the <b>existing tree</b>, so a
+        /// concurrent rename of the matched Bastet subnet moves <c>DisambiguateName</c>'s output and
+        /// the commit writes a child under a name that was never on screen. Every other
+        /// tree-dependent way the target can move is already covered by the fields above; this was
+        /// the one that was not.
+        /// <para>
+        /// Null when the caller did not preview, which keeps the optional contract the rest of this
+        /// type follows for the documented direct JSON API.
+        /// </para>
+        /// </remarks>
+        public List<string>? ChildNames { get; set; }
     }
 
     /// <summary>
