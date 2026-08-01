@@ -265,76 +265,31 @@ three observed variants without restructuring eleven actions' return types for a
 
 ---
 
-## J5 [x1] - Single-VNet import wizard: "Next: Select Subnets" stays enabled when `loadVNets` repopulates the dropdown, leaving a live-but-inert primary button
+_J5 is fixed and committed, exactly as proposed — the only fix this round that needed no correction.
+One line in `loadVNets`' `beforeSend`, beside the four panel resets:
+`$("#select-vnet-btn").prop("disabled", true);`. Same placement and pattern `loadSubnets`' `beforeSend`
+already uses, so the wizard now has one rule rather than two that disagree, and it covers the error and
+no-vnets branches for free._
 
-**Severity:** low | **Confidence:** confirmed | **Cite:**
-`src/Bastet/Views/Azure/Import/_ImportScripts.cshtml:188` (`loadVNets`' `beforeSend`)
+_Measured in real headless Chromium against the live rig, before and after, walking subscription →
+Next: Select VNet → pick a VNet → Back to Subscriptions → Next: Select VNet. **Before:** state E read
+`value="" disabled=false opacity=1 pointer-events=auto` — a fully saturated primary button over the
+"-- Select a Virtual Network --" placeholder — and the click was **accepted** while issuing zero Azure
+requests and never opening step 3. **After:** state E reads
+`value="" disabled=true opacity=0.65 pointer-events=none` and Playwright **refuses** the click, which
+is itself the proof, since it will not click a disabled control. The happy path is untouched: picking a
+VNet still enables the button, still issues `GetSubnets`, and still advances. 0 console errors and 0
+page errors in both runs._
 
-**What goes wrong.** On `/Azure/Import/{id}`: pick the subscription, click **Next: Select VNet**, pick a
-VNet (the change handler at `:107-114` enables `#select-vnet-btn`), click **Back to Subscriptions**, then
-**Next: Select VNet** again. No change event fires anywhere, `loadVNets` re-runs, and its success branch
-does `$dropdown.empty()` (`:199`) and re-appends the disabled/selected placeholder (`:200`), which resets
-the select's value to `""` **without** firing `change`. `beforeSend` (`:188-193`) resets `#vnet-loading`,
-`#vnet-selection`, `#vnet-error` and `#no-vnets` but not the button, and `:110`/`:112` inside the change
-handler are the **only** code in the tree that touches its disabled state.
+_No test ships with this. It is view-embedded JavaScript with no unit-testable seam — the repo has no
+harness for driving a Razor script block, and the verification above is recorded as prose for that
+reason. Suite unchanged at **725**._
 
-**Wrong output:** the dropdown reads *"-- Select a Virtual Network --"* while **Next: Select Subnets**
-renders as a fully saturated, hit-testable `btn-primary`. Clicking it hits
-`selectedVNetId = $("#vnet-select").val()` -> `""` -> the `if (selectedVNetId)` guard at `:59` falls
-through: no request, no step change, no spinner, no message. The wizard's primary Next button silently
-does nothing.
-
-This is the step-2 twin of round 7's G10, which fixed exactly this class for step 3's
-`#select-all-subnets` / `#import-subnets-btn` by resetting them in `loadSubnets`' `beforeSend`
-(`:255-256`); `loadVNets` never got the same treatment. The in-repo name for this shape is
-`_ReconcileScripts.cshtml:68-72`: *"A permanently live, inert button"*.
-
-**Reproduction.** Real headless Chromium (jQuery 4.0.0, Bootstrap 5.3.8), two verifiers with independently
-written harnesses, four runs, identical result. One measured with a raw `page.Mouse.ClickAsync` so that
-"the click landed" is not doing inferential work:
-
-```
-B first entry to step 2 : value=""  disabledProp=true  :disabled=true  opacity=0.65  pointer-events=none
-C after picking a VNet  : value=".../virtualNetworks/rig-vnet-visible"  disabledProp=false  opacity=1
-  [REQ] GET /Azure/GetVNets?subscriptionId=...&subnetId=1        (the second load)
-E re-entry to step 2    : value=""  text="-- Select a Virtual Network --"  optionCount=3
-                          disabledProp=false  hasDisabledAttr=false  opacity=1  pointer-events=auto
-F CLICK ACCEPTED -> Azure requests after the click: []   count=0
-                    step3 pill still DISABLED; #subnet-selection/#subnet-error/#no-subnets all d-none
-                    #vnet-resource-id = ''      CONSOLE_ERRORS: 0
-G control: pick a VNet -> GET /Azure/GetSubnets?vnetResourceId=...  -> step 3 ACTIVE, 2 rows
-```
-
-Screenshot of state F shows a solid blue **Next: Select Subnets** directly under the placeholder text.
-Leg G proves the button is not broken, only mis-enabled.
-
-**Reachability is slightly wider than filed:** `invalidateVNetStep()` (`:84-88`), which runs when the
-subscription dropdown changes, disables `#step2-tab`, `#step3-tab` and `#import-subnets-btn` but likewise
-never touches `#select-vnet-btn`, so switching subscriptions lands in the same state. Not claimed as
-reproduced - the rig tenant exposes only one subscription.
-
-**Fix - SOUND, and the only fix this round that needed no correction.** One line in `loadVNets`'
-`beforeSend`, beside the four panel resets:
-
-```javascript
-$("#select-vnet-btn").prop("disabled", true);
-```
-
-Same placement and pattern `loadSubnets`' `beforeSend` already uses, so the wizard ends up with one rule
-rather than two that disagree. Built and driven on the patched build: state E flips to
-`disabled / :disabled / opacity 0.65 / pointer-events none`, Playwright then **refuses** the click, the
-happy path is untouched (leg G still issues `GetSubnets` and activates step 3), 0 console errors, build
-0/0, suite **716/716**. `loadVNets` has exactly one caller (`:43`), so `beforeSend` covers every entry;
-`loadAzureSubscriptions()` is called once at document-ready and needs no equivalent.
-
-**Two notes on the alternatives.** The "cheaper interim"
-(`prop("disabled", !$("#vnet-select").val())` after the `$.each`) does close the reproduced path but is
-strictly worse - it leaves the button stale on the error and no-vnets branches. Those branches are
-currently unreachable to a user (`#vnet-selection` keeps its `d-none`, and the button's box is
-zero-sized), so `beforeSend` placement is defence-in-depth there rather than a second live defect; that
-is still the right home. **Do NOT fix this with `$("#vnet-select").trigger("change")`** - it would re-run
-`invalidateSubnetStep()` as a side effect and reintroduce the synthetic-event pattern round 4's D1
-removed.
+_Two alternatives left unused, both on the finding's own evidence. The "cheaper interim"
+(`prop("disabled", !$("#vnet-select").val())` after the `$.each`) closes the reproduced path but leaves
+the button stale on the error and no-vnets branches, so `beforeSend` is the better home. And
+`$("#vnet-select").trigger("change")` was **not** used: it would re-run `invalidateSubnetStep()` as a
+side effect and reintroduce the synthetic-event pattern round 4's D1 removed._
 
 ---
 
