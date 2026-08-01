@@ -40,8 +40,7 @@ public partial class SubnetController : Controller
         if (subnet == null)
         {
             // Use our custom 404 page with helpful context
-            TempData["ErrorPageMessage"] = $"Subnet with ID {id} could not be found.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, $"Subnet with ID {id} could not be found.");
         }
 
         SubnetDetailsViewModel viewModel = new()

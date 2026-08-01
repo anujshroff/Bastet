@@ -37,7 +37,14 @@ public class ErrorController : Controller
         // The message is read from TempData (set server-side by the redirecting action), never from
         // the query string - otherwise anyone could craft /Error/400?errorMessage=... and show
         // arbitrary text under this origin. Falls back to the per-status default below.
-        string? errorMessage = TempData["ErrorPageMessage"] as string;
+        //
+        // Only the message belonging to *this* redirect is read. The query key is an opaque token
+        // minted by the redirecting action, not the text: a single shared slot meant whichever
+        // request reached this page first consumed whatever was pending, so an unrelated 4xx landing
+        // in the gap printed another request's diagnostic and the intended page lost it. A
+        // re-executed status page and a direct visit to /Error/{code} carry no token, so they read
+        // nothing and, just as importantly, clear nothing.
+        string? errorMessage = ErrorPageMessages.Take(TempData, Request.Query[ErrorPageMessages.TokenQueryKey]);
 
         // UseStatusCodePagesWithReExecute sets the status itself before re-executing, so a route
         // that matched nothing really did answer 404. A controller that *redirects* here does not:

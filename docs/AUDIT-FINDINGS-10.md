@@ -227,91 +227,41 @@ such a response was demonstrated, and none was invented to justify a wider chang
 
 ---
 
-## J4 [x1] - A concurrent 4xx anywhere in the session steals the pending error-page message: the unrelated page prints it, the intended page loses it
+_J4 is fixed and committed, but **not with the fix as proposed**. The suggested
+`IStatusCodeReExecuteFeature` guard was rejected on the verifier's own measurement: it closes the
+re-execute leg while leaving redirect-vs-redirect untouched, and that is the 10-of-12 real-browser
+path — neither request in that pair is a re-execute, so neither carries the feature. Shipping it would
+have fixed the variant an operator is least likely to hit._
 
-**Severity:** low | **Confidence:** confirmed | **Cite:**
-`src/Bastet/Controllers/ErrorController.cs:22`
+_Instead each redirect now gets its own slot. A new `ErrorPageMessages` helper mints an opaque token,
+stores the diagnostic against it, and puts the token in the redirect's route; `ErrorController` reads
+only the entry its own token names. All eleven stashing sites (`Read.cs`, `Delete.cs` x2, `Edit.cs`
+x4, `AzureController.cs` x4) became one-line `this.RedirectToErrorPage(status, message)` calls, which
+also removes eleven copies of the stash-then-redirect pair. Round 3's B6 is not reintroduced: the
+token is a lookup key that is never rendered, and the message text still comes from TempData set
+server-side, never from the URL. Pending messages are capped at five, oldest dropped first, because
+TempData keeps anything unread and an abandoned redirect would otherwise accumulate in the cookie for
+the whole session — the finding notes that abandonment already leaves a message pending indefinitely._
 
-**What goes wrong.** `ErrorController.HttpStatusCodeHandler` is two things at once: the explicit
-redirect target of eleven controller sites that first stash a diagnostic in
-`TempData["ErrorPageMessage"]` (`Read.cs:43`, `Delete.cs:22`, `:127`, `Edit.cs:22/:59/:190/:251`,
-`AzureController.cs:24/:36/:184/:292`), and the automatic target of `UseStatusCodePagesWithReExecute`
-for every bodiless 4xx/5xx. Line 22 reads that key **unconditionally**, and a TempData read *consumes*
-it. Any unrelated 4xx that lands between a controller's 302 and the browser following it takes the
-message.
+_All three variants measured against the live app, one cookie jar per browser. **(1)** With
+`/Subnet/Edit/999` pending, an unrelated `GET /css/nope.css` now renders the generic "The resource you
+requested could not be found." and the intended page still renders "ID 999 could not be found or may
+have been deleted" — before, those were the other way round. **(2)** Redirect-vs-redirect: tab A
+(`Edit/999`) and tab B (`Details/888`) each now receive their own message; before, tab A received tab
+B's and tab B got the generic. **(3)** The silent-delete variant: after an unrelated 404, a pending
+message still arrives, because a request with no token neither reads nor clears anything._
 
-Tab A requests `GET /Subnet/Edit/999` (row archived): the controller stashes *"The subnet with ID 999
-could not be found or may have been deleted."* and 302s to `/Error/404`. Tab B, on a form with a stale
-antiforgery token, posts `/Subnet/Create`. **Wrong output:** tab B is served an HTTP 400 page titled
-*"Bad Request"*, *"Status Code: 400"*, whose body reads *"The subnet with ID 999 could not be found or
-may have been deleted."* - a statement about a request that browser never made - and tab A then gets the
-generic *"The resource you requested could not be found."*
+_Four existing tests asserted the single shared slot and were rewritten against the new mechanism —
+they now read the message back through the redirect's own token, which is what the page does. Two
+regression tests added, including one pinning that another redirect's message is **neither shown nor
+consumed**, 724 → **725**. `ErrorPageMessages` is public rather than internal so the tests exercise the
+real path instead of reimplementing its storage format; the assembly has no `InternalsVisibleTo`._
 
-**Reachability is wider than filed, in two directions found by the verifiers.** (a) **No concurrency is
-required at all:** an abandoned redirect (user hits Stop, closes the tab, the follow-up fails) leaves the
-message pending indefinitely - 30 unrelated 200s later, a mistyped URL rendered the stale subnet message.
-(b) **Two stale rows in two tabs is the most reachable path and it is not the filed one:** 10 of 12
-real-Chromium trials had one tab printing the *other* tab's diagnostic. (c) A 4xx re-execute with
-*nothing* pending still emits a TempData-clearing `Set-Cookie`, so an overlapping 4xx that started before
-the 302 silently **deletes** the message rather than stealing it (3 of 36 runs).
-
-**Reproduction.** One cookie jar = one browser, pristine `dcc15ab`:
-
-```
-GET /Subnet/Edit/999  -> 302 Location: /Error/404 ; Set-Cookie: .AspNetCore.Mvc.CookieTempDataProvider=...
-GET /css/nope.css     -> 404, Content-Type: text/html, 6369 bytes
-                         Set-Cookie: .AspNetCore.Mvc.CookieTempDataProvider=; expires=Thu, 01 Jan 1970
-                         body: "Status Code: 404" + "The subnet with ID 999 could not be found..."
-GET /Error/404        -> 404, SPECIFIC MESSAGE ABSENT: "The resource you requested could not be found."
-
-POST /Subnet/Create (stale token) -> 400, <title>Bad Request - BASTET</title>,
-                                     "The subnet with ID 999 could not be found or may have been deleted."
-GET /Error/403 with the message pending -> 403, "Status Code: 403" + the same sentence.
-
-Control: GET /Subnet (200) does NOT consume it - only a request reaching /Error does.
-Real Chromium, 36 runs: clean=26, wrong-page-printed-it=10, tab-A-lost-it=3.
-Real Chromium, two stale rows in two tabs, 12 trials: 10 crossed.
-```
-
-**Why low.** The text is server-composed from an int id (round 3's B6 removed the query-string source),
-`_ErrorLayout.cshtml:7` Razor-encodes it, and the cookie is `SameSite=lax; httponly` and same-origin - so
-no injection, no cross-user leak. What is left is a misleading diagnostic on the wrong page and a lost one
-on the right page.
-
-**Fix.** Only read the stashed message when the request really is the explicit redirect, not the
-automatic re-execute. With `using Microsoft.AspNetCore.Diagnostics;`:
-
-```csharp
-string? errorMessage = HttpContext.Features.Get<IStatusCodeReExecuteFeature>() is null
-    ? TempData["ErrorPageMessage"] as string
-    : null;
-```
-
-Built and measured: 0 warnings, **716/716**, the interleaved `/css/nope.css` and antiforgery-400 pages
-render their own generic text and the message survives to `/Error/404`, the intended redirect path is
-unchanged, and as a bonus the patched re-execute emits no `Set-Cookie` at all, closing the silent-delete
-variant. Unit tests are unaffected because `DefaultHttpContext` carries no such feature.
-
-**Verifier correction - INCOMPLETE, and the interim is unsupported.**
-
-1. **Redirect-vs-redirect collisions are not covered**, because neither request carries the feature.
-   Measured on the *patched* build: `GET /Subnet/Edit/999` (stashes) then `GET /Azure/BulkImport` ->
-   `/Error/403` (overwrites with *"Azure Import feature is not enabled"*); `/Error/404` then renders the
-   Azure sentence and `/Error/403` renders the generic default. Same wrong output, after the fix. This is
-   also the 10-of-12 real-browser path, i.e. the fix misses the variant an operator is most likely to hit.
-   Direct navigation to `/Error/{code}` likewise still consumes a pending message.
-2. **The "cheaper interim" (ship a `wwwroot/favicon.ico`) is not supported by measurement.** `/favicon.ico`
-   does 404 with a 6348-byte HTML page, but real headless Chromium issued **zero** favicon requests across
-   ~40 navigations, and a favicon fetch is triggered by a document that has already loaded - i.e. after the
-   ~1 ms window, never inside it. Keep it only as *"removes one stray 404"*, never as *"removes the most
-   common thief"*.
-3. Side effect worth stating rather than discovering: because re-executes no longer flush the key, an
-   abandoned message now survives strictly longer. It is never rendered wrongly, so this is not a
-   regression.
-
-The change that closes the whole class is making the message request-scoped instead of session-scoped -
-answering in place from the eleven sites rather than round-tripping a diagnostic through a single-slot
-browser cookie. That is the round-9 watch-list item, and it subsumes all three variants.
+_Not done, on the finding's own evidence: no `wwwroot/favicon.ico` — real headless Chromium issued
+zero favicon requests across ~40 navigations, and a favicon fetch lands after the document has already
+consumed the message. The round-9 watch-list item about answering in place from the eleven sites
+rather than round-tripping through a cookie remains the larger structural change; this closes all
+three observed variants without restructuring eleven actions' return types for a low-severity finding._
 
 ---
 

@@ -19,8 +19,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
         // Count all descendants (not just direct children)
@@ -124,8 +123,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
         // Begin a transaction to ensure data consistency
