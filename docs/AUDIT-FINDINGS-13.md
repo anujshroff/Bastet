@@ -8,7 +8,7 @@
 | Build | **0 warnings, 0 errors** |
 | Tests | **738 passed**, 0 failed, 0 skipped |
 | Date | 2026-08-02 |
-| Status | **2 fixed** (M1 high, M2 low), **1 open** — 1 info |
+| Status | **all 3 fixed** — M1 high, M2 low, M3 info |
 
 > **Post-round amendment (2026-08-02, by the repository owner).** `M1` was filed by this round at
 > **medium** and has been **re-rated HIGH**, and it is **to be fixed, not deferred again**. The round's
@@ -293,101 +293,66 @@ browser._
 
 ## M3 — Azure import re-appends the "fully allocated" note to the target's Description on every run, so a wizard → un-mark → wizard cycle persists the same sentence N times
 
-**Severity:** Info  **Tag:** `[x1]`  **Beat:** 5
-**File:** `src/Bastet/Controllers/SubnetController.Azure.cs:85`
-(callers: `SubnetController.Azure.cs:370`, `SubnetController.BulkAzure.cs:417`)
+_M3 is fixed and committed. The note is now written at most once, and clearing the flag removes it._
 
-**Confidence:** **confirmed.** Four cycles driven through the shipped forms and the persisted column
-read back.
+_**What was done — the finder's proposal was corrected before it was built, on both points the
+verifier raised.** The note logic moved out of `SubnetController.Azure.cs` into a new
+`Bastet.Services.FullyAllocatedNote` with `For`, `Strip` and `Append`, because the un-mark path needs
+the same strip and a private controller method could not be shared or tested.
+`AppendFullyAllocatedNote` is now a one-line delegation and keeps its signature, so its two callers
+(`SubnetController.Azure.cs:370`, `SubnetController.BulkAzure.cs:417`) are unchanged._
 
-**Failure scenario.** Azure VNet `rig-13-b5b-vnet` (10.99.0.0/24) has one subnet `rig-13-b5b-sn` whose
-prefix is the whole VNet prefix, so `GetCompatibleSubnets` returns it with
-`FullyEncompassesVNetPrefix=true`. Bastet subnet 10.99.0.0/24 exists. Running `/Azure/Import/{id}` and
-importing sets `IsFullyAllocated=1` and
-`Description = AppendFullyAllocatedNote(null, 'rig-13-b5b-sn')` (91 chars). The Details page's own
-*Mark as Not Fully Allocated* form (`Views/Subnet/Details/_HostIpAssignments.cshtml:102`, POST
-`HostIp/SetAllocationStatus`) clears the flag but leaves the note. `/Azure/Import/{id}` is now
-reachable again (no children, no host IPs, not fully allocated), so the same import runs again — and
-`AppendFullyAllocatedNote` has **no idempotence check** (`:94` is a bare
-`string combined = $"{existingDescription}\n{note}"`), so it concatenates the identical sentence again.
+_`Strip` removes any line that **both** starts with `Fully allocated by Azure subnet '` and ends with
+`' which encompasses the entire address space.`, ordinal and whole-line after trimming. The finder's
+alternative — a loose pattern matching "the shape" of the note — was **not** used: it can delete
+operator-authored text and would break the helper's own documented contract that existing text is
+never sacrificed. Four `[Theory]` cases pin that, including
+`"Fully allocated by Azure subnet 'sn' which encompasses the entire address space, per ticket 42."`,
+which a loose match would have destroyed and which is kept verbatim. Anchoring both ends also closes
+the gap the verifier found in the finder's own version: exact equality against the *current* note
+misses a note written before the Azure subnet was renamed, so two distinct notes accumulated._
 
-**Wrong state** after four ordinary UI cycles: `Description` is the same 91-char sentence four times
-separated by newlines (367 chars) on a row whose `IsFullyAllocated` is **0** — the description asserts
-*"Fully allocated by Azure subnet 'rig-13-b5b-sn' which encompasses the entire address space."* four
-times about a subnet that is not fully allocated. Growth is bounded only by the 1000-char cap (~10
-repeats), after which the helper silently discards the note. `SubnetController.BulkAzure.cs:417` calls
-the same helper, so the bulk wizard has the identical write.
+_**The un-mark mirror was required, not "ideally", and is built.** `HostIpController.SetAllocationStatus`
+(`HostIpController.cs:735`) now strips the note when it clears the flag, nulling the column if nothing
+else remains. Without it the finding's own scenario still ends with a description asserting
+"fully allocated by Azure subnet ..." about a row whose `IsFullyAllocated` is 0._
 
-**Reproduction — ran it.** Own app on 127.0.0.1:5273 (PID 442252), own catalog `bastet_rig13_v7c`,
-SP A. Reused the existing fixture read-only; created no new Azure resource.
+_**The overflow contract is unchanged and is now better.** If the deduped text plus the note still
+exceeds `MaxSubnetDescriptionLength` the note is dropped and the existing text kept whole, exactly as
+before — overflowing the column fails the insert and rolls back the whole import behind a generic
+error. Because stripping happens first, a description that used to overflow can now fit: pinned by a
+test where 850 characters of operator text plus three stacked notes exceeds the cap and, after the
+strip, the text plus one note does not._
 
-1. Real ARM through the app:
-   `GET /Azure/GetSubnets?vnetResourceId=…/rig-13-b5b-vnet&subnetId=1` →
-   `{"success":true,"subnets":[{"name":"rig-13-b5b-sn","addressPrefix":"10.99.0.0/24","hasMultipleAddressSchemes":false,"fullyEncompassesVNetPrefix":true}]}`
-2. Four cycles of the exact form `_SubnetList.cshtml` posts, each followed by the Details page's own
-   un-mark form, both with a live `__RequestVerificationToken` scraped from the rendered page:
-
-```
-cycle 1: importpage=200 import=302->/Subnet/Details/1 unmark=302 dblen|flag=91|0
-cycle 2: importpage=200 import=302->/Subnet/Details/1 unmark=302 dblen|flag=183|0
-cycle 3: importpage=200 import=302->/Subnet/Details/1 unmark=302 dblen|flag=275|0
-cycle 4: importpage=200 import=302->/Subnet/Details/1 unmark=302 dblen|flag=367|0
-```
-
-3. The persisted row (`sqlcmd … -d bastet_rig13_v7c`, newlines rendered as `<NL>`):
+_**Proved by A/B on a live fixture, not by reading.** Azure VNet `rec13-fa` (10.46.0.0/24) whose only
+subnet `rec13-fa-sn` covers the whole VNet prefix, so `GetSubnets` returns it with
+`fullyEncompassesVNetPrefix: true`. Four cycles of the real import form followed by the Details page's
+own **Mark as Not Fully Allocated** form, each with a live antiforgery token, against SQL Server 2022
+and live ARM. Unfixed build was a clone at `ec9c866` on port 5402/catalog `bastet_rec13_m3`; fixed on
+5401/`bastet_rec13`:_
 
 ```
-1 | rig-13-b5b-vnet | full=0 | len=367 |
-Fully allocated by Azure subnet 'rig-13-b5b-sn' which encompasses the entire address space. <NL>
-(same sentence) <NL> (same sentence) <NL> (same sentence)
+after 4 import -> un-mark cycles     IsFullyAllocated   DescLen
+  unfixed (ec9c866)                        0             359      <- 4 x 89 chars + 3 newlines
+  fixed                                    0               0      <- Description is NULL
+fixed, one import with no un-mark          1              89      <- exactly one note, append works
 ```
 
-+92 bytes per repeat, on a row whose `IsFullyAllocated` is 0. Instance killed by captured PID 442252,
-catalog dropped, `git status --porcelain` empty.
+_359 characters of the identical sentence four times on a row that is not fully allocated, versus
+nothing. The middle row is the finding; the bottom row is the guard that the fix did not simply stop
+writing the note._
 
-**Fix — the finder's proposal was corrected.** The core idea (dedupe before append) is right, but as
-written it had one unsound branch and one gap.
+_**Tests: 754 → 771** (+17), the first coverage `AppendFullyAllocatedNote` has ever had — the finding
+noted it had none. They pin idempotence across four appends, the renamed-Azure-subnet case, operator
+text surviving repeated appends, the four look-alike prose strings that must **not** be stripped,
+`Strip` clearing several stacked notes (the state existing rows are already in), both overflow
+branches, and the first-import case. `dotnet build --no-incremental`: 0 warnings._
 
-> **Unsound branch, removed.** The original offered, as an alternative, stripping lines *"matching the
-> `Fully allocated by Azure subnet '…' which encompasses the entire address space.` shape"* via a loose
-> pattern. That can delete operator-authored text and breaks the helper's own documented contract at
-> `:79-84` (*"Existing text is never sacrificed for the note"*). **Do not use a loose shape match.**
->
-> **Gap.** Exact-line equality against the *current* note alone does not dedupe a note written for a
-> differently-named Azure subnet (rename the Azure subnet between cycles and two distinct notes
-> accumulate), and it leaves the note asserting a state the row no longer has.
-
-Corrected fix, minimal and safe:
-
-1. In `AppendFullyAllocatedNote`, split `existingDescription` on `\n` and drop any line that **both**
-   starts with the literal `"Fully allocated by Azure subnet '"` **and** ends with the literal
-   `"' which encompasses the entire address space."` (ordinal, whole line — narrow enough that operator
-   prose cannot collide, wide enough to catch a renamed Azure subnet). Re-join, then append once.
-2. Keep the overflow contract unchanged: if the deduped-plus-note string still exceeds
-   `MaxSubnetDescriptionLength`, return the deduped existing description rather than truncating
-   mid-note. Dedupe alone already frees ~92 bytes per stale copy, so this is strictly better than today.
-3. Give `HostIpController.SetAllocationStatus` the mirror when it clears the flag: apply the same
-   line-strip to `subnet.Description` so the row stops asserting fully-allocated after an un-mark. The
-   finder listed this as *"ideally"*; it is **required** — without it the finding's own scenario still
-   ends with a stale sentence.
-4. Both call sites are fixed by (1) since they share the helper; factor the strip into a private static
-   so (3) can reuse it.
-
-This is pinnable by ordinary unit tests on the helper — no rendered-view seam needed — which is worth
-doing, since the suite has **no coverage of `AppendFullyAllocatedNote` at all**.
-
-**Cheaper interim — one line.** In `AppendFullyAllocatedNote`, before building `combined`:
-`if (existingDescription is not null && existingDescription.Contains(note, StringComparison.Ordinal)) return existingDescription;`
-Stops the duplication with no change to first-import behaviour and no change to either call site.
-
-**Why Info and not Low.** `docs/AUDIT-FINDINGS-10.md:533` already records the sibling half verbatim as
-a residue of a round-10 kill — *"after un-flagging, the appended note … stays in the description
-(`DescLen 91` with `IsFullyAllocated=0`)"* — which establishes append-and-preserve as deliberate
-design. What is new here is that the append is not **idempotent**, so the residue accumulates. That is
-real but strictly cosmetic and self-limiting: bounded by the 1000-char cap, after which the helper
-correctly drops the note and keeps existing text; no operator-authored text is ever destroyed (a
-pre-existing 950-char description makes `combined.Length > 1000` on the very first import, so nothing
-accumulates); and no count, validation or reconcile decision reads `Description`.
+_**Not done, deliberately.** The one-line interim (`existingDescription.Contains(note)`) was not used:
+it is subsumed by the strip and would not have handled the renamed-subnet case. Nothing was done about
+descriptions **already** carrying stacked notes from before this fix — no migration, no backfill. They
+are cosmetic, `Strip` removes every one of them the next time either path touches the row, and a data
+migration rewriting operator-visible free text is a far larger risk than the residue it would tidy._
 
 ---
 

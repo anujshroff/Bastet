@@ -83,23 +83,13 @@ public partial class SubnetController : Controller
     /// IsFullyAllocated flag already records, and overflowing the column fails the insert and rolls
     /// back the entire import behind a generic error. Existing text is never sacrificed for the note.
     /// </summary>
-    private static string AppendFullyAllocatedNote(string? existingDescription, string? azureSubnetName)
-    {
-        string note = $"Fully allocated by Azure subnet '{azureSubnetName}' which encompasses the entire address space.";
-
-        if (string.IsNullOrEmpty(existingDescription))
-        {
-            return Truncate(note);
-        }
-
-        string combined = $"{existingDescription}\n{note}";
-        return combined.Length <= MaxSubnetDescriptionLength
-            ? combined
-            : Truncate(existingDescription);
-
-        static string Truncate(string value) =>
-            value.Length > MaxSubnetDescriptionLength ? value[..MaxSubnetDescriptionLength] : value;
-    }
+    /// <remarks>
+    /// Any earlier note is removed first. The wizard is reachable again after the Details page's own
+    /// "Mark as Not Fully Allocated", so without that an ordinary import - un-mark - import cycle
+    /// concatenated the identical sentence once per pass.
+    /// </remarks>
+    private static string AppendFullyAllocatedNote(string? existingDescription, string? azureSubnetName) =>
+        FullyAllocatedNote.Append(existingDescription, azureSubnetName, MaxSubnetDescriptionLength);
 
     // POST: Subnet/BatchCreateChildSubnets
     /// <param name="isAzureImport">
