@@ -8,7 +8,54 @@
 | Build | **0 warnings, 0 errors** |
 | Tests | **738 passed**, 0 failed, 0 skipped |
 | Date | 2026-08-02 |
-| Status | **all 3 fixed** — M1 high, M2 low, M3 info |
+| Status | **RECONCILED — all 3 fixed**, M1 high, M2 low, M3 info |
+
+## Reconciliation — final state
+
+| | Value |
+|---|---|
+| Build after clean rebuild (`bin`/`obj` deleted, `--no-incremental`) | **0 warnings, 0 errors** |
+| Tests | **771 passed**, 0 failed, 0 skipped (baseline 738, **+33**, none removed) |
+| Commits | `bbf8e42` M1, `ec9c866` M2, `950f838` M3 — one finding each |
+| `main` | unmoved at `78fc4c9` throughout |
+
+**Final sweep — clean.** 20 major areas requested against the real app on SQL Server 2022, asserting
+rendered content and page titles rather than status codes: home, subnet list/details/create/edit/delete,
+purge-deleted-subnets, deleted subnets, host IPs (all, per subnet, create, deleted, purge), all-deleted
+host IPs, all three Azure wizards, and a 404. Security headers (`X-Content-Type-Options`,
+`Referrer-Policy`, `Content-Security-Policy: frame-ancestors 'none'`) present on both a 200 and a 404.
+Application log carried **no `fail:` lines**; the only `warn:` lines were two EF Core
+`MultipleCollectionIncludeWarning` advisories from the pre-existing double-`Include` in
+`SubnetController.Delete.cs`, triggered by requesting the delete-confirm page and untouched by this
+round.
+
+**Both Azure surfaces driven end to end against live ARM**, including the two counter-tests that prove
+the reconciler *discriminates* rather than merely blocking — checking only one would let an
+over-blocking regression pass silently:
+
+- a genuinely deleted VNet was still **offered and deletable** (`VNetDeleted` + `SubnetDeleted`,
+  committed: `targetsDeleted:1, subnetsArchived:2`);
+- a Bastet row linked to a resource in the second resource group, which the running credential has no
+  assignment on, was **withheld and named**: *"…Azure denied access when asked about them directly …
+  They have been withheld from deletion: 'hidden-linked'."*
+
+Bulk import was driven preview-to-commit on a multi-prefix subnet (`createdChildSubnets: 2`), and the
+single-VNet wizard likewise, so both commit paths are covered rather than just the one M1 was filed
+against.
+
+**Deliberately not done** — each recorded in full in the relevant struck entry:
+
+- **M2's server-side half.** `BulkDeleteStaleAzureSubnets` still reports `success:true` when every
+  requested id resolved to null. Returning a 409 there would turn an honest out-of-band concurrent
+  delete into an error *after* a committed transaction. The client guard closes both reachable routes;
+  the underlying absence of an idempotency token stays on the watch list.
+- **No backfill for descriptions already carrying stacked notes.** `Strip` clears them the next time
+  either path touches the row; a data migration rewriting operator-visible free text is a larger risk
+  than the residue it would tidy.
+- **M1's two interim mitigations** are moot now that no prefix is dropped; building either would leave
+  dead advisory code.
+- **No browser test ships for M2.** The suite has no Playwright seam and the rig rules forbid adding
+  scaffolding to the repo for one finding; the measurements in the struck entry are the record.
 
 > **Post-round amendment (2026-08-02, by the repository owner).** `M1` was filed by this round at
 > **medium** and has been **re-rated HIGH**, and it is **to be fixed, not deferred again**. The round's
