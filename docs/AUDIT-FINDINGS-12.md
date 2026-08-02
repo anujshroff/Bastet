@@ -4,10 +4,76 @@
 |---|---|
 | Round | **12** (finding letter **L** - findings are `L1` ... `L4`, numbered sequentially across the whole file) |
 | Branch | `audit/round-12` |
-| HEAD | `e03ae51` - *"Audit 11 Cleanup (#156)"* |
-| Build | **0 warnings, 0 errors** |
-| Tests | **738 passed**, 0 failed, 0 skipped |
+| HEAD at audit time | `e03ae51` - *"Audit 11 Cleanup (#156)"* |
+| Build | **0 warnings, 0 errors** (clean rebuild with `bin`/`obj` deleted, after reconciliation) |
+| Tests | **738 passed**, 0 failed, 0 skipped - unchanged from the audit baseline |
 | Date | 2026-08-02 |
+| **Status** | **All 4 findings reconciled**, one commit each, `L1`-`L4` struck below |
+
+## Reconciliation
+
+All four are fixed and committed on this branch, in numeric order, one commit per finding:
+
+| | Commit | |
+|---|---|---|
+| `L1` | `ca8ed15` | Re-lock the bulk import selection step when the Azure subscription changes |
+| `L2` | `99aefc0` | Hide Add Child Subnet from users without the Edit role |
+| `L3` | `3e48edb` | Keep the Select All checkbox in step with the rows in the import and reconcile wizards |
+| `L4` | `490f337` | Stop the bulk import commit step re-arming once a commit has run |
+
+Every fix is view-only: four `.cshtml` files, no controller, service, model or migration changed. **The
+test count is therefore unchanged at 738 and no test was added** - this repo has no rendered-view test
+seam (see `R6`), so none of these four can be pinned by a unit test. Each was instead proved in real
+Chromium against the real published application and real ARM, before and after, on separate ports and
+catalogs.
+
+**The audit's judgement that its own fixes needed correcting held up.** `L1`'s proposed one-liner was
+rebuilt here rather than taken on the verifiers' word and reproduced the regression they reported, so
+the change-handler variant was taken instead; `L3` shipped with both gaps closed, including the
+reconcile sibling the watch list carried; `L4`'s cheaper interim was declined after its pill route was
+measured. Only `L2` was applied as proposed.
+
+### Final sweep
+
+- Clean rebuild with `bin`/`obj` removed: **0 warnings, 0 errors**. Full suite: **738 passed**.
+- All **17 major areas** requested against real SQL Server, asserted on rendered content and `<title>`,
+  not on HTTP 200: subnet list/create/details/edit/delete, deleted subnets, purge, host IPs,
+  all-deleted-host-IPs, both purge screens, all three Azure wizards, roles, error page. All correct.
+  Security headers still ride on an ordinary 200 (`nosniff`, `strict-origin-when-cross-origin`,
+  `frame-ancestors 'none'`, `DENY`, `no-store`), and `/Subnet/Details/999999` renders a 404 with no
+  *"Status Code: 0"*.
+- **Both Azure surfaces driven end to end against live ARM**: subscriptions -> VNet/subnet discovery ->
+  single-VNet import (2 children, parent renamed) -> bulk preview and commit -> reconcile scan ->
+  delete commit.
+- **Both reconciler counter-tests pass**, which is what proves it discriminates rather than merely
+  blocks. A catalog was built with rows of two provenances - `rig-vnet-hidden` and its two children
+  stamped by **SP_B** in a resource group **SP_A** cannot see, and `rig-vnet-bulk` and its three
+  children stamped by SP_A and then genuinely deleted from ARM. Scanning as SP_A: the four deleted rows
+  were **offered and deleted** (archived to `DeletedSubnets`), while the three invisible rows were
+  **withheld and named on screen** - *"3 Azure-linked subnet(s) were missing from the subscription
+  listing, and Azure denied access when asked about them directly ... withheld from deletion:
+  'rig-vnet-hidden', 'rig-sub-db', 'rig-sub-mgmt'."* The three live rows were offered for nothing.
+- **Log triage: zero `fail:` lines and no unhandled exception across every sweep run.** Four warning
+  classes, all accounted for: `AzureService[0]` 403s are the withhold path logging **by design** - the
+  expected output of a deliberate permission-denied probe, not an error; EF `Transaction[30004]`
+  (savepoints disabled under MARS) and DataProtection `XmlKeyManager[35]` (no XML encryptor) are rig
+  artifacts of the harness connection string and environment; EF `Query[20504]`
+  (`MultipleCollectionInclude`) is pre-existing and known.
+- `git status` clean, no scaffolding in any commit, **`main` untouched at `e03ae51`**.
+
+### Deliberately not done
+
+- **No test was added for any of the four.** Adding a rendered-view seam (`WebApplicationFactory` or an
+  `IRazorViewEngine` harness) is a real gap this round re-confirms, but standing one up is a change to
+  the test project's architecture and is out of scope for four view fixes.
+- **`L1`'s multi-subscription gap is not closed.** The rig principal lists exactly one subscription, so
+  the second dropdown row still has to be supplied in the browser. The fix is sound for the mechanism,
+  but a genuinely multi-subscription credential has never exercised this wizard.
+- **`L4`'s two residues are left**, both recorded in its struck entry: re-previewing *while* a commit is
+  in flight needs one extra Back-and-Continue once the response lands, and step 4 still hides the
+  success panel on re-entry.
+- **Nothing in the refuted table was revisited**, and no watch-list item other than the reconcile
+  sibling was acted on.
 
 ## Verdict
 
@@ -263,12 +329,12 @@ re-deriving them.
 
 **Code**
 
-- **Reconcile wizard carries `L3` verbatim and is unfixed.** `_ReconcileScripts.cshtml`: master
-  `#rec-select-all` (`:316-320`) propagates with `.prop()`, the delegated `.rec-item-checkbox` handler
-  (`:311-314`) never recomputes it, and the only reset is `:292` on re-scan. Reproduced live with two
-  genuinely stale Azure-linked rows: master ticked over an empty selection, Select All click selects 0
-  rows. This is the only Azure-driven DELETE path. It was found as a sibling during verification, not
-  filed separately - fix it alongside `L3`.
+- ~~**Reconcile wizard carries `L3` verbatim and is unfixed.**~~ **Resolved during reconciliation** -
+  fixed in the same commit as `L3`, as this entry asked. `_ReconcileScripts.cshtml` gained
+  `syncRecSelectAll()` on the delegated `.rec-item-checkbox` handler and an `indeterminate` reset
+  beside the existing `#rec-select-all` reset on re-scan. Re-measured against four genuinely stale
+  Azure-linked rows: master no longer ticks over an empty selection, and one click on Select All
+  selects all four.
 - **`SubnetController.BulkAzure.cs:199-201` states something false.** "because then it produced no
   items" is true only for the step-1 parse/validate early return (`AzureBulkImportPlanner.cs:121-125`);
   the four detectors at `:130, :131, :145, :146` leave `plan.Items` fully populated. Comment accuracy
