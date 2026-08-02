@@ -141,114 +141,52 @@ this with; the per-role render matrix above is the verification._
 
 ---
 
-## L3 - Single-VNet import wizard: unticking rows leaves the "Select All Subnets" master ticked, so the next click on it clears the whole selection instead of completing it
+_L3 is fixed and committed with both gaps the verifiers found closed, in one commit. The delegated
+per-row handler now calls a new `syncSelectAllSubnets()`, which recomputes the master from the rows
+(`checked`, plus `indeterminate` for a partial selection); `loadSubnets`' `beforeSend` clears
+`indeterminate` alongside the `checked` reset it already did; and the identical construction in the
+reconcile wizard got the same two changes - `syncRecSelectAll()` on `.rec-item-checkbox`, and an
+`indeterminate` reset beside the existing `#rec-select-all` reset on re-scan._
 
-`[x1]` &nbsp;|&nbsp; **Severity: info** &nbsp;|&nbsp; **Confidence: confirmed**
+_The `checked > 0 &&` conjunct was kept in both, as the finding says: over an empty list `0 === 0`
+would otherwise tick the master. `.prop()` was kept too - it fires no `change` event, so the sync
+cannot re-enter the master's own handler, and this is not the synthetic-event shape round 4's `D1`
+removed._
 
-**Citation:** `src/Bastet/Views/Azure/Import/_ImportScripts.cshtml:124` - the delegated `.subnet-checkbox`
-change handler (`:124-126`) calls only `updateImportButton()`. The master at `:117-121` propagates to
-every row with `.prop()` (which fires no `change`), and the only reset of `#select-all-subnets` anywhere
-in the tree is `loadSubnets`' `beforeSend` at `:264`.
-
-### Failure scenario
-
-On `/Azure/Import/{id}` step 3 the operator ticks "Select All Subnets", then unticks rows. Nothing ever
-recomputes the master, so it stays `checked` over a partial - or empty - selection. Their next click on
-the control labelled "Select All Subnets" *unchecks* it, propagating `false` to every row: zero subnets
-selected, "Import Selected Subnets" disabled.
-
-The wizard already treats this exact staleness as a defect: the comment at `:256-263` records fixing the
-reload variant (round 7's `G10`), in the same words - *"the operator's first click on Select All
-untick[ed] everything instead of selecting it"*. It resets the master in `loadSubnets` only, not on a
-per-row change.
-
-**Scenario correction (both verifiers).** The finding's narrated motive is weak: after Select All then
-unticking one row, every *remaining* row is already selected, so "clicks Select All expecting the
-remaining rows to be selected" has no motive. The motivated and strictly worse path - measured on the
-pristine HEAD reference instance - is the operator unticking rows down to an empty selection. The master
-then asserts "all selected" over **zero** selected rows, and the click on Select All selects 0 rows,
-i.e. the click is a visible no-op. That is the `:256-263` complaint verbatim, reached without a reload.
-
-### Reproduction
-
-Real Chromium against the unmodified HEAD reference instance (subnet `rig-probe-visible` 10.120.0.0/16
--> Azure VNet `rig-vnet-visible`, rows `rig-sub-web` / `rig-sub-app`). Reproduced independently twice.
+_Measured in real Chromium against real ARM on two publishes, unfixed `4a59ddf` and the fix, each on
+its own port and catalog. Single-VNet import wizard, walking the motivated path - untick down to an
+empty selection:_
 
 ```
-E1 fresh                      {master: false, indeterminate: false, rows: [false, false], importDisabled: true}
-E2 Select All ticked          {master: true,  indeterminate: false, rows: [true,  true ], importDisabled: false}
-E3 operator unticks BOTH rows {master: true,  indeterminate: false, rows: [false, false], importDisabled: true}
-     master still renders ticked over an EMPTY selection: True
-E4 operator clicks 'Select All' {master: false, rows: [false, false], importDisabled: true}
-     -> rows selected by that click: 0
-pageerrors: []
+                          BEFORE (HEAD)                      AFTER
+E3 untick both rows   master=True  over 0 rows ticked   master=False  (honest)
+E4 click 'Select All' selected 0 rows  (visible no-op)  selected 2 rows
+P2 untick ONE of two  master=True, indeterminate=False  master=False, indeterminate=True
+P3 re-enter the step  -                                 indeterminate cleared
 ```
 
-The finding's own 1-of-2 sequence reproduces identically (`master_checked: true` over one ticked row,
-`:checked` matches so it *visibly* renders ticked, next click leaves 0 selected).
-
-**No wrong import.** The submit handler at `:399-408` re-derives the disabled flags from current
-checkbox state and `:388` blocks a zero-selection submit; the POST carried only the ticked row. The harm
-is confined to the selection being destroyed. Control leg: an operator who never touches the master gets
-correct behaviour throughout, so the defect requires Select All to have been used first, and one further
-click on the same control fully restores the selection. That bounded, self-correcting consequence is
-why this sits at info rather than at `G10`'s low - info is already the floor, so no further correction
-was available.
-
-### Fix - INCOMPLETE as proposed; both verifiers built it and found two gaps
-
-Proposed: sync the master from the rows inside the delegated per-row handler at `:124-126`:
-
-```js
-$(document).on("change", ".subnet-checkbox", function () {
-    var boxes = $(".subnet-checkbox");
-    var checked = boxes.filter(":checked").length;
-    $("#select-all-subnets")
-        .prop("checked", checked > 0 && checked === boxes.length)
-        .prop("indeterminate", checked > 0 && checked < boxes.length);
-    updateImportButton();
-});
-```
-
-Built, published and driven by both verifiers: 0 warnings / 0 errors, zero pageerrors, and it closes the
-reported defect (partial selection -> master unchecked + indeterminate; next click on Select All ticks
-every row). The deliberate `.prop()` choice is correct and was verified not to re-enter the master's own
-handler - this is **not** the synthetic-event shape round 4's `D1` removed. The `checked > 0 &&`
-conjunct looks redundant but is load-bearing for the empty-list case; keep it.
-
-**Gap 1 - it plants a new stale state of the exact class `:256-263` exists to close.** `indeterminate`
-is now a second piece of master state, and `loadSubnets`' `beforeSend` at `:264` clears `checked` only.
-Measured on the built fix, driving `G10`'s own path (partial selection -> "Back to VNets" -> "Next" with
-the same VNet still chosen, so no `change` fires on `#vnet-select`): the rebuilt list comes back with
-zero rows ticked and the master rendering an indeterminate **dash**.
+_The reconcile sibling was driven with **genuinely stale rows**, not a stub: `rig-vnet-bulk` and its
+three children were bulk-imported so Bastet held rows stamped with live `AzureResourceId`s, then that
+VNet was deleted from ARM, so the scan found four real stale items._
 
 ```
-FIXED build : after re-entry {master: false, indeterminate: TRUE,  rows: [false, false], importDisabled: true}
-HEAD  build : after re-entry {master: false, indeterminate: false, rows: [false, false], importDisabled: true}
+                          BEFORE (HEAD)                      AFTER
+R3 untick every row   master=True  over 0 of 4 ticked   master=False
+R4 click 'Select All' selected 0 rows                   selected 4 rows
+R5 untick 1 of 4      indeterminate=False               indeterminate=True
 ```
 
-Required addition, beside the existing reset at `:264` (applied by content, not line number):
+_Gap 1 is the reason the `beforeSend` line was needed: `indeterminate` is a second piece of master
+state that survives a rebuild of the rows exactly as `checked` does, so the proposed fix on its own
+would have left a dash rendering over a freshly emptied list - a new staleness of the same class the
+comment at that reset exists to close. Gap 2 is the reconcile wizard, which the finding recorded as an
+unfiled sibling; it is the only Azure-driven DELETE path, so it is fixed here rather than deferred, and
+it is removed from the watch list below._
 
-```js
-$("#select-all-subnets").prop("checked", false);
-$("#select-all-subnets").prop("indeterminate", false);
-```
-
-Re-run with that line: re-entry gives `{master: false, indeterminate: false, both rows false}` and one
-click on Select All selects all. `G10`'s behaviour preserved, reported defect still closed, zero
-pageerrors.
-
-**Gap 2 - it misses a sibling call site.** `src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml`
-has the identical construction: master `#rec-select-all` at `:316-320` propagating with `.prop()`, a
-delegated `.rec-item-checkbox` handler at `:311-314` that never recomputes it, and a single reset at
-`:292` on re-scan. Reproduced live with two genuinely stale Azure-linked rows: master stayed ticked over
-an empty selection and the Select All click selected 0 rows. **That is the wizard whose commit is the
-only Azure-driven DELETE path** - fix it in the same commit, with the matching `indeterminate` reset at
-`:292`.
-
-**The finding's rejection of its own cheaper interim is sound and was confirmed by measurement:**
-clearing the master only when a row is unticked leaves it unticked after the operator re-ticks the last
-row - the same lie in the other direction.
+_The finding's rejection of its own cheaper interim was accepted without rebuilding it: clearing the
+master only when a row is unticked leaves it unticked after the operator re-ticks the last row, which
+is the same lie in the other direction. Zero pageerrors in every run. Suite unchanged at **738** -
+no rendered-view test seam exists (see `R6`), so the browser legs are the verification._
 
 ---
 
