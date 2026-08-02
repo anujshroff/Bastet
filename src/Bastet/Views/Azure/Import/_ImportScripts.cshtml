@@ -120,8 +120,22 @@
             updateImportButton();
         });
         
+        // Nothing recomputed the master from the rows, so unticking rows left it asserting
+        // "all selected" over a partial - or empty - list, and the operator's next click on
+        // Select All unticked everything instead of selecting it. .prop() fires no change
+        // event, so this cannot re-enter the master's own handler above. The `checked > 0 &&`
+        // conjunct is not redundant: over an empty list 0 === 0 would tick the master.
+        function syncSelectAllSubnets() {
+            let boxes = $(".subnet-checkbox");
+            let checked = boxes.filter(":checked").length;
+            $("#select-all-subnets")
+                .prop("checked", checked > 0 && checked === boxes.length)
+                .prop("indeterminate", checked > 0 && checked < boxes.length);
+        }
+
         // Update import button state when subnet checkboxes change
         $(document).on("change", ".subnet-checkbox", function() {
+            syncSelectAllSubnets();
             updateImportButton();
         });
         
@@ -261,7 +275,10 @@
                     // list, and made the operator's first click on Select All untick everything
                     // instead of selecting it. Resetting here rather than beside $list.empty()
                     // also covers the no-subnets and error branches.
-                    $("#select-all-subnets").prop("checked", false);
+                    // indeterminate is a second piece of master state and survives the rebuild
+                    // just like `checked` does, so clearing only `checked` would leave the master
+                    // rendering a dash over a freshly emptied list.
+                    $("#select-all-subnets").prop("checked", false).prop("indeterminate", false);
                     $("#import-subnets-btn").prop("disabled", true);
                 },
                 success: function(result) {

@@ -289,7 +289,9 @@
             });
             $("#rec-review-section").toggleClass("d-none", reviewItems.length === 0);
 
-            $("#rec-select-all").prop("checked", false);
+            // Clear indeterminate too: a re-scan rebuilds the rows, and the dash would otherwise
+            // survive onto a selection that is now empty.
+            $("#rec-select-all").prop("checked", false).prop("indeterminate", false);
             updateGoConfirmBtn();
             // A re-scan clears the selection, so anything already confirmed refers to the old plan.
             invalidateConfirmation();
@@ -308,7 +310,20 @@
             $("#rec-go-confirm-btn").prop("disabled", selectedIds().length === 0);
         }
 
+        // Same staleness the import wizard had: nothing recomputed the master from the rows, so
+        // it kept asserting "all selected" over an emptied selection and the next click on it
+        // selected nothing. .prop() fires no change event, so this cannot re-enter the master's
+        // own handler. The `checked > 0 &&` conjunct guards the empty-list case.
+        function syncRecSelectAll() {
+            let boxes = $(".rec-item-checkbox");
+            let checked = boxes.filter(":checked").length;
+            $("#rec-select-all")
+                .prop("checked", checked > 0 && checked === boxes.length)
+                .prop("indeterminate", checked > 0 && checked < boxes.length);
+        }
+
         $(document).on("change", ".rec-item-checkbox", function () {
+            syncRecSelectAll();
             updateGoConfirmBtn();
             invalidateConfirmation();
         });
