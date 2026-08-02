@@ -8,7 +8,7 @@
 | Build | **0 warnings, 0 errors** |
 | Tests | **738 passed**, 0 failed, 0 skipped |
 | Date | 2026-08-02 |
-| Status | **1 fixed** (M1, high), **2 open** — 1 low, 1 info |
+| Status | **2 fixed** (M1 high, M2 low), **1 open** — 1 info |
 
 > **Post-round amendment (2026-08-02, by the repository owner).** `M1` was filed by this round at
 > **medium** and has been **re-rated HIGH**, and it is **to be fixed, not deferred again**. The round's
@@ -206,141 +206,86 @@ encompassing path cannot now be reached with siblings from one Azure subnet._
 
 ## M2 — Round 12's `L4` double-commit guard was applied only to the bulk-import wizard; the reconcile delete wizard, edited in the same commit for `L3`, still re-arms its Confirm Delete button mid-flight
 
-**Severity:** Low  **Tag:** `[x1]`  **Beat:** 6
-**File:** `src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:76`
-(supporting: `:14`, `:345-408`, `:410`, `:416`, `:435-442`, `:453`, `:489`;
-server: `SubnetController.AzureReconcile.cs:78-93`, `:144-149`, `:193-204`)
+_M2 is fixed and committed. The reconcile delete wizard now carries the same in-flight guard `L4` gave
+the bulk-import wizard, so neither re-arm route can fire a second DELETE._
 
-**Confidence:** **confirmed.** Both re-arm routes driven end to end on the HEAD build, and the fix
-built and re-run on a patched scratch copy.
+_**What was done**, exactly as the finding proposed — it was assessed sound and needed no correction.
+`_ReconcileScripts.cshtml` gains a module-scope `deleting` flag beside `confirmedIds`; `beforeSend`
+sets it; `complete` clears it and then calls `refreshDeleteButton()`; and the single choke point at
+`refreshDeleteButton` became `deleting || !hasSnapshot || !confirmed`. Both re-arm routes run through
+`refreshDeleteButton`, so that one conjunct closes both. No `committed`-style flag was added: the
+button is already `.addClass("d-none")`'d on success, so the post-success re-enable is unreachable by
+a click — confirmed by reading, and by the `hidden` field captured in every run below._
 
-**Failure scenario.** Round 12's `L4` added `committing`/`committed` to `_BulkScripts.cshtml` so
-re-entering step 4 cannot fire a second commit. The same commit (`78fc4c9`) also edited
-`_ReconcileScripts.cshtml` for `L3` but left the identical re-arm in the only Azure-driven DELETE path.
-`refreshDeleteButton()` (`:73-77`) gates `#rec-confirm-delete-btn` on `confirmedIds` + the typed word
-only — **no in-flight flag** — and it is reachable from two ordinary handlers while a delete POST is
-still running: `$("#rec-confirmation").on("input", refreshDeleteButton)` (`:410`) and the
-`#rec-go-confirm-btn` rebuild (`:345-408`). `beforeSend` (`:435`) disables the button but sets no flag,
-so anything that calls `refreshDeleteButton` re-enables it.
-
-Concrete inputs: an Admin imports Azure VNet `rig-13-b6p2-vnet` (10.171.0.0/16 + child
-`rig-13-b6p2-sn-a` 10.171.0.0/24); the VNet is then deleted in Azure. On */Azure/Reconcile* the
-operator scans, ticks the stale row, types `approved`, clicks Confirm Delete.
-`POST /Subnet/BulkDeleteStaleAzureSubnets` runs a **live ARM re-scan before it touches the DB**, so it
-is in flight for ~0.7 s on the rig and multi-second against a real subscription. While the spinner is
-up the operator either **(a)** clicks Back to Review, unticks/re-ticks, Next, retypes `approved`,
-Confirm Delete, or **(b)** simply presses one key and Backspace in the confirmation box. Either
-re-arms the button and a second identical DELETE is posted.
-
-**Wrong output.** The second request's ARM re-scan overlaps the first request's transaction, so its
-`stillStale` map is built *before* the rows are archived and it does **not** hit the 409 at
-`SubnetController.AzureReconcile.cs:80-92`. It queues on `_localGate`, finds every
-`context.Subnets.FindAsync(id)` returns null (`:143-148`), skips them all, and returns
-**HTTP 200 `{"success":true,"targetsDeleted":0,"subnetsArchived":0}`**. That response lands last, so
-its `TempData["SuccessMessage"]` (`:193-195`) overwrites the first one. The operator is redirected to
-*/Subnet* and reads **"Azure reconcile: deleted 0 stale subnet(s), archiving 0 subnet(s) and 0 host IP
-assignment(s) in total."** while `DeletedSubnets` in fact holds both archived rows. This is strictly
-worse than the `L4` case round 12 fixed: there the server *refused* the second attempt; here it accepts
-it and reports a destructive operation as a no-op.
-
-This is not a narrow race. The two requests are ~50 ms apart while the ARM leg is ~700 ms, so the
-200/zero outcome is the **normal** result of a double submit here — it happened on every run.
-
-**Reproduction — ran it.** App on 127.0.0.1:5317, catalog `bastet_rig13_verc2`, SP A,
-Playwright/Chromium, live ARM.
-
-Fixture built for real:
+_**Reproduced first, on the HEAD build, before anything was changed.** Fixture: Azure VNet
+`rec13-stale` (10.42.0.0/16, child `rec13-stale-sn` 10.42.1.0/24) created, imported through the real
+wizard, then deleted in Azure so both Bastet rows went stale. Chromium via Playwright, app on
+127.0.0.1:5401 against SQL Server 2022, live ARM. Route (b), one keystroke plus Backspace:_
 
 ```
-az network vnet create -g bastet-visible -n rig-13-c2ver-vnet \
-  --address-prefixes 10.181.0.0/16 --subnet-name rig-13-c2ver-sn-a --subnet-prefixes 10.181.0.0/24
-# two Azure-linked Bastet rows seeded with those exact ARM ids, then:
-az network vnet delete -g bastet-visible -n rig-13-c2ver-vnet   -> DELETED
+K2 1.432 {'delDisabled': True,  'progressHidden': False}     <- delete in flight
+K4 1.454 {'delDisabled': False, 'progressHidden': False}     <- RE-ARMED, still in flight
+K5 1.482 SECOND CLICK SENT
+REQ  1.432 BulkDeleteStaleAzureSubnets
+REQ  1.481 BulkDeleteStaleAzureSubnets                        <- 49 ms apart
+RESP 2.450 200 {"targetsDeleted":1,"subnetsArchived":2,"hostIpsArchived":0}
+RESP 2.450 200 {"targetsDeleted":0,"subnetsArchived":0,"hostIpsArchived":0}
 ```
 
-Route **(b)** — one keystroke plus Backspace, no navigation, HEAD build:
+_and the database immediately after, showing the response the operator sees is the false one:_
 
 ```
-S2 2.447 stale rows: ['1', '2'] ['rig-13-c2ver-vnet', 'rig-13-c2ver-sn-a']
-K1 2.555 first click sent
-K2 2.558 {'delDisabled': True,  'progressHidden': False}
-K3 2.562 typed "x":  {'delDisabled': True,  'confirmVal': 'approvedx'}
-K4 2.565 Backspace:  {'delDisabled': False, 'progressHidden': False, 'confirmVal': 'approved'}
-K5 2.604 SECOND CLICK SENT
-(2.555, 'REQ',  'BulkDeleteStaleAzureSubnets')
-(2.604, 'REQ',  'BulkDeleteStaleAzureSubnets')
-(3.333, 'RESP', 200, '{"success":true,"redirectUrl":"/Subnet","targetsDeleted":1,"subnetsArchived":2,"hostIpsArchived":0}')
-(3.408, 'RESP', 200, '{"success":true,"redirectUrl":"/Subnet","targetsDeleted":0,"subnetsArchived":0,"hostIpsArchived":0}')
-K8 landed message: Azure reconcile: deleted 0 stale subnet(s), archiving 0 subnet(s) and 0 host IP assignment(s) in total.
-pageerrors: []
+live=4      DeletedSubnets: 5|rec13-stale|10.42.0.0|16
+                            6|rec13-stale-sn|10.42.1.0|24
 ```
 
-Route **(a)** — Back to Review → untick/re-tick → Next → retype → Confirm, HEAD build:
+_Two rows archived while the last response reported zero._
+
+_**Both routes then re-run against the fixed build**, each on its own fresh live fixture rather than a
+replay:_
 
 ```
-A3 2.088 {'delDisabled': True,  'progressHidden': False}
-A4 2.122 Back to Review:       {'delDisabled': True,  'progressHidden': False}
-A5 2.187 untick+retick:        {'delDisabled': True,  'progressHidden': False}
-A6 2.225 re-confirmed+retyped: {'delDisabled': False, 'progressHidden': False}   <- re-armed, delete still in flight
-A7 2.255 SECOND CLICK SENT
-RESP 2.800 200 targetsDeleted:1 subnetsArchived:2
-RESP 2.830 200 targetsDeleted:0 subnetsArchived:0
-A10 landed: deleted 0 stale subnet(s), archiving 0 subnet(s) and 0 host IP assignment(s) in total.
+route (b)  fixture rec13-stale2 (10.43.0.0/16)
+  K4 1.963 {'delDisabled': True} confirmVal='approved'  -> second click impossible
+  one REQ; RESP 200 {"targetsDeleted":1,"subnetsArchived":2}
+
+route (a)  fixture rec13-stale3 (10.44.0.0/16)   Back to Review -> untick/re-tick -> Next -> retype
+  A4 2.567 {'delDisabled': True}    back to review, delete still in flight
+  A5 2.651 {'delDisabled': True}    untick + re-tick
+  A6 2.694 {'delDisabled': True}    re-confirmed and retyped -> second click impossible
+  one REQ; RESP 200 {"targetsDeleted":1,"subnetsArchived":2}
 ```
 
-Database after each run:
+_**The non-regression leg matters more than either**, because a guard that made a failed delete
+un-retryable would be a worse bug than the one being fixed. Fixture `rec13-stale4` (10.45.0.0/16) was
+imported, deleted in Azure, taken to the confirm screen — and then the VNet was **re-created in Azure
+out of band**, inside the wizard's window, so the commit's own ARM re-scan would find it live:_
 
 ```
-SELECT COUNT(*) FROM Subnets; SELECT OriginalId,Name,NetworkAddress,Cidr FROM DeletedSubnets
-LiveSubnets 0
-2|rig-13-c2ver-sn-a|10.181.0.0|24
-1|rig-13-c2ver-vnet|10.181.0.0|16
+R1 after failed delete: {'delDisabled': False, 'hidden': False, 'progressHidden': True}
+R2 error: '2 of the selected subnet(s) are no longer reported as deleted in Azure. Nothing was
+           deleted. Re-run the scan and review the results.'
+R3 retryable (enabled and visible): True
+RESP 409 {"success":false,"error":"...no longer reported as deleted in Azure..."}
 ```
 
-Two subnets archived while the operator is told zero were.
+_`complete` runs after `error`, so clearing the flag there lets `showCommitError`'s own
+`refreshDeleteButton()` bring the button back. `pageerrors: []` on every run of both builds._
 
-**The fix was built and run, not read.** Patched scratch copy, port 5318, catalog
-`bastet_rig13_verc2fix`, `dotnet build` 0 warnings / 0 errors:
+_**No permanent test ships with this.** The defect is client-side wizard state — jQuery handlers,
+`disabled` attributes and AJAX lifecycle callbacks — and the suite has no browser seam
+(`Microsoft.Playwright` is not referenced by `Bastet.Tests`, and the rig rules forbid adding
+scaffolding to the repo for one finding). The measurements above are the record. Test count is
+unchanged at **754**; `dotnet build --no-incremental` 0 warnings._
 
-```
-route b: K4 {'delDisabled': True}  -> second click impossible; one POST; landed "deleted 1 stale subnet(s), archiving 2 subnet(s)"
-route a: A6 {'delDisabled': True}  -> refused;                one POST; landed "deleted 1 stale subnet(s), archiving 2 subnet(s)"
-non-regression (real 409 forced by an out-of-band row delete between confirm and click):
-   HEAD    F3 {'delDisabled': False, 'hidden': False, msg '1 of the selected subnet(s) are no longer reported as deleted in Azure...'}
-   PATCHED F3 {'delDisabled': False, 'hidden': False, msg identical}
-pageerrors: [] on every run of both builds
-```
-
-Both instances killed by captured PID (443034, 448206 — never `pkill`), both catalogs dropped, ports
-free, `git status --porcelain` on the repo empty.
-
-**Fix — verdict: sound, as proposed.** Mirror `L4` in `_ReconcileScripts.cshtml`:
-
-- declare `let deleting = false;` beside `confirmedIds` (`:14`);
-- set `deleting = true` in the delete AJAX `beforeSend` (`:435`);
-- in `complete` (`:440-442`) set `deleting = false;` then call `refreshDeleteButton();` — `complete`
-  runs *after* `success`/`error`, so `showCommitError`'s existing `refreshDeleteButton()` at `:489`
-  still leaves a genuinely-failed delete retryable (verified by the non-regression leg above);
-- make the single choke point honest at `:76`:
-  `$("#rec-confirm-delete-btn").prop("disabled", deleting || !hasSnapshot || !confirmed);`
-
-Because both re-arm routes go through `refreshDeleteButton`, that one conjunct closes both. A
-`committed`-style flag is **not** needed: `#rec-confirm-delete-btn` is already `.addClass("d-none")`'d
-on success (`:453`), so the post-success re-enable is unreachable by a click.
-
-**Optional server-side half — do it separately.** `SubnetController.AzureReconcile.cs:193-204` reports
-`success:true` and stamps `TempData["SuccessMessage"]` even when every requested id resolved to null and
-`targetsDeleted == 0`. Returning the 409 shape instead when `targetsDeleted == 0` with a non-empty
-`SubnetIds` cannot false-fire on a legitimate single request (the smallest-CIDR target always resolves,
-so `targetsDeleted >= 1`), but it would convert the honest out-of-band-concurrent-delete case into an
-error *after* a transaction that has already committed. The client guard alone closes both reachable
-routes; ship that first. This half was **not** built.
-
-**Cheaper interim — one line, no state to reason about.** Guard the click handler itself. In
-`$("#rec-confirm-delete-btn").on("click", …)` at `:416`, after `const ids = confirmedIds || [];`, add a
-module-scope `deleting` flag and `if (deleting) { return; }` before the `$.ajax` call, setting it in
-`beforeSend` and clearing it in `complete`. The button still visually re-arms, but no second POST is
-issued, so the false "deleted 0" message cannot be produced.
+_**The server-side half was deliberately not built**, as the finding itself recommended.
+`SubnetController.AzureReconcile.cs:193-204` still reports `success:true` when every requested id
+resolved to null. Returning the 409 shape on `targetsDeleted == 0` with a non-empty `SubnetIds` would
+convert an honest out-of-band concurrent delete into an error **after** a transaction that has already
+committed — a worse outcome than the message it fixes. The client guard closes both reachable routes;
+the underlying property (no idempotency token, no dedup, no per-user in-flight lock on
+`BulkDeleteStaleAzureSubnets`) stays on the watch list for anything that can post it twice without a
+browser._
 
 ---
 
