@@ -48,11 +48,26 @@ public partial class SubnetController : Controller
         return descendantCount;
     }
 
-    // Helper method to get all descendants ordered for deletion (deepest children first)
-    private async Task<List<Subnet>> GetAllDescendantsOrdered(int subnetId)
+    /// <summary>
+    /// Gets all descendants of <paramref name="subnetId"/> ordered for deletion (deepest first).
+    /// </summary>
+    /// <param name="subnetId">The subnet whose descendants are wanted.</param>
+    /// <param name="treeCache">
+    /// An already-loaded copy of the whole Subnets table, so a caller archiving several subtrees in
+    /// one transaction reads the table once instead of once per subtree. Subtrees are disjoint, so a
+    /// snapshot taken before the first archive still names every later target's descendants.
+    /// <para>
+    /// It MUST be a tracking read. <see cref="ArchiveSubnetSubtreeAsync"/> calls
+    /// <c>context.Subnets.Remove</c> on the instances this returns, while loading host IPs tracks a
+    /// fresh instance of every descendant; removing a detached duplicate throws "another instance
+    /// with the same key value is already being tracked". A flat, leaf-only workload never reaches
+    /// that path, so this cannot be left to a benchmark to catch.
+    /// </para>
+    /// </param>
+    private async Task<List<Subnet>> GetAllDescendantsOrdered(int subnetId, List<Subnet>? treeCache = null)
     {
         // Start with all subnets
-        List<Subnet> allSubnets = await context.Subnets.ToListAsync();
+        List<Subnet> allSubnets = treeCache ?? await context.Subnets.ToListAsync();
 
         // Create a dictionary for faster lookup
         Dictionary<int, Subnet> subnetDict = allSubnets.ToDictionary(s => s.Id);
@@ -110,8 +125,27 @@ public partial class SubnetController : Controller
 
     private bool SubnetExists(int id) => context.Subnets.Any(e => e.Id == id);
 
+    /// <summary>
+    /// Reads the whole subnet tree once, for callers that validate many subnets in a row.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ValidateSubnetCreation"/> needs every existing subnet to find the most specific
+    /// parent and to reject a new subnet that would swallow an existing one, and it issues that read
+    /// itself on every call. A batch import calls it once per submitted child while holding the global
+    /// write lock, so the unfiltered read was re-issued per child and the whole write surface of the
+    /// application was unavailable for as long as it took. Read once, pass the list in, and append
+    /// rows created inside the batch so overlap detection still sees them.
+    /// <para>
+    /// <c>AsNoTracking</c> is safe here: the cached rows are only ever read for their Id, Name,
+    /// NetworkAddress, Cidr and ParentSubnetId, never mutated. The duplicate lookup and the parent
+    /// read inside the validator stay real queries, because those must see the current transaction.
+    /// </para>
+    /// </remarks>
+    private Task<List<Subnet>> LoadSubnetTreeForBatchAsync() =>
+        context.Subnets.AsNoTracking().ToListAsync();
+
     // Helper method to validate subnet creation
-    private async Task<bool> ValidateSubnetCreation(CreateSubnetViewModel viewModel)
+    private async Task<bool> ValidateSubnetCreation(CreateSubnetViewModel viewModel, List<Subnet>? treeCache = null)
     {
         // Require a canonical dotted-quad IPv4 address. IPAddress.Parse also accepts partial
         // ("10.0.0"), hex ("0x0A.0.0.0") and zero-padded/octal ("010.0.0.0") forms, which the checks
@@ -210,8 +244,9 @@ public partial class SubnetController : Controller
         }
 
         // Always check for the most specific parent subnet
-        // Get all existing subnets
-        List<Subnet> allSubnets = await context.Subnets.ToListAsync();
+        // Get all existing subnets - from the caller's snapshot when it supplied one, so a batch
+        // does not re-read the whole table per item while holding the global write lock.
+        List<Subnet> allSubnets = treeCache ?? await context.Subnets.ToListAsync();
 
         // Find closest containing subnet (most specific parent)
         Subnet? bestParent = null;

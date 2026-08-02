@@ -60,9 +60,23 @@ else
                                 <td><code>@hostIp.OriginalIP</code></td>
                                 <td>@(string.IsNullOrEmpty(hostIp.Name) ? "-" : hostIp.Name)</td>
                                 <td>
+                                    @*
+                                        Deliberately no address range. This column is headed "Original
+                                        Subnet", but the only prefix available at render time is the
+                                        subnet's *current* one - the prefix as it stood when the
+                                        address was archived is not stored anywhere. Those differ
+                                        precisely when the subnet was narrowed after the address was
+                                        deleted, which is the one edit deleting it makes possible:
+                                        ValidateSubnetCidrChangeWithHostIps returns early when a
+                                        subnet has no live host IPs. The pairing then read as a
+                                        containment claim that was false and unconstructible -
+                                        10.150.0.200 shown inside 10.150.0.0/25 - because the live
+                                        listing renders the byte-identical string where containment
+                                        *is* guaranteed. The name and the link are enough to navigate.
+                                    *@
                                     @if (hostIp.SubnetName != "Unknown")
                                     {
-                                        <text>@hostIp.SubnetName (@hostIp.NetworkAddress/@hostIp.Cidr)</text>
+                                        <text>@hostIp.SubnetName</text>
                                     }
                                     else
                                     {

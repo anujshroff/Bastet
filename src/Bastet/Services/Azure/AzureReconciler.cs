@@ -49,6 +49,11 @@ namespace Bastet.Services.Azure
             // target sitting above one is never offered for deletion: see the cascade guard below.
             HashSet<int> liveLinked = [];
 
+            // Subnets this scan skipped because they belong to another subscription. Out of scope is
+            // not the same as unprotected: nothing was established about these rows, yet archiving an
+            // ancestor archives them all the same, so they get their own cascade guard below.
+            HashSet<int> notCovered = [];
+
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
                 if (!string.IsNullOrEmpty(vnet.ResourceId))
@@ -72,33 +77,47 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
-                // Only reconcile what this scan actually covers. A subnet belonging to another
-                // subscription is out of scope, not stale.
-                if (!BelongsToSubscription(snapshot.AzureResourceId, subscriptionId))
+                // Recognise the ID before scoping it. BelongsToSubscription is a StartsWith over
+                // "/subscriptions/{id}/", so a value that is not a parseable ARM ID at all - a typo,
+                // a truncation, a migrated string; AzureResourceId is free text and the app's own
+                // Admin API will write one - fails it for *every* subscription. Scoping first
+                // therefore sent those rows to notCovered and they never reached the
+                // UnrecognisedResourceId arm below that exists precisely for them: the scan reported
+                // them in no list at all, and where one sat beneath a stale ancestor the cascade
+                // guard withheld it saying the descendant "belongs to a different subscription",
+                // which is not true of a row that names no subscription and cannot be acted on,
+                // because rescanning any other subscription will never surface it either.
+                //
+                // Reported on every subscription's scan now rather than none, which is correct - it
+                // is in no subscription - and it lands in ReviewItems, which is never offered for
+                // deletion.
+                bool recognised = AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)
+                                  || AzureResourceIdentity.IsAzureVNet(snapshot.AzureResourceId);
+
+                if (!recognised)
                 {
+                    plan.ReviewItems.Add(Item(snapshot, AzureReconcileStatus.UnrecognisedResourceId, true,
+                        "The recorded Azure resource ID names neither a VNet nor a subnet, so nothing "
+                        + "can be established about it. Correct or clear the link on this subnet."));
                     continue;
                 }
 
-                // Three-way, not two. An ID that is neither a VNet nor a subnet used to fall down
-                // the VNet branch, where absence from the listing reads as VNetDeleted - a claim
-                // nothing established, on the one path that removes data. It is reported for review
-                // instead, so the operator can correct the row rather than have it silently offered
-                // for archival.
-                AzureReconcileItem? item;
-                if (AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId))
+                // Only reconcile what this scan actually covers. A subnet belonging to another
+                // subscription is out of scope, not stale - but it still has to be protected from an
+                // ancestor's cascade, because an unasked question is not a deletion either.
+                if (!BelongsToSubscription(snapshot.AzureResourceId, subscriptionId))
                 {
-                    item = EvaluateSubnetLevel(snapshot, liveSubnetPrefixes);
+                    notCovered.Add(snapshot.Id);
+                    continue;
                 }
-                else if (AzureResourceIdentity.IsAzureVNet(snapshot.AzureResourceId))
-                {
-                    item = EvaluateVNetLevel(snapshot, liveVNets);
-                }
-                else
-                {
-                    item = Item(snapshot, AzureReconcileStatus.UnrecognisedResourceId, true,
-                        "The recorded Azure resource ID names neither a VNet nor a subnet, so nothing "
-                        + "can be established about it. Correct or clear the link on this subnet.");
-                }
+
+                // Two-way: the unrecognised case is handled above, before scoping. An ID that is
+                // neither a VNet nor a subnet used to fall down the VNet branch, where absence from
+                // the listing reads as VNetDeleted - a claim nothing established, on the one path
+                // that removes data.
+                AzureReconcileItem? item = AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)
+                    ? EvaluateSubnetLevel(snapshot, liveSubnetPrefixes)
+                    : EvaluateVNetLevel(snapshot, liveVNets);
 
                 if (item is null)
                 {
@@ -124,6 +143,13 @@ namespace Bastet.Services.Azure
             WithholdTargetsWhoseCascadeIsBlocked(
                 plan, liveLinked,
                 "archiving them would also archive Azure-linked subnet(s) beneath them that still exist in Azure");
+
+            // Separately worded on purpose: these rows were never read, so claiming they "still exist
+            // in Azure" would assert something this scan did not establish.
+            WithholdTargetsWhoseCascadeIsBlocked(
+                plan, notCovered,
+                "archiving them would also archive Azure-linked subnet(s) beneath them that belong to a "
+                + "different subscription and were not checked by this scan");
 
             // An empty subscription and a subscription we failed to enumerate properly look the same
             // from here, and the consequence of being wrong is deleting everything.

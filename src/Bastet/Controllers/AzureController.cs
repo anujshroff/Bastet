@@ -21,8 +21,7 @@ namespace Bastet.Controllers
             // Check environment variable
             if (!IsAzureImportEnabled())
             {
-                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
+                return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
             // Get the subnet
@@ -33,8 +32,7 @@ namespace Bastet.Controllers
 
             if (subnet == null)
             {
-                TempData["ErrorPageMessage"] = $"Subnet with ID {id} could not be found.";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+                return this.RedirectToErrorPage(404, $"Subnet with ID {id} could not be found.");
             }
 
             // Check if subnet has no children or host IPs and is not fully allocated
@@ -181,8 +179,7 @@ namespace Bastet.Controllers
         {
             if (!IsAzureImportEnabled())
             {
-                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
+                return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
             BulkImportInitialViewModel viewModel = new() { IsFeatureEnabled = true };
@@ -289,8 +286,7 @@ namespace Bastet.Controllers
         {
             if (!IsAzureImportEnabled())
             {
-                TempData["ErrorPageMessage"] = "Azure Import feature is not enabled";
-                return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 403 });
+                return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
             AzureReconcileInitialViewModel viewModel = new() { IsFeatureEnabled = true };
@@ -378,13 +374,16 @@ namespace Bastet.Controllers
                 .Where(i => AzureReconciler.IsAbsenceStatus(i.Status))
                 .Select(i => i.AzureResourceId)];
 
-            if (absenceClaims.Length == 0)
-            {
-                return;
-            }
-
+            // No absence claim means there is nothing to ask Azure about, so the ARM round trip is
+            // skipped - but ApplyConfirmations must still run. It also applies the cascade guard that
+            // protects plan.ReviewItems, and those are independent of any confirmation: a plan made
+            // entirely of drift would otherwise archive a review-item descendant this same scan had
+            // just verified live. Returning early here made that guard conditional on some unrelated
+            // row happening to be absent.
             IReadOnlyDictionary<string, AzureResourceConfirmation> confirmations =
-                await azureService.ConfirmResourcesAsync(absenceClaims);
+                absenceClaims.Length == 0
+                    ? new Dictionary<string, AzureResourceConfirmation>(StringComparer.OrdinalIgnoreCase)
+                    : await azureService.ConfirmResourcesAsync(absenceClaims);
 
             reconciler.ApplyConfirmations(plan, confirmations);
         }

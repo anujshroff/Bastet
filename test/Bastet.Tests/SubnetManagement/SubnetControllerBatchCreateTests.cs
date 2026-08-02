@@ -505,6 +505,42 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.Equal(0, subnetCount);
     }
 
+    /// <summary>
+    /// An entry contained inside an earlier entry of the same batch must be refused. The batch reads
+    /// the subnet tree once and appends each row it creates, so this is the case that proves the
+    /// appending happens: without it the second entry is validated against a snapshot that predates
+    /// the first, finds only the real parent, and is created nested wrongly.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_EntryContainedInAnEarlierEntry_ReturnsValidationError()
+    {
+        int parentId = 2; // 10.0.0.0/16
+
+        List<Subnet> existingSubnets = await _context.Subnets
+            .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        _context.Subnets.RemoveRange(existingSubnets);
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "Outer", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = parentId },
+            // Inside Outer, not equal to it, so the duplicate index would not catch this one.
+            new() { Name = "Inner", NetworkAddress = "10.0.1.0", Cidr = 25, ParentSubnetId = parentId }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+
+        int subnetCount = await _context.Subnets
+            .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
+            .CountAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, subnetCount);
+    }
+
     [Fact]
     public async Task BatchCreateChildSubnets_SubnetsOutsideParent_ReturnsValidationError()
     {

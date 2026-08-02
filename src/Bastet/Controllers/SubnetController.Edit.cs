@@ -19,8 +19,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
         EditSubnetViewModel viewModel = new()
@@ -56,8 +55,7 @@ public partial class SubnetController : Controller
     {
         if (id != viewModel.Id)
         {
-            TempData["ErrorPageMessage"] = "The ID in the URL doesn't match the ID in the form data.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, "The ID in the URL doesn't match the ID in the form data.");
         }
 
         if (ModelState.IsValid)
@@ -187,8 +185,7 @@ public partial class SubnetController : Controller
             {
                 if (!SubnetExists(id))
                 {
-                    TempData["ErrorPageMessage"] = "The subnet no longer exists. It may have been deleted by another user.";
-                    return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+                    return this.RedirectToErrorPage(404, "The subnet no longer exists. It may have been deleted by another user.");
                 }
 
                 // Handle concurrency conflict - reload current data and show user-friendly message.
@@ -248,8 +245,7 @@ public partial class SubnetController : Controller
 
         if (origSubnet == null)
         {
-            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
         // Repopulate the display-only properties

@@ -19,8 +19,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
         // Count all descendants (not just direct children)
@@ -124,8 +123,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            TempData["ErrorPageMessage"] = $"The subnet with ID {id} could not be found or may have been deleted.";
-            return RedirectToAction("HttpStatusCodeHandler", "Error", new { statusCode = 404 });
+            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
         // Begin a transaction to ensure data consistency
@@ -167,12 +165,25 @@ public partial class SubnetController : Controller
     /// archived atomically. Entities are queued deepest-first because the self-referencing FK is
     /// Restrict, so a parent cannot be removed before its children.
     /// </remarks>
+    /// <param name="subnet">The root of the subtree to archive.</param>
+    /// <param name="treeCache">
+    /// An already-loaded, <b>tracking</b> copy of the Subnets table - see
+    /// <see cref="GetAllDescendantsOrdered"/>. Lets a caller archiving several subtrees read the
+    /// table once rather than once per subtree.
+    /// </param>
+    /// <param name="archivedSubnetIds">
+    /// Receives the id of every subnet archived here, so a caller looping over targets can skip ones
+    /// already cascaded away without re-walking the tree to find out.
+    /// </param>
     /// <returns>How many subnets and host IP assignments were archived.</returns>
-    private async Task<(int SubnetsArchived, int HostIpsArchived)> ArchiveSubnetSubtreeAsync(Subnet subnet)
+    private async Task<(int SubnetsArchived, int HostIpsArchived)> ArchiveSubnetSubtreeAsync(
+        Subnet subnet, List<Subnet>? treeCache = null, List<int>? archivedSubnetIds = null)
     {
         // Deepest first, with the subnet itself processed last
-        List<Subnet> toDelete = await GetAllDescendantsOrdered(subnet.Id);
+        List<Subnet> toDelete = await GetAllDescendantsOrdered(subnet.Id, treeCache);
         toDelete.Add(subnet);
+
+        archivedSubnetIds?.AddRange(toDelete.Select(s => s.Id));
 
         string? deletedBy = userContextService.GetCurrentUsername();
         DateTime deletedAt = DateTime.UtcNow;
@@ -274,14 +285,21 @@ public partial class SubnetController : Controller
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> PurgeAllDeletedSubnets()
     {
-        int count = await context.DeletedSubnets.CountAsync();
+        // Bound first, then count inside the bound. Counting first and reading the bound afterwards
+        // are two round trips, and anything archived between them lands inside the bound the POST
+        // carries while sitting outside the count this page prints - so the purge destroys records the
+        // operator was never shown, irreversibly. Id is IDENTITY and nothing else deletes from this
+        // table, so COUNT(Id <= maxId) is exactly the POST's scope. This also removes the variant
+        // where a concurrent purge left count > 0 beside maxId == 0 and the POST then refused the
+        // operator's own form: maxId == 0 now implies count == 0, so the honest redirect fires.
+        int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;
+        int count = await context.DeletedSubnets.CountAsync(d => d.Id <= maxId);
         if (count == 0)
         {
             TempData["ErrorMessage"] = "There are no deleted subnet records to purge.";
             return RedirectToAction(nameof(DeletedSubnets));
         }
 
-        int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;
         return View(new PurgeAllDeletedSubnetsViewModel { Count = count, MaxId = maxId });
     }
 

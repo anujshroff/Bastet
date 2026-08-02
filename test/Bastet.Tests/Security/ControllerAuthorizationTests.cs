@@ -24,7 +24,8 @@ public class ControllerAuthorizationTests
         ["ErrorController.Error"] = "Target of UseExceptionHandler; challenging it would recurse.",
         ["AccountController.AccessDenied"] = "Configured AccessDeniedPath; must be reachable after a failed authorization check.",
         ["AccountController.Logout"] = "Must work once the session is already gone.",
-        ["AccountController.SignedOut"] = "Post-logout landing page; shown precisely when the user has no session."
+        ["AccountController.SignedOut"] = "Post-logout landing page; shown precisely when the user has no session.",
+        ["AccountController.SignInFailed"] = "Where OnRemoteFailure lands; reached precisely when authentication did not happen, so challenging it would loop."
     };
 
     /// <summary>

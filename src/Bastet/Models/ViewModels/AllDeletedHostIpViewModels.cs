@@ -24,9 +24,17 @@ public class AllDeletedHostIpItemViewModel
 
     // Original subnet information
     public int OriginalSubnetId { get; set; }
+
+    /// <summary>
+    /// The original subnet's name, or "Unknown" when neither a live nor an archived subnet carries
+    /// the recorded id.
+    /// </summary>
+    /// <remarks>
+    /// No address range accompanies it. The prefix the subnet had when this address was archived is
+    /// not stored, and the current one is not a truthful substitute under a column headed "Original
+    /// Subnet" - see the comment in AllDeletedHostIps.cshtml.
+    /// </remarks>
     public string SubnetName { get; set; } = string.Empty;
-    public string NetworkAddress { get; set; } = string.Empty;
-    public int Cidr { get; set; }
 
     // Metadata
     public DateTime DeletedAt { get; set; }

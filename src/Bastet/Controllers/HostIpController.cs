@@ -471,6 +471,16 @@ public class HostIpController(
         // Get total count
         int totalCount = orderedHostIps.Count;
 
+        // Clamp to the range that actually exists, now that the total is known. Flooring alone left
+        // an over-range page rendering an inverted "Showing 51-40 of 40" banner over an empty table,
+        // and a page number large enough to overflow (page-1)*pageSize in int made Skip see a negative
+        // count - which it treats as zero, so the request was served page 1's rows while still
+        // reporting itself as page 45000000. Clamping first means the label, the rows and the pager all
+        // derive from the same value and cannot disagree, and post-clamp the multiplication cannot
+        // overflow. Math.Clamp is safe because Math.Max guarantees totalPages >= 1.
+        int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+        page = Math.Clamp(page, 1, totalPages);
+
         // Apply pagination
         List<AllHostIpItemViewModel> pagedHostIps = [.. orderedHostIps
             .Skip((page - 1) * pageSize)
@@ -517,6 +527,12 @@ public class HostIpController(
         // Get total count
         int totalCount = deletedHostIps.Count;
 
+        // Clamp to the range that exists - see AllHostIps for why flooring alone is not enough. This
+        // listing is the more reachable of the two: its own pager emits ?page=2, and a concurrent purge
+        // can shrink the archive before that link is followed.
+        int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
+        page = Math.Clamp(page, 1, totalPages);
+
         // Get all subnet information (including deleted subnets)
         List<Subnet> allSubnets = await context.Subnets.ToListAsync();
         List<DeletedSubnet> allDeletedSubnets = await context.DeletedSubnets.ToListAsync();
@@ -551,8 +567,6 @@ public class HostIpController(
             {
                 // Subnet still exists
                 viewModel.SubnetName = subnet.Name;
-                viewModel.NetworkAddress = subnet.NetworkAddress;
-                viewModel.Cidr = subnet.Cidr;
             }
             else
             {
@@ -561,15 +575,11 @@ public class HostIpController(
                 if (deletedSubnet != null)
                 {
                     viewModel.SubnetName = $"{deletedSubnet.Name} (deleted)";
-                    viewModel.NetworkAddress = deletedSubnet.NetworkAddress;
-                    viewModel.Cidr = deletedSubnet.Cidr;
                 }
                 else
                 {
                     // No information available
                     viewModel.SubnetName = "Unknown";
-                    viewModel.NetworkAddress = "Unknown";
-                    viewModel.Cidr = 0;
                 }
             }
 
@@ -592,14 +602,16 @@ public class HostIpController(
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> PurgeAllDeletedHostIps()
     {
-        int count = await context.DeletedHostIpAssignments.CountAsync();
+        // Bound first, then count inside it - see PurgeAllDeletedSubnets for why the other order lets
+        // the purge destroy records the confirmation page never counted.
+        int maxId = await context.DeletedHostIpAssignments.MaxAsync(d => (int?)d.Id) ?? 0;
+        int count = await context.DeletedHostIpAssignments.CountAsync(d => d.Id <= maxId);
         if (count == 0)
         {
             TempData["ErrorMessage"] = "There are no deleted host IP records to purge.";
             return RedirectToAction(nameof(AllDeletedHostIps));
         }
 
-        int maxId = await context.DeletedHostIpAssignments.MaxAsync(d => (int?)d.Id) ?? 0;
         return View(new PurgeAllDeletedHostIpsViewModel { Count = count, MaxId = maxId });
     }
 

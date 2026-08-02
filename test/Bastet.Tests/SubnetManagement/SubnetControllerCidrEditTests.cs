@@ -192,8 +192,10 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.NotNull(statusCode);
         Assert.Equal(404, statusCode);
 
-        // The custom message now travels via TempData, not the (forgeable) query string.
-        string errorMessageStr = _controller.TempData["ErrorPageMessage"]?.ToString() ?? string.Empty;
+        // The custom message travels via TempData, not the (forgeable) query string, and is keyed
+        // to this redirect so a concurrent 4xx elsewhere in the session cannot take it.
+        string errorMessageStr = ErrorPageMessages.Take(
+            _controller.TempData, redirectResult.RouteValues?["m"]?.ToString()) ?? string.Empty;
         Assert.Contains($"{nonExistentId}", errorMessageStr);
     }
 
@@ -921,8 +923,10 @@ public class SubnetControllerCidrEditTests : IDisposable
         Assert.NotNull(statusCode);
         Assert.Equal(404, statusCode);
 
-        // The custom message now travels via TempData, not the (forgeable) query string.
-        string errorMessageStr = _controller.TempData["ErrorPageMessage"]?.ToString() ?? string.Empty;
+        // The custom message travels via TempData, not the (forgeable) query string, and is keyed
+        // to this redirect so a concurrent 4xx elsewhere in the session cannot take it.
+        string errorMessageStr = ErrorPageMessages.Take(
+            _controller.TempData, redirectResult.RouteValues?["m"]?.ToString()) ?? string.Empty;
         Assert.Contains($"{nonExistentId}", errorMessageStr);
     }
 }
