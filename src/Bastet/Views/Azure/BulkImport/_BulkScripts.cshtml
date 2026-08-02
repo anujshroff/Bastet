@@ -10,6 +10,8 @@
         let vnets = []; // [{ resourceId, name, ipv4AddressPrefixes:[], subnets:[{name, addressPrefix}] }]
         let lastSelection = null; // last BulkImportSelectionDto submitted
         let previewSeq = 0;       // bumped per preview so a superseded response can be told apart
+        let committing = false;   // a commit POST is in flight
+        let committed = false;    // this plan has already been committed successfully
 
         // ---------------------------------------------------------------
         // Step navigation helpers
@@ -28,6 +30,10 @@
         // re-locks the later steps and drops the cached selection.
         function invalidatePlan() {
             lastSelection = null;
+            // A new plan has not been committed yet. `committing` is deliberately NOT cleared here:
+            // a commit already in flight belongs to the old plan and is still running, and clearing
+            // it would re-arm Confirm underneath that request.
+            committed = false;
             $("#step3-tab, #step4-tab").addClass("disabled");
             $("#bulk-go-commit-btn").prop("disabled", true);
         }
@@ -654,7 +660,11 @@
             // reset commit-step state
             $("#bulk-commit-success").addClass("d-none");
             $("#bulk-commit-error").addClass("d-none");
-            $("#bulk-confirm-commit-btn").prop("disabled", false).show();
+            // Re-entering step 4 used to re-arm Confirm unconditionally, so an operator who came
+            // back here while a commit was in flight - or after one had already succeeded - could
+            // fire a second commit for the same plan. The server refuses it, but the refusal is
+            // what they are left looking at, naming the rows their own import just created.
+            $("#bulk-confirm-commit-btn").prop("disabled", committing || committed).toggle(!committed);
         });
 
         $("#bulk-back-to-preview-btn").on("click", function () {
@@ -676,6 +686,7 @@
                 data: JSON.stringify(selection),
                 headers: { "RequestVerificationToken": getAntiForgeryToken() },
                 beforeSend: function () {
+                    committing = true;
                     $("#bulk-commit-progress").removeClass("d-none");
                     $("#bulk-commit-success").addClass("d-none");
                     $("#bulk-commit-error").addClass("d-none");
@@ -683,6 +694,7 @@
                 },
                 success: function (result) {
                     if (result && result.success) {
+                        committed = true;
                         $("#bulk-commit-success-message").text(
                             // linkedTargets counts the existing Bastet subnets this commit stamped
                             // with an ARM id. Without it a link-only import reports every counter as
@@ -706,6 +718,7 @@
                     showCommitError(payload || { error: "Server error: " + xhr.status });
                 },
                 complete: function () {
+                    committing = false;
                     $("#bulk-commit-progress").addClass("d-none");
                 }
             });
@@ -739,6 +752,9 @@
                 $.each(payload.differences, function (i, d) { $list.append($('<li></li>').text(d)); });
             }
             $("#bulk-commit-error").removeClass("d-none");
+            // Deliberately ungated by `committed`, which is still false on every path that reaches
+            // here: this is the retry-after-a-genuine-failure route, and gating it would strand an
+            // operator whose commit was legitimately refused.
             $("#bulk-confirm-commit-btn").prop("disabled", false);
         }
     });

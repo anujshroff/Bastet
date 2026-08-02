@@ -190,112 +190,52 @@ no rendered-view test seam exists (see `R6`), so the browser legs are the verifi
 
 ---
 
-## L4 - Bulk import: the Commit step re-arms itself while a commit is in flight, so one successful import reports itself as "Commit failed" and names every subnet it just created
+_L4 is fixed and committed with the primary fix, verbatim as the finding specifies it: `committing` and
+`committed` are declared beside `lastSelection`/`previewSeq`; `committing` is set in `commitImport`'s
+`beforeSend` and cleared in its `complete`; `committed` is set on the `result.success` branch;
+`invalidatePlan()` clears `committed` and deliberately **not** `committing`; and the re-entry line
+becomes `$("#bulk-confirm-commit-btn").prop("disabled", committing || committed).toggle(!committed);`._
 
-`[x1]` &nbsp;|&nbsp; **Severity: info** &nbsp;|&nbsp; **Confidence: confirmed**
-
-**Citation:** `src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:652` - the `#bulk-go-commit-btn`
-handler (`:647`) unconditionally runs `$("#bulk-confirm-commit-btn").prop("disabled", false).show();`
-with no test for a commit in flight or already completed. `commitImport`'s `beforeSend` (`:677`)
-disables the confirm button but nothing disables `#bulk-back-to-preview-btn` (`:655`) or
-`#bulk-go-commit-btn`. The step pills are Bootstrap `data-bs-toggle="pill"` and bypass `:652` entirely,
-so `:652` is the single re-arm site.
-
-### Failure scenario
-
-An admin on step 4 clicks **Confirm Import**. While the commit is in flight the operator clicks **Back
-to Preview**, then **Continue to Commit** - which re-arms Confirm - and clicks it again. The server
-serialises the two on the subnet lock and refuses the second, so **nothing is written twice**, but the
-second response is what the operator is left looking at: a red **"Commit failed: The import failed."**
-panel listing `Azure subnet 'rig-uiwzb-a' (10.150.1.0/24, VNet 'rig-vnet-uiwzb') already exists in
-Bastet.` and three more lines naming exactly the rows the operator's own import had just created.
-
-**Wrong-output correction (both verifiers, independently).** The finding says the wizard's final
-rendered state is "the red panel". It is worse and simpler than that: `showCommitError` never hides
-`#bulk-commit-success`, so the green *"Bulk import completed. Created 4 VNet target(s), 5 child
-subnet(s)..."* alert and the red *"Commit failed"* alert are **on screen simultaneously for ~2 seconds**
-(1.95 s and 2.04 s measured on two rigs; screenshot captured) before the `setTimeout(..., 2000)` at
-`:692` redirects to `/Subnet`, whose banner says the import succeeded. The screen contradicts *itself*,
-not only the page it redirects to.
-
-**A second aggravator the finding misses:** `:650-651` also hide the success panel on re-entry, so the
-re-entered step 4 shows no evidence the import already happened, next to a live Confirm button.
-
-### Reproduction
-
-Reproduced on three rigs by three methods, **including with no interception and no concurrency at all.**
-
-*Genuine lock contention, ordinary UI clicks, no `page.route`* - the latency came from a second admin's
-ordinary `POST /Subnet/Delete` of a 6001-row subtree holding the global subnet lock (timed alone at
-7.58 s), which is the app's own designed serialisation:
+_Reproduced on the unfixed build with **no concurrency and no interception at all** - the simplest of
+the three routes the finding records. Commit once, then inside the 2 s redirect window go back and
+return to step 4:_
 
 ```
- 3.566 click Confirm #1
- 3.577   >>> commit POST issued          (queues on the lock)
- 4.278   progress visible: True  confirm disabled: True
- 4.285 click Back to Preview  (commit still in flight)
- 4.811 click Continue to Commit
- 5.331   confirm now disabled: False  visible: True      <-- :652 re-armed it
- 5.334 click Confirm #2  -> SECOND CLICK ACCEPTED
-10.841   <<< 200 {"success":true,"createdTargets":4,"createdChildSubnets":5,...}
-10.841   <<< 400 {"success":false,"globalErrors":["Azure subnet 'rig-uiwzb-a' (10.150.1.0/24,
-                  VNet 'rig-vnet-uiwzb') already exists in Bastet.", ...]}
-10.842 PANEL error  = True
-10.947 PANEL success= True      >>> BOTH PANELS VISIBLE FOR 1.95 s
-12.850 NAV -> /Subnet
-commit POST bodies identical: True (both len=3327, sha256 1210e1b5...)   pageerrors: []
-DB after: 9 live rows, no duplicates.
+                                   BEFORE (HEAD)                    AFTER
+via #bulk-back-to-preview-btn   confirm visible=True disabled=False   visible=False disabled=True
+                                SECOND CLICK ACCEPTED                 refused
+                                POSTs: 200 then 400                   POSTs: 200 only
+via the #step3-tab pill         confirm visible=True disabled=False   visible=False disabled=True
+                                SECOND CLICK ACCEPTED                 refused
+                                POSTs: 200 then 400                   POSTs: 200 only
 ```
 
-*Pill variant:* identical outcome without ever touching `#bulk-back-to-preview-btn` - clicking the
-`#step3-tab` pill while the commit is in flight, then Continue to Commit, re-arms Confirm the same way.
+_The pill leg is the one that condemns the cheaper interim, and it was measured rather than assumed:
+disabling `#bulk-back-to-preview-btn` cannot help, because `activateTab` deliberately leaves a visited
+step's pill clickable and the pill reaches the same re-arm. **The interim was not taken.**_
 
-*No concurrency, no throttling at all:* the commit returns in 157 ms; Back to Preview -> Continue to
-Commit -> Confirm at 0.35 s intervals, all inside the 2 s redirect window, re-arms and fires a second
-POST that returns the same 400 and renders the red panel for 0.83 s.
+_Both non-regression legs pass on the fix. With nothing in flight, an ordinary Back to Preview ->
+Continue to Commit -> Confirm still commits (200, "Created 2 VNet target(s), 5 child subnet(s)") - no
+operator is stranded. And a genuinely refused commit stays retryable: a colliding `10.150.1.0/24` was
+created out of band through the ordinary Create form in a second cookie jar while the plan was on
+screen, the commit returned 400 with `Azure subnet 'rig-bulk-a' ... already exists in Bastet`, and
+Confirm came back `visible=True disabled=False`. `showCommitError`'s `prop("disabled", false)` is
+therefore left ungated, with a comment saying why, since this fix is exactly what would tempt a later
+change to gate it._
 
-**Scenario correction:** the finding justifies the in-flight window by citing round 11's 7,247 ms figure
-as ARM latency on this surface. That is wrong - `BulkCreateFromAzurePlanCore` makes **zero** ARM calls
-(`GetExistingSubnetsAsync` is pure EF, the planner is in-memory) and measured 157-222 ms unthrottled.
-The 7,247 ms is bulk *preview* latency and does not transfer. The finding's other named source - queuing
-on the `Bastet:SubnetOperations` app lock, which the controller's own 503 names - is real and is what
-both verifiers used.
+_No temporal dead zone: both flags are `let`s at the top of the same `$(document).ready` scope and every
+handler closes over them, so this is not round 10's `J9` shape. Zero pageerrors across all six runs,
+which is the only evidence that matters here - Razor compiles the view without parsing the embedded
+JavaScript, so a broken script still builds at 0 warnings._
 
-### Fix - primary is sound (built and run); the cheaper interim is UNSOUND and must not be taken
+_Two residues are left deliberately, both recorded by the finding and neither unsound: re-previewing
+*while* a commit is in flight leaves `committing` true when the new step 4 is entered, so Confirm needs
+one more Back to Preview -> Continue to Commit once the response lands; and the success panel is still
+hidden on re-entry to step 4. The simultaneous both-panels render the finding measured needs genuine
+lock contention to open the window and was **not** re-measured here - the re-arm that causes it is
+closed, which is what the fix is for._
 
-Primary, applied verbatim and measured on two rigs:
-
-- `let committing = false; let committed = false;` beside `lastSelection`/`previewSeq` at `:11-12`
-- `committing = true` first statement of `beforeSend`; `committing = false` first statement of `complete`
-- `committed = true` first statement of the `result.success` branch
-- `:652` becomes
-  `$("#bulk-confirm-commit-btn").prop("disabled", committing || committed).toggle(!committed);`
-- `invalidatePlan()` clears `committed` (and must **not** clear `committing` - doing so reopens the hole)
-
-Measured: confirm stays `disabled: True` across Back to Preview -> Continue to Commit, the second click
-is refused, exactly **one** POST is issued, only the success panel renders, `pageerrors: []`, DB still
-correct. No temporal dead zone - all handlers are closures over `let`s declared at the top of the same
-`$(document).ready` scope and `commitImport` is a hoisted function declaration; this is not round 10's
-`J9` shape. `.toggle(Boolean)` was probed in the live page against the shipped jQuery **4.0.0**
-(`_Layout.cshtml:103`) and still works.
-
-Non-regression legs both pass: an ordinary Back to Preview -> Continue to Commit -> Confirm with nothing
-in flight still commits (no operator is stranded), and a genuinely failed commit (a real 409 from an
-out-of-band row created through the ordinary Create form in a second cookie jar) stays retryable -
-`showCommitError`'s `prop("disabled", false)` at `:737` must be **left ungated**, since `committed` is
-still false there and that is the deliberate retry path.
-
-**The cheaper interim closes nothing.** The finding calls disabling `#bulk-back-to-preview-btn` in
-`beforeSend` "strictly weaker"; a verifier measured it as *ineffective*. `activateTab` deliberately
-leaves a visited step's pill clickable (comment at `:25-28`), so clicking the `#step3-tab` pill instead
-of the button re-arms Confirm identically - "SECOND CLICK ACCEPTED", 200 then 400, both panels visible
-for 1.96 s. To work it would also have to disable `#bulk-go-commit-btn`, at which point it is no cheaper
-than the flag.
-
-Two residues the fix leaves, neither unsound: re-previewing *while* a commit is in flight leaves
-`committing` true when the new step 4 is entered, so Confirm renders disabled and needs one more Back to
-Preview -> Continue to Commit after the response lands; and `:650-651` still hides the success panel on
-re-entry after a successful commit.
+_Suite unchanged at **738**; no rendered-view test seam exists (see `R6`)._
 
 ---
 
