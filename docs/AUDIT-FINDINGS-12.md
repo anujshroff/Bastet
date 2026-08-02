@@ -70,132 +70,33 @@ including where a verifier's correction contradicts the finder.
 
 # Low
 
-## L1 - Bulk import wizard never re-locks step 2 when the subscription changes, so the previous subscription's VNet tree stays selectable and the import commits against the old subscription
+_L1 is fixed and committed with the change-handler variant, not the one-liner the finding proposed.
+`$("#step2-tab").addClass("disabled")` now sits beside the existing `invalidatePlan()` call in the
+`#bulk-subscription-select` change handler, so step 2 is re-locked exactly when the subscription
+changes and at no other time. `#bulk-select-subscription-btn` re-opens it through `activateTab`._
 
-`[x1]` &nbsp;|&nbsp; **Severity: low** (reported medium; corrected to low by all three verifiers) &nbsp;|&nbsp; **Confidence: plausible**
+_Reproduced first against an unfixed publish of `4a59ddf` driven by real Chromium against real ARM,
+with only `GET /Azure/GetSubscriptions` stubbed - the rig principal still lists a single subscription,
+so the second dropdown row has to be supplied, which is the same gap the finding recorded and it is
+not closed. **Before:** after switching the dropdown with no Next, `step2: 'nav-link'`; the pill click
+opened the pane; the tree still showed the previous subscription's `rig-vnet-bulk`; and
+`POST /Azure/BulkImportPreview` carried `subscriptionId=f0e8d6db-...` (Main) while the dropdown read
+`Second-Sub`. **After:** `step2: 'nav-link disabled'` and the pill click is refused with a pointer-events
+timeout. Zero pageerrors either way._
 
-**Load-bearing step that could not be established:** the rig's service principal lists exactly one
-subscription (`az account list --all` returns only `Main`, and the app's own
-`GET /Azure/GetSubscriptions` returns that one entry), so a second dropdown row had to be supplied by
-fulfilling that single request in Playwright. The finder and both reproducing verifiers all had to stub
-it. Every other request in every run - `BulkGetVNets`, `BulkImportPreview`,
-`BulkCreateFromAzurePlan` - went to the real server and real ARM, and the defect is entirely
-client-side, but **a genuinely multi-subscription credential was never exercised**.
+_The finding's own one-liner - adding `#step2-tab` to the re-lock inside `invalidatePlan()` - was built
+here as a third publish rather than taken on the verifiers' word, and it reproduces the regression they
+reported. Standing on step 2 with the tree loaded the pill reads `nav-link active disabled`, so the
+wizard marks its own current step disabled; that persists after every checkbox tick, because
+`updateGoPreviewBtn` (`:332`) calls `invalidatePlan()` as well; and from step 3 the step-2 pill is
+refused outright, the click landing on the intercepting `<li>`. The change-handler variant was put
+through the same five legs and left every one of them normal, ending in an ordinary end-to-end import
+that committed 1 VNet target on a clean catalog. The cheaper interim was declined for the reason the
+finding gives - it leaves `selectedSubscriptionId` stale and the pill live._
 
-**Citation:** `src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:31` - verbatim
-`$("#step3-tab, #step4-tab").addClass("disabled");`. Change handler at `:96-101`;
-`#bulk-select-subscription-btn` at `:103-111`; `#step2-tab` starts `disabled` in
-`BulkImport.cshtml:29` and nothing but `activateTab` (`:21`) ever touches that class again.
-
-### Failure scenario
-
-An operator on `/Azure/BulkImport` picks subscription `Main`, clicks Next, and step 2 renders Main's
-VNet tree. They click "Back to Subscription" and switch the dropdown to a second subscription, but do
-**not** press Next. The change handler calls `invalidatePlan()`, which at `:31` re-locks `#step3-tab`
-and `#step4-tab` only - `#step2-tab` is left clickable. The operator clicks the step-2 pill and is
-shown Main's VNet tree, fully enabled, with nothing on screen naming a subscription. They tick a subnet
-and click "Next: Preview".
-
-The POST carries `subscriptionId`/`subscriptionName` of **Main** while step 1's dropdown still reads the
-other subscription. The plan renders, Continue to Commit is enabled, and the commit succeeds - writing
-rows stamped with `AzureResourceId`s that no screen in the application can clear.
-
-The code states this intent twice and does not honour it: the comment at `:98-99` says "choosing a
-different one re-locks the later steps rather than leaving them reachable through their pills" while
-step 2 stays reachable through its pill, and `_ImportScripts.cshtml:82-83` claims to "mirror the
-Bulk/Reconcile wizards", which is false of Bulk.
-
-### Reproduction
-
-Real Chromium against a published HEAD build, own port and own catalog, SP_A, real ARM. Reproduced
-independently three times (finder + two verifiers).
-
-```
-after switching the dropdown, no Next:
-  {'step2': 'nav-link', 'step3': 'nav-link disabled', 'step4': 'nav-link disabled',
-   'selectedText': 'Second-Sub (...)'}          <-- step2 carries no `disabled`
-click #step2-tab           -> step2 pane visible: True
-tree still shows Main's:      rig-vnet-uiwzb 10.150.0.0/16 | rig-uiwzb-a 10.150.1.0/24 ...
-POST /Azure/BulkImportPreview:
-  subscriptionId=f0e8d6db-e9c4-4215-81a5-17762ea56be8  subscriptionName=Main
-  (dropdown at that moment reads: Second-Sub)
-goCommit disabled: False
-commit 200: "Created 1 VNet target(s), 1 child subnet(s), renamed 0, linked 0, marked 0 fully allocated."
-pageerrors: []
-```
-
-Post-state, `SELECT Id,Name,NetworkAddress,Cidr,AzureResourceId FROM Subnets`:
-
-```
-11|rig-vnet-uiwzb|10.150.0.0|16|/subscriptions/f0e8d6db-.../virtualNetworks/rig-vnet-uiwzb
-12|rig-uiwzb-a   |10.150.1.0|24|/subscriptions/f0e8d6db-.../virtualNetworks/rig-vnet-uiwzb/subnets/rig-uiwzb-a
-```
-
-One verifier additionally measured that **no screen after step 1 names a subscription** - neither
-`Main` nor `Second-Sub` appears anywhere in the step-3 or step-4 pane. The dropdown is the wizard's only
-statement of which subscription is in force, and nothing downstream can correct the operator's belief.
-
-### Why low, not medium
-
-The posted DTO is internally coherent (`subscriptionId` Main *and* `vNetResourceId` Main), and the rows
-carry the genuine ARM ids of the very VNet and subnet the operator saw on step 2, saw again in the
-rendered step-3 plan, and ticked by hand. Nothing is committed unseen (unlike round 11's `K1`), no row
-created out of band is stamped, and the "AzureResourceId no screen can clear" limb barely attaches -
-these are ordinary deletable rows and deleting them removes the stamp. The residual harm is an unwanted
-Azure-linked row.
-
-One verifier voted to refute outright at info, on the ground that everything downstream of the dropdown
-is mutually consistent and what remains is "one stale label on an uncommitted form control". The
-tie-breaking verifier overruled that: the wizard *silently discards an input the operator just gave*
-and runs to a state-writing completion on the subscription they navigated away from, which is not the
-same as ticking the wrong VNet under a tree that agrees with your last input.
-
-**Scenario correction:** the finding's "both sibling wizards guard exactly this" is at best half true.
-Reconcile's `#rec-step2-tab` (`_ReconcileScripts.cshtml:44`) is the *scan-review* step, structurally the
-analogue of bulk's step 3, which `invalidatePlan()` already locks. The single-VNet import wizard is the
-exact analogue and does guard it.
-
-### Fix - the proposed one-liner is overbroad; do not take it as written
-
-The finding proposes adding `#step2-tab` to the re-lock inside `invalidatePlan()` at `:31`. **Two of
-three verifiers built that change, served it to a real browser, and measured a navigation regression.**
-It does close the hole - after the dropdown change, `step2: 'nav-link disabled'`, the pill click is
-refused with `pointer-events: none`, and a normal end-to-end import still commits - but:
-
-- The finding's premise is false. It claims "the only path that reaches step 2 legitimately is
-  `#bulk-select-subscription-btn`'s handler". `invalidatePlan()` has **four** call sites: `:100`
-  (subscription change), `:126` (`loadVNets` `beforeSend`, which runs immediately *after*
-  `activateTab("step2")` on the legitimate path), `:332` (`updateGoPreviewBtn`, which runs on **every
-  checkbox tick**), and `:424` (go-preview). `#bulk-back-to-selection-btn` (`:640`) is a second
-  legitimate route into step 2.
-- Measured consequences of the one-liner: standing on step 2 with the tree loaded, the pill is
-  `nav-link active disabled` with `pointer-events: none` - **the wizard marks its own current step
-  disabled**; and from step 3 after a good preview the step-2 pill is refused, removing pill navigation
-  back to Selection (the "Back to Selection" button survives, so it is a degradation, not a dead end).
-- The stated justification - "that matches `invalidateVNetStep()`" - does not carry:
-  `_ImportScripts.cshtml:84-88` is invoked only from the subscription `change` handler at `:98`, so it
-  has no self-disable.
-
-**Take this instead** (built and run by a verifier; hole closed, all correct-state paths measured
-normal, zero pageerrors). Leave `:31` alone and re-lock step 2 only where the subscription actually
-changes, at `:96-101`:
-
-```js
-$("#bulk-subscription-select").on("change", function () {
-    $("#bulk-select-subscription-btn").prop("disabled", !$(this).val());
-    $("#step2-tab").addClass("disabled");   // the tree belongs to the previous subscription
-    invalidatePlan();
-});
-```
-
-`#bulk-select-subscription-btn` -> `activateTab("step2")` re-opens it, `#bulk-back-to-selection-btn`
-still works, the step-2 pill keeps working from step 3, and no pill is ever disabled while active. This
-is exactly what `_ImportScripts.cshtml:84-98` does.
-
-**Decline the cheaper interim.** Emptying `#bulk-vnet-tree` and hiding `#bulk-vnet-selection` leaves
-`selectedSubscriptionId` pointing at the old subscription and leaves the pill live, and with
-`#bulk-vnet-selection` hidden the step-2 pane renders as a bare info alert with no "Back to
-Subscription" button. It is worse than the two-word fix above, not cheaper.
+_Suite unchanged at **738**. This repo has no rendered-view test seam - no `WebApplicationFactory`, no
+`IRazorViewEngine`, no rendered-view assertion anywhere in `test/` - so a view-script fix cannot be
+pinned by a unit test; the browser legs are the verification, as they were for `K1` and `K2`._
 
 ---
 

@@ -97,6 +97,11 @@
             $("#bulk-select-subscription-btn").prop("disabled", !$(this).val());
             // A plan belongs to the subscription it was built from, so choosing a different one
             // re-locks the later steps rather than leaving them reachable through their pills.
+            // Step 2 belongs to it too: its tree is the previous subscription's. Re-lock it here
+            // rather than inside invalidatePlan(), which also runs on every checkbox tick and
+            // while step 2 is itself the active step - the tree only goes stale when the
+            // subscription changes. #bulk-select-subscription-btn re-opens it via activateTab.
+            $("#step2-tab").addClass("disabled");
             invalidatePlan();
         });
 
