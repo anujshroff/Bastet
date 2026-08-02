@@ -1,5 +1,6 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Services;
 using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
@@ -240,6 +241,58 @@ public partial class SubnetController : Controller
         }
     }
 
+    /// <summary>
+    /// The Bastet name each posted row will be created under, keyed by its index in
+    /// <paramref name="subnets"/>.
+    /// </summary>
+    /// <remarks>
+    /// An Azure subnet owning several IPv4 prefixes posts one row per prefix, all carrying the same
+    /// Azure name, and <c>Subnet.Name</c> has a NON-unique index - so they would persist as rows
+    /// indistinguishable by name in every list and dropdown. Each such row is named for the range it
+    /// holds. The same is done for any other duplicate name in the batch.
+    ///
+    /// Settled server-side because the browser is not the authority: a crafted or replayed post
+    /// carries whatever names it likes. A row contributing no duplicate keeps its name exactly as
+    /// posted, so ordinary single-prefix imports are unchanged.
+    /// </remarks>
+    private static Dictionary<int, string> ResolveImportNames(List<AzureImportSubnetViewModel> subnets)
+    {
+        HashSet<string> multiPrefixResourceIds = [.. subnets
+            .Where(s => !s.FullyEncompassesVNetPrefix && !string.IsNullOrEmpty(s.AzureResourceId))
+            .GroupBy(s => s.AzureResourceId!, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)];
+
+        Dictionary<int, string> names = [];
+        HashSet<string> used = new(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < subnets.Count; i++)
+        {
+            AzureImportSubnetViewModel subnet = subnets[i];
+            if (subnet.FullyEncompassesVNetPrefix)
+            {
+                continue;
+            }
+
+            string name = subnet.Name;
+            bool sharesAnAzureSubnet = !string.IsNullOrEmpty(subnet.AzureResourceId)
+                && multiPrefixResourceIds.Contains(subnet.AzureResourceId);
+
+            if (sharesAnAzureSubnet || used.Contains(name))
+            {
+                // {NetworkAddress, Cidr} is unique across a batch - overlap validation refuses a
+                // repeat - so a prefix-qualified name cannot collide with another one.
+                name = SubnetNaming.WithSuffix(
+                    name, $" ({subnet.NetworkAddress}/{subnet.Cidr})", MaxSubnetNameLength);
+            }
+
+            used.Add(name);
+            names[i] = name;
+        }
+
+        return names;
+    }
+
     private async Task<IActionResult> BatchCreateChildSubnetsCore(int parentId, List<AzureImportSubnetViewModel> subnets, string? vnetName, string? vnetResourceId, bool isAzureImport)
     {
         // Begin transaction
@@ -379,9 +432,14 @@ public partial class SubnetController : Controller
             // we don't create any child subnets
             if (!hasFullyEncompassingSubnet)
             {
+                // Settled before the loop so every row is named against the whole batch.
+                Dictionary<int, string> importNames = ResolveImportNames(subnets);
+
                 // Create each subnet - with validation right before adding to catch overlaps
-                foreach (AzureImportSubnetViewModel subnet in subnets)
+                for (int i = 0; i < subnets.Count; i++)
                 {
+                    AzureImportSubnetViewModel subnet = subnets[i];
+
                     // Skip subnets that fully encompass the VNet address prefix
                     if (subnet.FullyEncompassesVNetPrefix)
                     {
@@ -401,7 +459,7 @@ public partial class SubnetController : Controller
                     // Create the subnet entity
                     Subnet newSubnet = new()
                     {
-                        Name = subnet.Name,
+                        Name = importNames[i],
                         NetworkAddress = subnet.NetworkAddress,
                         Cidr = subnet.Cidr,
                         Description = subnet.Description,

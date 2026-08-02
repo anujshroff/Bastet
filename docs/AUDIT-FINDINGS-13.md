@@ -8,7 +8,7 @@
 | Build | **0 warnings, 0 errors** |
 | Tests | **738 passed**, 0 failed, 0 skipped |
 | Date | 2026-08-02 |
-| Status | **3 findings open** — 1 **high**, 1 low, 1 info |
+| Status | **1 fixed** (M1, high), **2 open** — 1 low, 1 info |
 
 > **Post-round amendment (2026-08-02, by the repository owner).** `M1` was filed by this round at
 > **medium** and has been **re-rated HIGH**, and it is **to be fixed, not deferred again**. The round's
@@ -101,149 +101,104 @@ first two split. All three survivors in this file are `[x1]`. The single `[x2]` 
 
 ## M1 — Both Azure import wizards silently drop every IPv4 prefix after the first on a multi-prefix Azure subnet, and BASTET then reports the dropped ranges as free space
 
-**Severity:** **High** (filed by the round at medium; re-rated — see disposition below)  **Tag:** `[x1]`  **Beat:** 3
-**Disposition: MUST FIX. Not eligible for deferral to round 14.**
-**File:** `src/Bastet/Services/Azure/AzureService.cs:352`
-(siblings: `AzureService.cs:275`, `AzureService.cs:418-439`, `AzureBulkImportPlanner.cs:520-527`)
+_M1 is fixed and committed. Both wizards now emit one selectable entry per IPv4 prefix an Azure
+subnet owns, so every prefix can be imported and none is silently dropped._
 
-**Confidence:** **confirmed.** Mechanism, the absence of any warning, the persisted rows and the
-free-space claim were each observed on a live rig, not inferred.
+_**What was done.** The collapse had two sites, both of them the same mistake made when an Azure
+subnet could still only hold one IPv4 prefix. `GetVNetInventory` (`AzureService.cs:350`) built one
+`BulkAzureSubnetViewModel` per Azure subnet from the singular `ExtractIpv4Prefix`; it now calls a new
+`AzureService.BuildInventorySubnetRows`, which returns one row per prefix. `GetCompatibleSubnets`
+(`AzureService.cs:239-277`) carried an explicit `break; // Take only the first valid IPv4 address`,
+which is gone. Nothing else in either wizard needed changing: the bulk wizard already keys its
+checkboxes on `data-address-prefix` and posts `{name, addressPrefix, azureResourceId}` per row, and
+the single-VNet wizard already renders `result.subnets` by index, so both render N rows the moment N
+are returned._
 
-**Failure scenario.** Azure has allowed several IPv4 prefixes on one subnet since Sept 2025 and ARM
-accepts it today. Given VNet `rig-13-b3p2-multi` (10.31.0.0/16) with one subnet
-`rig-13-b3p2-sn-multi` carrying `addressPrefixes: [10.31.0.0/24, 10.31.1.0/24]`, `GetVNetInventory`
-builds one `BulkAzureSubnetViewModel` per Azure subnet and sets
-`AddressPrefix = ExtractIpv4Prefix(subnet)` — the **first** prefix only (`AzureService.cs:352`). The
-single-VNet wizard does the same, with an explicit `break; // Take only the first valid IPv4 address`
-(`AzureService.cs:275`). The planner then creates exactly one Bastet child.
+_**The naming was the only real obstacle, and it is a product decision the owner made, not one this
+reconciliation made for them.** Two Bastet rows from one Azure subnet would otherwise both carry the
+bare Azure name, and `Subnet.Name` has a **non-unique** index (`BastetDbContext.cs:36`) — they would
+persist as rows distinguishable only by CIDR. Each row is now named for the range it holds:
+`rec13-sn-multi (10.41.0.0/24)` and `rec13-sn-multi (10.41.1.0/24)`. **A subnet contributing a single
+row is untouched** — `rec13-sn-single` imported as exactly `rec13-sn-single`, so no existing install
+sees a rename. Applied in the planner (`AzureBulkImportPlanner.cs:486-533`) and, independently,
+server-side in the single-VNet commit via a new `ResolveImportNames` (`SubnetController.Azure.cs:243`),
+because the browser is not the authority there and a crafted or replayed post carries whatever names
+it likes._
 
-The model *does* carry the full list (`BulkAzureSubnetViewModel.Ipv4AddressPrefixes`, populated at
-`AzureService.cs:366`) but its only consumer is the reconciler (`AzureReconciler.cs:391-394`) — no
-view and no planner path reads it. Nothing in either wizard, in the preview, or in `AnnotateSubnet`
-mentions the other prefixes.
+_**Three things the finding asked for were not built, each for a reason established by reading the
+code rather than assuming.** (1) `AnnotateSubnet` needed **no** change: it keys the already-exists
+test on `{NetworkAddress, Cidr}` (`AzureBulkImportPlanner.cs:288-289`), not on the resource id, so
+importing one prefix leaves its sibling `Available` and an unrelated Bastet row still `Blocked` — both
+measured live. The round-13 verifier had already corrected the finder on this point and was right;
+making the instructed change would have been a regression. (2) The **reconciler** needed no change,
+but it did constrain the fix: it shares `GetVNetInventory` (`SubnetController.AzureReconcile.cs:56`)
+and indexes prefixes by resource id at `AzureReconciler.cs:68` with an indexer assignment — not
+`ToDictionary`, so duplicate ids overwrite rather than throw. Every expanded row therefore carries the
+subnet's **complete** prefix list; a row reporting only its own would make the last write win and the
+reconciler would believe the subnet had lost the others, offering a live row for deletion. That
+invariant has its own test. (3) A **new** `PrefixQualifiedName` helper was written and then deleted —
+`SubnetNaming.WithSuffix` (`SubnetNaming.cs:52`) already does exactly this, length-aware, and is used
+by the planner and `SubnetController.Create.cs:81`. Adding a second one would have been the residue
+these rounds keep finding._
 
-**Wrong output:** after import, `10.31.1.0/24` exists in Azure but nowhere in BASTET, and the target's
-Details page advertises it as unallocated with a *Create Subnet* button. An operator allocating from
-BASTET hands out addresses Azure has already assigned. The reconciler cannot correct it: it walks only
-Bastet rows that carry an `AzureResourceId` and has no "present in Azure, absent from Bastet" status at
-all. The wrong state is permanent and invisible.
+_**Proved by A/B against live ARM on the same fixture, not by reading.** Azure subnet
+`rec13-sn-multi` in VNet `rec13-multi` (10.41.0.0/16) created with
+`az network vnet subnet create --address-prefixes 10.41.0.0/24 10.41.1.0/24`; ARM returned
+`addressPrefix: null, addressPrefixes: ["10.41.0.0/24","10.41.1.0/24"]`, confirming both the GA
+behaviour and that the singular field nulls once there are two. A sibling `rec13-sn-single`
+(10.41.5.0/24, singular field set) exercised the unchanged path. The unfixed build was a clone at
+`c04fe21` on port 5402/catalog `bastet_rec13_head`; the fixed build ran on 5401/`bastet_rec13`. Same
+subscription, same fixture, same posts:_
 
-**Reproduction — ran it.** Own instance on port 5313, own catalog `bastet_rig13_v5c`, SP A, real
-Chromium via Playwright, live ARM. The multi-prefix fixture already existed; no new Azure resource was
-created.
+```
+                    unfixed (c04fe21)                    fixed
+GET /Azure/GetSubnets
+  rows offered      2                                    3
+                    sn-multi 10.41.0.0/24                sn-multi 10.41.0.0/24
+                    sn-single 10.41.5.0/24               sn-multi 10.41.1.0/24
+                                                         sn-single 10.41.5.0/24
+after import, GET /Subnet/Details/1 "Unallocated IP Ranges"
+                    10.41.1.0 - 10.41.4.255              10.41.2.0 - 10.41.4.255
+                    1,024 IP addresses  [Create Subnet]  768 IP addresses  [Create Subnet]
+                    10.41.6.0 - 10.41.255.254            10.41.6.0 - 10.41.255.254
+```
 
-1. ARM ground truth, `az network vnet show -g bastet-visible -n rig-13-b3p2-multi`:
-   `space ["10.31.0.0/16"], subnets [{ n: rig-13-b3p2-sn-multi, p: null, ps: ["10.31.0.0/24","10.31.1.0/24"] }]`
-   — the singular `addressPrefix` really is `null` once there are two, exactly as the XML doc at
-   `AzureService.cs:390-396` says.
-2. `GET /Azure/BulkGetVNets` returned
-   `{ name: rig-13-b3p2-sn-multi, addressPrefix: "10.31.0.0/24", ipv4AddressPrefixes: ["10.31.0.0/24","10.31.1.0/24"], statusName: "Available", reason: null, isSelectable: true }`.
-   Step-2 card `innerText`, verbatim and complete:
-   `rig-13-b3p2-multi 10.31.0.0/16 / Will create a new Bastet subnet. / rig-13-b3p2-sn-multi 10.31.0.0/24`
-   — no badge, no reason line, no mention of `10.31.1.0/24`. Zero page errors.
-3. `POST /Azure/BulkImportPreview` → `childSubnets = [{ name: rig-13-b3p2-sn-multi, networkAddress: 10.31.0.0, cidr: 24 }]`,
-   `errors []`, `warnings []`, `canCommit true`.
-4. Confirm Import clicked. SQL on the fresh catalog:
-   `1|rig-13-b3p2-multi|10.31.0.0|16|NULL` and `2|rig-13-b3p2-sn-multi|10.31.0.0|24|1`. Nothing for
-   `10.31.1.0/24`.
-5. `GET /Subnet/Details/1`, verbatim:
-   `Unallocated IP Ranges — 10.31.1.0 … 10.31.255.254 … 65,279 IP addresses … [Create Subnet]`.
-6. Single-VNet wizard, same subnet: `GET /Azure/GetSubnets?vnetResourceId=…/rig-13-b3p2-multi&subnetId=1`
-   returned **one** entry —
-   `{"resourceId":"…/subnets/rig-13-b3p2-sn-multi","name":"rig-13-b3p2-sn-multi","addressPrefix":"10.31.0.0/24","hasMultipleAddressSchemes":false,"fullyEncompassesVNetPrefix":false}`
-   — and `hasMultipleAddressSchemes` is `false` (it is IPv4-only), so not even the dual-stack badge
-   fires. Matches the `break; // Take only the first valid IPv4 address` at `AzureService.cs:275`.
+_The 256-address difference is exactly the dropped /24. On the unfixed build BASTET offered a *Create
+Subnet* button over a range Azure had already assigned; on the fixed build that range is child subnet
+id 3 and is absent from the free list. Persisted rows on the fixed build:_
 
-Instance killed by captured PID 442806, catalog dropped, `git status --porcelain` empty.
+```
+2|rec13-sn-multi (10.41.0.0/24)|10.41.0.0|24|.../subnets/rec13-sn-multi
+3|rec13-sn-multi (10.41.1.0/24)|10.41.1.0|24|.../subnets/rec13-sn-multi
+4|rec13-sn-single             |10.41.5.0|24|.../subnets/rec13-sn-single
+```
 
-**Fix.** Emit one selectable entry per IPv4 prefix: in `GetVNetInventory` (`AzureService.cs:350-368`)
-and `GetCompatibleSubnets` (`AzureService.cs:239-277`), produce a `BulkAzureSubnetViewModel` per
-element of `ExtractIpv4Prefixes(subnet)` rather than per Azure subnet, each carrying the same
-`ResourceId`. The reconciler already copes with several Bastet rows sharing one Azure subnet id,
-because `EvaluateSubnetLevel` tests *membership* in `Ipv4PrefixesOf` (`AzureReconciler.cs:376`).
+_**The bulk wizard and the reconciler were driven too, including the counter-test that proves the
+reconciler still discriminates rather than merely having gone quiet.** `GET /Azure/BulkGetVNets`
+returned both prefixes as separate rows, each resolving to its own Bastet subnet
+(`Already imported as Bastet subnet 'rec13-sn-multi (10.41.1.0/24)'.`) and each carrying the full
+`ipv4AddressPrefixes` list. `POST /Azure/ReconcileScan` with both prefixes live reported
+**0 items, 0 warnings** — no false drift on the row linked at the second prefix. Then
+`az network vnet subnet update --address-prefixes 10.41.0.0/24` genuinely removed the second prefix in
+Azure, and the same scan reported **exactly 1 item**: subnetId 3, `SubnetPrefixChanged`, reason
+*"The Azure subnet still exists but its address prefix is now 10.41.0.0/24, not 10.41.1.0/24."* The
+fixture was then restored._
 
-> **The finder's fix was corrected by the verifier on two points.**
->
-> 1. **Wrong claim, removed.** The original said *"`DisambiguateName` already handles the resulting
->    name collision."* That is true of the **bulk** planner only (`AzureBulkImportPlanner.cs:485-527`,
->    where `usedNames` + `DisambiguateName` run per plan item). The **single-VNet** commit path has no
->    disambiguation at all — `SubnetController.Azure.cs:404` writes `Name = subnet.Name` straight from
->    the posted view model, and `Subnet.Name` carries a non-unique index, so two identically-named rows
->    would persist silently. If the single-VNet leg is taken, `BatchCreateChildSubnetsCore` needs the
->    same used-names pass the planner has, or the wizard must suffix the prefix into the name it posts
->    at `_ImportScripts.cshtml:330`.
-> 2. **Confused claim, removed.** The original said `AnnotateSubnet` *"must then compare per prefix
->    rather than against `subnet.AddressPrefix`."* That is a no-op — once one view model is emitted per
->    prefix, `subnet.AddressPrefix` **is** the per-prefix value, and `AnnotateSubnet`
->    (`AzureBulkImportPlanner.cs:259-307`) needs no change. `encompassesAPrefix` at `:267-268` already
->    compares against the *VNet's* prefix list, which is correct as it stands. Making the instructed
->    change would be a regression.
->
-> Confirmed sound: the duplicate-`AzureResourceId` reasoning. Nothing keys on it in a way that breaks —
-> `AzureSubnetSnapshotService` keys on `SubnetId`/`ParentSubnetId`, `SubnetController.AzureReconcile.cs:78`
-> keys `stillStale` on `SubnetId`, and `AzureService.cs:537`'s `ToDictionary` is over resource ids that
-> `ConfirmResourcesAsync` has already deduplicated at `:524-526`, so a repeated id cannot collide. And
-> `p.Subnets.Count > 1` beside a `FullyEncompasses` entry (`AzureBulkImportPlanner.cs:464`) cannot
-> false-fire, because a prefix equal to the whole VNet prefix leaves no room for the subnet's second
-> prefix.
+_**Tests: 738 → 754** (+16, no test removed). Two failed against the unfixed code for the defect's own
+reason — `Assert.Equal() Failure: Values differ` on the distinct-name assertion, both prefixes having
+persisted under one name. The rest are guards that must never fail: single-prefix subnets keep their
+plain name and shape; ARM reporting a prefix in both the singular property and the collection collapses
+to one row; a prefix occupied by an unrelated Bastet subnet stays `Blocked`; two rows covering the same
+range are still refused by overlap validation rather than renamed and created; and the reconciler
+reports no drift for a row linked at the second prefix but still reports it when the prefix genuinely
+goes. `dotnet build --no-incremental`: 0 warnings._
 
-**Cheaper interim — stop the silence, one file.** Round 6 declined the full change as *"a feature
-change, not a bug fix"*, so an interim that only removes the invisibility is worth having. In
-`GetVNetInventory` (`AzureService.cs:358-367`) and `GetCompatibleSubnets`, when
-`ExtractIpv4Prefixes(subnet)` yields more than one, set `Reason` to name the prefixes that will **not**
-be imported, and have `AnnotateSubnet` *preserve* rather than null that reason (it currently overwrites
-`Reason = null` at `:294` on the Available path). Add the same sentence to `BulkImportPlanItem.Warnings`
-so it survives into step 3 and into the commit-time divergence text. One Bastet row per Azure subnet —
-no data-model change, no name collisions, no new reconciler tests — while removing the property the
-finding is actually about. It does **not** close the "Details page advertises the range as free" half,
-so it is an interim, not a substitute.
-
-**Harder interim — refuse rather than truncate.** Server-side, so the browser is not the authority: in
-`AzureBulkImportPlanner.AnnotateSubnet` (`AzureBulkImportPlanner.cs:259`) set `Status = Blocked`,
-`IsSelectable = false` and a reason naming every prefix whenever `subnet.Ipv4AddressPrefixes.Count > 1`,
-plus the matching hard error in `BuildPlanItem` so a crafted or stale POST is refused too. The operator
-cannot import the subnet, but BASTET never asserts that an Azure-assigned range is free.
-
-### Disposition — fix it, and why the standing deferral is overturned
-
-**This is to be fixed. The interims above are fallbacks if the full change cannot ship immediately;
-they are not the resolution.** The wizards must offer **one selectable entry per IPv4 prefix**, and
-the operator imports the ones they want. No auto-import, no guessing, no truncation.
-
-Round 6 deferred this as *"creating several Bastet subnets from one Azure subnet, which is a feature
-change, not a bug fix."* **That framing is rejected, on the codebase's own evidence:**
-
-- **The pattern already exists in this application, one level up.** `AzureBulkImportPlanner.cs:165` is
-  `vnet.Prefixes = [.. vnet.Ipv4AddressPrefixes.Select(p => AnnotatePrefix(p, vnet, existingSubnets))]`
-  — a prefix list fanned out into one entry per prefix. A **VNet** with four IPv4 prefixes is handled
-  correctly today, and a VNet with four **subnets** is handled correctly today. Only a **subnet** with
-  several prefixes is truncated. Applying an established internal pattern at the level where it was
-  missed is not a new feature.
-- **The truncation predates the problem it fails to handle.** The `break; // Take only the first valid
-  IPv4 address` (`AzureService.cs:275`) comes from `9f220e0` (2025-05-01), the original Azure import
-  feature — written when an Azure subnet could not have more than one IPv4 prefix. Azure changed that
-  in September 2025. This is code that was correct when written and became wrong when the external
-  contract moved: a regression against reality, not an unimplemented feature.
-- **The data has been ready since round 6.** `BulkAzureSubnetViewModel.Ipv4AddressPrefixes` is
-  populated at `AzureService.cs:366`, sits one line below the truncation, and no view or planner path
-  reads it. Round 6 plumbed it specifically so that whoever closed this would not have to re-plumb ARM.
-  The remaining work is rendering and naming, not integration.
-- **Azure's behaviour is confirmed against live ARM, not assumed.** This round ran
-  `az network vnet subnet create ... --address-prefixes 10.31.0.0/24 10.31.1.0/24`; ARM returned 200 and
-  reported `addressPrefix: null, addressPrefixes: ["10.31.0.0/24","10.31.1.0/24"]`. The singular field
-  going null once there are two is exactly what `AzureService.cs:390-395` already documents.
-
-**Deferral history — four rounds, no decision.** Filed as round 6 `F2`; the reconciler half was fixed
-and the import half deferred on cost. It rode the watch list through rounds 7, 8 and 9, then fell off
-in rounds 10-12 without ever being closed or formally accepted. Round 13 rediscovered it independently
-and measured the operator-visible consequence for the first time. **The consequence was never priced in
-any of the four deferrals** — only the cost of the fix was. That is the error being corrected here.
-
-**Definition of done:** a multi-prefix Azure subnet presents every one of its IPv4 prefixes as a
-separate selectable row in both wizards; importing all of them produces one Bastet row per prefix with
-non-colliding names through **both** commit paths (the single-VNet path needs the planner's
-`usedNames`/`DisambiguateName` pass — see the watch-list entry on `SubnetController.Azure.cs:404`); and
-no range Azure has assigned is ever shown as unallocated. Regression test must fail against HEAD.
+_**Not done, deliberately.** The two interim mitigations the finding offered — a `Reason` naming the
+dropped prefixes, and blocking multi-prefix subnets outright — are moot now that no prefix is dropped;
+building either would leave dead advisory code. The finding's remark that a fully-encompassing subnet
+"cannot false-fire" because `p.Subnets.Count > 1` was left as it stands, verified rather than changed:
+a prefix equal to the whole VNet prefix leaves no room for a second prefix on the same subnet, so the
+encompassing path cannot now be reached with siblings from one Azure subnet._
 
 ---
 
