@@ -733,6 +733,17 @@ public class HostIpController(
 
                 // Update the subnet
                 subnet.IsFullyAllocated = dto.IsFullyAllocated;
+
+                // Clearing the flag must also clear the note an Azure import wrote, or the
+                // description goes on asserting "fully allocated by Azure subnet ..." about a row
+                // that is no longer fully allocated. Only the note is removed; operator-authored
+                // text is left exactly as it is.
+                if (!dto.IsFullyAllocated && !string.IsNullOrEmpty(subnet.Description))
+                {
+                    string stripped = FullyAllocatedNote.Strip(subnet.Description);
+                    subnet.Description = string.IsNullOrEmpty(stripped) ? null : stripped;
+                }
+
                 subnet.LastModifiedAt = DateTime.UtcNow;
                 subnet.ModifiedBy = userContextService.GetCurrentUsername();
 

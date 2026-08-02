@@ -468,3 +468,54 @@ failure, and it must leave the same durable record as any other so the next one 
   mangled through tool round-trips.
 - **Migration `.Designer.cs` snapshots are frozen history.** Never report them as stale.
 - **No novels.** A finding is a citation, a scenario, a reproduction, a fix.
+
+## Scope is the owner's call, never the round's
+
+**A round may decide whether a defect is REAL. It may never decide whether a real defect is WORTH
+FIXING, or that fixing it is "out of scope", "a feature change, not a bug fix", or "too expensive".
+That is a product decision and it belongs to the repository owner. Not to a finder, not to a verifier,
+not to the scribe, and not to you.**
+
+Round 6 broke this and it cost four rounds. It reproduced a real defect — both Azure import wizards
+silently truncate a multi-prefix Azure subnet to its first prefix, after which BASTET advertises
+Azure-assigned ranges as free space — then decided by itself that closing it "means creating several
+Bastet subnets from one Azure subnet, which is a feature change, not a bug fix, and is out of scope
+here." It demoted the finding to a watch-list line. Rounds 7-9 inherited the demotion without
+re-examining it; rounds 10-12 dropped it entirely. Round 13 rediscovered it independently and measured
+the operator-visible consequence for the first time — a *Create Subnet* button over an /24 Azure had
+already assigned. **The owner was never asked, across four rounds, whether an IPAM tool silently lying
+about free space was acceptable.** The answer, when finally put to them, was not close.
+
+The failure mode is specific and worth naming: **every one of those deferrals priced the COST of the
+fix and none of them priced the CONSEQUENCE of the defect.** Cost is visible from inside the code.
+Consequence requires running the thing and looking at what the operator sees. A round that defers on
+cost alone has not done the work that would justify deferring.
+
+Therefore:
+
+- **A reproduced defect gets filed as a finding at the severity its consequence warrants**, whatever
+  the fix costs. Fix cost belongs in the *Fix* section, never in the severity and never in the
+  decision to file.
+- **"Out of scope", "feature change not a bug fix", "too big for this round", "the data model does not
+  support it"** are not verdicts a round may reach. They are *recommendations to the owner*, and they
+  go in the finding's own text where the owner will see them — not in a watch-list line, and never as
+  a reason to lower severity or drop the finding.
+- **Severity is graded on what the software does wrong, not on how often it does it.** Rarity of the
+  trigger is one sentence in the failure scenario. It does not reduce severity. For an IPAM tool
+  specifically, *silently asserting that an allocated range is free* is a top-severity output no matter
+  how narrow the path to it, because the product's entire purpose is being the authority on that
+  question.
+- **Never use the watch list as a place to put a real defect you have decided not to fix.** The watch
+  list is for things a verifier *could not settle* — thin evidence, unproven reachability, patterns
+  worth grepping next round. A reproduced defect on the watch list is a finding that has been hidden,
+  and it will fall off within three rounds. It did.
+- **If a round believes a finding needs a scope decision, say so at the top of the Verdict**, in the
+  words "this needs a decision from you and here is what it costs" — so it is the first thing read,
+  not the last thing skimmed.
+- **The same rule binds `/audit-reconcile`.** Declining to implement a filed finding, narrowing it, or
+  substituting an interim for the real fix is the owner's call. Ask; do not decide and record the
+  decision as though it were settled.
+
+When in doubt: **file it, rate it on consequence, and let the owner say no.** A finding the owner
+declines costs one line in a table. A defect a round declines on their behalf costs four rounds and
+ships the bug.

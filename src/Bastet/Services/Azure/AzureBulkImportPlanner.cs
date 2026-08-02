@@ -501,6 +501,17 @@ namespace Bastet.Services.Azure
                 usedNames.Add(targetAutoCreatedName);
             }
 
+            // An Azure subnet owning several IPv4 prefixes contributes one selection per prefix, and
+            // every one of them carries the same Azure name. Subnet.Name has a non-unique index, so
+            // without this they would persist as indistinguishable rows differing only by CIDR.
+            // Name each for the range it actually holds. A subnet contributing a single selection is
+            // untouched, so ordinary imports keep the exact names they have always had.
+            HashSet<string> multiPrefixResourceIds = [.. p.Subnets
+                .Where(s => !s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId))
+                .GroupBy(s => s.Source.AzureResourceId, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)];
+
             foreach (ParsedSubnetSelection sub in p.Subnets)
             {
                 if (sub.FullyEncompasses)
@@ -512,6 +523,11 @@ namespace Bastet.Services.Azure
                 if (string.IsNullOrEmpty(baseName))
                 {
                     baseName = $"{sub.Network}_{sub.Cidr}";
+                }
+                else if (multiPrefixResourceIds.Contains(sub.Source.AzureResourceId))
+                {
+                    baseName = SubnetNaming.WithSuffix(
+                        baseName, $" ({sub.Network}/{sub.Cidr})", MaxSubnetNameLength);
                 }
 
                 string finalName = DisambiguateName(baseName, usedNames, p.Source.VNetName);

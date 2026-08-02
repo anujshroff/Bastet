@@ -12,6 +12,14 @@
         // whatever the review checkboxes hold at click time, so it can only ever delete what the
         // confirmation screen listed.
         let confirmedIds = null;
+        // True while a delete POST is in flight. Without it, anything that calls
+        // refreshDeleteButton re-arms the button mid-delete - one keystroke plus Backspace in the
+        // confirmation box is enough - and the second POST's ARM re-scan starts before the first
+        // request's transaction archives the rows, so it misses the 409, finds every id already
+        // gone, and returns 200 with zero counters. That response lands last, so its TempData
+        // banner overwrites the true one and the operator reads "deleted 0 stale subnet(s)" after a
+        // delete that archived two.
+        let deleting = false;
 
         function getAntiForgeryToken() {
             return $("input[name='__RequestVerificationToken']").first().val();
@@ -73,7 +81,7 @@
         function refreshDeleteButton() {
             const hasSnapshot = Array.isArray(confirmedIds) && confirmedIds.length > 0;
             const confirmed = $("#rec-confirmation").val() === "approved";
-            $("#rec-confirm-delete-btn").prop("disabled", !hasSnapshot || !confirmed);
+            $("#rec-confirm-delete-btn").prop("disabled", deleting || !hasSnapshot || !confirmed);
         }
 
         // ------------------------------------------------------------------
@@ -433,12 +441,19 @@
                     confirmation: $("#rec-confirmation").val()
                 }),
                 beforeSend: function () {
+                    deleting = true;
                     $("#rec-confirm-delete-btn").prop("disabled", true);
                     $("#rec-commit-progress").removeClass("d-none");
                     $("#rec-commit-error").addClass("d-none");
                 },
                 complete: function () {
+                    // complete runs after success/error, so clearing the flag here still leaves a
+                    // genuinely failed delete retryable: showCommitError's own refreshDeleteButton
+                    // call re-enables the button once this flag is down. On success the button is
+                    // already .d-none'd, so the re-enable is unreachable by a click.
+                    deleting = false;
                     $("#rec-commit-progress").addClass("d-none");
+                    refreshDeleteButton();
                 },
                 success: function (result) {
                     if (!result.success) {
