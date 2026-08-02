@@ -102,105 +102,42 @@ pinned by a unit test; the browser legs are the verification, as they were for `
 
 # Info
 
-## L2 - "Add Child Subnet" on the subnet Details page is the one action control in the app with no role gate: a View-only user is offered it and every click is refused
+_L2 is fixed and committed as proposed: `_ChildSubnets.cshtml` injects `IUserContextService` and the
+anchor's condition becomes `Model.CanAddChildSubnet && ChildSubnetsUserContext.UserHasRole(ApplicationRoles.Edit)`.
+The AND is load-bearing and was kept for the reason the finding gives - the `else if` branches print the
+**Fully Allocated** and **Has Host IPs** badges, which are capacity statements a read-only user must keep
+seeing, and replacing the condition rather than ANDing it would have suppressed them._
 
-`[x1]` &nbsp;|&nbsp; **Severity: info** (reported low; corrected to info by both verifiers) &nbsp;|&nbsp; **Confidence: confirmed**
-
-**Citation:** `src/Bastet/Views/Subnet/Details/_ChildSubnets.cshtml:6` - `@if (Model.CanAddChildSubnet)`,
-where `SubnetViewModels.cs:114` defines that as `HostIpAssignments.Count == 0 && !IsFullyAllocated`.
-Capacity only; no user in the predicate.
-
-### Failure scenario
-
-A principal whose token carries only the `View` role opens `/Subnet/Details/1`. The Child Subnets card
-header renders `<a class="btn btn-sm btn-primary" href="/Subnet/Create?parentId=1">Add Child Subnet</a>`.
-Following it is refused: `GET /Subnet/Create` is `[Authorize(Policy = "RequireEditRole")]`
-(`SubnetController.Create.cs:13`).
-
-The page disagrees with itself on the same render: the Unallocated Ranges card lists its ranges and
-renders **zero** "Create Subnet" buttons, because `_UnallocatedRanges.cshtml:34` gates that control on
-`UserHasRole(ApplicationRoles.Edit)`; and `/Subnet` renders no Create link at all, because
-`Index.cshtml:15` gates it the same way. One control offers the action while the two others offering
-the identical action correctly hide it.
-
-This is the only such gap. `grep -rn UserHasRole src/Bastet/Views/` returns 20 gates across 13 view
-files; `_ChildSubnets.cshtml` is the only view emitting an action anchor with no `UserHasRole` in it.
-Two independent per-role href enumerations over ten pages agreed: for `View` the only href pointing at
-an unreachable action is `/Subnet/Create?parentId=N`; `Edit` and `Delete` have none at all.
-
-### Reproduction
-
-Two independent rigs, each a worktree at HEAD whose **only** edit is `Services/DevAuthHandler.cs`
-reading an `X-Rig-Roles` header to choose the role claim set (header absent => `Admin`, i.e. identical
-to HEAD). Views, view models and every `[Authorize]` policy stock.
+_Measured on a rig whose only edit to HEAD is `DevAuthHandler` reading an `X-Rig-Roles` header to choose
+the role claim set (header absent => `Admin`, i.e. identical to HEAD); views, view models and every
+`[Authorize]` policy stock. Three subnets were seeded to cover all three arms of the chain - empty and
+not full, marked fully allocated, and carrying a host IP - and each was rendered as View, Edit, Delete
+and Admin, before and after:_
 
 ```
-GET /Subnet/Create?parentId=1 :  none 403 | View 403 | Edit 200 | Delete 200 | Admin 200
-GET /Subnet/Details/1         :  none 403 | View 200 | Edit 200 | Admin 200
+                            BEFORE                       AFTER
+subnet 1 empty/not full  View  anchor=True   ->   View  anchor=False
+                         Edit/Delete/Admin  anchor=True  (unchanged)
+subnet 2 fully allocated all roles  fullyAllocated badge=True   (unchanged both builds)
+subnet 3 has host IPs    all roles  hasHostIps badge=True       (unchanged both builds)
 
-One page, /Subnet/Details/1, same DB row, three principals:
-  View  | Create-Subnet buttons: 0 | unallocated rows: 2 | Add-Child anchors: ['Add Child Subnet']
-  Edit  | Create-Subnet buttons: 2 | unallocated rows: 2 | Add-Child anchors: ['Add Child Subnet']
-  Admin | Create-Subnet buttons: 2 | unallocated rows: 2 | Add-Child anchors: ['Add Child Subnet']
-  (same render: Edit/Delete buttons 0/0 for View, 1/0 for Edit, 1/1 for Admin)
-
-Following that href as View:
-  HTTP/1.1 403 Forbidden
+GET /Subnet/Create?parentId=1 : none 403 | View 403 | Edit 200 | Delete 200 | Admin 200
+GET /Subnet/Details/1         : none 403 | View 200   (200 for View after the fix too)
 ```
 
-A full POST matrix (14 endpoints x 5 roles with per-role antiforgery tokens) found **no policy gap
-anywhere**: `POST /Subnet/Create` = `403 403 200 200 200`, `POST /Subnet/Delete/1` = `403 403 403 302
-302`, `PurgeAll*` and all four Azure POSTs = `403 403 403 403 <2xx/3xx/400>`. Server-side enforcement is
-intact at every layer.
+_So the only delta is the anchor the View principal could not follow; every badge and the page's own
+status are unchanged for every role. The visible result for a View user on an empty, non-full subnet is
+a bare "Child Subnets" card header with neither button nor badge, which matches how the other cards
+already render for that principal._
 
-### Why info, not low
+_The cheaper interim - a `ViewBag.CanCreateSubnets` flag set in `SubnetController.Read.cs` beside the
+existing `ViewBag.CanImportFromAzure` - was **not** taken. The finding marked it plausible but never
+built, and the injected-partial form is the one that was measured; `_UnallocatedRanges.cshtml`,
+`_HostIpAssignments.cshtml` and `Index.cshtml` all already inject `IUserContextService` the same way, so
+this is the established idiom in these views rather than a second mechanism._
 
-Both verifiers independently corrected this down. The finding narrates the Development consequence - a
-generic "Status Code: 403 / An error occurred while processing your request" page - which is a rig
-artifact twice over: `Program.cs:180-188` registers no `AccessDeniedPath` on the dev scheme (the code
-comment there says so explicitly), and stock Development issues `Admin` to everyone, so a View-only
-principal cannot exist there at all. In the only deployment where the precondition can hold
-(Production/OIDC), `Program.cs:200` turns the same Forbid into a 302 to `/Account/AccessDenied`, whose
-text is *"Your account doesn't have the necessary roles to view this page."*
-
-So the entire harm is one misleading affordance whose click lands on a page that correctly explains the
-refusal. Nothing is written, nothing is disclosed that `/Account/Roles` does not already show, no
-privilege is gained.
-
-**Not the twice-refuted claim on this line.** Round 7's `F10` and round 11's kill were the *capacity*
-claim (hide the link on a `/32`; proposed gate `Cidr < 32`). Round 11 killed it because the "two
-controls on one page disagree" premise is measurably **false** for capacity - a fully-covered subnet
-renders no Unallocated Ranges card at all - and because the target answers 200 with an inline reason.
-For the **role** predicate both inversions hold: the second control is on screen and measurably
-disagrees, and the target genuinely refuses at the authorization layer.
-
-### Fix - sound, built and run
-
-```razor
-@inject Bastet.Services.IUserContextService ChildSubnetsUserContext
-...
-@if (Model.CanAddChildSubnet && ChildSubnetsUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
-```
-
-Both verifiers applied it, published (0 warnings / 0 errors) and re-rendered 3 subnet states x 5 role
-sets. View loses the anchor; Edit/Delete/Admin keep it; `/Subnet/Details/1` still returns 200 for View.
-
-**The AND is load-bearing, as the finding says.** The `else if` branches below print the "Fully
-Allocated" and "Has Host IPs" badges, which are capacity statements that must keep rendering for a
-read-only user - measured intact after the fix (subnet with host IPs still shows "Has Host IPs" to
-View; fully-allocated subnet still shows "Fully Allocated" and its alert). Replacing rather than ANDing
-would have broken exactly that.
-
-Single render site (`Details.cshtml:41`), no sibling call site missed; the third `CanAddChildSubnet`
-consumer (`_HostIpAssignments.cshtml:110`) is already inside an Edit gate at `:98`. No test touches the
-view. Visible delta: a View user on an empty, non-full subnet now sees a bare "Child Subnets" card
-header with neither button nor badge - matches the other cards, not a regression.
-
-**Cheaper interim (`ViewBag.CanCreateSubnets` in `SubnetController.Read.cs` beside the existing
-`ViewBag.CanImportFromAzure` at `:124-129`): plausible but NOT BUILT.** The mechanism is confirmed to
-work - `Html.PartialAsync` inherits parent `ViewData`, which is how `_RoleBasedActions.cshtml:9` already
-reads `ViewBag.CanImportFromAzure` set in that same block - but it was never measured. Take the injected
-partial; it is the verified one.
+_Suite unchanged at **738** - no test in the repo renders a view (see `R6`), so there is nothing to pin
+this with; the per-role render matrix above is the verification._
 
 ---
 
