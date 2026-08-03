@@ -196,7 +196,7 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
                 Statuses = await AzureReconcileApproval.ForAsync(azure, snapshots, SubId, targets)
             },
             azure,
-            new AzureReconciler(),
+            new AzureReconciler(new IpUtilityService()),
             snapshots);
 
         // An empty-but-successful Azure inventory means every VNet really is gone, so all of them

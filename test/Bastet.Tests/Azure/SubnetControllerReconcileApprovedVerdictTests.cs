@@ -32,7 +32,7 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
 
     private readonly BastetDbContext _context;
     private readonly SubnetController _controller;
-    private readonly IAzureReconciler _reconciler = new AzureReconciler();
+    private readonly IAzureReconciler _reconciler = new AzureReconciler(new IpUtilityService());
     private readonly AzureSubnetSnapshotService _snapshotService;
 
     public SubnetControllerReconcileApprovedVerdictTests()

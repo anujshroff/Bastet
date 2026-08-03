@@ -1,4 +1,5 @@
 using Bastet.Models.ViewModels;
+using Bastet.Services;
 using Bastet.Services.Azure;
 
 namespace Bastet.Tests.Azure;
@@ -17,7 +18,7 @@ public class AzureReconcilerRangeStillAllocatedTests
 {
     private const string SubId = "11111111-1111-1111-1111-111111111111";
 
-    private readonly AzureReconciler _reconciler = new();
+    private readonly AzureReconciler _reconciler = new(new IpUtilityService());
 
     private static string VNetId(string name) =>
         $"/subscriptions/{SubId}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/{name}";
@@ -61,7 +62,7 @@ public class AzureReconcilerRangeStillAllocatedTests
 
     private AzureReconcilePlanViewModel Build(
         AzureVNetInventory inventory, params AzureLinkedSubnetSnapshot[] linked) =>
-        _reconciler.BuildPlan(SubId, "Test Sub", inventory, linked);
+        _reconciler.BuildPlan(SubId, "Test Sub", inventory, linked, []);
 
     // -------------------------------------------------------------------------
     // The defect - a range still assigned in Azure must never be offered for deletion

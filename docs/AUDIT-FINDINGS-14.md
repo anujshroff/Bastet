@@ -101,55 +101,23 @@ _Tests: 792 → 800. Eight in `SubnetControllerReconcileApprovedVerdictTests`, i
 
 ---
 
-## N3 — An IPv4 prefix Azure adds to an already-imported subnet is advertised by BASTET as free space, both import wizards refuse to import it, and the reconcile scan reports no differences `[x2]`
+## N3 — An IPv4 prefix Azure adds to an already-imported subnet is invisible to reconcile and advertised as free space `[x2]` — FIXED
 
-**Severity:** high · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/Azure/AzureReconciler.cs:73`
+_N3 is fixed and committed. The reconciler had no inbound direction at all: every status started from a BASTET row and asked what Azure said about it, so an Azure range BASTET has no row for was invisible to all of them. `AzureReconcileStatus.AzureRangeNotImported` is that verdict, reported into `ReviewItems` — report-only, never deletable, because it names no BASTET subnet and the absence of one **is** the finding._
 
-**Failure scenario.** Ordinary sequence, no operator error, no crafted request. Bulk-import a VNet and its multi-prefix subnet. Azure later adds a third prefix to that same subnet (`az network vnet subnet update --address-prefixes ...`) — routine since multi-prefix subnets went GA. From that moment: the Details page lists a range **containing** the newly assigned `/24` under "Unallocated IP Ranges" with a **Create Subnet** button; `ReconcileScan` returns `items 0, reviewItems 0, warnings [], globalErrors []`; and neither import path can correct it — `GET /Azure/Import/{id}` 302s with *"Subnet must not have any child subnets or host IP assignments"* (`AzureController.cs:39-45`), and the bulk wizard marks the VNet prefix `Blocked` (`AzureBulkImportPlanner.cs:199`) which disables every subnet row underneath it, including the new row the very same response marks `Available / isSelectable: true`. The tool renders the discrepancy on one page while denying it exists on two others. Structural cause: every `AzureReconcileStatus` starts from a Bastet row carrying an `AzureResourceId` — `BuildPlan` iterates `linkedSubnets` at `:73` and never walks the inventory looking for Azure ranges BASTET has no row for.
+_The owner chose the full inbound verdict over the warning-only half, so `IAzureReconciler.BuildPlan` now also takes the whole subnet tree (`IAzureSubnetSnapshotService.GetExistingSubnetsAsync`, which already existed and was already called by the bulk path), and `AzureReconciler` takes `IIpUtilityService` for the containment maths — the same shape `AzureBulkImportPlanner` already has, and still pure in the sense that matters: no EF, no Azure calls._
 
-**Reproduction** — own instance port 5342, catalog `bastet_rig14_verc1`, live fixture `rig-14-verc1-vnet` (10.90.0.0/16), subnet with prefixes `10.90.200.0/25` + `10.90.200.128/25`:
+_Both of the verifier's corrections to part (a) were taken and both are pinned by tests. **Containment, not equality**: an IPAM routinely records a coarser allocation than Azure carves out of it, so a BASTET `10.90.64.0/18` accounts for an Azure `10.90.77.0/24` inside it — `ARangeContainedByACoarserBastetSubnet_IsNotReported`. **The whole tree, not just linked rows**: only the two import paths ever write `AzureResourceId`, so a range the operator created by hand carries none, and matching against linked rows alone would report it forever after they had already done exactly what the report asked — `ARangeCreatedByHandCarryingNoAzureLink_IsNotReported`. The walk is scoped to VNets that have actually been imported, or pointing the scan at an untouched subscription produces an item per Azure subnet on every scan._
 
-```
-bulk import -> {"success":true,"createdTargets":1,"createdChildSubnets":2}
-az network vnet subnet update ... --address-prefixes 10.90.200.0/25 10.90.200.128/25 10.90.77.0/24
+_Two corrections were mine, not the audit's, and both were found by running the thing rather than reading it. First, **a VNet-level import target contains every range in its VNet by construction**, so counting a target's containment as "accounted for" made the check vacuous — it could never report anything. Targets are excluded from the containment arm but still honoured on exact match, because an Azure subnet covering a whole VNet prefix is recorded by marking that target fully allocated rather than by creating a child. Two tests pin both halves of that. Second, **`GetVNetInventory` emits one row per prefix and every row carries the complete prefix list** (round 13's `BuildInventorySubnetRows`), so walking rows x prefixes visits an n-prefix subnet n-squared times: the first live run reported one unaccounted range **three times**. Deduped, with `TheRealMultiPrefixInventoryShape_ReportsEachRangeExactlyOnce` built from the real inventory shape rather than a hand-simplified fixture that hides it._
 
-POST /Azure/ReconcileScan -> {"scanSucceeded":true,"items":[],"reviewItems":[],
-                              "globalErrors":[],"warnings":[],"canCommit":false}
+_Part (b) of the finder's proposal — relaxing the two import gates — was **not** done here; it is N4's decision and is answered there._
 
-GET /Subnet/Details/1 "Unallocated IP Ranges":
-  10.90.0.0   10.90.199.255   51,199 IP addresses   [Create Subnet]   <- contains 10.90.77.0/24
-  10.90.201.0 10.90.255.254   14,079 IP addresses   [Create Subnet]
+_Proven by A/B on live Azure. Fixture `rec14-n3-vnet` 10.90.0.0/16 with subnet `rec14-n3-sn-multi` carrying `10.90.200.0/25` + `10.90.200.128/25`, bulk-imported into both builds (`createdTargets: 1, createdChildSubnets: 2`), then `az network vnet subnet update` added `10.90.77.0/24` to that same subnet — ARM confirmed the multi-prefix shape with singular `addressPrefix: null` and `addressPrefixes` populated. Unfixed `77560af`: `items [], reviewItems [], warnings []` — the one feature whose job is comparing the two systems reported nothing at all. Fixed: one `AzureRangeNotImported` review row for `10.90.77.0/24` reading "Azure subnet 'rec14-n3-sn-multi' in VNet 'rec14-n3-vnet' owns 10.90.77.0/24, which no BASTET subnet records. BASTET is reporting that range as free space."_
 
-GET /Azure/Import/1                 -> 302 /Subnet/Details/1 ("must not have any child subnets")
-GET /Azure/BulkGetVNets             -> PREFIX 10.90.0.0/16 Blocked isSelectable false
-                                       SN 10.90.77.0/24 Available isSelectable TRUE
-POST /Azure/BulkImportPreview (crafted: ONLY the new prefix)
-  -> errors ["Cannot import VNet prefix 10.90.0.0/16: matched Bastet subnet ... already has child subnets."]
-POST /Subnet/BulkCreateFromAzurePlan -> HTTP 400, same error   (the gate is server-side, no API back door)
+_Still true after this fix, and deliberately: `/Subnet/Details/{id}` continues to print the range under Unallocated IP Ranges with a Create Subnet button. Closing that is N4's half of the same defect and is answered there — this finding is the detection._
 
-THE HARM, EXECUTED:
-POST /Subnet/Create Name=team-web-block NetworkAddress=10.90.77.0 Cidr=24 ParentSubnetId=1
-  -> 302 /Subnet/Details/4 ; row persisted, AzureResourceId NULL
-BASTET allocated a /24 Azure had already assigned, with no warning.
-POST /Azure/ReconcileScan (with the double-allocation live) -> items [] warnings [] globalErrors []
-```
-
-**Fix (finder's proposal, corrected by the verifier — part (a) was underspecified and part (b) is dangerous).**
-
-**(a) The inbound verdict cannot be built from `BuildPlan`'s current inputs.** `BuildPlan` only receives `linkedSubnets`, and `AzureSubnetSnapshotService.GetAzureLinkedSubnetsAsync` (`:52`) filters to rows with a non-empty `AzureResourceId`. Proved false-positive: the hand-created `team-web-block` above exactly accounts for the Azure prefix but never enters `linkedSubnets`, so the proposed loop would report `10.90.77.0/24` as "not imported" forever. Two changes are required: **(i)** extend `IAzureReconciler.BuildPlan` to also take the full tree — `IAzureSubnetSnapshotService.GetExistingSubnetsAsync()` already returns every subnet and is already called by the bulk path; **(ii)** match by **containment, not `{network,cidr}` equality** — an IPAM routinely records a coarser allocation (Bastet has `10.90.64.0/18`; Azure carves `10.90.77.0/24` inside it), and that range *is* accounted for. Report only when no Bastet subnet contains the Azure prefix, and scope the walk to VNets at least one of whose prefixes maps to an existing Bastet target, or an unimported subscription produces an item per Azure subnet on every scan.
-
-**(b) Do not relax the two import gates as proposed.** `AnnotatePrefix:197-200` / `BuildPlanItem:379-383` block an exact-match target that has children for a reason that survives this finding: the commit path also renames the target, stamps `AzureResourceId` and can set `IsFullyAllocated` (`SubnetController.Azure.cs:397-399,404,410`). Loosening them to "block only when the selection would create a row that already exists" lets an import adopt and re-stamp a target whose children were created by hand — the state round 13's C4 analysis showed lets a later reconcile cascade archive non-Azure rows. See N4 for the narrower alternative.
-
-**(c)** The interim warning is the right first move, with the same full-tree + containment input as (a), or it fires on ranges Bastet legitimately accounts for and operators learn to ignore it.
-
-**Also worth doing regardless:** `BulkGetVNets` returns `10.90.77.0/24` as `Available / isSelectable: true` under a prefix it marks `Blocked / isSelectable: false` **in the same response**. Whatever is decided about the gates, mark a subnet row unselectable-with-a-reason when its own VNet prefix is blocked, so the wizard stops offering a row nothing can act on.
-
-**Interim mitigation.** A `plan.Warnings` entry (not an item) — *"Azure subnet 'X' owns 10.90.77.0/24, which no Bastet subnet records. BASTET will report that range as free."* Warnings are already rendered on the reconcile review screen, are never deletable, and `nothingToReport` (`_ReconcileScripts.cshtml:287`) already includes `warnings.length === 0`, so this correctly suppresses the "nothing to clean up" banner without touching the deletion path. ~30 lines, no schema, no UI change.
-
-**Decision needed from you.** (1) Does the reconciler get an inbound verdict at all — a new `AzureReconcileStatus`, the wider `BuildPlan` input, and a report-only never-deletable review row? Roughly a day plus tests; the cheap half ships first and is independently useful. (2) Should there be any supported path to pull new Azure prefixes into an already-imported target — covered in N4.
-
-*Narrative correction:* the JSON is `items 0, warnings []`, but the green banner it drives (`_StepReview.cshtml:30`) reads "Everything imported from this subscription still exists in Azure. There is nothing to clean up." — carefully scoped to the outbound direction and not literally false. The defect is that the only comparison feature in the product has **no inbound verdict at all**, so the free-space page lies unopposed.
+_Tests: 800 → 812. Twelve in `AzureReconcilerInboundTests`, seven of which are false-positive tests: an inbound report that fires on ranges BASTET legitimately accounts for is a warning operators learn to ignore, which is worse than no warning._
 
 ---
 

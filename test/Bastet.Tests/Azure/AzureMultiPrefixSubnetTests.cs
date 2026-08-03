@@ -275,7 +275,7 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler(new IpUtilityService()).BuildPlan(SubId, "Test Sub", inventory, linked, []);
 
         Assert.Empty(plan.Items);
     }
@@ -306,7 +306,7 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler(new IpUtilityService()).BuildPlan(SubId, "Test Sub", inventory, linked, []);
 
         Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, Assert.Single(plan.Items).Status);
     }

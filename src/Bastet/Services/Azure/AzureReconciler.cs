@@ -7,17 +7,19 @@ namespace Bastet.Services.Azure
     /// rules that decide what may be deleted can be tested exhaustively, mirroring
     /// <see cref="AzureBulkImportPlanner"/>.
     /// </summary>
-    public class AzureReconciler : IAzureReconciler
+    public class AzureReconciler(IIpUtilityService ipUtilityService) : IAzureReconciler
     {
         /// <inheritdoc/>
         public AzureReconcilePlanViewModel BuildPlan(
             string subscriptionId,
             string? subscriptionName,
             AzureVNetInventory inventory,
-            IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets)
+            IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
         {
             ArgumentNullException.ThrowIfNull(inventory);
             ArgumentNullException.ThrowIfNull(linkedSubnets);
+            ArgumentNullException.ThrowIfNull(existingSubnets);
 
             AzureReconcilePlanViewModel plan = new()
             {
@@ -199,6 +201,12 @@ namespace Bastet.Services.Azure
                 }
             }
 
+            // INBOUND. Everything above walks Bastet rows and asks what Azure says about them, so
+            // every verdict starts from a row that already exists. An Azure range BASTET has no row
+            // for is invisible to all of it - the scan reports "nothing to clean up" while the
+            // parent's Details page offers the range as free with a Create Subnet button over it.
+            ReportAzureRangesNoBastetSubnetRecords(plan, inventory, existingSubnets);
+
             if (rangeStillAllocated.Count > 0)
             {
                 plan.Warnings.Add(
@@ -372,6 +380,121 @@ namespace Bastet.Services.Azure
         /// </summary>
         public static bool IsAbsenceStatus(AzureReconcileStatus status) =>
             status is AzureReconcileStatus.VNetDeleted or AzureReconcileStatus.SubnetDeleted;
+
+        /// <summary>
+        /// Reports every IPv4 range Azure has assigned inside an imported VNet that no Bastet subnet
+        /// accounts for. Report-only: these rows name no Bastet subnet, so there is nothing to
+        /// delete and nothing here is ever deletable.
+        /// </summary>
+        /// <remarks>
+        /// Two things make this correct rather than noisy, and both were wrong in the finding's
+        /// original proposal:
+        ///
+        /// CONTAINMENT, NOT EQUALITY. An IPAM routinely records a coarser allocation than Azure
+        /// carves out of it - Bastet holds 10.90.64.0/18 and Azure creates 10.90.77.0/24 inside it.
+        /// That range IS accounted for. Comparing {network, cidr} for equality would report it
+        /// forever, and an operator who cannot silence a warning stops reading warnings.
+        ///
+        /// EVERY subnet, not just linked ones. A range created by hand carries no AzureResourceId -
+        /// only the two import paths ever write that column - so matching against linked rows alone
+        /// would report a range the operator had already corrected, permanently.
+        ///
+        /// Scoped to VNets that have actually been imported, or an unimported subscription produces
+        /// an item per Azure subnet on every scan.
+        /// </remarks>
+        private void ReportAzureRangesNoBastetSubnetRecords(
+            AzureReconcilePlanViewModel plan,
+            AzureVNetInventory inventory,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
+        {
+            HashSet<string> importedVNetIds = new(
+                existingSubnets
+                    .Select(s => AzureResourceIdentity.VNetIdOf(s.AzureResourceId))
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .Select(id => id!),
+                StringComparer.OrdinalIgnoreCase);
+
+            // GetVNetInventory emits ONE ROW PER PREFIX for a multi-prefix Azure subnet, and every
+            // one of those rows carries the COMPLETE prefix list (round 13's BuildInventorySubnetRows,
+            // deliberately, so the reconciler's resource-id index is safe whichever row lands last).
+            // Walking rows x prefixes therefore visits an n-prefix subnet n^2 times, and without
+            // this set the same range is reported n times over.
+            HashSet<string> reported = new(StringComparer.OrdinalIgnoreCase);
+
+            foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
+            {
+                if (string.IsNullOrEmpty(vnet.ResourceId) || !importedVNetIds.Contains(vnet.ResourceId))
+                {
+                    continue;
+                }
+
+                foreach (BulkAzureSubnetViewModel subnet in vnet.Subnets)
+                {
+                    foreach (string prefix in Ipv4PrefixesOf(subnet))
+                    {
+                        string[] parts = prefix.Split('/');
+
+                        if (parts.Length != 2 || !int.TryParse(parts[1], out int cidr))
+                        {
+                            continue;
+                        }
+
+                        if (!reported.Add($"{subnet.ResourceId}|{prefix}"))
+                        {
+                            continue;
+                        }
+
+                        if (existingSubnets.Any(e => AccountsFor(e, parts[0], cidr)))
+                        {
+                            continue;
+                        }
+
+                        plan.ReviewItems.Add(new AzureReconcileItem
+                        {
+                            // No Bastet row exists - that is the whole point of the item. Zero is
+                            // safe in the withheld set below because no real subnet has that id.
+                            SubnetId = 0,
+                            Name = subnet.Name,
+                            NetworkAddress = parts[0],
+                            Cidr = cidr,
+                            AzureResourceId = subnet.ResourceId ?? string.Empty,
+                            Status = AzureReconcileStatus.AzureRangeNotImported,
+                            Reason = $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}, "
+                                     + "which no BASTET subnet records. BASTET is reporting that range as free space.",
+                            IsVNetLevel = false
+                        });
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// True when a Bastet subnet already accounts for an Azure range - it either IS that range,
+        /// or it is a non-target subnet containing it.
+        /// </summary>
+        /// <remarks>
+        /// The exclusion of VNet-level targets from the containment arm is load-bearing, not a
+        /// detail. An import target holds the VNet's whole address prefix, so it contains every
+        /// range in the VNet by construction; counting that as "accounted for" makes the inbound
+        /// check vacuous - it can never report anything. A target represents the address space the
+        /// VNet owns, not an allocation within it, and BASTET's own free-space table agrees: it
+        /// prints the target's range minus its CHILDREN.
+        ///
+        /// Equality is still honoured for targets, because an Azure subnet covering a whole VNet
+        /// prefix is recorded by marking that very target fully allocated rather than by creating a
+        /// child - so the target genuinely is the record of that range.
+        /// </remarks>
+        private bool AccountsFor(ExistingSubnetSnapshot existing, string network, int cidr)
+        {
+            if (string.Equals(existing.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
+                && existing.Cidr == cidr)
+            {
+                return true;
+            }
+
+            return !AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId)
+                   && ipUtilityService.IsSubnetContainedInParent(network, cidr, existing.NetworkAddress, existing.Cidr);
+        }
 
         /// <summary>An Azure subnet that currently holds a given IPv4 range.</summary>
         private sealed record AzurePrefixOwner(string ResourceId, string SubnetName, string VNetName);

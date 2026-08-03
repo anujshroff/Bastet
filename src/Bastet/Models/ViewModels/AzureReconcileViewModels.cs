@@ -135,7 +135,16 @@ namespace Bastet.Models.ViewModels
         /// advertise an allocated range as free space. Correct it by re-linking the subnet to the
         /// Azure subnet that now holds the range.
         /// </summary>
-        RangeStillAllocatedInAzure
+        RangeStillAllocatedInAzure,
+
+        /// <summary>
+        /// Azure has assigned a range inside an imported VNet that no BASTET subnet records, so
+        /// BASTET is reporting an allocated range as free space.
+        /// Reported for review only and never deletable - it names no BASTET subnet, because the
+        /// absence of one IS the finding. This is the only inbound verdict: every other status
+        /// starts from a BASTET row and asks what Azure says about it.
+        /// </summary>
+        AzureRangeNotImported
     }
 
     /// <summary>

@@ -55,7 +55,8 @@ public partial class SubnetController : Controller
         // Re-scan against live Azure and the current tree
         AzureVNetInventory inventory = await azureService.GetVNetInventory(request.SubscriptionId);
         IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked);
+        IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
+        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked, existing);
 
         // A failed scan produces no items, so this also covers "Azure was unreachable"
         if (!plan.ScanSucceeded || plan.GlobalErrors.Count > 0)
@@ -293,7 +294,8 @@ public partial class SubnetController : Controller
 
         AzureVNetInventory inventory = await azureService.GetVNetInventory(request.SubscriptionId);
         IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked);
+        IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
+        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked, existing);
 
         if (!plan.ScanSucceeded || plan.GlobalErrors.Count > 0)
         {

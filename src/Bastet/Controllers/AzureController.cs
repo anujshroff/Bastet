@@ -336,7 +336,10 @@ namespace Bastet.Controllers
             {
                 AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
                 IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked);
+                // The whole tree, not just the linked rows: the inbound direction has to know about
+                // a range someone created by hand, which carries no Azure resource ID.
+                IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
+                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked, existing);
 
                 // The inventory is a list result and ARM filters those by RBAC, so "missing" is not
                 // the same fact as "deleted". Read each proposed row directly before offering it for
