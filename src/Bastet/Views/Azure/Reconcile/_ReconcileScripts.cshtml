@@ -293,6 +293,16 @@
                 tr.append($("<td></td>").text(item.name));
                 tr.append($("<td></td>").html("<code>" + escapeHtml(item.networkAddress) + "/" + escapeHtml(item.cidr) + "</code>"));
                 tr.append($("<td></td>").text(item.reason));
+
+                // Only a range that moved to another Azure subnet has a repair; every other review
+                // status needs a human decision the application cannot make.
+                const action = $("<td></td>");
+                if (item.suggestedAzureResourceId) {
+                    action.append($('<button type="button" class="btn btn-sm btn-outline-primary rec-relink-btn"></button>')
+                        .attr("data-subnet-id", item.subnetId)
+                        .text("Re-link to '" + item.suggestedAzureSubnetName + "'"));
+                }
+                tr.append(action);
                 reviewRows.append(tr);
             });
             $("#rec-review-section").toggleClass("d-none", reviewItems.length === 0);
@@ -340,6 +350,56 @@
             $(".rec-item-checkbox").prop("checked", $(this).is(":checked"));
             updateGoConfirmBtn();
             invalidateConfirmation();
+        });
+
+        // Repairs the Azure link of a row whose range moved to another Azure subnet. Delegated
+        // because the review rows are rebuilt on every scan. The server re-derives which Azure
+        // subnet to link to, so nothing but the row id is sent, and a re-scan follows so the
+        // screen never keeps showing a verdict that has just been acted on.
+        let relinking = false;
+        $("#rec-review-rows").on("click", ".rec-relink-btn", function () {
+            if (relinking) {
+                return;
+            }
+
+            const btn = $(this);
+            const subnetId = btn.data("subnet-id");
+
+            $.ajax({
+                url: "@Url.Action("RelinkAzureSubnet", "Subnet")",
+                type: "POST",
+                contentType: "application/json",
+                dataType: "json",
+                headers: { "RequestVerificationToken": getAntiForgeryToken() },
+                data: JSON.stringify({ subscriptionId: selectedSubscriptionId, subnetId: subnetId }),
+                beforeSend: function () {
+                    relinking = true;
+                    $(".rec-relink-btn").prop("disabled", true);
+                    btn.text("Re-linking...");
+                },
+                success: function (result) {
+                    if (result && result.success) {
+                        // Re-scan rather than patching the row: the repair can change other rows'
+                        // verdicts too, and a stale table is what makes an archive click wrong.
+                        runScan();
+                        return;
+                    }
+                    showScanError((result && result.error) || "The re-link failed.");
+                },
+                error: function (xhr) {
+                    let message = "The re-link failed.";
+                    if (xhr && xhr.responseJSON && xhr.responseJSON.error) {
+                        message = xhr.responseJSON.error;
+                    }
+                    showScanError(message);
+                },
+                complete: function () {
+                    // Re-enable unconditionally: a failed re-link must stay retryable, and runScan
+                    // rebuilds these rows from scratch on the success path anyway.
+                    relinking = false;
+                    $(".rec-relink-btn").prop("disabled", false);
+                }
+            });
         });
 
         $("#rec-back-to-subscription-btn").on("click", function () {

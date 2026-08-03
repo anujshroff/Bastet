@@ -54,6 +54,25 @@ namespace Bastet.Services.Azure
             // ancestor archives them all the same, so they get their own cascade guard below.
             HashSet<int> notCovered = [];
 
+            // Rows withheld because the range they record is still assigned in Azure under another
+            // resource ID. Collected so the operator gets one warning naming what holds each range,
+            // rather than only a silently shorter list.
+            List<AzurePrefixOwner> rangeStillAllocated = [];
+
+            // Which Azure subnet holds a given range, scoped to one VNet. Azure has no subnet
+            // rename, so re-organising one means delete-and-recreate: the recorded resource ID goes
+            // genuinely 404 while the range it named is still assigned under a new ID. Keyed by
+            // {vnetResourceId}|{prefix} rather than by the bare prefix because overlapping RFC1918
+            // across unrelated VNets is normal, and a bare-prefix match would withhold rows that
+            // really are stale.
+            //
+            // Accumulates into a list; never ToDictionary. One prefix legitimately has several
+            // owners even within this narrower key - a subnet can be listed twice by a paged read,
+            // and the same VNet ID can appear more than once in a malformed inventory. A duplicate
+            // key throw here turns the whole scan into "The reconcile scan failed", which is the
+            // exact failure mode the subnet-prefix index above already avoids.
+            Dictionary<string, List<AzurePrefixOwner>> livePrefixOwners = new(StringComparer.OrdinalIgnoreCase);
+
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
                 if (!string.IsNullOrEmpty(vnet.ResourceId))
@@ -66,6 +85,24 @@ namespace Bastet.Services.Azure
                     if (!string.IsNullOrEmpty(subnet.ResourceId))
                     {
                         liveSubnetPrefixes[subnet.ResourceId] = Ipv4PrefixesOf(subnet);
+                    }
+
+                    if (string.IsNullOrEmpty(vnet.ResourceId))
+                    {
+                        continue;
+                    }
+
+                    foreach (string prefix in Ipv4PrefixesOf(subnet))
+                    {
+                        string key = PrefixKey(vnet.ResourceId, prefix);
+
+                        if (!livePrefixOwners.TryGetValue(key, out List<AzurePrefixOwner>? owners))
+                        {
+                            owners = [];
+                            livePrefixOwners[key] = owners;
+                        }
+
+                        owners.Add(new AzurePrefixOwner(subnet.ResourceId ?? string.Empty, subnet.Name, vnet.Name));
                     }
                 }
             }
@@ -129,6 +166,28 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
+                // Before offering anything for deletion, ask the question the statuses above cannot:
+                // is the RANGE still assigned in Azure, even though the resource that carried it is
+                // not? A rename, or a prefix moved between two subnets, produces exactly that - and
+                // archiving on it makes the parent's Details page advertise an allocated range as
+                // free with a Create Subnet button over it. The evidence was always in hand; nothing
+                // consulted it.
+                AzurePrefixOwner? stillAllocated = FindLiveOwnerOfRange(snapshot, item, livePrefixOwners);
+
+                if (stillAllocated is not null)
+                {
+                    AzureReconcileItem review = Item(snapshot, AzureReconcileStatus.RangeStillAllocatedInAzure, item.IsVNetLevel,
+                        $"{item.Reason} The range {snapshot.NetworkAddress}/{snapshot.Cidr} is still assigned in Azure "
+                        + $"to subnet '{stillAllocated.SubnetName}' in VNet '{stillAllocated.VNetName}', so archiving this "
+                        + "subnet would make BASTET report an allocated range as free. Re-link it to that Azure subnet.");
+                    review.SuggestedAzureResourceId = stillAllocated.ResourceId;
+                    review.SuggestedAzureSubnetName = stillAllocated.SubnetName;
+
+                    plan.ReviewItems.Add(review);
+                    rangeStillAllocated.Add(stillAllocated);
+                    continue;
+                }
+
                 if (item.Status is AzureReconcileStatus.FullyAllocatingSubnetDeleted
                     or AzureReconcileStatus.UnrecognisedResourceId)
                 {
@@ -138,6 +197,15 @@ namespace Bastet.Services.Azure
                 {
                     plan.Items.Add(item);
                 }
+            }
+
+            if (rangeStillAllocated.Count > 0)
+            {
+                plan.Warnings.Add(
+                    $"{rangeStillAllocated.Count} subnet(s) were withheld from deletion because their address range is "
+                    + "still assigned in Azure under a different resource - which is what a subnet rename looks like, "
+                    + "Azure having no rename operation. Archiving them would make BASTET report an allocated range as "
+                    + $"free space: {OwnerList(rangeStillAllocated)}.");
             }
 
             WithholdTargetsWhoseCascadeIsBlocked(
@@ -304,6 +372,60 @@ namespace Bastet.Services.Azure
         /// </summary>
         public static bool IsAbsenceStatus(AzureReconcileStatus status) =>
             status is AzureReconcileStatus.VNetDeleted or AzureReconcileStatus.SubnetDeleted;
+
+        /// <summary>An Azure subnet that currently holds a given IPv4 range.</summary>
+        private sealed record AzurePrefixOwner(string ResourceId, string SubnetName, string VNetName);
+
+        /// <summary>Index key: a range is only comparable within the VNet that carries it.</summary>
+        private static string PrefixKey(string vnetResourceId, string prefix) => $"{vnetResourceId}|{prefix}";
+
+        /// <summary>
+        /// The live Azure subnet still holding this row's range under a *different* resource ID, or
+        /// null. Only asked for rows already judged stale, and only within the row's own VNet.
+        /// </summary>
+        /// <remarks>
+        /// A row whose own recorded resource still owns the range is not stale in the first place
+        /// and never reaches here, so excluding the row's own ID cannot mask a real drift; what it
+        /// does exclude is the degenerate case of a subnet reported twice by a paged read, where
+        /// treating the row as its own evidence would withhold every genuine deletion.
+        /// </remarks>
+        private static AzurePrefixOwner? FindLiveOwnerOfRange(
+            AzureLinkedSubnetSnapshot snapshot,
+            AzureReconcileItem item,
+            Dictionary<string, List<AzurePrefixOwner>> livePrefixOwners)
+        {
+            // FullyAllocatingSubnetDeleted and UnrecognisedResourceId are review-only already and
+            // delete nothing, so re-routing them would only muddy the reason they carry.
+            if (item.Status is not (AzureReconcileStatus.VNetDeleted
+                or AzureReconcileStatus.VNetPrefixRemoved
+                or AzureReconcileStatus.SubnetDeleted
+                or AzureReconcileStatus.SubnetPrefixChanged))
+            {
+                return null;
+            }
+
+            string? vnetId = AzureResourceIdentity.VNetIdOf(snapshot.AzureResourceId);
+
+            if (vnetId is null)
+            {
+                return null;
+            }
+
+            string key = PrefixKey(vnetId, $"{snapshot.NetworkAddress}/{snapshot.Cidr}");
+
+            return livePrefixOwners.TryGetValue(key, out List<AzurePrefixOwner>? owners)
+                ? owners.FirstOrDefault(o =>
+                    !string.Equals(o.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase))
+                : null;
+        }
+
+        /// <summary>Comma-separated "'subnet' in VNet 'vnet'", capped so a warning stays readable.</summary>
+        private static string OwnerList(List<AzurePrefixOwner> owners)
+        {
+            const int Max = 10;
+            string names = string.Join(", ", owners.Take(Max).Select(o => $"'{o.SubnetName}' in VNet '{o.VNetName}'"));
+            return owners.Count > Max ? $"{names} and {owners.Count - Max} more" : names;
+        }
 
         /// <summary>Comma-separated subnet names, capped so a warning stays readable.</summary>
         private static string NameList(List<AzureReconcileItem> items)

@@ -65,47 +65,19 @@ All ten findings reproduced on a running instance. Nothing in this file is infer
 
 # Critical
 
-## N1 — Reconcile archives a Bastet subnet whose CIDR is still allocated in Azure by a *different* Azure subnet, after which BASTET advertises the Azure-assigned range as free space — and re-import is then refused `[x2]`
+## N1 — Reconcile archives a Bastet subnet whose CIDR is still allocated in Azure by a *different* Azure subnet `[x2]` — FIXED
 
-**Severity:** critical · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/Azure/AzureReconciler.cs:367` (and the identical hole at `:376-381`)
+_N1 is fixed and committed. The reconciler now answers the question the four stale statuses never asked: is the RANGE still assigned in Azure, even though the resource that carried it is gone? `BuildPlan` builds a second index alongside `liveSubnetPrefixes` mapping each live IPv4 prefix to the Azure subnet holding it, and any row that would have been offered for deletion while its range is still assigned becomes a new report-only status, `RangeStillAllocatedInAzure`, in `ReviewItems` — never deletable — plus a plan warning naming the Azure subnet that holds it._
 
-**Failure scenario.** Azure has no subnet rename, so re-organising one means delete-and-recreate. A VNet holds subnet `sn-a` with prefix `10.111.5.0/24`, imported into Bastet. `sn-a` is deleted and immediately recreated as `sn-a2` carrying the **same** prefix. `EvaluateSubnetLevel` keys only on the recorded ARM resource id (`:365-369`), so the Bastet row becomes `SubnetDeleted` — "The Azure subnet this was imported from no longer exists." That statement is *literally true*; the resource really is gone. What is missing is any range-level check. `ConfirmProposedDeletionsAsync` (`AzureController.cs:368-389`) asks ARM one question only — is this resource id gone — gets a genuine 404, and keeps the row. After approval the parent's Details page advertises the still-assigned `/24` as free with a **Create Subnet** button. The reconciler holds the contradicting evidence: `liveSubnetPrefixes`, built at `AzureReconciler.cs:64-71` from the same scan, contains `sn-a2 -> [10.111.5.0/24]`. The second route, `SubnetPrefixChanged` (`:376-381`), gets no direct ARM confirmation at all — `IsAbsenceStatus` (`:305-306`) covers only `VNetDeleted`/`SubnetDeleted` — so moving a prefix between two Azure subnets produces the same wrong output with even less friction.
+_All three of the verifier's corrections were taken. The index accumulates into `Dictionary<string, List<AzurePrefixOwner>>` rather than `ToDictionary`, because one prefix legitimately has several owners and a duplicate-key throw would turn a whole scan into "The reconcile scan failed"; `DuplicateRangesAcrossVNets_DoNotThrow` pins it with three VNets carrying the same `10.10.1.0/24`. The match is scoped to the row's own VNet via a new `AzureResourceIdentity.VNetIdOf`, because overlapping RFC1918 across unrelated VNets is the norm — `TheSameRangeAllocatedInADifferentVNet_DoesNotWithholdTheDeletion` proves an unrelated VNet's identical range does not withhold a genuine deletion. And the fail-closed half was **not** shipped alone: the owner chose warn + fail closed + re-link, so `POST /Subnet/RelinkAzureSubnet` now repairs the link in place, which is what makes withholding a correction rather than the permanent dead end correction 3 warned about._
 
-**Reproduction** — own instance port 5196, catalog `bastet_rig14_verc7`, own live fixture `rig-14-verc7-vnet` (10.111.0.0/16):
+_The re-link endpoint takes **no resource ID from the caller** — only the Bastet subnet id. It re-scans Azure, re-derives the new link from the fresh plan, accepts only a row that plan itself reports as `RangeStillAllocatedInAzure`, and re-checks the row's link under the subnet lock before writing. So neither a stale browser view nor a crafted post can point a Bastet subnet at an arbitrary Azure resource; the range that moved decides what the row links to. `TheNewLinkIsDerivedFromAzure_NotFromAnythingTheCallerSupplied` pins that with a decoy subnet in the same VNet._
 
-```
-BEFORE  GET /Subnet/Details/1 "Unallocated IP Ranges":
-        10.111.0.0 - 10.111.4.255 (1,279)  |  10.111.7.0 - 10.111.255.254 (63,743)
+_Proven by A/B against a clone of the unfixed commit `77560af`, both builds driven through the same live Azure fixture (`rec14-n1-vnet` 10.111.0.0/16, subnet `rec14-n1-sn-a` 10.111.5.0/24 deleted and recreated as `rec14-n1-sn-a2` with the same prefix — Azure has no rename). Unfixed: the scan reported `items: [(2, "SubnetDeleted")]` with no warning, `BulkDeleteStaleAzureSubnets` returned **200 `subnetsArchived: 1`**, and `/Subnet/Details/1` then advertised `10.111.0.0 - 10.111.255.255, 65,534 IP addresses` as free — up from 65,278, a difference of exactly the 256 addresses ARM still assigns. Fixed, same fixture: `items: []`, `reviewItems: [(2, "RangeStillAllocatedInAzure", "rec14-n1-sn-a2")]`, the archive attempt returned **409 with nothing deleted**, free space was unchanged, the re-link returned 200, and the following scan was completely clean — `items []`, `reviewItems []`, `warnings []`. The re-link endpoint returns 404 on the unfixed build; it did not exist._
 
-az network vnet subnet delete ... -n rig-14-verc7-sn-a
-az network vnet subnet create ... -n rig-14-verc7-sn-a2 --address-prefixes 10.111.5.0/24
+_Not done, and deliberately: nothing backfills rows already archived by this defect. `DeletedSubnets` has no restore path (round 13 established that on the record), so a row archived before this fix is recovered by re-importing it, which the re-link path does not change. The `SubnetPrefixChanged` route still takes no direct ARM read — `IsAbsenceStatus` is unchanged — because the range check now covers the case that made that gap dangerous, and widening confirmation to drift statuses would withhold every drift row permanently, which `ApplyConfirmations` documents at length as the reason it does not._
 
-POST /Azure/ReconcileScan ->
-  items: [{subnetId:2, status:2, statusName:"SubnetDeleted",
-           reason:"The Azure subnet this was imported from no longer exists."}]
-  reviewItems: []  globalErrors: []  warnings: []  canCommit: true
-
-POST /Subnet/BulkDeleteStaleAzureSubnets {"subnetIds":[2],"confirmation":"approved"}
-  -> 200 {"success":true,"targetsDeleted":1,"subnetsArchived":1,"hostIpsArchived":0}
-
-AFTER   GET /Subnet/Details/1:
-        10.111.0.0 - 10.111.5.255 (1,535)   <- grew by exactly the 256 addresses ARM still assigns
-```
-
-Route B (`SubnetPrefixChanged`, no ARM confirmation at all) archived row 3 and left `/Subnet/Details/1` showing `10.111.0.0 - 10.111.255.255, 65,534 IP addresses` while ARM held three `/24`s assigned. While a sibling Azure-linked child survives, re-import is refused by both wizards: `GET /Azure/Import/1` → 302; the VNet prefix is `Blocked`/`isSelectable=false`; a hand-built `BulkImportPreview` returns `canCommit:false`. Once **all** children were archived the prefix returned to `WillUpdateExisting` — so it is un-re-importable while a sibling remains, not permanently unrecoverable.
-
-**Fix (finder's proposal, corrected by the verifier — the original was incomplete on three counts).** Build a second index alongside `liveSubnetPrefixes` at `:64-71` mapping each live IPv4 prefix to its owning Azure subnet, and consult it before adding an item to `plan.Items`. Corrections:
-
-1. **Do not build it with `ToDictionary`.** Two VNets in one subscription can carry overlapping address space (the rig itself ships `10.10.0.0/16` and `10.10.0.0/20`), so one prefix string has several live owners. Use `Dictionary<string, List<(ResourceId, SubnetName, VNetName)>>` with indexer/`TryAdd` accumulation — exactly as `:68` already avoids `ToDictionary` for the same reason. A `ToDictionary` here turns every scan of a subscription with duplicated private CIDRs into "The reconcile scan failed."
-2. **Scope the match to the row's own VNet.** Overlapping RFC1918 across unrelated VNets is the norm; matching on the bare prefix string withholds genuinely stale rows. Parse the `/virtualNetworks/{name}/` segment out of `snapshot.AzureResourceId` (`AzureResourceIdentity` already handles these ids) and treat only a same-VNet live owner as evidence the range is still allocated — which is precisely where a rename or prefix move keeps the range.
-3. **Routing to `ReviewItems` is a dead end as the application stands.** No screen can edit or clear `Subnet.AzureResourceId`; the only writers are the two import commits. Worse, `ApplyConfirmations` adds every `ReviewItem`'s `SubnetId` to the `withheld` set at `:263`, so `WithholdTargetsWhoseCascadeIsBlocked` would permanently withhold the parent VNet-level row too. **Do not ship the fail-closed half alone.** A dedicated status is also cheap and keeps the reason honest — reusing `ReviewItems` renders these rows with the misleading existing copy "Correct or clear the link on this subnet", which no screen can do.
-
-**Interim mitigation (ship this now, under any of the three options).** One LINQ pass, ~15 lines: a `plan.Warnings` entry naming every proposed deletion whose CIDR is still live in the scanned inventory under a different Azure resource id in the same VNet — *"N subnet(s) below are proposed for deletion but their address range is still assigned in Azure to subnet 'X'; archiving them will make BASTET report an allocated range as free."* Put the same sentence on the item's own `Reason` so it appears next to the checkbox, not only in the banner. No new ARM calls, no change to what is deletable, no new stuck state.
-
-**Decision needed from you.** Fail closed, warn loudly, or fail closed plus a new "re-link this subnet to Azure subnet X" action. Fail-closed alone strands the row and its ancestors forever (see correction 3). Fail-closed plus re-link is the correct end state and also fixes the un-re-importable-sibling case; it is the largest of the three. The warning ships under all three.
-
-*Note on grading:* this is the same operator-visible output round 13 filed as High under M1. It is graded critical here because the wrong state is produced by an **irreversible archive** rather than by a display path, and because two independent routes reach it with zero warnings. If your scale caps range-misreporting at High, grade it there — but do not discount it for the rename trigger being uncommon.
+_Tests: 771 → 792. Nine in `AzureReconcilerRangeStillAllocatedTests` (four of which fail against the unfixed reconciler, and five counter-tests that a genuinely deleted range stays deletable), nine in `SubnetControllerRelinkAzureSubnetTests`, and three added automatically by `ControllerAuthorizationTests`, which enumerates controller actions by reflection and so picked the new endpoint up on its own._
 
 ---
 

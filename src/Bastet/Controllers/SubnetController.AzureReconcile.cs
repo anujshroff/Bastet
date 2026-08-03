@@ -203,4 +203,125 @@ public partial class SubnetController : Controller
             hostIpsArchived
         });
     }
+
+    /// <summary>
+    /// POST: Subnet/RelinkAzureSubnet — re-points a Bastet subnet at the Azure subnet that now holds
+    /// its range, after a rename or a prefix move left the recorded resource ID naming nothing.
+    ///
+    /// Azure has no subnet rename, so re-organising one is delete-and-recreate. Before this existed
+    /// the resulting row could only be archived — which made BASTET advertise a range Azure had
+    /// already assigned as free space — because nothing in the application could edit
+    /// <see cref="Subnet.AzureResourceId"/>. This is the repair path that makes withholding those
+    /// rows from deletion a correction rather than a dead end.
+    /// </summary>
+    /// <remarks>
+    /// The caller supplies no resource ID. We re-scan Azure and re-derive the link here, and accept
+    /// only a row the fresh plan itself reports as RangeStillAllocatedInAzure, so neither a stale
+    /// browser view nor a crafted post can point a subnet at an arbitrary resource.
+    /// </remarks>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = "RequireAdminRole")]
+    public async Task<IActionResult> RelinkAzureSubnet(
+        [FromBody] AzureRelinkDto request,
+        [FromServices] IAzureService azureService,
+        [FromServices] IAzureReconciler reconciler,
+        [FromServices] IAzureSubnetSnapshotService snapshotService)
+    {
+        if (!AzureController.IsAzureImportEnabled())
+        {
+            return StatusCode(403, new { success = false, error = "Azure Import feature is not enabled" });
+        }
+
+        if (request is null)
+        {
+            return BadRequest(new { success = false, error = "No request was provided." });
+        }
+
+        AzureVNetInventory inventory = await azureService.GetVNetInventory(request.SubscriptionId);
+        IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
+        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked);
+
+        if (!plan.ScanSucceeded || plan.GlobalErrors.Count > 0)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                error = "Azure could not be re-checked, so nothing was changed.",
+                globalErrors = plan.GlobalErrors
+            });
+        }
+
+        AzureReconcileItem? target = plan.ReviewItems.FirstOrDefault(i =>
+            i.SubnetId == request.SubnetId
+            && i.Status == AzureReconcileStatus.RangeStillAllocatedInAzure
+            && !string.IsNullOrEmpty(i.SuggestedAzureResourceId));
+
+        if (target is null)
+        {
+            return Conflict(new
+            {
+                success = false,
+                error = "This subnet is no longer reported as holding a range that moved to another Azure subnet. "
+                        + "Nothing was changed. Re-run the scan and review the results."
+            });
+        }
+
+        try
+        {
+            IActionResult? failure = await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult?>(async () =>
+            {
+                Subnet? subnet = await context.Subnets.FindAsync(request.SubnetId);
+
+                if (subnet is null)
+                {
+                    return NotFound(new { success = false, error = "That subnet no longer exists." });
+                }
+
+                // Re-check under the lock. The plan was built before it was taken, and a concurrent
+                // import could have re-linked this row in the meantime - in which case the verdict
+                // this action rests on is about a state that no longer exists.
+                if (!string.Equals(subnet.AzureResourceId, target.AzureResourceId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Conflict(new
+                    {
+                        success = false,
+                        error = "This subnet's Azure link changed while the scan was being reviewed. Nothing was changed."
+                    });
+                }
+
+                subnet.AzureResourceId = target.SuggestedAzureResourceId;
+                await context.SaveChangesAsync();
+                return null;
+            });
+
+            if (failure is not null)
+            {
+                return failure;
+            }
+        }
+        catch (TimeoutException)
+        {
+            return StatusCode(503, new
+            {
+                success = false,
+                error = "The operation timed out because another subnet operation is in progress. Nothing was changed. Please try again."
+            });
+        }
+
+        logger.LogInformation(
+            "Azure reconcile: re-linked subnet {SubnetId} to {AzureResourceId}",
+            request.SubnetId, target.SuggestedAzureResourceId);
+
+        TempData["SuccessMessage"] =
+            $"Re-linked '{target.Name}' to Azure subnet '{target.SuggestedAzureSubnetName}'.";
+
+        return Ok(new
+        {
+            success = true,
+            subnetId = request.SubnetId,
+            azureResourceId = target.SuggestedAzureResourceId,
+            azureSubnetName = target.SuggestedAzureSubnetName
+        });
+    }
 }

@@ -125,7 +125,17 @@ namespace Bastet.Models.ViewModels
         /// group and the last path segment alone, so reading such an ID asks about a different
         /// resource entirely and its 404 would otherwise read as a confirmed deletion.
         /// </summary>
-        UnrecognisedResourceId
+        UnrecognisedResourceId,
+
+        /// <summary>
+        /// The recorded Azure resource is gone or no longer carries this prefix, but the range
+        /// itself is still assigned in the same VNet under a different Azure resource ID - which is
+        /// what a subnet rename looks like, Azure having no rename operation.
+        /// Reported for review only and never deletable: archiving the row would make BASTET
+        /// advertise an allocated range as free space. Correct it by re-linking the subnet to the
+        /// Azure subnet that now holds the range.
+        /// </summary>
+        RangeStillAllocatedInAzure
     }
 
     /// <summary>
@@ -157,6 +167,21 @@ namespace Bastet.Models.ViewModels
         /// the client avoid double-counting when an item and its ancestor are both selected.
         /// </summary>
         public IReadOnlyList<int> DescendantSubnetIds { get; set; } = [];
+
+        /// <summary>
+        /// For <see cref="AzureReconcileStatus.RangeStillAllocatedInAzure"/>: the Azure subnet that
+        /// now holds this row's range, so the operator can re-link in one click rather than typing a
+        /// resource ID. Empty for every other status.
+        /// </summary>
+        /// <remarks>
+        /// Offered by the server but never trusted from the client: the re-link endpoint re-derives
+        /// this from a fresh scan before writing, because the browser is not the authority on what
+        /// Azure holds.
+        /// </remarks>
+        public string SuggestedAzureResourceId { get; set; } = string.Empty;
+
+        /// <summary>Display name of <see cref="SuggestedAzureResourceId"/>.</summary>
+        public string SuggestedAzureSubnetName { get; set; } = string.Empty;
 
         /// <summary>The status name, so clients don't depend on the enum's ordinal.</summary>
         public string StatusName => Status.ToString();
@@ -215,5 +240,22 @@ namespace Bastet.Models.ViewModels
 
         /// <summary>Must be "approved", matching the single-subnet delete flow.</summary>
         public string Confirmation { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Re-points one Bastet subnet at the Azure subnet that now holds its range, after a rename or
+    /// a prefix move left the recorded resource ID naming something that no longer exists.
+    /// </summary>
+    /// <remarks>
+    /// Carries no resource ID on purpose. The server re-scans and derives the new link itself from
+    /// the fresh plan, so a stale browser view - or a crafted post - cannot point a subnet at an
+    /// arbitrary Azure resource. The client names the row; Azure decides what it links to.
+    /// </remarks>
+    public class AzureRelinkDto
+    {
+        public string SubscriptionId { get; set; } = string.Empty;
+
+        /// <summary>The Bastet subnet to re-link.</summary>
+        public int SubnetId { get; set; }
     }
 }
