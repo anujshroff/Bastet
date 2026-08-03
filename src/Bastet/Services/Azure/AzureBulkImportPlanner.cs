@@ -621,8 +621,15 @@ namespace Bastet.Services.Azure
                     // Name each for the range it actually holds. A subnet contributing a single
                     // selection with no persisted sibling is untouched, so ordinary imports keep the
                     // exact names they have always had.
+                    //
+                    // "-{cidr}" and NOT "/{cidr}": [SafeText] on CreateSubnetViewModel.Name forbids
+                    // "/", so a generated name carrying one is a name this application refuses on
+                    // its own Create form - and SubnetNaming.ToSafeText DELETES the character rather
+                    // than rejecting it, so the create-from-unallocated-range prefill silently turned
+                    // "(10.20.40.0/24)" into the false token "(10.20.40.024)". Same convention as
+                    // SubnetController.Create.
                     baseName = SubnetNaming.WithSuffix(
-                        baseName, $" ({sub.Network}/{sub.Cidr})", MaxSubnetNameLength);
+                        baseName, $" ({sub.Network}-{sub.Cidr})", MaxSubnetNameLength);
                 }
 
                 string finalName = DisambiguateName(baseName, usedNames, p.Source.VNetName);

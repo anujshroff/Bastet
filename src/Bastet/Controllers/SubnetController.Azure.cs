@@ -244,8 +244,13 @@ public partial class SubnetController : Controller
     /// Settled server-side because the browser is not the authority: a crafted or replayed post
     /// carries whatever names it likes. A row contributing no duplicate keeps its name exactly as
     /// posted, so ordinary single-prefix imports are unchanged.
+    ///
+    /// Public as a test seam, the same way AzureService.BuildInventorySubnetRows is: the surrounding
+    /// action needs a DbContext, an antiforgery token and a live Azure credential, so the naming
+    /// rules could not otherwise be asserted directly - and one of the things that must be asserted
+    /// is that every name this produces satisfies the application's own [SafeText] input rules.
     /// </remarks>
-    private static Dictionary<int, string> ResolveImportNames(List<AzureImportSubnetViewModel> subnets)
+    public static Dictionary<int, string> ResolveImportNames(List<AzureImportSubnetViewModel> subnets)
     {
         HashSet<string> multiPrefixResourceIds = [.. subnets
             .Where(s => !s.FullyEncompassesVNetPrefix && !string.IsNullOrEmpty(s.AzureResourceId))
@@ -273,7 +278,7 @@ public partial class SubnetController : Controller
                 // {NetworkAddress, Cidr} is unique across a batch - overlap validation refuses a
                 // repeat - so a prefix-qualified name cannot collide with another one.
                 name = SubnetNaming.WithSuffix(
-                    name, $" ({subnet.NetworkAddress}/{subnet.Cidr})", MaxSubnetNameLength);
+                    name, $" ({subnet.NetworkAddress}-{subnet.Cidr})", MaxSubnetNameLength);
             }
 
             used.Add(name);

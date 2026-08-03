@@ -167,43 +167,19 @@ _Tests: 822 → 828. Four of the six are counter-tests._
 
 ---
 
-## N7 — Round 13's name qualification builds subnet names containing `/`, the one character the app's own name rules forbid; the create-from-unallocated-range prefill then silently rewrites `(10.20.40.0/24)` to `(10.20.40.024)` and persists that false token `[x1]`
+## N7 — Round 13's name qualification builds subnet names containing `/`, the one character the app's own name rules forbid `[x1]` — FIXED
 
-**Severity:** low · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:530` and `src/Bastet/Controllers/SubnetController.Azure.cs:276`
+_N7 is fixed and committed. The owner chose option (a): the suffix at both name-producing sites is now `$" ({network}-{cidr})"`, matching the convention `SubnetController.Create` already uses and documents. Option (b) — keeping `/` and relaxing `[SafeText]` on `CreateSubnetViewModel.Name` — was declined, so the shared input class is untouched and carries no new security-review surface. No rename migration was needed: the slashed form shipped one commit ago, which is why the window to change it freely was now._
 
-**Failure scenario.** Bulk import creates rows named `rig-14-sn-a2-multi3 (10.20.40.0/24)`. `Subnet.Name` accepts them (Edit applies only `[NoHtml]`/`[SanitizeName]`), but `CreateSubnetViewModel.Name` carries `[SafeText]`, whose class `[a-zA-Z0-9\s\-_.,!?@#$%&()+=]` excludes `/`. Two operator-visible consequences: **(1)** the name the app generated is a name the app's own Create form refuses; **(2)** the Details page's **Create Subnet** button on an unallocated range navigates to `/Subnet/Create?parentId=…`, where `SubnetController.Create.cs:76` runs `SubnetNaming.ToSafeText(parentSubnet.Name)` precisely to avoid that rejection — and `ToSafeText` **deletes** the `/` rather than rejecting, so the prefilled default becomes `rig-14-sn-a2-multi3 (10.20.40.024)-10.20.40.0-25`. An operator who accepts the default — which is what that button exists for — persists it. The rule is written verbatim in a comment in the very controller that prefills the form, at `SubnetController.Create.cs:67-68`: *`"-{cidr}" and not "/{cidr}": [SafeText] on CreateSubnetViewModel.Name forbids "/"`*. This is the exact failure round 4's D19/D8 fixed; round 13 reintroduced the character, and `test/Bastet.Tests/Azure/AzureMultiPrefixImportCommitTests.cs:124-125` now pins the slashed form.
+_Both of the verifier's additions were taken. The pinned assertions were in **three** files, not two — `AzureMultiPrefixImportCommitTests`, `AzureMultiPrefixSubnetTests` (including its fixture names), and the `AzureBulkImportSpanningNameTests` added by N6 an hour earlier. And the missing recurrence guard now exists: `GeneratedNameSafeTextTests` asserts that every name the bulk planner and `ResolveImportNames` **generate** satisfies `IInputSanitizationService.IsSafeText`. That assertion is the cheap thing that stops a third occurrence — round 4 removed this character, round 13 put it back, and nothing in the suite noticed either time because `SubnetNamingSafeTextTests` pins `ToSafeText` character-by-character without ever checking a produced name._
 
-**Reproduction** — own instance port 5891, catalog `bastet_rig14_verc12b`, live ARM:
+_`ResolveImportNames` was made `public static` as a test seam, the same way round 13 made `AzureService.BuildInventorySubnetRows` public and for the same reason: the surrounding action needs a DbContext, an antiforgery token and a live Azure credential, so the naming rules cannot otherwise be asserted directly._
 
-```
-POST /Subnet/BulkCreateFromAzurePlan -> {"success":true,"createdTargets":1,"createdChildSubnets":5}
-  2|rig-14-sn-a2-multi3 (10.20.40.0/24)|10.20.40.0|24|1        (etc.)
+_The finder's own interim was **not** taken, on the verifier's reasoning: mapping `/` to `-` inside `ToSafeText` would leave the app still generating names its Create form rejects, and would change long-standing behaviour for hand-typed parents ("Prod/Web" becoming "Prod-Web"), breaking a pinned `InlineData` in `SubnetNamingSafeTextTests`._
 
-GET /Subnet/Details/2 renders
-  <button class="create-subnet-btn" data-network="10.20.40.0" data-parent-id="2" data-parent-cidr="24">
-  and navigates to /Subnet/Create?networkAddress=..&cidr=..&parentId=..
+_Proven by A/B at the unit level. The guard was copied into a clone of `77560af` (minus the two parts that need the new seam) and run: it fails there with **"The planner generated 'sn-multi (10.20.40.0/24)', which the app's own [SafeText] rules reject."**, and both prefill cases fail alongside it — 3 of 4 red. Against the fixed tree all five pass. `TheForwardSlashIsStillForbidden_SoTheSeparatorMayNotGoBack` pins the character itself, so putting the separator back is now a test failure rather than a silent regression._
 
-GET /Subnet/Create?networkAddress=10.20.40.0&cidr=25&parentId=2 ->
-  value="rig-14-sn-a2-multi3 (10.20.40.024)-10.20.40.0-25"      <- the "/" was deleted
-
-POST /Subnet/Create with that default -> 302 /Subnet/Details/7
-  7|rig-14-sn-a2-multi3 (10.20.40.024)-10.20.40.0-25|10.20.40.0|25|2
-
-POST /Subnet/Create Name="rig-14-sn-a2-multi3 (10.20.40.0/24)-child"
-  -> 200 with field error "Subnet name contains invalid characters"
-```
-
-**Fix (verifier: sound, with two additions).** Change the suffix at both sites from `$" ({network}/{cidr})"` to a separator the SafeText class admits — `$" ({network}-{cidr})"`, matching the convention `Create.cs:81` already uses. Verified: `-`, `.`, `(`, `)` are all inside the class, and the prefill then composes the coherent `rig-14-sn-a2-multi3 (10.20.40.0-24)-10.20.40.0-25`. These two are the only name-producing `/` sites in the repo (all other `({x}/{y})` interpolations are validation or error messages, none written to `Subnet.Name`). Additions:
-
-1. **The pinned assertions are in three places, not two** — `AzureMultiPrefixImportCommitTests.cs:124-125` **and** `AzureMultiPrefixSubnetTests.cs:142`, plus fixture names at `:207`/`:270` for consistency.
-2. **Add the recurrence guard that is missing.** `SubnetNamingSafeTextTests` pins `ToSafeText` character-by-character, but nothing asserts that a **generated** name satisfies `IsSafeText` — which is why round 13 reintroduced the character round 4 removed. Assert `new InputSanitizationService().IsSafeText(name)` over the planner's `BulkImportPlannedChildSubnet.Name` and `ResolveImportNames`' output. That is the cheap thing that stops a third occurrence.
-
-**Do not take the finder's own interim instead of the fix.** Making `ToSafeText` map `/` to `-` would leave the app still generating names its Create form rejects, and changes long-standing behaviour for hand-typed parents ("Prod/Web" → "Prod-Web"), breaking the pinned `InlineData` at `SubnetNamingSafeTextTests.cs:42`. As a stop-gap *alongside* the decision it is acceptable — it stops the prefill inventing `(10.20.40.024)` — but it is not a substitute.
-
-**Decision needed from you.** The suffix format is a naming/product call. Either **(a)** change the separator to `-` so generated names satisfy the app's own SafeText class — cosmetically different, three test assertions, and **no rename migration is needed because the code shipped one commit ago; the window to change it freely is now** — or **(b)** keep `/` in stored names and relax `[SafeText]` on `CreateSubnetViewModel.Name` to admit it (which Edit already effectively allows), accepting the security-review implication of widening a shared input class. Doing neither leaves the app generating names it refuses on input.
-
-*Harm corrected downward:* `10.20.40.024` is unparseable gibberish, not a plausible-but-wrong range, so an operator reads it as a mangled name rather than as a false allocation. `NetworkAddress`/`Cidr` are correct everywhere and Details renders `10.20.40.0/25` truthfully. Nothing in the IPAM data model is wrong — hence low, not the "allocated range shown free" class.
+_Tests: 828 → 833._
 
 ---
 

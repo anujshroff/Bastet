@@ -62,8 +62,8 @@ public class AzureBulkImportSpanningNameTests
         List<string> names = ChildNames(plan);
 
         Assert.Equal(2, names.Count);
-        Assert.Contains("sn-span (10.71.5.0/24)", names);
-        Assert.Contains("sn-span (10.72.5.0/24)", names);
+        Assert.Contains("sn-span (10.71.5.0-24)", names);
+        Assert.Contains("sn-span (10.72.5.0-24)", names);
         Assert.Distinct(names);
     }
 
@@ -84,7 +84,7 @@ public class AzureBulkImportSpanningNameTests
             ],
             Prefix("10.72.0.0/16", Sub("sn-span", "10.72.5.0/24", SpanningSubnet)));
 
-        Assert.Equal("sn-span (10.72.5.0/24)", Assert.Single(ChildNames(plan)));
+        Assert.Equal("sn-span (10.72.5.0-24)", Assert.Single(ChildNames(plan)));
     }
 
     /// <summary>
