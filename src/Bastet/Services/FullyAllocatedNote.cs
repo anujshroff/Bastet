@@ -20,7 +20,25 @@ public static class FullyAllocatedNote
     private const string Suffix = "' which encompasses the entire address space.";
 
     /// <summary>The note for a given Azure subnet name.</summary>
-    public static string For(string? azureSubnetName) => $"{Prefix}{azureSubnetName}{Suffix}";
+    /// <remarks>
+    /// Line breaks in the name are collapsed to spaces, which is what makes every note single-line
+    /// BY CONSTRUCTION. <see cref="Strip"/> matches whole lines anchored at both ends - deliberately,
+    /// so operator prose that merely resembles the note is never destroyed - and a name carrying a
+    /// newline produced a note spanning two lines, neither of which satisfies both anchors. No later
+    /// Strip could remove it, so the flag could be cleared while the description went on asserting it
+    /// and every import/un-mark cycle stacked another copy.
+    ///
+    /// Fixed here rather than at the two producers: this is the single choke point both call sites go
+    /// through, and leaving the helper able to build an unstrippable note for any future caller is
+    /// the same class of latent defect. Not fixed by tightening [SafeText] either - that class is
+    /// shared with host and subnet names across the app.
+    /// </remarks>
+    public static string For(string? azureSubnetName) =>
+        $"{Prefix}{Normalise(azureSubnetName)}{Suffix}";
+
+    /// <summary>Collapses every line-break form to a space so the note cannot span lines.</summary>
+    private static string? Normalise(string? azureSubnetName) =>
+        azureSubnetName?.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
 
     /// <summary>
     /// <paramref name="description"/> with every fully-allocated note removed, whatever Azure subnet

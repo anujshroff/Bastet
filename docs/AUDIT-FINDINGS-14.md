@@ -183,36 +183,19 @@ _Tests: 828 → 833._
 
 ---
 
-## N8 — `FullyAllocatedNote.For` can build a note that `FullyAllocatedNote.Strip` is structurally unable to remove, so M3's stacking defect returns in full `[x2]`
+## N8 — `FullyAllocatedNote.For` can build a note that `FullyAllocatedNote.Strip` is structurally unable to remove `[x2]` — FIXED
 
-**Severity:** low · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/FullyAllocatedNote.cs:23` (`Strip` at `:36-48`, `IsNote` at `:76-82`)
+_N8 is fixed and committed, as the verifier proposed: `For` normalises every line-break form in the Azure subnet name to a space, so a note is single-line **by construction** and `Strip`'s whole-line anchoring becomes total without being loosened. The name stays readable — collapsed to a space, not deleted._
 
-**Failure scenario.** `For` interpolates the Azure subnet name with no whitespace normalisation, while `Strip`/`IsNote` split the description on `\n` and require a **single line** to both start with the prefix and end with the suffix. A name containing a newline therefore produces a note spanning two lines, neither of which satisfies both anchors, so no later `Strip` can ever remove it. `AzureImportSubnetViewModel.Name` inherits `[SafeText]` from `CreateSubnetViewModel` (`SubnetViewModels.cs:11`), whose class admits `\s` — which includes newline — and `SanitizeName` only trims the ends. An Admin posts `Subnet/BatchCreateChildSubnets` with `isAzureImport=true`, a fully-encompassing entry, and a name of `sn-A<LF>sn-B`. Result: **(1)** after `HostIp/SetAllocationStatus IsFullyAllocated=false` the row has `IsFullyAllocated=0` while its description still reads "Fully allocated by Azure subnet '...' which encompasses the entire address space." — the exact contradiction M3's un-mark mirror exists to eliminate; **(2)** each import→un-mark→import cycle appends another copy, which is M3's original defect verbatim. Azure subnet names cannot contain newlines, so the trigger is a crafted or replayed POST by an Admin — the same threat model `ResolveImportNames` is explicitly settled server-side against (`SubnetController.Azure.cs:244-247`).
+_Fixed at the helper rather than at the two producers, on the finder's own reasoning: `For` is the single choke point both call sites go through, and leaving the helper able to build an unstrippable note for any future caller is the same latent defect one step removed. **Not** fixed by tightening the `[SafeText]` pattern — that class is shared with host names and subnet names across the app, and narrowing it to close this would be a far wider change than the defect warrants._
 
-**Reproduction** — own instance port 5361, catalog `bastet_rig14_advc5`. Name posted as a literal `sn-A<LF>sn-B` via `--data-urlencode 'subnets[0].Name@nl.txt'`; the server accepted it (302, no ModelState error):
+_The owner declined a backfill, so rows that already carry an unstrippable two-line note stay hand-repairable via Edit only. That matches the call round 13 made explicitly for the analogous stacked-note residue, and no such row can exist without someone having already sent a crafted POST._
 
-```
-SELECT Id, IsFullyAllocated, LEN(Description), REPLACE(Description,CHAR(10),'<LF>') FROM Subnets WHERE Id=1
+_Proven by A/B: the updated test file was copied unchanged into a clone of `77560af` and run — **4 of the 5 new cases fail there**, including `Strip(Append(null, "sn-A\nsn-B", 1000))` returning the note instead of empty, and the four-cycle stacking test. The fifth, a name carrying a bare `\r`, passes on both builds: `Strip` splits on `\n` only, so that spelling never produced a two-line note in the first place. It is kept as a test because the fix now normalises it too, and a future change to the splitting would otherwise reintroduce the defect through a spelling nobody was watching._
 
-  baseline        1|0|19 |Ops owns this range
-  after import 1  1|1|107|Ops owns this range<LF>Fully allocated by Azure subnet 'sn-A<LF>sn-B' which ...
-  after un-mark   1|0|107|<IDENTICAL — the note SURVIVED SetAllocationStatus IsFullyAllocated=false>
-  after import 2  1|1|195|<operator line + TWO identical notes>
-  after cycle 3   1|1|283|<operator line + THREE identical notes>
-  final un-mark   1|0|283
+_The seventeen existing `FullyAllocatedNoteTests` are untouched and still pass, including the four `[Theory]` cases pinning operator prose that merely resembles the note — those exercise `Strip`, not `For`, which is why this fix could not disturb them._
 
-Growth 88 chars per cycle, exactly M3's original arithmetic. Control: the operator line
-"Ops owns this range" is preserved throughout, so Strip works normally — it is specifically
-the two-line note it cannot see. Rendered Details shows three copies on a row whose
-IsFullyAllocated is 0.
-```
-
-**Fix (verifier: sound).** One line at `FullyAllocatedNote.cs:23` — normalise the name before interpolation, e.g. `azureSubnetName?.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ')`. Every note becomes single-line by construction, so `Strip`'s whole-line anchoring becomes total without loosening it. `For` is the single choke point both call sites go through; the null case is unchanged; the four `[Theory]` cases pinning operator prose exercise `Strip`, not `For`, so they are untouched. Add a test asserting `Strip(Append(null, "a\nb", 1000))` is empty. **Do not** take the "cheaper interim" of collapsing newlines at the two producers — it leaves the helper able to build an unstrippable note for any future caller, as the finder himself notes. **Do not** "fix" this by tightening the `[SafeText]` pattern; that class is shared with host names and subnet names across the app.
-
-**Decision needed from you.** Whether to do anything about rows that already carry an unstrippable two-line note. None can exist without someone having already sent a crafted POST, and round 13 explicitly declined a backfill for the analogous stacked-note residue — but the code fix alone leaves those rows permanently un-repairable except by hand-editing the description.
-
-*Bounded harm:* no IPAM correctness impact (the `IsFullyAllocated` flag itself is written correctly, no range is shown free), no data loss (the overflow branch at `:71-73` keeps operator text whole and growth is capped at `MaxSubnetDescriptionLength`), and the row is hand-repairable via Edit. What is wrong is a free-text field asserting the opposite of the row's state, permanently un-removable by the app, plus unbounded restacking. A shade worse than M3's own Info rating because the residue is now un-strippable rather than self-healing.
+_Tests: 833 → 838._
 
 ---
 

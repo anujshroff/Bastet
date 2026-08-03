@@ -169,4 +169,44 @@ public class FullyAllocatedNoteTests
     [Fact]
     public void FirstImport_WritesTheNoteAlone()
         => Assert.Equal(Note("sn"), FullyAllocatedNote.Append(null, "sn", Max));
+
+    // -------------------------------------------------------------------------
+    // A note must be single-line BY CONSTRUCTION, or Strip's anchoring cannot reach it
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The defect: Strip matches whole lines anchored at both ends, so a name carrying a newline
+    /// built a note spanning two lines that no later Strip could remove. The flag could then be
+    /// cleared while the description went on asserting it, and every cycle stacked another copy.
+    /// </summary>
+    [Theory]
+    [InlineData("sn-A\nsn-B")]
+    [InlineData("sn-A\r\nsn-B")]
+    [InlineData("sn-A\rsn-B")]
+    public void ANameCarryingALineBreak_StillProducesAStrippableNote(string name)
+    {
+        string note = FullyAllocatedNote.Append(null, name, Max);
+
+        Assert.Single(note.Split('\n'));
+        Assert.Equal(string.Empty, FullyAllocatedNote.Strip(note));
+    }
+
+    /// <summary>And the stacking that followed from it: four cycles must still leave exactly one.</summary>
+    [Fact]
+    public void RepeatedAppendsWithALineBrokenName_StillLeaveExactlyOneNote()
+    {
+        string d = FullyAllocatedNote.Append("Ops owns this range", "sn-A\nsn-B", Max);
+        for (int i = 0; i < 3; i++)
+        {
+            d = FullyAllocatedNote.Append(d, "sn-A\nsn-B", Max);
+        }
+
+        Assert.Equal(2, d.Split('\n').Length);
+        Assert.Equal("Ops owns this range", FullyAllocatedNote.Strip(d));
+    }
+
+    /// <summary>The name is still readable - collapsed to a space, not deleted.</summary>
+    [Fact]
+    public void TheNameSurvivesWithItsLineBreakCollapsedToASpace()
+        => Assert.Equal(Note("sn-A sn-B"), FullyAllocatedNote.For("sn-A\nsn-B"));
 }
