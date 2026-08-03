@@ -272,7 +272,12 @@ namespace Bastet.Services.Azure
                                         cidr);
                                 }
 
-                                break; // Take only the first valid IPv4 address
+                                // Every IPv4 prefix gets its own entry. This used to `break` after
+                                // the first, which was right only while Azure allowed one prefix per
+                                // subnet. Azure has allowed several since September 2025, so the
+                                // rest were silently dropped: never offered, never created, and then
+                                // shown on the target's Details page as free space over a range
+                                // Azure had already assigned.
                             }
                         }
                     }
@@ -349,22 +354,10 @@ namespace Bastet.Services.Azure
                     // delete involved. The list response carries every field used here.
                     foreach (SubnetData subnet in vnet.Data.Subnets ?? [])
                     {
-                        string? ipv4Prefix = ExtractIpv4Prefix(subnet);
-                        if (string.IsNullOrEmpty(ipv4Prefix))
-                        {
-                            continue;
-                        }
-
-                        vnetVm.Subnets.Add(new BulkAzureSubnetViewModel
-                        {
-                            ResourceId = subnet.Id?.ToString() ?? string.Empty,
-                            Name = subnet.Name ?? string.Empty,
-                            AddressPrefix = ipv4Prefix,
-                            // Distinct because ARM may report a single prefix in both the singular
-                            // property and the collection; a duplicate would reach the operator in
-                            // the reconcile reason text.
-                            Ipv4AddressPrefixes = [.. ExtractIpv4Prefixes(subnet).Distinct(StringComparer.OrdinalIgnoreCase)]
-                        });
+                        vnetVm.Subnets.AddRange(BuildInventorySubnetRows(
+                            subnet.Id?.ToString() ?? string.Empty,
+                            subnet.Name ?? string.Empty,
+                            [.. ExtractIpv4Prefixes(subnet)]));
                     }
 
                     result.Add(vnetVm);
@@ -470,6 +463,40 @@ namespace Bastet.Services.Azure
                     FullyEncompassesVNetPrefix = false
                 });
             }
+        }
+
+        /// <summary>
+        /// One selectable inventory row per IPv4 prefix the Azure subnet owns.
+        /// </summary>
+        /// <remarks>
+        /// Azure has allowed several IPv4 prefixes on a single subnet since September 2025. This used
+        /// to emit one row carrying only the first, so the remaining prefixes were never offered,
+        /// never created, and the target's Details page then advertised them as unallocated space -
+        /// an operator allocating from Bastet would hand out addresses Azure had already assigned.
+        ///
+        /// Every row keeps the subnet's COMPLETE prefix list. The reconciler shares this inventory
+        /// and indexes prefixes by resource id, so a row reporting only its own prefix would make it
+        /// believe the subnet had lost the others - and a drift row is offered for deletion.
+        /// </remarks>
+        public static List<BulkAzureSubnetViewModel> BuildInventorySubnetRows(
+            string resourceId, string name, IReadOnlyList<string> ipv4Prefixes)
+        {
+            ArgumentNullException.ThrowIfNull(ipv4Prefixes);
+
+            // Distinct because ARM may report a single prefix in both the singular property and the
+            // collection; a duplicate would offer the operator the same range twice and the second
+            // would fail as an overlap.
+            List<string> prefixes = [.. ipv4Prefixes
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
+
+            return [.. prefixes.Select(prefix => new BulkAzureSubnetViewModel
+            {
+                ResourceId = resourceId,
+                Name = name,
+                AddressPrefix = prefix,
+                Ipv4AddressPrefixes = [.. prefixes]
+            })];
         }
 
         /// <summary>

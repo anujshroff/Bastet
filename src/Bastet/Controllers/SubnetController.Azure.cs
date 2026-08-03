@@ -1,5 +1,6 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Services;
 using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
@@ -82,23 +83,13 @@ public partial class SubnetController : Controller
     /// IsFullyAllocated flag already records, and overflowing the column fails the insert and rolls
     /// back the entire import behind a generic error. Existing text is never sacrificed for the note.
     /// </summary>
-    private static string AppendFullyAllocatedNote(string? existingDescription, string? azureSubnetName)
-    {
-        string note = $"Fully allocated by Azure subnet '{azureSubnetName}' which encompasses the entire address space.";
-
-        if (string.IsNullOrEmpty(existingDescription))
-        {
-            return Truncate(note);
-        }
-
-        string combined = $"{existingDescription}\n{note}";
-        return combined.Length <= MaxSubnetDescriptionLength
-            ? combined
-            : Truncate(existingDescription);
-
-        static string Truncate(string value) =>
-            value.Length > MaxSubnetDescriptionLength ? value[..MaxSubnetDescriptionLength] : value;
-    }
+    /// <remarks>
+    /// Any earlier note is removed first. The wizard is reachable again after the Details page's own
+    /// "Mark as Not Fully Allocated", so without that an ordinary import - un-mark - import cycle
+    /// concatenated the identical sentence once per pass.
+    /// </remarks>
+    private static string AppendFullyAllocatedNote(string? existingDescription, string? azureSubnetName) =>
+        FullyAllocatedNote.Append(existingDescription, azureSubnetName, MaxSubnetDescriptionLength);
 
     // POST: Subnet/BatchCreateChildSubnets
     /// <param name="isAzureImport">
@@ -240,6 +231,71 @@ public partial class SubnetController : Controller
         }
     }
 
+    /// <summary>
+    /// The Bastet name each posted row will be created under, keyed by its index in
+    /// <paramref name="subnets"/>.
+    /// </summary>
+    /// <remarks>
+    /// An Azure subnet owning several IPv4 prefixes posts one row per prefix, all carrying the same
+    /// Azure name, and <c>Subnet.Name</c> has a NON-unique index - so they would persist as rows
+    /// indistinguishable by name in every list and dropdown. Each such row is named for the range it
+    /// holds. The same is done for any other duplicate name in the batch.
+    ///
+    /// Settled server-side because the browser is not the authority: a crafted or replayed post
+    /// carries whatever names it likes. A row contributing no duplicate keeps its name exactly as
+    /// posted, so ordinary single-prefix imports are unchanged.
+    ///
+    /// Public as a test seam, the same way AzureService.BuildInventorySubnetRows is: the surrounding
+    /// action needs a DbContext, an antiforgery token and a live Azure credential, so the naming
+    /// rules could not otherwise be asserted directly - and one of the things that must be asserted
+    /// is that every name this produces satisfies the application's own [SafeText] input rules.
+    /// </remarks>
+    public static Dictionary<int, string> ResolveImportNames(List<AzureImportSubnetViewModel> subnets)
+    {
+        // new(..., comparer) and NOT a collection expression: [.. query] builds a plain
+        // HashSet<string> with EqualityComparer<string>.Default, silently discarding the
+        // OrdinalIgnoreCase on the GroupBy directly above it. ARM resource IDs are case-insensitive
+        // and GroupBy keeps only the first member's spelling as g.Key, so a sibling row spelled
+        // .../Subnets/... failed the later Contains and kept its bare Azure name while its siblings
+        // were qualified - the hardening added for crafted posts, defeated by a crafted post.
+        HashSet<string> multiPrefixResourceIds = new(
+            subnets
+            .Where(s => !s.FullyEncompassesVNetPrefix && !string.IsNullOrEmpty(s.AzureResourceId))
+            .GroupBy(s => s.AzureResourceId!, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key),
+            StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<int, string> names = [];
+        HashSet<string> used = new(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < subnets.Count; i++)
+        {
+            AzureImportSubnetViewModel subnet = subnets[i];
+            if (subnet.FullyEncompassesVNetPrefix)
+            {
+                continue;
+            }
+
+            string name = subnet.Name;
+            bool sharesAnAzureSubnet = !string.IsNullOrEmpty(subnet.AzureResourceId)
+                && multiPrefixResourceIds.Contains(subnet.AzureResourceId);
+
+            if (sharesAnAzureSubnet || used.Contains(name))
+            {
+                // {NetworkAddress, Cidr} is unique across a batch - overlap validation refuses a
+                // repeat - so a prefix-qualified name cannot collide with another one.
+                name = SubnetNaming.WithSuffix(
+                    name, $" ({subnet.NetworkAddress}-{subnet.Cidr})", MaxSubnetNameLength);
+            }
+
+            used.Add(name);
+            names[i] = name;
+        }
+
+        return names;
+    }
+
     private async Task<IActionResult> BatchCreateChildSubnetsCore(int parentId, List<AzureImportSubnetViewModel> subnets, string? vnetName, string? vnetResourceId, bool isAzureImport)
     {
         // Begin transaction
@@ -379,9 +435,14 @@ public partial class SubnetController : Controller
             // we don't create any child subnets
             if (!hasFullyEncompassingSubnet)
             {
+                // Settled before the loop so every row is named against the whole batch.
+                Dictionary<int, string> importNames = ResolveImportNames(subnets);
+
                 // Create each subnet - with validation right before adding to catch overlaps
-                foreach (AzureImportSubnetViewModel subnet in subnets)
+                for (int i = 0; i < subnets.Count; i++)
                 {
+                    AzureImportSubnetViewModel subnet = subnets[i];
+
                     // Skip subnets that fully encompass the VNet address prefix
                     if (subnet.FullyEncompassesVNetPrefix)
                     {
@@ -401,7 +462,7 @@ public partial class SubnetController : Controller
                     // Create the subnet entity
                     Subnet newSubnet = new()
                     {
-                        Name = subnet.Name,
+                        Name = importNames[i],
                         NetworkAddress = subnet.NetworkAddress,
                         Cidr = subnet.Cidr,
                         Description = subnet.Description,
