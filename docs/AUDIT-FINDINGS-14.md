@@ -133,65 +133,21 @@ _Proven by A/B on live Azure, continuing N3's fixture (`rec14-n3-vnet`, subnet `
 
 _Tests: 812 → 822. Ten in `AzureBulkImportTopUpTests`, six of which are refusals — the allowance is only correct if adoption, a different VNet, host IPs, the fully-allocated flag, the fully-allocated marking and the rename all stay refused._
 
-## N5 — A failed `sp_releaseapplock` is swallowed on a documented invariant that is false: closing the connection returns the session to the pool, so the global subnet write lock stays held and every replica's writes fail for minutes with "high concurrency" `[x1]`
+## N5 — A failed `sp_releaseapplock` is swallowed on a documented invariant that is false `[x1]` — FIXED
 
-**Severity:** medium · **Confidence:** **plausible**
-**Load-bearing step that could not be established:** no **natural** (non-injected) failure of `sp_releaseapplock` that leaves the SQL session alive was produced. Every fault applicable on the shared rig also kills the session, which releases the lock safely. The trigger class is real rather than invented — a command timeout whose ATTENTION is acked, and Azure SQL 10928/10929/40501 resource-governance errors, all return a `SqlException` on a still-open connection, and the maintainers' own comment at `Program.cs:459-461` records a release failure reproduced against a real server. **Everything downstream of the trigger was measured**, with the failure injected: that the lock survives return-to-pool, for 4+ minutes, and that the peer replica then fails for 30 s with a false message. The migration-lock half was reasoned from the same measured pooling behaviour, not executed.
-**Citation:** `src/Bastet/Services/Locking/SqlServerSubnetLockingService.cs:96` (swallowing catch at `:98-101`, false comment at `:91-93`, outer finally at `:104-107`); same false comment at `Program.cs:461-463`.
+_N5 is fixed and committed. The swallow stays — every guarded path has already committed by then, and an exception raised in a `finally` replaces the one in flight — but it is no longer swallowed on a false premise. `CloseConnectionAsync` returns the connection to SqlClient's **pool**; the SQL session stays open, and a Session-owned application lock is only dropped when that pooled connection is next reused or physically destroyed. On a failed release the physical connection is now discarded via `SqlConnection.ClearPool`, which ends the session and the lock with it._
 
-**Failure scenario.** Two replicas against one database — the multi-replica shape `Program.cs` and the DataProtection key ring exist to support. Replica A serves `POST /Subnet/Create`; `sp_getapplock 'Bastet:SubnetOperations'` is taken **Session**-owned on the request's EF connection; the subnet is committed; `sp_releaseapplock` fails for any reason that leaves the connection usable. The catch logs and continues on the stated grounds that "if it is alive the outer finally closes it anyway". **It does not.** `context.Database.CloseConnectionAsync()` returns the connection to SqlClient's pool; the SQL session stays open; a Session-owned application lock is dropped only when the pooled connection is next *used* (`sp_reset_connection`) or physically destroyed. During that window every subnet/host-IP write on replica B parks 30 s inside `sp_getapplock` and fails — interactive forms with *"The operation timed out due to high concurrency. Please try again."*, Azure endpoints with 503 "another subnet operation is in progress" — none of which is true. The operator's only offered remedy ("try again") keeps failing. The same false claim governs the `Bastet:Migration` lock; on the bootstrap path that connection lives in a master-catalog pool the app never reuses, so a stranded migration lock persists for the process lifetime and later cold starts burn the full 300000 ms `@LockTimeout` before aborting with "Another replica appears to be stuck applying migrations."
+_The comments that asserted the false invariant are corrected in both places — `SqlServerSubnetLockingService` ("if it is alive the outer finally closes it anyway") and `Program.cs` ("if it is alive the using block closes it here") — and the log message no longer implies the lock takes care of itself. Those comments were the reason the defect survived review; leaving them would have re-taught the next reader the thing that was wrong._
 
-**Reproduction** — scratch copy of HEAD at `$RIG/ver-c8/repo` (nothing written into the repo; `git status --porcelain -uall` empty afterwards). Only change: a one-shot `throw` at the top of `ReleaseAppLockAsync`, gated on `VERC8_FAULT=1`. Two replicas, ports 5231/5232, catalog `bastet_v14c8`:
+_The verifier's correction to the secondary fix was taken. `Pooling=false` was **not** added to `MigrationLockConnectionString.Configured`: that method's contract is the connection string returned verbatim, `MigrationLockConnectionStringTests` asserts exactly that, and routing it through `SqlConnectionStringBuilder` would also destroy its documented null-in/null-out behaviour. The migration lock uses the same `ClearPool` remedy in its existing catch instead, which covers both branches uniformly and touches no unit-tested contract. The discard is itself wrapped, because it runs inside the catch of a release that already failed and must not throw from there._
 
-```
-POST /Subnet/Create (replica A) -> 302 /Subnet/Details/1 in 0.118 s   (row committed)
-log: "Failed to release the subnet operation lock after the operation completed"
+_The owner accepted the pool-wide blast radius knowingly: `ClearPool` empties the whole pool for that connection string, so the replica pays a burst of reconnect handshakes — on an error path only. Microsoft.Data.SqlClient exposes no per-connection "do not pool" switch, so this is the only public mechanism, and the alternative is denying every write on every replica until something happens to reuse that one connection, which a peer replica cannot cause._
 
-APPLOCK_TEST('public','Bastet:SubnetOperations','Exclusive','Session')
-  before POST -> 1 (free)      after POST -> 0 (HELD, request finished, DbContext disposed)
-sys.dm_tran_locks  -> session 96, 0:[Bastet:SubnetOperations]:(b83d66a6)
-sys.dm_exec_sessions -> status 'sleeping', program_name 'EFCore/10.0.10'   <- alive in the pool
+_Proven on a rig, not by a unit test, because the suite runs SQLite and this is real SQL Server locking behaviour. Two scratch copies — the fixed tree and a clone of `77560af` — each with a one-shot injected release failure gated on an env var, run against the real SQL Server container, one replica each plus a peer replica on the same catalog. Both builds accepted the create (302) and both logged the failed release exactly once, so the fault fired identically. **Unfixed:** `APPLOCK_TEST('public','Bastet:SubnetOperations','Exclusive','Session')` returned **0 — held** after the request had completed and the DbContext was disposed, and the peer replica's `POST /Subnet/Create` returned HTTP 200 after **30.06 seconds** rendering "The operation timed out due to high concurrency. Please try again." with the row never written. **Fixed:** the same query returned **1 — free**, and the peer replica's identical write returned 302 in **0.15 seconds** with the row persisted._
 
-POST /Subnet/Create (replica B) -> 200 in 30.049 s,
-  rendered: "The operation timed out due to high concurrency. Please try again."
-  Subnets table: only vc8-a. Nothing written. Repeated 5 minutes later: identical.
+_Not done, and deliberately: the interim mitigation of raising the log to `LogCritical` was dropped rather than shipped alongside. It existed to make the 30-second "high concurrency" failures diagnosable while the lock stayed stranded; with the lock no longer stranded there are no such failures to diagnose, and a Critical line for a condition the process has just repaired would be noise. The natural (non-injected) trigger remains unproduced — that stays on the watch list, where the audit put it._
 
-Held on an idle holder: t+11s .. t+297s -> APPLOCK_TEST 0 throughout (4m12s watched).
-Holder self-heals: 5 read-only GETs on replica A -> lock free, A's next create 302 in 0.026 s.
-Replica B has no way to cause that; it can only block 30 s and fail.
-
-PROPOSED FIX, same rig, same injected fault (SqlConnection.ClearPool in the catch):
-  create -> 302 in 0.183 s ; log still records the failed release
-  APPLOCK_TEST pre=1 post=1 post+5s=1        <- NOT stranded
-  replica B create immediately after -> 302 in 0.134 s   (was 30 s / failed)
-```
-
-**Fix (primary sound and verified running; the secondary half was corrected).** In the catch at `:98`, destroy the physical connection so the SQL session — and with it the Session-owned lock — actually ends:
-
-```csharp
-catch (Exception ex)
-{
-    logger.LogError(ex, "Failed to release the subnet operation lock; discarding the pooled connection so the session-owned lock is dropped");
-    if (context.Database.GetDbConnection() is SqlConnection stranded)
-    {
-        SqlConnection.ClearPool(stranded);
-    }
-}
-```
-
-`using Microsoft.Data.SqlClient;` is already at the top of the file, so the fully-qualified names in the original proposal are unnecessary. Two things the proposal omitted: **(a)** `ClearPool` empties the **whole** pool for that connection string — a transient reconnect cost paid only on this error path, and there is no per-connection "do not pool" API in Microsoft.Data.SqlClient, so this is the only public mechanism; **(b)** the log message must stop asserting the false invariant, and the comments at `:91-93` and `Program.cs:461-463` must be corrected — closing an EF/ADO connection returns it to the pool, it does not end the session, and a session-owned applock outlives it.
-
-**Correction to the secondary fix.** Do **not** add `Pooling=false` inside `MigrationLockConnectionString.Configured`: that method's documented contract is the connection string returned verbatim, `MigrationLockConnectionStringTests.cs:40` asserts `Assert.Equal(connectionString, Configured(connectionString))` and would fail, and routing it through `SqlConnectionStringBuilder` also destroys the deliberate null-in/null-out behaviour documented at `MigrationLockConnectionString.cs:31-37`. Use the same remedy as the service — `SqlConnection.ClearPool(migrationLockConnection)` inside the existing catch at `Program.cs:475-480`, before the `using` disposes it. That covers both branches uniformly and touches no unit-tested contract.
-
-**Interim mitigation.** Raise `SqlServerSubnetLockingService.cs:100` from `LogError` to `LogCritical` and say what it means — *"the global subnet lock may be stranded on a pooled connection; restart this replica if subnet operations start timing out"* — so the 30-second "high concurrency" failures that follow are diagnosable instead of being misattributed to load.
-
-**Decision needed from you.** Whether the pool-wide blast radius of `ClearPool` on the release-failure path is acceptable: the replica pays a burst of TCP+TLS+login handshakes right after a failed release. Alternatives: (b) leave the lock stranded and make the peer's failure honest — "the lock is held by another replica's stale session" plus a documented `sp_releaseapplock`/KILL runbook; or (c) change the lock's ownership model, which the class remarks at lines 13-20 explicitly rejected for good reasons. **(a) is cheapest and is the one verified to work.**
-
-*Scope narrowed by the verifier:* the holding replica self-heals on its very next query, so single-replica deployments recover almost immediately. The damage that persists is **cross-replica** — replica B has its own pool and can do nothing to reset A's session, so B's writes stay broken until A happens to touch that one connection: unbounded if A is idle, drained, or scaled to zero. Medium is right — writes are denied and the error message is a lie, but nothing is corrupted and no allocated range is ever reported free.
-
----
-
-# Low
+_Tests: unchanged at 822. Nothing was added, because nothing in the suite can reach this: SQLite has no `sp_getapplock`, and the defect is in what SqlClient does with a connection after it is closed._
 
 ## N6 — Bulk import's multi-prefix name qualification is scoped to one VNet address prefix, so an Azure subnet whose prefixes fall under different VNet prefixes persists as two Bastet rows with the identical name and the identical `AzureResourceId` `[x2]`
 

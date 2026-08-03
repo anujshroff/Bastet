@@ -458,9 +458,16 @@ if (autoMigrate)
         // startup - with nothing to say the schema was interrupted mid-flight. The reverse case is
         // worse and was reproduced against a real SQL Server: both migrations succeed, an idle
         // gateway drops the lock connection, and an unguarded release turns a completed migration
-        // into a hard startup crash. Swallowing does not strand the lock either way - it is
-        // session-owned, so if the connection died the server has already released it, and if it is
-        // alive the using block closes it here.
+        // into a hard startup crash.
+        //
+        // Swallowing alone is not enough though, and the claim that used to end this comment - "if
+        // it is alive the using block closes it here" - was false. Disposing a SqlConnection returns
+        // it to the POOL; the SQL session stays open and a Session-owned lock outlives it until that
+        // pooled connection is reused or destroyed. On the bootstrap path the connection lives in a
+        // master-catalog pool this process never touches again, so a stranded 'Bastet:Migration'
+        // lock persists for the process lifetime and later cold starts burn the full @LockTimeout
+        // before aborting with "Another replica appears to be stuck applying migrations".
+        // So a failed release discards the pooled connection, ending the session and the lock.
         //
         // Deliberately not guarded by a State != Open check: SqlClient does not poll the socket, so
         // State still reports Open after a silent failover and the guard would not fire.
@@ -475,8 +482,23 @@ if (autoMigrate)
         catch (Exception releaseException)
         {
             app.Logger.LogError(releaseException,
-                "Failed to release the 'Bastet:Migration' application lock after migration. The lock is "
-                + "session-owned and is released when the connection closes, so startup continues.");
+                "Failed to release the 'Bastet:Migration' application lock after migration; discarding the pooled "
+                + "connection so the session-owned lock is dropped rather than stranded. Startup continues.");
+
+            // Same remedy as SqlServerSubnetLockingService, and for the same reason. Deliberately
+            // NOT Pooling=false on MigrationLockConnectionString.Configured: that method's contract
+            // is the connection string returned verbatim - MigrationLockConnectionStringTests asserts
+            // exactly that - and routing it through SqlConnectionStringBuilder would also destroy its
+            // documented null-in/null-out behaviour.
+            try
+            {
+                SqlConnection.ClearPool(migrationLockConnection);
+            }
+            catch (Exception discardException)
+            {
+                app.Logger.LogError(discardException,
+                    "Failed to discard the pooled migration-lock connection after a failed release.");
+            }
         }
     }
 }
