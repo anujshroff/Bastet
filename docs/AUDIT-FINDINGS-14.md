@@ -121,55 +121,17 @@ _Tests: 800 → 812. Twelve in `AzureReconcilerInboundTests`, seven of which are
 
 ---
 
-## N4 — An Azure subnet that gains an IPv4 prefix after import can never be imported by either wizard, and the Details page keeps offering the Azure-assigned range as free `[x2]`
+## N4 — An Azure subnet that gains an IPv4 prefix after import can never be imported by either wizard `[x2]` — FIXED
 
-**Severity:** high · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:199` (server-side mirror at `:382`; single-VNet gate at `AzureController.cs:38-44`)
+_N4 is fixed and committed. The owner chose the narrow top-up action over detect-and-report-only, so a populated target is no longer refused outright — but the allowance is deliberately narrow: **the target must already be linked to THIS VNet**. That is what separates topping up an import that has happened from adopting a subtree somebody built by hand, which is the adopt-and-re-stamp blast radius the verifier warned about. A populated target with no Azure link, or one linked to a different VNet, is still refused, and both refusals are pinned by tests._
 
-**Failure scenario.** N3 is the reconciler's blindness; this is the import side of the same dead end, and it is a separate change with a separate owner decision. `AnnotatePrefix:199` blocks the whole VNet prefix — "Bastet subnet 'X' already has child subnets. Already imported?" — and `_BulkScripts.cshtml:249` sets `.prop('disabled', !subnet.isSelectable || !prefixInfo.isSelectable)`, so the one genuinely-new subnet row is un-tickable; `buildSelectionFromUI` only walks *checked* prefixes, so it can never be submitted. A hand-crafted POST is refused server-side by the mirror at `:382`. The single-VNet wizard refuses at the door. The identical dead end is reached by a second, arguably more likely route that starts **inside the reconcile wizard**: remove a prefix in Azure, reconcile correctly offers the drift row, the operator approves and it is archived — then Azure restores the prefix. Both wizards then refuse to bring it back, and the Details page advertises the live Azure-assigned range as free.
+_All four of the verifier's gaps were closed. **(1)** A populated target can no longer be marked fully allocated: the commit marks the flag INSTEAD of creating children, so the existing rows would have been stranded under a target claiming nothing more fits — the old blanket refusal was preventing this incidentally, and the top-up made it reachable, so it is now refused explicitly. Host IPs and the fully-allocated flag remain hard refusals. **(2)** The prefix now previews as `WillUpdateExisting` with distinct copy — "Will add any missing subnets to existing Bastet subnet 'X'. Subnets already imported are left untouched." — rather than the first-import wording, and `renameMatched` no longer renames a populated target, because renaming a label the operator has been living with is not what a run to add one missing subnet is for. **(3)** The single-VNet wizard was narrowed the same way rather than left half-fixed: `AzureController.Import` admits a populated target when it is Azure-linked, and `GetAzureSubnets` now filters out ranges BASTET already records, server-side, so a top-up there cannot re-offer a subnet a previous import created. **(4)** The reconciler half is N3 and shipped with it._
 
-**Reproduction** — own instance port 5219, catalog `bastet_rig14_verc2`, own fixture `rig-14-verc2-vnet` 10.90.0.0/16:
+_One part of this finding could not be done as specified, and the reason matters. "Closing the free-space lie on `/Subnet/Details/{id}`" cannot mean asking Azure on page render: **BASTET is self-hosted and must keep working with no outbound internet**, so making the free-space table depend on reaching ARM would break air-gapped deployments and hang the page whenever Azure is slow. Two things close it instead. The top-up import closes it *properly* — once the range is imported it is a real subnet and stops being listed as free, which is what the measurement below shows. And for the window before that, an offline-safe note now sits above the table on any Azure-linked subnet, saying the ranges are free according to what BASTET has imported and linking to Azure Reconcile, which is the feature that establishes the rest._
 
-```
-bulk import (real endpoints) -> {"success":true,"createdTargets":1,"createdChildSubnets":3}
-az network vnet subnet update ... -n rig-14-verc2-sn-multi \
-   --address-prefixes 10.90.100.0/24 10.90.101.0/24 10.90.102.0/24
+_Proven by A/B on live Azure, continuing N3's fixture (`rec14-n3-vnet`, subnet `rec14-n3-sn-multi` with `10.90.77.0/24` added after import). The wizard annotation first, and it reproduces the contradiction the finding describes: unfixed `77560af` returned `PREFIX 10.90.0.0/16 Blocked selectable=False` while the row underneath read `SN 10.90.77.0/24 Available selectable=True` — offered and un-tickable in the same response. Fixed: `PREFIX 10.90.0.0/16 WillUpdateExisting selectable=True` with the top-up copy. Then the commit: unfixed returned **HTTP 400** "matched Bastet subnet 'rec14-n3-vnet' already has child subnets" with free space unchanged; fixed returned **HTTP 200 `createdChildSubnets: 1`**, after which `/Subnet/Details/1` reports `10.90.0.0-10.90.76.255`, `10.90.78.0-10.90.199.255`, `10.90.201.0-10.90.255.254` — 65,278 addresses free before, 65,022 after, a difference of exactly the 256 the `/24` holds, with the range carved out rather than advertised. The reconcile scan that reported `AzureRangeNotImported` before the top-up returns `items [], reviewItems [], warnings []` after it._
 
-GET /Azure/BulkGetVNets (verbatim):
-  PREFIX 10.90.0.0/16      Blocked False  "Bastet subnet ... already has child subnets. Already imported?"
-  SN  10.90.100.0/24       AlreadyImported False
-  SN  10.90.101.0/24       AlreadyImported False
-  SN  10.90.102.0/24       Available       True     <- offered, but un-tickable (parent blocked)
-
-crafted POST (only the new prefix): preview canCommit False ; commit HTTP 400 (BuildPlanItem:382)
-GET /Azure/Import/1 -> 302 /Subnet/Details/1
-POST /Azure/ReconcileScan -> items [] reviewItems [] warnings [] globalErrors []
-
-GET /Subnet/Details/1 "Unallocated IP Ranges":
-  10.90.0.0    10.90.4.255     1,279    Create Subnet
-  10.90.6.0    10.90.99.255   24,064    Create Subnet
-  10.90.102.0  10.90.255.254  39,423    Create Subnet   <- over the /24 Azure just assigned
-
-escape hatch: POST /Subnet/Create 10.90.102.0/24 under parent 1 -> 302, row persists,
-              AzureResourceId NULL (only the two import paths ever write that column)
-```
-
-**Fix (verifier: incomplete — direction right, four gaps).** Narrow the `HasChildSubnets` hard stop to a **top-up import**: when the matched target already has children, keep the prefix selectable and let `AnnotateSubnet` do the discriminating it already does correctly (measured: 3 rows `AlreadyImported`, 1 `Available`). Keep the existing refusals for a target that is fully allocated, has host IPs, or is linked to a different VNet. Gaps to close first:
-
-1. **Scope the exact-match target's side effects.** A selectable ExactMatch prefix drives `SubnetController.BulkAzure.cs:346` (`targetSubnet.AzureResourceId = sanitizedVNetResourceId`) and, when a child fully encompasses the prefix, `WillMarkFullyAllocated`. Re-stamping the same VNet id is idempotent (a different VNet stays blocked at `AzureBulkImportPlanner.cs:216-223`/`:397-401`), but marking a target `IsFullyAllocated` when it already has children is a contradictory write the existing gate has been incidentally preventing. Add an explicit refusal.
-2. **The blocked prefix must become `WillUpdateExisting` with distinct preview copy** — how many children will be created, and that existing ones are untouched — not the first-import wording "Will import into existing Bastet subnet 'X'", which reads as a re-import. `BuildPlanItem`'s `renameMatched` path also needs deciding: renaming a populated target on a top-up is almost certainly not wanted.
-3. **The single-VNet wizard is not fixed by this change.** `AzureController.Import` refuses on `subnet.ChildSubnets.Count != 0` before the planner is consulted. Either narrow that gate the same way, or state explicitly that top-up is bulk-wizard-only — otherwise the headline "neither wizard" stays half-true after the fix.
-4. **The reconciler half (N3) is what stops this recurring and should not be optional.** Without an inbound status the model silently re-diverges on the next Azure change.
-
-**Interim mitigation — put it on the Details page, not the wizard.** Do **not** ship the finder's proposed "extend the Blocked reason to name the un-imported prefixes" alone: it requires reordering `AnnotateAvailability` (prefixes are annotated before subnets, `:164-169`), and it puts the warning on the one screen the operator has no reason to visit while `/Subnet/Details/{id}` keeps printing the allocated range under "Unallocated IP Ranges" with a Create Subnet button. For an Azure-linked subnet, the free-space table is the thing that is wrong.
-
-**Decision needed from you.** Whether BASTET supports a top-up import at all — importing new Azure prefixes into a target that already has children — versus keeping "a populated target is never an import destination" and only *detecting and reporting* the divergence (N3's reconciler status plus a Details-page warning), leaving the operator to create the range by hand. The first is a change to the planner's target rules plus preview copy plus the single-VNet gate; the second is smaller, weakens no existing guard, but leaves the correction manual and the resulting row permanently unlinked from Azure. **Either way the free-space lie on `/Subnet/Details/{id}` needs closing; that part is not optional.**
-
-*Two narrative corrections:* (a) "no in-app path back to a correct model" is too strong — `POST /Subnet/Create` does create the missing range (measured); the correct statement is "no path back to an *Azure-linked* correct model, and nothing in the application tells the operator the model is wrong". (b) The multi-prefix GA feature is the common **trigger**, not the mechanism — any Azure change that adds an unmodelled range under an already-imported VNet prefix reaches the same dead end.
-
----
-
-# Medium
+_Tests: 812 → 822. Ten in `AzureBulkImportTopUpTests`, six of which are refusals — the allowance is only correct if adoption, a different VNet, host IPs, the fully-allocated flag, the fully-allocated marking and the rename all stay refused._
 
 ## N5 — A failed `sp_releaseapplock` is swallowed on a documented invariant that is false: closing the connection returns the session to the pool, so the global subnet write lock stays held and every replica's writes fail for minutes with "high concurrency" `[x1]`
 
