@@ -121,8 +121,8 @@ public class AzureMultiPrefixImportCommitTests : IDisposable
 
         // The names must differ, and each must name its own range.
         Assert.Equal(2, created.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        Assert.Equal("sn-multi (10.31.0.0/24)", created[0].Name);
-        Assert.Equal("sn-multi (10.31.1.0/24)", created[1].Name);
+        Assert.Equal("sn-multi (10.31.0.0-24)", created[0].Name);
+        Assert.Equal("sn-multi (10.31.1.0-24)", created[1].Name);
 
         // Both stay linked to the one Azure subnet they came from.
         Assert.All(created, s => Assert.Equal(SubnetResourceId, s.AzureResourceId));

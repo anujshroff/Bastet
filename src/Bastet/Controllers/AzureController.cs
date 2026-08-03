@@ -35,12 +35,22 @@ namespace Bastet.Controllers
                 return this.RedirectToErrorPage(404, $"Subnet with ID {id} could not be found.");
             }
 
-            // Check if subnet has no children or host IPs and is not fully allocated
-            if (subnet.ChildSubnets.Count != 0 || subnet.HostIpAssignments.Count != 0 || subnet.IsFullyAllocated)
+            // A populated target used to be refused outright, which left an Azure subnet that gained
+            // a prefix after import impossible to import by any route while BASTET went on
+            // advertising the Azure-assigned range as free space. Narrowed rather than removed: a
+            // subnet that already has children may only be topped up when it is ALREADY LINKED to a
+            // VNet - i.e. an import put those children there. Adopting a hand-built subtree stays
+            // refused, because that is what re-stamps AzureResourceId on rows nobody imported.
+            // Host IPs and the fully-allocated flag are refused exactly as before.
+            bool isTopUp = subnet.ChildSubnets.Count != 0 && !string.IsNullOrEmpty(subnet.AzureResourceId);
+
+            if ((subnet.ChildSubnets.Count != 0 && !isTopUp) || subnet.HostIpAssignments.Count != 0 || subnet.IsFullyAllocated)
             {
                 TempData["ErrorMessage"] = subnet.IsFullyAllocated
                     ? "Subnet must not be marked as fully allocated"
-                    : "Subnet must not have any child subnets or host IP assignments";
+                    : subnet.HostIpAssignments.Count != 0
+                        ? "Subnet must not have any host IP assignments"
+                        : "Subnet already has child subnets and is not linked to an Azure VNet";
                 return RedirectToAction("Details", "Subnet", new { id });
             }
 
@@ -151,6 +161,19 @@ namespace Bastet.Controllers
             {
                 List<AzureSubnetViewModel> azureSubnets = await azureService.GetCompatibleSubnets(
                     vnetResourceId, subnet.NetworkAddress, subnet.Cidr);
+
+                // Offer only ranges BASTET does not already record. On a top-up the target keeps the
+                // subnets a previous import created, and re-offering them would either duplicate a
+                // row or fail the overlap check at commit - neither of which the operator asked for.
+                // Filtered server-side because the browser is not the authority on what BASTET holds.
+                HashSet<string> alreadyRecorded = new(
+                    await context.Subnets
+                        .AsNoTracking()
+                        .Select(s => s.NetworkAddress + "/" + s.Cidr)
+                        .ToListAsync(),
+                    StringComparer.OrdinalIgnoreCase);
+
+                azureSubnets = [.. azureSubnets.Where(a => !alreadyRecorded.Contains(a.AddressPrefix ?? string.Empty))];
 
                 return azureSubnets.Count == 0
                     ? Json(new
@@ -336,7 +359,10 @@ namespace Bastet.Controllers
             {
                 AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
                 IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked);
+                // The whole tree, not just the linked rows: the inbound direction has to know about
+                // a range someone created by hand, which carries no Azure resource ID.
+                IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
+                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked, existing);
 
                 // The inventory is a list result and ARM filters those by RBAC, so "missing" is not
                 // the same fact as "deleted". Read each proposed row directly before offering it for

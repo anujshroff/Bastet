@@ -139,7 +139,7 @@ public class AzureMultiPrefixSubnetTests
         Assert.Equal(2, item.ChildSubnets.Count);
 
         Assert.Equal(
-            ["sn-multi (10.31.0.0/24)", "sn-multi (10.31.1.0/24)"],
+            ["sn-multi (10.31.0.0-24)", "sn-multi (10.31.1.0-24)"],
             item.ChildSubnets.Select(c => c.Name).Order());
 
         // Both keep the true Azure name and the true Azure resource id.
@@ -204,7 +204,7 @@ public class AzureMultiPrefixSubnetTests
         // 10.31.0.0/24 has already been imported from this very Azure subnet.
         List<ExistingSubnetSnapshot> existing =
         [
-            new() { Id = 7, Name = "sn-multi (10.31.0.0/24)", NetworkAddress = "10.31.0.0", Cidr = 24, AzureResourceId = id }
+            new() { Id = 7, Name = "sn-multi (10.31.0.0-24)", NetworkAddress = "10.31.0.0", Cidr = 24, AzureResourceId = id }
         ];
 
         _planner.AnnotateAvailability([InventoryVNet([.. rows])], existing);
@@ -267,7 +267,7 @@ public class AzureMultiPrefixSubnetTests
             new()
             {
                 Id = 7,
-                Name = "sn-multi (10.31.1.0/24)",
+                Name = "sn-multi (10.31.1.0-24)",
                 NetworkAddress = "10.31.1.0",
                 Cidr = 24,
                 AzureResourceId = id
@@ -275,7 +275,7 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler(new IpUtilityService()).BuildPlan(SubId, "Test Sub", inventory, linked, []);
 
         Assert.Empty(plan.Items);
     }
@@ -306,7 +306,7 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler(new IpUtilityService()).BuildPlan(SubId, "Test Sub", inventory, linked, []);
 
         Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, Assert.Single(plan.Items).Status);
     }

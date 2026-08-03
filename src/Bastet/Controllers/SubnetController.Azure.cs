@@ -244,14 +244,27 @@ public partial class SubnetController : Controller
     /// Settled server-side because the browser is not the authority: a crafted or replayed post
     /// carries whatever names it likes. A row contributing no duplicate keeps its name exactly as
     /// posted, so ordinary single-prefix imports are unchanged.
+    ///
+    /// Public as a test seam, the same way AzureService.BuildInventorySubnetRows is: the surrounding
+    /// action needs a DbContext, an antiforgery token and a live Azure credential, so the naming
+    /// rules could not otherwise be asserted directly - and one of the things that must be asserted
+    /// is that every name this produces satisfies the application's own [SafeText] input rules.
     /// </remarks>
-    private static Dictionary<int, string> ResolveImportNames(List<AzureImportSubnetViewModel> subnets)
+    public static Dictionary<int, string> ResolveImportNames(List<AzureImportSubnetViewModel> subnets)
     {
-        HashSet<string> multiPrefixResourceIds = [.. subnets
+        // new(..., comparer) and NOT a collection expression: [.. query] builds a plain
+        // HashSet<string> with EqualityComparer<string>.Default, silently discarding the
+        // OrdinalIgnoreCase on the GroupBy directly above it. ARM resource IDs are case-insensitive
+        // and GroupBy keeps only the first member's spelling as g.Key, so a sibling row spelled
+        // .../Subnets/... failed the later Contains and kept its bare Azure name while its siblings
+        // were qualified - the hardening added for crafted posts, defeated by a crafted post.
+        HashSet<string> multiPrefixResourceIds = new(
+            subnets
             .Where(s => !s.FullyEncompassesVNetPrefix && !string.IsNullOrEmpty(s.AzureResourceId))
             .GroupBy(s => s.AzureResourceId!, StringComparer.OrdinalIgnoreCase)
             .Where(g => g.Count() > 1)
-            .Select(g => g.Key)];
+            .Select(g => g.Key),
+            StringComparer.OrdinalIgnoreCase);
 
         Dictionary<int, string> names = [];
         HashSet<string> used = new(StringComparer.OrdinalIgnoreCase);
@@ -273,7 +286,7 @@ public partial class SubnetController : Controller
                 // {NetworkAddress, Cidr} is unique across a batch - overlap validation refuses a
                 // repeat - so a prefix-qualified name cannot collide with another one.
                 name = SubnetNaming.WithSuffix(
-                    name, $" ({subnet.NetworkAddress}/{subnet.Cidr})", MaxSubnetNameLength);
+                    name, $" ({subnet.NetworkAddress}-{subnet.Cidr})", MaxSubnetNameLength);
             }
 
             used.Add(name);

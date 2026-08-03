@@ -45,6 +45,37 @@ namespace Bastet.Services.Azure
         public static bool IsAzureVNet(string? resourceId) =>
             IsResourceType(resourceId, VNetResourceType);
 
+        /// <summary>
+        /// The VNet an ID belongs to: the parent for a subnet ID, itself for a VNet ID, null for
+        /// anything else. Used to scope a range comparison to one VNet.
+        /// </summary>
+        /// <remarks>
+        /// Scoping matters because overlapping RFC1918 space across unrelated VNets in one
+        /// subscription is the norm, not an anomaly. Comparing bare prefix strings across the whole
+        /// inventory would treat an unrelated VNet's 10.0.0.0/8 as evidence that a genuinely stale
+        /// row's range is still allocated, and withhold a deletion that ought to be offered.
+        /// </remarks>
+        public static string? VNetIdOf(string? resourceId)
+        {
+            if (string.IsNullOrWhiteSpace(resourceId)
+                || !ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? id)
+                || id is null)
+            {
+                return null;
+            }
+
+            string type = id.ResourceType.ToString();
+
+            if (string.Equals(type, VNetResourceType, StringComparison.OrdinalIgnoreCase))
+            {
+                return id.ToString();
+            }
+
+            return string.Equals(type, SubnetResourceType, StringComparison.OrdinalIgnoreCase)
+                ? id.Parent?.ToString()
+                : null;
+        }
+
         private static bool IsResourceType(string? resourceId, string resourceType) =>
             !string.IsNullOrWhiteSpace(resourceId)
             && ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? id)

@@ -16,11 +16,18 @@ namespace Bastet.Services.Azure
         /// <param name="subscriptionName">Display name, for the report.</param>
         /// <param name="inventory">Live Azure state. If it reports failure, the plan comes back empty and cannot be committed.</param>
         /// <param name="linkedSubnets">Every Bastet subnet carrying an Azure resource ID.</param>
+        /// <param name="existingSubnets">
+        /// Every Bastet subnet, linked or not. Needed for the INBOUND direction: an Azure range that
+        /// no Bastet subnet records is reported from here, and a range created by hand carries no
+        /// Azure resource ID, so it is absent from <paramref name="linkedSubnets"/> while
+        /// legitimately accounting for the address space.
+        /// </param>
         AzureReconcilePlanViewModel BuildPlan(
             string subscriptionId,
             string? subscriptionName,
             AzureVNetInventory inventory,
-            IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets);
+            IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets);
 
         /// <summary>
         /// Removes from <see cref="AzureReconcilePlanViewModel.Items"/> everything whose absence

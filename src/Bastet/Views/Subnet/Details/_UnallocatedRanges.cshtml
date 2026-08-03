@@ -8,6 +8,29 @@
             <h5 class="mb-0">Unallocated IP Ranges</h5>
         </div>
         <div class="card-body">
+            @*
+                This table is BASTET's answer to "what is free?", and for an Azure-linked subnet that
+                answer is only as current as the last import. Azure can assign a range inside this
+                subnet at any time - adding a prefix to an existing Azure subnet does exactly that -
+                and nothing here would know. Azure Reconcile is what establishes it.
+
+                Deliberately a static note rather than a live check: BASTET is self-hosted and must
+                keep working with no outbound internet, so rendering this page must never depend on
+                reaching ARM.
+            *@
+            @if (!string.IsNullOrEmpty(Model.AzureResourceId))
+            {
+                <div class="alert alert-warning d-flex align-items-start" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <div>
+                        This subnet is linked to Azure. Ranges listed here are free
+                        <strong>according to what BASTET has imported</strong> — if Azure has assigned
+                        address space that was never imported, it will still be listed below.
+                        <a asp-controller="Azure" asp-action="Reconcile">Run Azure Reconcile</a>
+                        to check before allocating from these ranges.
+                    </div>
+                </div>
+            }
             <div class="table-responsive">
                 <table class="table table-hover">
                     <thead>

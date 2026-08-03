@@ -24,6 +24,35 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
     private const string SUBNET_OPERATIONS_LOCK = "Bastet:SubnetOperations";
 
     /// <summary>
+    /// Ends the SQL session behind the current connection, so a Session-owned application lock the
+    /// release failed to drop cannot outlive the request on a pooled connection.
+    /// </summary>
+    /// <remarks>
+    /// ClearPool empties the whole pool for this connection string, not just this connection.
+    /// Microsoft.Data.SqlClient exposes no per-connection "do not pool" switch, so this is the only
+    /// public mechanism; the cost is a burst of reconnect handshakes, paid only on a path that has
+    /// already failed. The alternative - leaving the lock held - denies every write on every replica
+    /// until something happens to reuse that one connection, which a peer replica cannot cause.
+    ///
+    /// Failure here is swallowed on purpose: this already runs inside the catch of a release that
+    /// failed, and throwing would replace the exception in flight.
+    /// </remarks>
+    private void DiscardPooledConnection()
+    {
+        try
+        {
+            if (context.Database.GetDbConnection() is SqlConnection stranded)
+            {
+                SqlConnection.ClearPool(stranded);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to discard the pooled connection after a failed lock release");
+        }
+    }
+
+    /// <summary>
     /// Caps how many requests this replica can have parked inside <c>sp_getapplock</c> at once, from
     /// unbounded to one.
     /// </summary>
@@ -88,16 +117,31 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
                     // inside operation(), so by now the work is durable: rethrowing here would report a
                     // completed operation as failed, and - because an exception raised in a finally
                     // replaces the one in flight - would also destroy the original error when the
-                    // operation itself was what failed. Swallowing does not change the lock's fate: if
-                    // the connection died the session died with it and SQL Server has already dropped
-                    // the session-scoped lock, and if it is alive the outer finally closes it anyway.
+                    // operation itself was what failed.
+                    //
+                    // But swallowing alone is NOT enough, and the comment that used to sit here was
+                    // wrong about why: "if it is alive the outer finally closes it anyway" does not
+                    // release the lock. CloseConnectionAsync returns the connection to SqlClient's
+                    // POOL; the SQL session stays open, and a Session-owned application lock is only
+                    // dropped when that pooled connection is next reused (sp_reset_connection) or
+                    // physically destroyed. Measured: the lock survived a completed request, a
+                    // disposed DbContext and a closed connection for over four minutes, during which
+                    // every subnet write on a second replica parked 30 s in sp_getapplock and failed
+                    // with "The operation timed out due to high concurrency" - which was not true.
+                    //
+                    // So on a failed release, destroy the physical connection. That ends the session,
+                    // and the lock with it.
                     try
                     {
                         await ReleaseAppLockAsync(SUBNET_OPERATIONS_LOCK);
                     }
                     catch (Exception ex)
                     {
-                        logger.LogError(ex, "Failed to release the subnet operation lock after the operation completed");
+                        logger.LogError(ex,
+                            "Failed to release the subnet operation lock; discarding the pooled connection so the "
+                            + "session-owned lock is dropped rather than stranded");
+
+                        DiscardPooledConnection();
                     }
                 }
             }

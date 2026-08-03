@@ -19,6 +19,47 @@ namespace Bastet.Services.Azure
         /// </summary>
         private const int MaxSubnetNameLength = 100;
 
+        /// <summary>
+        /// True when an existing Bastet subnet is already the import target of this very VNet.
+        /// </summary>
+        /// <remarks>
+        /// This is what separates a top-up - adding the subnets an already-imported VNet has gained -
+        /// from adopting a subtree somebody built by hand. Only the former re-stamps a resource ID
+        /// the row already carries, which is a no-op; the latter would claim rows nobody imported
+        /// and pull them into a later reconcile cascade.
+        /// </remarks>
+        private static bool IsSameVNet(ExistingSubnetSnapshot existing, string? vnetResourceId) =>
+            !string.IsNullOrEmpty(existing.AzureResourceId)
+            && !string.IsNullOrEmpty(vnetResourceId)
+            && string.Equals(existing.AzureResourceId, vnetResourceId, StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsSameVNet(ExistingSubnetSnapshot existing, BulkAzureVNetViewModel vnet) =>
+            IsSameVNet(existing, vnet.ResourceId);
+
+        /// <summary>
+        /// True when a row from the SAME Azure subnet, holding a DIFFERENT range, is already in the
+        /// tree - so this commit's row needs qualifying even though this commit only carries one
+        /// selection for that Azure subnet.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately narrow. Seeding the disambiguator from the whole existing tree instead would
+        /// rename any child whose Azure name merely matched some unrelated Bastet subnet anywhere -
+        /// a broad silent rename in the ordinary path - and would append the VNet name rather than
+        /// the range, giving a second row a different shape from the first. Keying on the Azure
+        /// resource ID fires only for the real multi-row case and keeps the one shape.
+        ///
+        /// The already-persisted first row keeps its bare name and stays unambiguous, because the
+        /// row being added is the one that gets qualified.
+        /// </remarks>
+        private static bool HasPersistedSiblingFromSameAzureSubnet(
+            ParsedSubnetSelection sub,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets) =>
+            !string.IsNullOrEmpty(sub.Source.AzureResourceId)
+            && existingSubnets.Any(e =>
+                string.Equals(e.AzureResourceId, sub.Source.AzureResourceId, StringComparison.OrdinalIgnoreCase)
+                && !(e.Cidr == sub.Cidr
+                     && string.Equals(e.NetworkAddress, sub.Network, StringComparison.OrdinalIgnoreCase)));
+
         /// <inheritdoc/>
         public BulkImportPlanViewModel BuildPlan(
             BulkImportSelectionDto selection,
@@ -133,9 +174,45 @@ namespace Bastet.Services.Azure
             // -------------------------------------------------------------
             // Step 3: determine target Bastet subnet for each VNet prefix and check Bastet conflicts
             // -------------------------------------------------------------
+            // Computed across the WHOLE commit, not per item. BuildPlanItem runs once per selected
+            // VNet address prefix, so a per-item grouping only ever sees that prefix's rows: an Azure
+            // subnet owning one prefix under 10.71.0.0/16 and another under 10.72.0.0/16 looked
+            // single-prefix to both items, and the qualification that exists to keep those rows
+            // distinguishable was silently skipped - two children with the same name AND the same
+            // AzureResourceId, differing only by CIDR.
+            //
+            // The FullyEncompasses / non-empty-resource-id filter is kept exactly as it was: an
+            // encompassing selection marks the target fully allocated instead of creating a child,
+            // so counting it would inflate the group and needlessly rename the one child that IS
+            // created. (A subnet may equal one VNet prefix exactly and still hold a prefix inside
+            // another, so this is reachable rather than theoretical.)
+            // Which VNets contribute MORE THAN ONE selected address prefix. BuildPlanItem runs once
+            // per prefix and TargetName returns the bare VNet name, so such a VNet persisted one
+            // Bastet subnet per prefix all carrying the identical name AND the identical VNet
+            // resource id - N6 one level up the tree, and unlike N6 it fires on every
+            // multi-address-space VNet import rather than only on a prefix-spanning subnet.
+            HashSet<string> multiPrefixVNetIds = new(
+                parsed
+                    .Where(p => !string.IsNullOrEmpty(p.Source.VNetResourceId))
+                    .GroupBy(p => p.Source.VNetResourceId!, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Select(x => $"{x.PrefixNetwork}/{x.PrefixCidr}")
+                                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+                    .Select(g => g.Key),
+                StringComparer.OrdinalIgnoreCase);
+
+            HashSet<string> multiPrefixResourceIds = new(
+                parsed.SelectMany(p => p.Subnets)
+                    .Where(s => !s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId))
+                    .GroupBy(s => s.Source.AzureResourceId!, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() > 1)
+                    .Select(g => g.Key),
+                StringComparer.OrdinalIgnoreCase);
+
             foreach (ParsedPrefixSelection p in parsed)
             {
-                BulkImportPlanItem item = BuildPlanItem(p, existingSubnets, selection.RenameMatchedBastetSubnets);
+                BulkImportPlanItem item = BuildPlanItem(
+                    p, existingSubnets, selection.RenameMatchedBastetSubnets,
+                    multiPrefixResourceIds, multiPrefixVNetIds);
                 plan.Items.Add(item);
             }
 
@@ -193,10 +270,37 @@ namespace Bastet.Services.Azure
 
             if (exact is not null)
             {
-                // Mirrors the hard failures in BuildPlanItem for an ExactMatch target
-                if (exact.HasChildSubnets)
+                // Matching on address says nothing about which Azure resource the row came from:
+                // two VNets in one subscription may carry the same prefix, which is ordinary in
+                // hub-and-spoke and dev/prod topologies. Importing this one would replace the
+                // recorded link, after which reconcile measures the row against a VNet it was never
+                // imported from and offers it - and its subtree - for deletion when that VNet goes.
+                // Name both resources: "blocked" alone does not explain a same-prefix collision.
+                //
+                // Checked FIRST because the top-up allowance below turns on it.
+                if (!string.IsNullOrEmpty(exact.AzureResourceId)
+                    && !string.IsNullOrEmpty(vnet.ResourceId)
+                    && !string.Equals(exact.AzureResourceId, vnet.ResourceId, StringComparison.OrdinalIgnoreCase))
                 {
-                    return Blocked(result, $"Bastet subnet '{exact.Name}' already has child subnets. Already imported?");
+                    return Blocked(result,
+                        $"Bastet subnet '{exact.Name}' is already linked to Azure VNet '{exact.AzureResourceId}'. "
+                        + $"Importing '{vnet.ResourceId}' would replace that link, so it is refused.");
+                }
+
+                // TOP-UP. A populated target used to be refused outright, which left an Azure subnet
+                // that gained a prefix after import impossible to import by any route while BASTET
+                // went on advertising the Azure-assigned range as free space.
+                //
+                // Narrowed rather than removed: the allowance requires the target to be linked to
+                // THIS VNet already, so this is a continuation of an import that has happened, not
+                // the adoption of a hand-built subtree. Adoption is what re-stamps AzureResourceId
+                // on rows nobody imported and puts them inside a later reconcile cascade.
+                bool isTopUp = IsSameVNet(exact, vnet);
+
+                if (exact.HasChildSubnets && !isTopUp)
+                {
+                    return Blocked(result,
+                        $"Bastet subnet '{exact.Name}' already has child subnets and is not linked to this VNet. Already imported?");
                 }
                 if (exact.HasHostIpAssignments)
                 {
@@ -207,23 +311,12 @@ namespace Bastet.Services.Azure
                     return Blocked(result, $"Bastet subnet '{exact.Name}' is marked as fully allocated.");
                 }
 
-                // Matching on address says nothing about which Azure resource the row came from:
-                // two VNets in one subscription may carry the same prefix, which is ordinary in
-                // hub-and-spoke and dev/prod topologies. Importing this one would replace the
-                // recorded link, after which reconcile measures the row against a VNet it was never
-                // imported from and offers it - and its subtree - for deletion when that VNet goes.
-                // Name both resources: "blocked" alone does not explain a same-prefix collision.
-                if (!string.IsNullOrEmpty(exact.AzureResourceId)
-                    && !string.IsNullOrEmpty(vnet.ResourceId)
-                    && !string.Equals(exact.AzureResourceId, vnet.ResourceId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Blocked(result,
-                        $"Bastet subnet '{exact.Name}' is already linked to Azure VNet '{exact.AzureResourceId}'. "
-                        + $"Importing '{vnet.ResourceId}' would replace that link, so it is refused.");
-                }
-
                 result.Status = BulkImportAvailability.WillUpdateExisting;
-                result.Reason = $"Will import into existing Bastet subnet '{exact.Name}'.";
+                // Distinct copy: "Will import into existing Bastet subnet 'X'" reads as a first
+                // import and would be a lie about a target that already holds rows.
+                result.Reason = exact.HasChildSubnets
+                    ? $"Will add any missing subnets to existing Bastet subnet '{exact.Name}'. Subnets already imported are left untouched."
+                    : $"Will import into existing Bastet subnet '{exact.Name}'.";
                 result.IsSelectable = true;
                 return result;
             }
@@ -354,7 +447,9 @@ namespace Bastet.Services.Azure
         private BulkImportPlanItem BuildPlanItem(
             ParsedPrefixSelection p,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
-            bool renameMatched)
+            bool renameMatched,
+            IReadOnlySet<string> multiPrefixResourceIds,
+            IReadOnlySet<string> multiPrefixVNetIds)
         {
             BulkImportPlanItem item = new()
             {
@@ -375,11 +470,13 @@ namespace Bastet.Services.Azure
                 item.ExistingTargetSubnetId = exact.Id;
                 item.ExistingTargetSubnetName = exact.Name;
 
-                // Hard fail (5b) if the matched Bastet subnet is non-empty.
-                if (exact.HasChildSubnets)
+                // Hard fail (5b) if the matched Bastet subnet is non-empty - EXCEPT for a top-up,
+                // where the target is already linked to this same VNet. See AnnotatePrefix for why
+                // the allowance is narrowed to that case rather than dropped.
+                if (exact.HasChildSubnets && !IsSameVNet(exact, p.Source.VNetResourceId))
                 {
                     item.Errors.Add(
-                        $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) already has child subnets.");
+                        $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) already has child subnets and is not linked to this VNet.");
                 }
                 if (exact.HasHostIpAssignments)
                 {
@@ -404,9 +501,12 @@ namespace Bastet.Services.Azure
                         + $"and importing '{p.Source.VNetResourceId}' would replace that link.");
                 }
 
-                if (renameMatched)
+                // Never on a top-up. Renaming a target that already holds imported rows changes a
+                // label the operator has been living with, for a run whose purpose is to add the
+                // one subnet that was missing.
+                if (renameMatched && !exact.HasChildSubnets)
                 {
-                    string proposed = TargetName(p);
+                    string proposed = TargetName(p, multiPrefixVNetIds);
                     if (!string.Equals(proposed, exact.Name, StringComparison.Ordinal))
                     {
                         item.WillRename = true;
@@ -424,7 +524,7 @@ namespace Bastet.Services.Azure
                     item.TargetType = BulkImportTargetType.AutoCreateChild;
                     item.AutoCreateParentSubnetId = deepest.Id;
                     item.AutoCreateParentSubnetName = deepest.Name;
-                    item.AutoCreateTargetName = TargetName(p);
+                    item.AutoCreateTargetName = TargetName(p, multiPrefixVNetIds);
 
                     // The auto-created target's parent must be eligible to receive children
                     if (deepest.HasHostIpAssignments)
@@ -441,7 +541,7 @@ namespace Bastet.Services.Azure
                 else
                 {
                     item.TargetType = BulkImportTargetType.AutoCreateTopLevel;
-                    item.AutoCreateTargetName = TargetName(p);
+                    item.AutoCreateTargetName = TargetName(p, multiPrefixVNetIds);
                 }
             }
 
@@ -468,6 +568,21 @@ namespace Bastet.Services.Azure
                         + $"{p.PrefixNetwork}/{p.PrefixCidr}, so nothing can be created inside it, but "
                         + $"{p.Subnets.Count - 1} other subnet(s) were selected from the same prefix. "
                         + "Azure does not allow overlapping subnets in a VNet, so this selection cannot be applied.");
+                    return item;
+                }
+
+                // A target that already holds children cannot also be "fully allocated by one Azure
+                // subnet" - the two describe different states, and the commit marks the flag INSTEAD
+                // of creating children, so the existing rows would be stranded under a target
+                // claiming nothing more fits. The old blanket refusal of populated targets was
+                // preventing this incidentally; the top-up allowance makes it reachable, so it is
+                // now refused explicitly.
+                if (exact is not null && exact.HasChildSubnets)
+                {
+                    item.Errors.Add(
+                        $"Cannot import VNet prefix {p.Source.AddressPrefix}: Azure subnet "
+                        + $"'{TruncateAndSanitizeName(fullyEncompassing.Source.Name)}' covers the whole prefix, which would "
+                        + $"mark Bastet subnet '{exact.Name}' fully allocated, but it already has child subnets.");
                     return item;
                 }
 
@@ -501,17 +616,6 @@ namespace Bastet.Services.Azure
                 usedNames.Add(targetAutoCreatedName);
             }
 
-            // An Azure subnet owning several IPv4 prefixes contributes one selection per prefix, and
-            // every one of them carries the same Azure name. Subnet.Name has a non-unique index, so
-            // without this they would persist as indistinguishable rows differing only by CIDR.
-            // Name each for the range it actually holds. A subnet contributing a single selection is
-            // untouched, so ordinary imports keep the exact names they have always had.
-            HashSet<string> multiPrefixResourceIds = [.. p.Subnets
-                .Where(s => !s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId))
-                .GroupBy(s => s.Source.AzureResourceId, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1)
-                .Select(g => g.Key)];
-
             foreach (ParsedSubnetSelection sub in p.Subnets)
             {
                 if (sub.FullyEncompasses)
@@ -524,10 +628,24 @@ namespace Bastet.Services.Azure
                 {
                     baseName = $"{sub.Network}_{sub.Cidr}";
                 }
-                else if (multiPrefixResourceIds.Contains(sub.Source.AzureResourceId))
+                else if (multiPrefixResourceIds.Contains(sub.Source.AzureResourceId)
+                         || HasPersistedSiblingFromSameAzureSubnet(sub, existingSubnets))
                 {
+                    // An Azure subnet owning several IPv4 prefixes contributes one selection per
+                    // prefix, all carrying the same Azure name, and Subnet.Name has a non-unique
+                    // index - so without this they persist as rows distinguishable only by CIDR.
+                    // Name each for the range it actually holds. A subnet contributing a single
+                    // selection with no persisted sibling is untouched, so ordinary imports keep the
+                    // exact names they have always had.
+                    //
+                    // "-{cidr}" and NOT "/{cidr}": [SafeText] on CreateSubnetViewModel.Name forbids
+                    // "/", so a generated name carrying one is a name this application refuses on
+                    // its own Create form - and SubnetNaming.ToSafeText DELETES the character rather
+                    // than rejecting it, so the create-from-unallocated-range prefill silently turned
+                    // "(10.20.40.0/24)" into the false token "(10.20.40.024)". Same convention as
+                    // SubnetController.Create.
                     baseName = SubnetNaming.WithSuffix(
-                        baseName, $" ({sub.Network}/{sub.Cidr})", MaxSubnetNameLength);
+                        baseName, $" ({sub.Network}-{sub.Cidr})", MaxSubnetNameLength);
                 }
 
                 string finalName = DisambiguateName(baseName, usedNames, p.Source.VNetName);
@@ -725,10 +843,30 @@ namespace Bastet.Services.Azure
         /// comment about exactly this hazard ("StripHtml can empty a name outright, defeating
         /// [Required]"); this was the one write with the same sanitizer output and no equivalent guard.
         /// </summary>
-        private string TargetName(ParsedPrefixSelection prefix) =>
-            TruncateAndSanitizeName(prefix.Source.VNetName) is { Length: > 0 } name
-                ? name
+        /// <summary>
+        /// The name for the Bastet subnet a VNet address prefix imports into, qualified by the range
+        /// it holds when the same VNet contributes several selected prefixes.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately NOT routed through DisambiguateName: that appends the VNet name, which is
+        /// precisely the token that is already identical here, and its numeric fallback would give
+        /// "vnet" and "vnet (2)" - neither of which says which range the row holds. Same
+        /// "name (network-cidr)" shape the child names use, so all three naming paths stay consistent.
+        ///
+        /// The ExactMatch branch never reaches this: it adopts an existing row and names nothing.
+        /// </remarks>
+        private string TargetName(ParsedPrefixSelection prefix, IReadOnlySet<string> multiPrefixVNetIds)
+        {
+            string name = TruncateAndSanitizeName(prefix.Source.VNetName) is { Length: > 0 } sanitized
+                ? sanitized
                 : $"{prefix.PrefixNetwork}_{prefix.PrefixCidr}";
+
+            return !string.IsNullOrEmpty(prefix.Source.VNetResourceId)
+                   && multiPrefixVNetIds.Contains(prefix.Source.VNetResourceId)
+                ? SubnetNaming.WithSuffix(
+                    name, $" ({prefix.PrefixNetwork}-{prefix.PrefixCidr})", MaxSubnetNameLength)
+                : name;
+        }
 
         private string TruncateAndSanitizeName(string? rawName)
         {

@@ -1,4 +1,5 @@
 using Bastet.Models.ViewModels;
+using Bastet.Services;
 using Bastet.Services.Azure;
 
 namespace Bastet.Tests.Azure;
@@ -15,7 +16,7 @@ public class AzureReconcilerTests
 
     private readonly AzureReconciler _reconciler;
 
-    public AzureReconcilerTests() => _reconciler = new AzureReconciler();
+    public AzureReconcilerTests() => _reconciler = new AzureReconciler(new IpUtilityService());
 
     // -------------------------------------------------------------------------
     // Builders
@@ -74,7 +75,7 @@ public class AzureReconcilerTests
 
     private AzureReconcilePlanViewModel Build(
         AzureVNetInventory inventory, params AzureLinkedSubnetSnapshot[] linked) =>
-        _reconciler.BuildPlan(SubId, "Test Sub", inventory, linked);
+        _reconciler.BuildPlan(SubId, "Test Sub", inventory, linked, []);
 
     // -------------------------------------------------------------------------
     // Fail closed - the safety property the whole feature rests on
@@ -655,7 +656,7 @@ public class AzureReconcilerTests
     public void NoSubscriptionSpecified_HardFails()
     {
         AzureReconcilePlanViewModel plan = _reconciler.BuildPlan(
-            string.Empty, null, Live(), [Linked(1, "vnet-a", "10.0.0.0", 16, VNetId("vnet-a"))]);
+            string.Empty, null, Live(), [Linked(1, "vnet-a", "10.0.0.0", 16, VNetId("vnet-a"))], []);
 
         Assert.False(plan.CanCommit);
         Assert.Contains(plan.GlobalErrors, e => e.Contains("No subscription"));
