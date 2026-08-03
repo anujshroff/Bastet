@@ -240,6 +240,36 @@ namespace Bastet.Models.ViewModels
 
         /// <summary>Must be "approved", matching the single-subnet delete flow.</summary>
         public string Confirmation { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The verdict the operator actually approved, one entry per selected subnet, snapshotted
+        /// when the confirmation screen was built.
+        /// </summary>
+        /// <remarks>
+        /// Set membership in the re-derived plan is not consent. A row approved under "the Azure
+        /// resource no longer exists" can still be in the plan moments later under "the prefix
+        /// changed" - a different fact, reached without any direct ARM read - and the subtree was
+        /// archived on an approval whose stated premise the server had itself disproved. Required:
+        /// a request that names no verdict is refused rather than trusted, because an omitted
+        /// verdict is exactly what a replayed or hand-built post carries.
+        /// </remarks>
+        public List<AzureReconcileApprovedVerdict> Statuses { get; set; } = [];
+    }
+
+    /// <summary>One row's verdict as it was shown to the operator on the confirmation screen.</summary>
+    public class AzureReconcileApprovedVerdict
+    {
+        public int SubnetId { get; set; }
+
+        /// <summary>The <see cref="AzureReconcileStatus"/> name, as rendered.</summary>
+        public string StatusName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The reason text shown beside the row. Compared as well as the status, because the same
+        /// status can carry different facts - a prefix that moved again re-derives as
+        /// SubnetPrefixChanged both times while naming a different live prefix.
+        /// </summary>
+        public string Reason { get; set; } = string.Empty;
     }
 
     /// <summary>

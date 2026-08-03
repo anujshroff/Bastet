@@ -78,6 +78,20 @@ public partial class SubnetController : Controller
         Dictionary<int, AzureReconcileItem> stillStale = plan.Items.ToDictionary(i => i.SubnetId);
         List<int> noLongerStale = [.. request.SubnetIds.Where(id => !stillStale.ContainsKey(id))];
 
+        // Set membership is not consent. Check the row is still stale FOR THE REASON THE OPERATOR
+        // SAW - the endpoint's own docstring promises "a resource that reappeared in Azure cannot
+        // cause the wrong subnets to be archived", and comparing ids alone does not deliver that.
+        // Ordered before the membership refusal only in the sense that both are computed here; the
+        // membership message is more specific, so it still wins when both apply.
+        Dictionary<int, AzureReconcileApprovedVerdict> approved =
+            (request.Statuses ?? [])
+                .GroupBy(s => s.SubnetId)
+                .ToDictionary(g => g.Key, g => g.Last());
+
+        List<int> verdictChanged = [.. request.SubnetIds
+            .Where(stillStale.ContainsKey)
+            .Where(id => !VerdictMatchesApproval(stillStale[id], approved.GetValueOrDefault(id)))];
+
         if (noLongerStale.Count > 0)
         {
             return Conflict(new
@@ -88,6 +102,22 @@ public partial class SubnetController : Controller
                 subnetIds = noLongerStale,
                 // Carries the reason a row was withheld - most usefully "Azure would not confirm it
                 // is deleted", which otherwise looks indistinguishable from an out-of-date scan.
+                warnings = plan.Warnings
+            });
+        }
+
+        if (verdictChanged.Count > 0)
+        {
+            // Deliberately not merged with the message above. "No longer reported as deleted" and
+            // "flagged for a different reason" call for different operator actions: the first means
+            // the row is fine, the second means it is still wrong but wrong in a way they have not
+            // seen and might well choose to re-import rather than archive.
+            return Conflict(new
+            {
+                success = false,
+                error = $"The reason {verdictChanged.Count} of the selected subnet(s) were flagged has changed since " +
+                        "you reviewed them. Nothing was deleted. Re-run the scan and review the results.",
+                subnetIds = verdictChanged,
                 warnings = plan.Warnings
             });
         }
@@ -202,6 +232,29 @@ public partial class SubnetController : Controller
             subnetsArchived,
             hostIpsArchived
         });
+    }
+
+    /// <summary>
+    /// True when the freshly derived verdict is the same one the operator approved.
+    /// </summary>
+    /// <remarks>
+    /// Three cases are all treated as a divergence rather than as consent:
+    /// a MISSING verdict (nothing was approved for this row, so nothing licenses archiving it),
+    /// an UNPARSEABLE status name (a caller-supplied string that names no status establishes
+    /// nothing - the same rule DescribeApprovedPlanDivergences applies to TargetType), and a
+    /// matching status whose REASON differs (same verdict, different facts: a prefix that has moved
+    /// again re-derives as SubnetPrefixChanged both times while naming a different live prefix).
+    /// </remarks>
+    private static bool VerdictMatchesApproval(AzureReconcileItem current, AzureReconcileApprovedVerdict? approvedVerdict)
+    {
+        if (approvedVerdict is null)
+        {
+            return false;
+        }
+
+        return Enum.TryParse(approvedVerdict.StatusName, ignoreCase: true, out AzureReconcileStatus approvedStatus)
+               && approvedStatus == current.Status
+               && string.Equals(approvedVerdict.Reason, current.Reason, StringComparison.Ordinal);
     }
 
     /// <summary>

@@ -83,47 +83,21 @@ _Tests: 771 → 792. Nine in `AzureReconcilerRangeStillAllocatedTests` (four of 
 
 # High
 
-## N2 — Reconcile delete archives on a re-derived Azure verdict it never compares against the one the operator approved `[x1]`
+## N2 — Reconcile delete archives on a re-derived Azure verdict it never compares against the one the operator approved `[x1]` — FIXED
 
-**Severity:** high · **Confidence:** confirmed
-**Citation:** `src/Bastet/Controllers/SubnetController.AzureReconcile.cs:78`
+_N2 is fixed and committed. `AzureReconcileDeleteDto` gained `Statuses`, a per-row `{subnetId, statusName, reason}` snapshot taken where `confirmedIds` is already frozen in `_ReconcileScripts.cshtml`, so both describe the same reviewed plan. The commit now refuses the whole batch when any selected row's re-derived verdict differs from the approved one, returning a 409 worded separately from the existing "no longer reported as deleted" refusal — deliberately not merged, because the two call for different operator actions: the first means the row is fine, the second means it is still wrong but wrong in a way they have not seen and might well answer by re-importing rather than archiving._
 
-**Failure scenario.** The wizard deliberately carries each row's *reason* onto the last screen before the archive (`_ReconcileScripts.cshtml:396-408`: "a row whose own reason says the Azure resource still exists was confirmed under a heading saying it did not"). The commit then throws that approval away: `stillStale = plan.Items.ToDictionary(i => i.SubnetId)` and `noLongerStale = request.SubnetIds.Where(id => !stillStale.ContainsKey(id))` test only **set membership** in the re-derived plan, never that the row is stale for the reason the operator saw. `VNetDeleted`/`SubnetDeleted` are absence claims that must survive a direct ARM read; `VNetPrefixRemoved`/`SubnetPrefixChanged` are drift verdicts taken off the listing with no direct read at all (deliberately — see `AzureReconciler.cs:186-196`). A row that moves from the first class to the second between the confirmation screen and the click stays in `plan.Items`, the 409 never fires, and the subtree is archived. Real trigger: an IaC destroy/apply with a changed CIDR — ARM ids are path-based, so the recreated VNet has the same id. The endpoint's own docstring at `:15-18` promises the opposite: *"a resource that reappeared in Azure cannot cause the wrong subnets to be archived."*
+_Both of the verifier's tightenings were taken, and the owner chose the strict reading of each. The **reason** is compared as well as the status, so a same-status/different-facts change — a prefix that has moved again, re-deriving as `SubnetPrefixChanged` both times while naming a different live prefix — is caught; `ApprovedWithTheSameStatusButADifferentReason_IsRefused` pins it. An **unparseable** status name is a divergence rather than "unverified", mirroring how `DescribeApprovedPlanDivergences` handles `TargetType`; a `[Theory]` covers `"NotAStatus"`, `""` and `"42"`. And the check is **mandatory**, not optional-and-logged: a request naming no verdict at all is refused, because an omitted verdict is exactly what a replayed or hand-built post carries. The refusal is all-or-nothing, returned before any lock is taken, and puts the mismatched ids in `subnetIds` so the wizard can highlight them._
 
-**Reproduction** — own instance port 5199, catalog `bastet_rig14_v9c`, live fixture `rig-14-v9c-vnet`. Seeded Bastet subnet `V` 10.111.0.0/16 linked to the VNet, with a **manually created** child `prod-app-tier` 10.111.1.0/24 (no Azure provenance) and host IP `web01` 10.111.1.10:
+_The interim mitigation was **not** taken. It rejected the absence-to-drift transition specifically, which is narrower than the defect: comparing the approved verdict covers that transition and every other, at the same cost, without the interim's side effect of 409ing a plan that was drift-only from the start._
 
-```
-az network vnet delete       -> rc 0 ; az network vnet show -> rc 3 (404)
-POST /Azure/ReconcileScan    -> statusName "VNetDeleted",
-   reason "The VNet this subnet was imported from no longer exists in Azure...",
-   descendantCount 1, hostIpCount 1, canCommit true       <- what the operator approves
+_Making the check mandatory is a contract change, so three existing tests that drove a successful delete without naming a verdict were updated to supply one. They derive it from a real scan through a new `AzureReconcileApproval.ForAsync` helper rather than hardcoding a status — a test that hardcodes what it expects would keep passing if the reconciler started reporting something else, which is the very drift this check exists to catch._
 
-az network vnet create -n rig-14-v9c-vnet --address-prefixes 10.112.0.0/16   (same name = same ARM id)
-re-scan (same session) -> [(1,'VNetPrefixRemoved',"VNet ... still exists but no longer has
-                            the address prefix 10.111.0.0/16.")]
+_Proven by A/B on the same live Azure, driving the exact IaC destroy/apply the finding describes: scan while the VNet is deleted (operator approves `VNetDeleted`), recreate the VNet at the same ARM id with prefix `10.112.0.0/16` — ARM ids are path-based, so the id is unchanged — then commit carrying the original approval. Unfixed `77560af`: the server re-derived `VNetPrefixRemoved` and still returned **HTTP 200 `targetsDeleted: 1, subnetsArchived: 1`**, taking the database from 1 subnet / 1 archived to 0 / 2. Fixed, same sequence: **HTTP 409**, `subnetIds: [1]`, "The reason 1 of the selected subnet(s) were flagged has changed since you reviewed them", and the database unchanged at 2 subnets / 0 archived. The 409 named only row 1; row 2, whose `SubnetDeleted` verdict was genuinely unchanged, was not falsely implicated._
 
-POST /Subnet/BulkDeleteStaleAzureSubnets {"subnetIds":[1],"confirmation":"approved"}
-  -> HTTP 200 {"success":true,"targetsDeleted":1,"subnetsArchived":2,"hostIpsArchived":1}
+_One measurement was discarded rather than recorded: the first fixed-build run also returned 200, because the app process had been started before the N2 edit and was still serving N1-era code. It was rebuilt and re-run before anything was concluded._
 
-SELECT COUNT(*) FROM Subnets            -> 0
-SELECT ... FROM DeletedSubnets          -> prod-app-tier 10.111.1.0/24 ; V 10.111.0.0/16
-SELECT COUNT(*) FROM HostIpAssignments  -> 0
-```
-
-The banner reads "Deleted 1 stale subnet(s)" — a staleness claim the server had disproved milliseconds earlier. There is no restore from `DeletedSubnets` (round 13 established this on the record).
-
-**Fix (verifier: sound, with two tightenings).** Carry the approved verdict into the commit and refuse a mismatch, exactly as the bulk import commit already does for its plan (`DescribeApprovedPlanDivergences`, round 10's J2). Add `Statuses` (a per-id `{subnetId, statusName}` list) to `AzureReconcileDeleteDto`; snapshot `i.statusName` alongside `i.subnetId` at `_ReconcileScripts.cshtml:362` where `confirmedIds` is already frozen; at `SubnetController.AzureReconcile.cs:78` add the conjunct `stillStale[id].Status != approvedStatus[id]` returning the same 409 body, worded *"the reason N of the selected subnet(s) were flagged has changed since you reviewed them. Nothing was deleted. Re-run the scan."* Tightenings:
-
-1. The status arrives as a caller-supplied string: parse defensively and treat an **unparseable** value as a divergence, not as "unverified" — mirror how `DescribeApprovedPlanDivergences` handles `TargetType`. Only a **missing** status counts as unverified-and-logged.
-2. Comparing `Status` alone still lets a same-status/different-facts change through (a row approved as `SubnetPrefixChanged :: "now 10.111.1.0/24"` commits unchanged when the prefix has since moved again). If you want the guarantee the docstring claims, compare the server-derived `Reason` (or the observed Azure prefix) too, as the bulk path compares `ChildNames` in addition to `TargetType`.
-
-Keep the refusal all-or-nothing, returned before any lock is taken, and put the mismatched ids in the `subnetIds` array so the wizard can highlight them. Do not merge the two messages — "no longer reported as deleted" and "flagged for a different reason" call for different operator actions.
-
-**Interim mitigation (three lines, no DTO change).** At `:78`, also refuse when any selected id's re-derived status is a drift status (`SubnetPrefixChanged`/`VNetPrefixRemoved`) while `ConfirmProposedDeletionsAsync` was not asked about it — i.e. reject the absence→drift transition specifically, which is the only unprotected transition (every other class change moves the row into `ReviewItems` and out of `plan.Items`, which the existing 409 already catches). Cost: a plan that was drift-only from the start also 409s unless drift statuses are whitelisted.
-
-**Decision needed from you.** Whether an out-of-band Azure re-create inside the confirm window becomes a 409 the operator must re-scan through (safer, converts a legitimate drift deletion into a retry), and whether the approved-status check is mandatory or optional-and-logged for callers using this as the documented direct JSON API — the same fail-open-and-log trade-off already accepted at `SubnetController.BulkAzure.cs:99-106`.
-
-*Scope correction from the verifier:* the id-set archived equals the id-set approved, and every archived target is independently stale under the fresh verdict. The wrongness is that **consent was bound to a fact the server had disproved**, not that unselected rows were touched. Severity stays high: this is the only endpoint that deletes on the strength of what Azure reports, the removal is irreversible, and the operator would plausibly have chosen re-import over archive had the drift reason been shown.
+_Tests: 792 → 800. Eight in `SubnetControllerReconcileApprovedVerdictTests`, including the counter-test that a verdict which still matches archives normally — without it this fix would be indistinguishable from breaking the feature._
 
 ---
 

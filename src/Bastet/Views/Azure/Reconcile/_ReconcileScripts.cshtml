@@ -12,6 +12,9 @@
         // whatever the review checkboxes hold at click time, so it can only ever delete what the
         // confirmation screen listed.
         let confirmedIds = null;
+        // The verdict each confirmed row was shown under. Sent with the delete so the server
+        // can refuse a batch whose reasons have changed since the operator read them.
+        let confirmedVerdicts = null;
         // True while a delete POST is in flight. Without it, anything that calls
         // refreshDeleteButton re-arms the button mid-delete - one keystroke plus Backspace in the
         // confirmation box is enough - and the second POST's ARM re-scan starts before the first
@@ -61,6 +64,7 @@
         // clickable once visited.
         function invalidateConfirmation() {
             confirmedIds = null;
+            confirmedVerdicts = null;
             $("#rec-step3-tab").addClass("disabled");
             refreshDeleteButton();
 
@@ -420,6 +424,10 @@
 
             // The deletion is submitted for every selected id; the server dedupes by subtree.
             confirmedIds = chosen.map(function (i) { return i.subnetId; });
+            // Snapshotted here, beside confirmedIds, so both describe the same reviewed plan.
+            confirmedVerdicts = chosen.map(function (i) {
+                return { subnetId: i.subnetId, statusName: i.statusName, reason: i.reason || "" };
+            });
 
             // The counts are subtree-inclusive, so an item selected together with one of its
             // ancestors is already inside the ancestor's numbers - same rule the server applies
@@ -498,7 +506,8 @@
                 data: JSON.stringify({
                     subscriptionId: selectedSubscriptionId,
                     subnetIds: ids,
-                    confirmation: $("#rec-confirmation").val()
+                    confirmation: $("#rec-confirmation").val(),
+                    statuses: confirmedVerdicts || []
                 }),
                 beforeSend: function () {
                     deleting = true;

@@ -246,7 +246,13 @@ public class SubnetControllerAzureReconcileTests : IDisposable
     public async Task BulkDeleteStaleAzureSubnets_StaleSubnetCorrectlyConfirmed_DeletesAndArchives()
     {
         // An empty-but-successful inventory means the VNet really is gone.
-        IActionResult result = await Delete(Request("approved", 1), new MockAzureService());
+        MockAzureService azure = new();
+        AzureReconcileDeleteDto request = Request("approved", 1);
+        // Approve exactly what a scan reports, as the wizard does - the verdict is now part of the
+        // request and a batch that names none is refused.
+        request.Statuses = await AzureReconcileApproval.ForAsync(azure, _snapshotService, SubId, [1]);
+
+        IActionResult result = await Delete(request, azure);
 
         _ = Assert.IsType<OkObjectResult>(result);
 

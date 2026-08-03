@@ -184,16 +184,20 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
 
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
+        MockAzureService azure = new();
+        AzureSubnetSnapshotService snapshots = new(context);
+
         IActionResult result = await controller.BulkDeleteStaleAzureSubnets(
             new AzureReconcileDeleteDto
             {
                 SubscriptionId = SubId,
                 SubnetIds = targets,
-                Confirmation = "approved"
+                Confirmation = "approved",
+                Statuses = await AzureReconcileApproval.ForAsync(azure, snapshots, SubId, targets)
             },
-            new MockAzureService(),
+            azure,
             new AzureReconciler(),
-            new AzureSubnetSnapshotService(context));
+            snapshots);
 
         // An empty-but-successful Azure inventory means every VNet really is gone, so all of them
         // are archived. Asserted here so a failure inside the loop is not read as a scaling result.
