@@ -149,50 +149,21 @@ _Not done, and deliberately: the interim mitigation of raising the log to `LogCr
 
 _Tests: unchanged at 822. Nothing was added, because nothing in the suite can reach this: SQLite has no `sp_getapplock`, and the defect is in what SqlClient does with a connection after it is closed._
 
-## N6 — Bulk import's multi-prefix name qualification is scoped to one VNet address prefix, so an Azure subnet whose prefixes fall under different VNet prefixes persists as two Bastet rows with the identical name and the identical `AzureResourceId` `[x2]`
+## N6 — Bulk import's multi-prefix name qualification is scoped to one VNet address prefix `[x2]` — FIXED
 
-**Severity:** low · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:509` (grouping at `:511`, `usedNames` at `:486`, `Contains` at `:527`, `DisambiguateName` at `:533`)
+_N6 is fixed and committed. The `multiPrefixResourceIds` grouping is hoisted out of `BuildPlanItem` into `BuildPlan` and computed once across every selected prefix of every VNet, then passed in — so an Azure subnet owning one prefix under `10.71.0.0/16` and another under `10.72.0.0/16` is now seen as multi-prefix by both items instead of looking single-prefix to each. The owner chose qualification across the whole commit and across sessions over the preview-warning alternative._
 
-**Failure scenario.** A VNet has two address prefixes (10.71.0.0/16, 10.72.0.0/16) and one Azure subnet owns one IPv4 prefix in each. `BuildPlanItem` runs once per selected VNet address prefix, and `multiPrefixResourceIds` is built only from **that prefix's** subnet rows — so each item sees exactly one row for the resource id, `Count() > 1` is false, and no prefix qualification is applied. `usedNames` is also per-item and seeded only from the item's own target names, so `DisambiguateName` cannot catch it either. Result: two child subnets with the **same name** and the **same Azure subnet resource id**, distinguishable only by CIDR — precisely the state round 13's M1 naming work exists to prevent. Reachable in one click of "Select all"; the wizard groups subnet checkboxes under prefixes by containment, so no crafted payload is needed.
+_The verifier's correction to part 1 was taken: the `!s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId)` filter is kept exactly as it was. `AnEncompassingSelectionDoesNotInflateTheGroup` pins why — a subnet may equal one VNet prefix exactly and still hold a prefix inside another, so dropping the filter would inflate the group and needlessly rename the one child that is actually created._
 
-**Reproduction** — own instance port 5193, catalog `bastet_rig14_verc3`, existing fixture `rig-14-b5p2-vnet`:
+_Part 2 was implemented as the verifier's **corrected** version, not as proposed. `usedNames` is **not** seeded from the existing tree: that would rename any child whose Azure name merely matched some unrelated Bastet subnet anywhere in the tree — a broad silent rename in the ordinary path — and `DisambiguateName` appends the VNet name rather than the range, so a cross-session second row would land in a different shape from the single-session one. Instead a planned child is qualified when the tree already holds a row with the **same `AzureResourceId` and a different `{NetworkAddress, Cidr}``_. Fires only for the real multi-row case, keeps one shape, needs no DTO or ARM change. `AnUnrelatedBastetSubnetWithTheSameName_DoesNotCauseARename` and `ThePersistedRowForTheSameRange_IsNotTreatedAsASibling` pin both edges._
 
-```
-ARM: prefixes ["10.71.0.0/16","10.72.0.0/16"], subnet rig-14-b5p2-sn-span
-     addressPrefix null, addressPrefixes ["10.71.5.0/24","10.72.5.0/24"]
+_Part 3 — the `TargetName` half — is N10 and is fixed there, on its own merits._
 
-POST /Azure/BulkImportPreview (exact payload buildSelectionFromUI produces for "select all")
-  -> 200, canCommit true, globalErrors []
-     item 10.71.0.0/16 -> childSubnets[0].name "rig-14-b5p2-sn-span"   (UNQUALIFIED)
-     item 10.72.0.0/16 -> childSubnets[0].name "rig-14-b5p2-sn-span"   (UNQUALIFIED)
+_Proven by A/B at the unit level, which is where this defect lives: the new test file was copied unchanged into a clone of `77560af` and run. Against the unfixed planner **2 of 6 fail** — `AnAzureSubnetSpanningTwoVNetPrefixes_HasBothChildrenQualified` (both children came back as the bare `sn-span`) and `ASelectionWhoseAzureSubnetAlreadyHasAPersistedSibling_IsQualified` — while the other 4 pass on both builds, because they assert behaviour the fix had to preserve rather than change._
 
-POST /Subnet/BulkCreateFromAzurePlan -> {"success":true,"createdTargets":2,"createdChildSubnets":2}
-  2 |rig-14-b5p2-vnet   |10.71.0.0|16|NULL
-  3 |rig-14-b5p2-sn-span|10.71.5.0|24|2
-  4 |rig-14-b5p2-vnet   |10.72.0.0|16|NULL
-  5 |rig-14-b5p2-sn-span|10.72.5.0|24|4
-rows 3 and 5 carry the SAME AzureResourceId .../subnets/rig-14-b5p2-sn-span
+_One incidental correction: the hoisted set is constructed with an explicit `StringComparer.OrdinalIgnoreCase` rather than the collection expression it replaced. That is N9's defect, and this finding could not move the line without either fixing it or knowingly re-writing it wrong. N9 covers the remaining site and pins both._
 
-Counter-test that narrows the finding: splitting an ordinary multi-prefix subnet (both prefixes
-inside ONE VNet prefix) across two sessions was REFUSED — "Cannot import VNet prefix 10.10.0.0/16:
-matched Bastet subnet 'rig-14-vnet-a1' ... already has child subnets." So the cross-session route
-needs the same spanning fixture; the two claimed routes are one trigger, not two.
-```
-
-**Fix (verifier: part 1 sound with one correction, part 2 unsound as written, part 3 split out to N10).**
-
-1. **Hoist the grouping out of `BuildPlanItem` into `BuildPlan`**, computing `multiPrefixResourceIds` once across every selected prefix of every VNet, and pass the set in. That is the whole of the single-session fix. **Keep the `!s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId)` filter that `:510` has today** — the proposal's wording drops it, and this fixture disproves M1's recorded assumption that an encompassing prefix cannot have a sibling prefix on the same Azure subnet (a subnet may equal VNet prefix 1 exactly and still hold a prefix inside VNet prefix 2). Without the filter, the encompassing selection would inflate the group to 2 and the one child that *is* created would be needlessly renamed.
-2. **Do not seed `usedNames` from the existing tree.** `usedNames` feeds `DisambiguateName`, which appends the **VNet name**, not the prefix — so the cross-session second row would land as `name (vnet-name)`, a different and inconsistent shape from the single-session `name (10.72.5.0/24)`. Worse, seeding from the whole `existingSubnets` list makes every ordinary import rename any child whose Azure name matches **any** existing Bastet subnet anywhere in the tree, including unrelated branches — a broad silent rename regression in the common path, exactly what M1 was careful to avoid. **Correct targeted fix:** in `BuildPlanItem`, prefix-qualify a planned child when `existingSubnets` already contains a row whose `AzureResourceId` equals `sub.Source.AzureResourceId` and whose `{NetworkAddress, Cidr}` is not this selection's. Same `name (network/cidr)` shape, fires only for the real multi-row case, needs no DTO or ARM change (the commit never re-queries Azure and `BulkImportSelectedSubnetDto` carries no prefix count). The already-persisted first row keeps its bare name and remains unambiguous because the new row is qualified.
-3. **The `TargetName(p)` half is a separate reproduced defect, filed as N10 — not deferred.** Two same-named Bastet targets for a two-address-space VNet were persisted in this very run (rows 2 and 4 of the output above). It is a different code path with its own owner decision, so it is fixed there rather than here; it is not a hole in round 13's guard, which is why it is a finding of its own rather than part of this one.
-
-*(If you take N7's separator change, note that the qualification suffix produced here should use it too.)*
-
-**Interim mitigation.** In `DetectExistingBastetSubnetConflicts`/`AnnotateSubnet`, warn per item when a planned child's final name equals an existing Bastet subnet name under the same target or another planned child's name in the same commit, so the preview discloses the collision before the operator confirms. Sound and cheap — but it is a disclosure, not a fix.
-
-**Decision needed from you.** (1) Whether prefix-qualified names apply across the whole commit and across sessions — the fix changes names some installs see on their **next** import of such a VNet (nothing already persisted is renamed) — versus shipping only the preview warning. (2) The `TargetName` question — whether a target should be prefix-qualified when a VNet contributes several selected prefixes — is N10's decision, taken on its own merits.
-
-*Consequence corrected downward by the verifier:* "no way to tell which range they are acting on from the name alone" is overstated — every render carries the address beside the name (`_SubnetTreeItem.cshtml:17-18`, `_ChildSubnets.cshtml:44-45`, `Delete/_WarningAlert.cshtml:6`, `AllHostIps.cshtml:53`, and all three reconcile lists). Every persisted range, parent link and Azure link is correct; nothing is misreported as free. This is a **broken deliberate invariant with a display-ambiguity consequence**, hence low — a judgement on consequence, not on rarity.
+_Tests: 822 → 828. Four of the six are counter-tests._
 
 ---
 

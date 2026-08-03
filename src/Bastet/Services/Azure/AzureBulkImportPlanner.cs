@@ -36,6 +36,30 @@ namespace Bastet.Services.Azure
         private static bool IsSameVNet(ExistingSubnetSnapshot existing, BulkAzureVNetViewModel vnet) =>
             IsSameVNet(existing, vnet.ResourceId);
 
+        /// <summary>
+        /// True when a row from the SAME Azure subnet, holding a DIFFERENT range, is already in the
+        /// tree - so this commit's row needs qualifying even though this commit only carries one
+        /// selection for that Azure subnet.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately narrow. Seeding the disambiguator from the whole existing tree instead would
+        /// rename any child whose Azure name merely matched some unrelated Bastet subnet anywhere -
+        /// a broad silent rename in the ordinary path - and would append the VNet name rather than
+        /// the range, giving a second row a different shape from the first. Keying on the Azure
+        /// resource ID fires only for the real multi-row case and keeps the one shape.
+        ///
+        /// The already-persisted first row keeps its bare name and stays unambiguous, because the
+        /// row being added is the one that gets qualified.
+        /// </remarks>
+        private static bool HasPersistedSiblingFromSameAzureSubnet(
+            ParsedSubnetSelection sub,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets) =>
+            !string.IsNullOrEmpty(sub.Source.AzureResourceId)
+            && existingSubnets.Any(e =>
+                string.Equals(e.AzureResourceId, sub.Source.AzureResourceId, StringComparison.OrdinalIgnoreCase)
+                && !(e.Cidr == sub.Cidr
+                     && string.Equals(e.NetworkAddress, sub.Network, StringComparison.OrdinalIgnoreCase)));
+
         /// <inheritdoc/>
         public BulkImportPlanViewModel BuildPlan(
             BulkImportSelectionDto selection,
@@ -150,9 +174,30 @@ namespace Bastet.Services.Azure
             // -------------------------------------------------------------
             // Step 3: determine target Bastet subnet for each VNet prefix and check Bastet conflicts
             // -------------------------------------------------------------
+            // Computed across the WHOLE commit, not per item. BuildPlanItem runs once per selected
+            // VNet address prefix, so a per-item grouping only ever sees that prefix's rows: an Azure
+            // subnet owning one prefix under 10.71.0.0/16 and another under 10.72.0.0/16 looked
+            // single-prefix to both items, and the qualification that exists to keep those rows
+            // distinguishable was silently skipped - two children with the same name AND the same
+            // AzureResourceId, differing only by CIDR.
+            //
+            // The FullyEncompasses / non-empty-resource-id filter is kept exactly as it was: an
+            // encompassing selection marks the target fully allocated instead of creating a child,
+            // so counting it would inflate the group and needlessly rename the one child that IS
+            // created. (A subnet may equal one VNet prefix exactly and still hold a prefix inside
+            // another, so this is reachable rather than theoretical.)
+            HashSet<string> multiPrefixResourceIds = new(
+                parsed.SelectMany(p => p.Subnets)
+                    .Where(s => !s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId))
+                    .GroupBy(s => s.Source.AzureResourceId!, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() > 1)
+                    .Select(g => g.Key),
+                StringComparer.OrdinalIgnoreCase);
+
             foreach (ParsedPrefixSelection p in parsed)
             {
-                BulkImportPlanItem item = BuildPlanItem(p, existingSubnets, selection.RenameMatchedBastetSubnets);
+                BulkImportPlanItem item = BuildPlanItem(
+                    p, existingSubnets, selection.RenameMatchedBastetSubnets, multiPrefixResourceIds);
                 plan.Items.Add(item);
             }
 
@@ -387,7 +432,8 @@ namespace Bastet.Services.Azure
         private BulkImportPlanItem BuildPlanItem(
             ParsedPrefixSelection p,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
-            bool renameMatched)
+            bool renameMatched,
+            IReadOnlySet<string> multiPrefixResourceIds)
         {
             BulkImportPlanItem item = new()
             {
@@ -554,17 +600,6 @@ namespace Bastet.Services.Azure
                 usedNames.Add(targetAutoCreatedName);
             }
 
-            // An Azure subnet owning several IPv4 prefixes contributes one selection per prefix, and
-            // every one of them carries the same Azure name. Subnet.Name has a non-unique index, so
-            // without this they would persist as indistinguishable rows differing only by CIDR.
-            // Name each for the range it actually holds. A subnet contributing a single selection is
-            // untouched, so ordinary imports keep the exact names they have always had.
-            HashSet<string> multiPrefixResourceIds = [.. p.Subnets
-                .Where(s => !s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId))
-                .GroupBy(s => s.Source.AzureResourceId, StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1)
-                .Select(g => g.Key)];
-
             foreach (ParsedSubnetSelection sub in p.Subnets)
             {
                 if (sub.FullyEncompasses)
@@ -577,8 +612,15 @@ namespace Bastet.Services.Azure
                 {
                     baseName = $"{sub.Network}_{sub.Cidr}";
                 }
-                else if (multiPrefixResourceIds.Contains(sub.Source.AzureResourceId))
+                else if (multiPrefixResourceIds.Contains(sub.Source.AzureResourceId)
+                         || HasPersistedSiblingFromSameAzureSubnet(sub, existingSubnets))
                 {
+                    // An Azure subnet owning several IPv4 prefixes contributes one selection per
+                    // prefix, all carrying the same Azure name, and Subnet.Name has a non-unique
+                    // index - so without this they persist as rows distinguishable only by CIDR.
+                    // Name each for the range it actually holds. A subnet contributing a single
+                    // selection with no persisted sibling is untouched, so ordinary imports keep the
+                    // exact names they have always had.
                     baseName = SubnetNaming.WithSuffix(
                         baseName, $" ({sub.Network}/{sub.Cidr})", MaxSubnetNameLength);
                 }
