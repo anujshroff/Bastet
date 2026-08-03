@@ -199,32 +199,19 @@ _Tests: 833 → 838._
 
 ---
 
-## N9 — Both new `multiPrefixResourceIds` sets are built with a collection expression, silently discarding the `StringComparer.OrdinalIgnoreCase` on the `GroupBy` immediately above `[x1]`
+## N9 — Both new `multiPrefixResourceIds` sets are built with a collection expression, silently discarding the `StringComparer.OrdinalIgnoreCase` on the `GroupBy` immediately above `[x1]` — FIXED
 
-**Severity:** low · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:509` (grouping `:511`, `Contains` `:527`) and `src/Bastet/Controllers/SubnetController.Azure.cs:250`
+_N9 is fixed and committed exactly as the verifier proposed and verified: both sets are now built with `new(..., StringComparer.OrdinalIgnoreCase)` instead of a collection expression. `[.. query]` constructs a plain `HashSet<string>` with `EqualityComparer<string>.Default`, so the later `Contains` was case-sensitive even though the grouping that filled it was not, and `GroupBy` keeps only the first member's spelling as `g.Key` — so a sibling row spelled `.../Subnets/...` fell out of the set and kept its bare Azure name._
 
-**Failure scenario.** `HashSet<string> multiPrefixResourceIds = [.. …GroupBy(s => s.Source.AzureResourceId, StringComparer.OrdinalIgnoreCase)…]` — the collection expression constructs a plain `HashSet<string>` with `EqualityComparer<string>.Default`, so the later `Contains` is case-**sensitive** even though the grouping that filled the set was case-insensitive. `GroupBy` keeps only the first member's spelling as `g.Key`, so every sibling row whose ARM id differs in case fails the `Contains` test and is not prefix-qualified. ARM resource ids are case-insensitive, so this is a legitimate variation; the wizards echo one server response, which puts the trigger at a crafted or replayed POST — precisely the case `ResolveImportNames`' own remarks say it exists to handle ("a crafted or replayed post carries whatever names it likes"). The hardening added for crafted posts is itself defeated by a crafted post. The intent is unambiguous: `used`, built three lines below the same collection expression at `SubnetController.Azure.cs:257`, `usedNames` at `AzureBulkImportPlanner.cs:486`, and both dictionaries at `AzureReconciler.cs:45-46` are all explicitly `OrdinalIgnoreCase`. These two collection expressions are the only ordinal resource-id collections in the Azure code.
+_One of the two sites was necessarily corrected an hour earlier: N6 hoisted the planner's set out of `BuildPlanItem` into `BuildPlan`, and that finding could not move the line without either writing the comparer correctly or knowingly re-writing it wrong. This finding covers the remaining site, `SubnetController.ResolveImportNames`, and pins **both** with tests so neither can regress independently. Each site now carries a comment saying why it is not a collection expression, because the defect is invisible at the call site — the two forms look interchangeable._
 
-**Reproduction** — own instance port 5211, catalog `bastet_rig14_vc11`. Only variable between runs is the casing of the `subnets`/`Subnets` segment on rows 2 and 3:
+_The offered interim was **not** taken, on the verifier's reasoning: `ToLowerInvariant` on ingest would change the `AzureResourceId` BASTET persists and displays on every import path, with its own blast radius through `BelongsToSubscription`'s `StartsWith` checks and existing mixed-case rows — strictly more expensive and more dangerous than a two-line comparer correction._
 
-```
-POST /Azure/BulkImportPreview
-CONTROL (all ids identically spelled):
-  'rig-14-sn-a2-multi3 (10.20.40.0/24)'  'rig-14-sn-a2-multi3 (10.20.5.0/24)'  'rig-14-sn-a2-multi3 (10.20.20.0/24)'
-MIXED (rows 2-3 use .../Subnets/...):
-  'rig-14-sn-a2-multi3 (10.20.40.0/24)'
-  'rig-14-sn-a2-multi3'                    <- lost its prefix qualification
-  'rig-14-sn-a2-multi3 (rig-14-vnet-a2)'   <- disambiguated by VNet, not by range
+_Proven by A/B: the bulk-planner half of the new test file was copied into a clone of `77560af` and fails there — the child whose resource ID differs only in the casing of the `subnets` segment comes back unqualified. The single-VNet half could not run against that commit, because `ResolveImportNames` was private until N7 opened it as a test seam; it is covered against the fixed tree, where all three pass._
 
-POST /Subnet/BatchCreateChildSubnets (same mixed casing) -> 302; persisted:
-  3|rig-14-sn-a2-multi3|10.20.5.0|24        <- bare Azure name in the database
-Control on the same endpoint with identical spellings: all three rows qualified by range.
-```
+_The verifier's downward correction of the consequence is recorded rather than argued with: exactly one row per group loses its qualification, the `used`/`usedNames` fallback catches every later sibling, so batch names stay mutually distinct and no collision occurs. No prefix is dropped, no range is shown free. The harm is a documented naming rule applied inconsistently — one row keeping the bare Azure name, and in the bulk path a sibling disambiguated by VNet name rather than by the range it holds, which is actively misleading about why it was renamed._
 
-**Fix (verifier: sound, compiled and run).** Replace both collection expressions with an explicit constructor: `HashSet<string> multiPrefixResourceIds = new([.. …], StringComparer.OrdinalIgnoreCase);` at `AzureBulkImportPlanner.cs:509` and `SubnetController.Azure.cs:250`. Verified in a throwaway net10.0 project: it compiles (the collection expression cannot convert to `int`, so the capacity overload is not a candidate) and yields `contains a/b = True` for a set built from a group keyed `A/b`. Two lines, no behavioural risk to the identical-casing path. **Do not take the offered interim** of `ToLowerInvariant` on ingest: that changes the `AzureResourceId` Bastet persists and displays on every import path — a data change with its own blast radius (`BelongsToSubscription` `StartsWith` checks, existing mixed-case rows) — and is strictly more expensive and more dangerous than the two-line comparer correction.
-
-*Consequence corrected downward — strike the "distinguishable only by CIDR" claim.* Exactly **one** row per group loses its qualification (the `used`/`usedNames` fallback catches every later sibling), traced across 2-, 3- and 4-row groups and every ordering of spellings, so batch names stay mutually distinct and **no name collision occurs**. No prefix is dropped, `AzureResourceId`/`NetworkAddress`/`Cidr` are all correct, no range is shown free, and the reconciler is case-insensitive so nothing escalates there. The surviving harm is a documented naming rule applied **inconsistently** — one row keeps the bare Azure name, and in the bulk path a sibling is disambiguated by VNet name rather than by the range it holds, which is actively misleading about why it was renamed.
+_Tests: 838 → 841._
 
 ---
 
