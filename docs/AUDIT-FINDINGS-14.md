@@ -215,28 +215,19 @@ _Tests: 838 → 841._
 
 ---
 
-## N10 — Every selected VNet address prefix creates a target named for the bare VNet, so a VNet with two address prefixes persists as two Bastet subnets with the identical name and the identical `AzureResourceId` *(promoted from the watch list by the citation check)*
+## N10 — Every selected VNet address prefix creates a target named for the bare VNet `[x2 via N6's reproduction]` — FIXED
 
-**Severity:** low · **Confidence:** confirmed
-**Citation:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:728` (callers at `:427` and `:444`; the commit that persists it at `src/Bastet/Controllers/SubnetController.BulkAzure.cs:365-369` and `:394-398`)
+_N10 is fixed and committed. The owner chose to prefix-qualify `TargetName` over the preview-warning alternative. Qualification is decided across the whole commit, exactly as N6's part 1 concluded: `BuildPlan` computes which VNets contribute more than one **distinct** selected address prefix and passes that set into `BuildPlanItem`, so each target is named for the range it holds — `vnet-a (10.71.0.0-16)` — using the same `name (network-cidr)` shape N6 and N7 settled on, so all three naming paths stay consistent._
 
-**Failure scenario.** `TargetName` returns the sanitised VNet name and nothing else — it never references which of the VNet's address prefixes the target holds. `BuildPlanItem` runs once per selected VNet address prefix, so every item for the same VNet carries the identical `AutoCreateTargetName`, and the commit creates one Bastet subnet per item with no cross-item name check: `usedNames` (`:486`) is per-item and only guards *child* names. A VNet with two address prefixes therefore persists **two top-level Bastet subnets with the same name**, both stamped with the same VNet `AzureResourceId`, distinguishable only by network address. Reachable in one click of "Select all"; no crafted payload. This is N6 one level up the tree: N6 is two same-named children of one Azure *subnet*, this is two same-named targets of one Azure *VNet*, and unlike N6 it fires on **every** multi-address-space VNet import, not only on a prefix-spanning subnet.
+_Not routed through `DisambiguateName`, on the finding's own reasoning: that appends the **VNet name**, which is precisely the token that is already identical here, and its numeric fallback would produce `vnet` and `vnet (2)` — neither of which says which range the row holds. The `ExactMatch` branch is unaffected because it adopts an existing row and names nothing; `AnExactMatchTargetIsNotRenamedByTheQualification` pins that._
 
-**Reproduction** — the same run recorded under N6 (own instance port 5193, catalog `bastet_rig14_verc3`, fixture `rig-14-b5p2-vnet`, prefixes 10.71.0.0/16 and 10.72.0.0/16). Rows 2 and 4 of that output *are* this defect, persisted:
+_A pre-existing test had to change, and it is worth recording why. `AzureBulkImportPlannerTests.MultipleVNetPrefixes_EachIsIndependentTarget` asserted the **opposite** — both targets keeping the bare VNet name — under a comment reading "If a future change introduces auto-disambiguation of these names, this assertion will catch it." It did exactly that, on the first run after the change. The assertion was updated rather than worked around, because the behaviour it pinned is the defect: two Bastet subnets with the identical name and the identical VNet resource id, on every multi-address-space VNet import._
 
-```
-POST /Subnet/BulkCreateFromAzurePlan -> {"success":true,"createdTargets":2,"createdChildSubnets":2}
-  2 |rig-14-b5p2-vnet|10.71.0.0|16|NULL      <- two targets, identical Name,
-  4 |rig-14-b5p2-vnet|10.72.0.0|16|NULL      <- identical AzureResourceId (the VNet)
-```
+_Proven by A/B: the new test file was copied unchanged into a clone of `77560af` and run — `AVNetWithTwoAddressPrefixes_NamesEachTargetForTheRangeItHolds` fails there while the other five pass, because those five assert behaviour the fix had to preserve: a single-prefix VNet keeps its bare name, two different VNets are both left bare, the same prefix selected twice is not two prefixes, an ExactMatch target is untouched, and every generated name satisfies the app's own `[SafeText]` rules._
 
-**Fix.** Qualification has to be decided across the commit, not inside one item, exactly as N6's part 1 concludes: in `BuildPlan`, when more than one address prefix of the same VNet is selected, qualify each item's `AutoCreateTargetName` with the prefix it holds — the same `name (network-cidr)` shape N6 and N7 settle on, so all three stay consistent. Do **not** route this through `DisambiguateName`: it appends the *VNet name*, which is precisely the token that is already identical here, and its numeric fallback would produce `vnet`/`vnet (2)`, which says nothing about which range the row holds. The `ExactMatch` branch is unaffected — it adopts an existing row and does not name anything.
+_Nothing already persisted is renamed; this changes only the names an install sees on its **next** import of a multi-address-space VNet._
 
-**Decision needed from you.** Whether to prefix-qualify `TargetName` when a VNet contributes several selected prefixes. It changes the names some installs see on their **next** import of a multi-address-space VNet (nothing already persisted is renamed). The alternative is a preview warning only — the wizard discloses that two targets will be created with the same name and the operator renames one afterwards by hand.
-
-*Consequence:* low, on the same reading as N6 — every persisted range, parent link and Azure link is correct, nothing is misreported as free, and every render carries the address beside the name. What is wrong is a duplicated display label that no screen can explain.
-
-*Why this is a finding and not a watch-list item:* it was parked in the watch list as "pre-existing on every build" and excluded from N6's fix as "out of scope", while the two rows above had already been **persisted and observed** in N6's own reproduction. Age, fix cost and blast radius are not severity inputs and are not grounds for withholding a reproduced defect from the findings; it is filed here at the severity its consequence warrants. Its `TargetName` half is therefore removed from N6's fix list and from the watch list.
+_Tests: 841 → 847._
 
 ---
 

@@ -350,10 +350,13 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(plan.Items, i => i.PrefixNetworkAddress == "10.0.0.0" && i.PrefixCidr == 16);
         Assert.Contains(plan.Items, i => i.PrefixNetworkAddress == "10.1.0.0" && i.PrefixCidr == 16);
 
-        // Both auto-created targets keep the unmodified VNet name (intentional — Bastet
-        // allows duplicate Subnet.Name; only NetworkAddress+Cidr is unique). If a future
-        // change introduces auto-disambiguation of these names, this assertion will catch it.
-        Assert.All(plan.Items, i => Assert.Equal("vnet-multi", i.AutoCreateTargetName));
+        // Each auto-created target is named for the range it holds. This assertion previously
+        // pinned the opposite - both targets keeping the bare VNet name - with a comment saying a
+        // future change introducing auto-disambiguation would be caught here. It was: two Bastet
+        // subnets with the identical name AND the identical VNet resource id, distinguishable only
+        // by network address, on every multi-address-space VNet import. Changed deliberately.
+        Assert.Contains(plan.Items, i => i.AutoCreateTargetName == "vnet-multi (10.0.0.0-16)");
+        Assert.Contains(plan.Items, i => i.AutoCreateTargetName == "vnet-multi (10.1.0.0-16)");
     }
 
 

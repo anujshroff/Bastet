@@ -186,6 +186,20 @@ namespace Bastet.Services.Azure
             // so counting it would inflate the group and needlessly rename the one child that IS
             // created. (A subnet may equal one VNet prefix exactly and still hold a prefix inside
             // another, so this is reachable rather than theoretical.)
+            // Which VNets contribute MORE THAN ONE selected address prefix. BuildPlanItem runs once
+            // per prefix and TargetName returns the bare VNet name, so such a VNet persisted one
+            // Bastet subnet per prefix all carrying the identical name AND the identical VNet
+            // resource id - N6 one level up the tree, and unlike N6 it fires on every
+            // multi-address-space VNet import rather than only on a prefix-spanning subnet.
+            HashSet<string> multiPrefixVNetIds = new(
+                parsed
+                    .Where(p => !string.IsNullOrEmpty(p.Source.VNetResourceId))
+                    .GroupBy(p => p.Source.VNetResourceId!, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Select(x => $"{x.PrefixNetwork}/{x.PrefixCidr}")
+                                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+                    .Select(g => g.Key),
+                StringComparer.OrdinalIgnoreCase);
+
             HashSet<string> multiPrefixResourceIds = new(
                 parsed.SelectMany(p => p.Subnets)
                     .Where(s => !s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId))
@@ -197,7 +211,8 @@ namespace Bastet.Services.Azure
             foreach (ParsedPrefixSelection p in parsed)
             {
                 BulkImportPlanItem item = BuildPlanItem(
-                    p, existingSubnets, selection.RenameMatchedBastetSubnets, multiPrefixResourceIds);
+                    p, existingSubnets, selection.RenameMatchedBastetSubnets,
+                    multiPrefixResourceIds, multiPrefixVNetIds);
                 plan.Items.Add(item);
             }
 
@@ -433,7 +448,8 @@ namespace Bastet.Services.Azure
             ParsedPrefixSelection p,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
             bool renameMatched,
-            IReadOnlySet<string> multiPrefixResourceIds)
+            IReadOnlySet<string> multiPrefixResourceIds,
+            IReadOnlySet<string> multiPrefixVNetIds)
         {
             BulkImportPlanItem item = new()
             {
@@ -490,7 +506,7 @@ namespace Bastet.Services.Azure
                 // one subnet that was missing.
                 if (renameMatched && !exact.HasChildSubnets)
                 {
-                    string proposed = TargetName(p);
+                    string proposed = TargetName(p, multiPrefixVNetIds);
                     if (!string.Equals(proposed, exact.Name, StringComparison.Ordinal))
                     {
                         item.WillRename = true;
@@ -508,7 +524,7 @@ namespace Bastet.Services.Azure
                     item.TargetType = BulkImportTargetType.AutoCreateChild;
                     item.AutoCreateParentSubnetId = deepest.Id;
                     item.AutoCreateParentSubnetName = deepest.Name;
-                    item.AutoCreateTargetName = TargetName(p);
+                    item.AutoCreateTargetName = TargetName(p, multiPrefixVNetIds);
 
                     // The auto-created target's parent must be eligible to receive children
                     if (deepest.HasHostIpAssignments)
@@ -525,7 +541,7 @@ namespace Bastet.Services.Azure
                 else
                 {
                     item.TargetType = BulkImportTargetType.AutoCreateTopLevel;
-                    item.AutoCreateTargetName = TargetName(p);
+                    item.AutoCreateTargetName = TargetName(p, multiPrefixVNetIds);
                 }
             }
 
@@ -827,10 +843,30 @@ namespace Bastet.Services.Azure
         /// comment about exactly this hazard ("StripHtml can empty a name outright, defeating
         /// [Required]"); this was the one write with the same sanitizer output and no equivalent guard.
         /// </summary>
-        private string TargetName(ParsedPrefixSelection prefix) =>
-            TruncateAndSanitizeName(prefix.Source.VNetName) is { Length: > 0 } name
-                ? name
+        /// <summary>
+        /// The name for the Bastet subnet a VNet address prefix imports into, qualified by the range
+        /// it holds when the same VNet contributes several selected prefixes.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately NOT routed through DisambiguateName: that appends the VNet name, which is
+        /// precisely the token that is already identical here, and its numeric fallback would give
+        /// "vnet" and "vnet (2)" - neither of which says which range the row holds. Same
+        /// "name (network-cidr)" shape the child names use, so all three naming paths stay consistent.
+        ///
+        /// The ExactMatch branch never reaches this: it adopts an existing row and names nothing.
+        /// </remarks>
+        private string TargetName(ParsedPrefixSelection prefix, IReadOnlySet<string> multiPrefixVNetIds)
+        {
+            string name = TruncateAndSanitizeName(prefix.Source.VNetName) is { Length: > 0 } sanitized
+                ? sanitized
                 : $"{prefix.PrefixNetwork}_{prefix.PrefixCidr}";
+
+            return !string.IsNullOrEmpty(prefix.Source.VNetResourceId)
+                   && multiPrefixVNetIds.Contains(prefix.Source.VNetResourceId)
+                ? SubnetNaming.WithSuffix(
+                    name, $" ({prefix.PrefixNetwork}-{prefix.PrefixCidr})", MaxSubnetNameLength)
+                : name;
+        }
 
         private string TruncateAndSanitizeName(string? rawName)
         {
