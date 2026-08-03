@@ -4,6 +4,36 @@
 
 ---
 
+## Reconciliation — final state
+
+**All ten findings are fixed, verified and struck.** One commit per finding, ten in all, on `audit/round-14`.
+
+| | |
+|---|---|
+| Build | 0 warnings after deleting `bin`/`obj` and rebuilding `--no-incremental` |
+| Tests | 771 → **847** (+76, none removed) |
+| App sweep | 24 checks over every major area, asserting rendered content and page titles, not just HTTP 200 — all pass |
+| Security headers | present on 200 and on 404 |
+| Log | **0 `fail:`, 0 `crit:`** |
+| Azure end to end | subscriptions → discovery (both wizards) → single-VNet listing → bulk preview → commit → reconcile scan → delete commit |
+| Discrimination | both counter-tests pass (below) |
+| `main` | `6d1a4cb`, byte-identical to the pre-round state |
+
+**Every finding was proven by A/B**, not by reasoning: the fixed tree and a clone of the unfixed commit `77560af` were driven through the identical scenario — against the same live Azure subscription for N1–N4, against real SQL Server with an injected release failure for N5, and at the unit level for N6–N10 by copying the new tests into the unfixed clone and watching them fail there.
+
+**The two counter-tests that prove the reconciler discriminates rather than merely blocks**, both re-run at the end: a Bastet row linked to a VNet in the resource group this credential has no assignment on was **withheld and named in a warning** ("…withheld from deletion: 'hidden-linked'"), while in the same commit four rows whose VNet was genuinely deleted were **offered and archived** (`targetsDeleted: 1, subnetsArchived: 4`). Checking only the first would let an over-blocking regression pass silently.
+
+**Eight `warn:` lines, all accounted for and none a defect:** one DataProtection "no XML encryptor" (Development default), three EF `MultipleCollectionIncludeWarning` performance advisories (pre-existing), three "Azure denied access … (403), so it cannot be reported as deleted" — the deliberate permission-denied probe logging *by design*, which is exactly what makes the first counter-test work — and one "carried no previewed outcome", the documented fail-open-and-log path for direct JSON API callers, triggered by the test driver posting a commit without carrying its preview.
+
+### Deliberately not done
+
+- **No backfill anywhere.** Rows already archived by N1's defect are not restored (`DeletedSubnets` has no restore path; re-import is the route back), and rows already carrying N8's unstrippable note are hand-repairable via Edit only — the same call round 13 made for the analogous residue, and the owner's choice here.
+- **N4's Details-page fix is a static note, not a live check.** BASTET is self-hosted and must work with no outbound internet, so the free-space table must never depend on reaching ARM. The top-up import closes the false claim properly by making the range a real subnet; the note covers the window before that.
+- **N5's `LogCritical` interim was dropped rather than shipped alongside** — it existed to make the stranded-lock symptoms diagnosable, and the lock is no longer stranded.
+- **N5's natural (non-injected) trigger was never produced.** It stays on the watch list, where the audit put it.
+
+---
+
 ## Verdict
 
 **Nine findings need a decision from you, and here is what each costs.** Read this list first; nothing below it is safe to skim past.
