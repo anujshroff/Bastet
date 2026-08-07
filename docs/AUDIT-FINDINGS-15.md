@@ -256,59 +256,25 @@ _Tests: 874 → 879. A new `SubnetDetailsAzureImportGateTests` with five cases p
 
 ---
 
-## O10 — A failed re-link paints the reconcile wizard's fail-closed *"Nothing was checked / Azure could not be read"* banner directly on top of a still-visible, still-tickable stale-subnet deletion table `[x1]`
+## O10 — A failed re-link paints the reconcile wizard's fail-closed *"Nothing was checked / Azure could not be read"* banner directly on top of a still-visible, still-tickable stale-subnet deletion table `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:210`.
-**Confidence:** confirmed.
+_O10 is fixed and committed. A failed re-link no longer routes through `showScanError`. It has its own surface: `showRelinkError(btn, originalLabel, message)` restores the button's label, renders the server's message in a new `#rec-relink-error` alert placed **outside** `#rec-scan-content`, and then calls `runScan()` so the operator lands on a current, internally consistent screen with the reason still on it._
 
-### What goes wrong
+_**The verifier's objection (a) is why the re-scan is part of the fix rather than optional.** The finding's rationale — "a failed re-link changed nothing, so the scan results remain exactly as valid as they were" — does not hold on the 409 at `SubnetController.AzureReconcile.cs:317-323`, which is precisely the branch where the server has re-derived the plan and found the displayed verdict **withdrawn**. Leaving `lastPlan` intact there would leave a review row asserting "the range is still assigned, re-link it" over a button that now 409s on every press, and would contradict the server's own instruction to re-run the scan. Re-scanning is what makes the new panel's closing sentence true._
 
-`showScanError()` is written for one caller — a scan that failed — where `runScan`'s `beforeSend` (`:174-179`) has already hidden `#rec-scan-content` and `#rec-scan-warnings`. The re-link handler reuses it at `:398`, where nothing has been hidden. `#rec-scan-error` lives **outside** `#rec-scan-content` in the markup (`_StepReview.cshtml:12` vs `:29`), so the panels stay on screen. `invalidateScan()` also stamps `disabled` on `#rec-step2-tab` — the pill for the pane the operator is looking at.
+_**(b) `:391` was dead and is gone in substance.** `RelinkAzureSubnet`'s only `Ok()` sets `success = true` and every failure branch is a 4xx/503, so with `dataType: "json"` only the error handler can run. The success-handler branch is kept as an explicit guard with a comment saying so, rather than deleted, because a future 200-with-`success:false` would otherwise fall through in silence._
 
-The screen then asserts, in a red banner, *"Nothing was checked."* / *"This subnet is no longer reported as holding a range that moved to another Azure subnet. Nothing was changed. Re-run the scan and review the results."* / *"Because Azure could not be read, BASTET cannot tell which resources still exist, so nothing is offered for deletion. Fix the connection and scan again."* — while the deletion table is still visible immediately below it, headed *"These BASTET subnets no longer match Azure."*, with a live checkbox and a **Next: Confirm deletion** button. All three sentences are false: Azure was read successfully, the scan succeeded, and a row **is** offered for deletion on the same screen.
+_**(c) the button label is restored, and the finding's own proposed fix for it would not have worked.** `const original = btn.text()` inside `beforeSend` is block-scoped to that callback, so the restore would throw a `ReferenceError` and silently no-op — the refuted candidate `C15` recorded that. The capture is therefore in the click handler, outside the ajax options, and the comment says why._
 
-The file states the invariant this breaks, at `:320-324`: *"Defence in depth: clear the failure panel where the content is revealed, so a valid plan never renders underneath a 'Nothing was checked' message left by an earlier scan."*
+_**(d) the two false sentences were moved out of the shared markup rather than left.** `_StepReview.cshtml`'s `#rec-scan-error` still says "Nothing was checked." and "Because Azure could not be read…", which is right for a failed **scan**; the new `#rec-relink-error` says only what actually happened. The cheap interim (hiding `#rec-scan-content` inside `showScanError`) was **not** shipped: it removes the contradiction but leaves both sentences asserting things that are false for this failure, and the verifier explicitly warned against that shape because the Re-link buttons live inside `#rec-scan-content` and a failed re-link must stay retryable._
 
-### Reproduced
+_Proven by A/B in real headless Chromium, both builds driven end to end against live Azure. Fixture `rig-o10-vnet` `10.95.0.0/16` with subnet `rig-o10-a` `10.95.1.0/24`, imported; `a` then deleted and recreated as `b` with the same prefix, producing a review row and a **`Re-link to 'rig-o10-b'`** button on both builds. The verdict was then withdrawn underneath the open tab — `b` deleted in Azure while the wizard sat there, no second browser tab and no crafted post — and the button clicked, producing the documented 409._
 
-Two triggers, and the second is **one operator with one tab and no concurrency at all** — which refutes the finder's own "requires a second admin" framing. Scan the subscription, and while the reconcile tab sits open (it has no auto-refresh and no polling), any Azure change that resolves the drift — in the verifier's run, deleting the very subnet the wizard was suggesting a re-link to — makes the server's freshly-derived plan disagree and return the documented 409 at `SubnetController.AzureReconcile.cs:317-323`.
+_Unfixed HEAD: the red **"Nothing was checked."** panel visible `True`, the dedicated panel `False`, the step-2 pill **disabled under the operator** `True`, and **1** Re-link button left permanently reading *"Re-linking…"*. Fixed, same fixture and same withdrawal: scan-error panel `False`, dedicated re-link panel `True` carrying the server's own sentence *"This subnet is no longer reported as holding a range that moved to another Azure subnet. Nothing was changed."*, step-2 pill **not** disabled, and **0** buttons stuck. The stale table is on screen in the fixed run and that is now correct rather than contradictory: the automatic re-scan repopulated it, and the row really is stale once `b` is gone._
 
-DOM immediately after the click, against the same snapshot before it:
+_Server messages reach the DOM through `.text()`, never `.html()` — the string interpolates an operator-authored subnet name and an ARM-derived Azure name._
 
-```
-before: scanErrorVisible false, scanContentVisible true, staleSectionVisible true,
-        pills [... "rec-step2-tab:nav-link active" ...]
-after : scanErrorVisible TRUE,  scanContentVisible TRUE, staleSectionVisible TRUE,
-        pills [... "rec-step2-tab:nav-link active disabled" ...]
-
-staleRows        = ["rig-r15-c13v-snstale 10.113.9.0/24 Subnet deleted
-                    The Azure subnet this was imported from no longer exists."]
-staleCheckboxes  = [{value:"3", disabled:false, checked:false}]        <- live, tickable
-```
-
-Ticking that checkbox: `{"goConfirmDisabled": false, "goConfirmVisible": true}` — the red **Next: Confirm deletion** button **re-arms** underneath a banner reading *"nothing is offered for deletion"*. Clicking it: `{"step3Active": false, "activePane": "rec-step2", "confirmDeleteDisabled": true}`, and the only POSTs the page ever made were the scan (200) and the re-link (409). Fail-closed, but the armed button is inert. (That inert button is **O15**.)
-
-A full-page screenshot shows all of it stacked in one viewport: the red *"Nothing was checked"* banner, then the yellow *"1 subnet(s) were withheld from deletion because their address range is still assigned in Azure…"* warning — a statement only a **successful** scan can make — then the deletion table with a ticked checkbox and an armed red button, then the review row whose Re-link button is stuck reading *"Re-linking…"*.
-
-**Severity corrected medium → low**, on consequence ceiling and not on rarity — the trigger was **widened**, not narrowed. `DeletedSubnets` COUNT = 0, no wrong write, no wrong archive, no range misreported as free, the false claim points in the conservative direction, and recovery is two clicks. This repo filed round 13's `M2` — a false *"deleted 0 stale subnet(s)"* banner painted over a delete that **had** archived two rows — at low; this is strictly less consequential. It is above info because of the affirmative falsehood on a destructive-decision screen plus the re-armed inert destructive button.
-
-### Fix
-
-Give the re-link its own error surface and stop routing it through `showScanError`.
-
-**Cheaper interim**, one line, keeps a single error surface but stops the screen contradicting itself: in `showScanError` add `$("#rec-scan-content").addClass("d-none"); $("#rec-scan-warnings").addClass("d-none");` beside the existing lines, mirroring `runScan`'s `beforeSend`. The operator loses a still-valid scan and must re-scan, but is never shown a deletion table under a banner saying nothing was checked.
-
-> **The verifier judged the direction right and the primary fix incomplete, resting on a claim that is false for its own headline trigger.**
->
-> **(a) The load-bearing justification is wrong on the 409 branches.** *"A failed re-link changed nothing, so the scan results and `lastPlan` remain exactly as valid as they were"* does not hold for the conflict at `:317-323`, which is precisely the case where the server has just re-derived the plan and found the displayed verdict **withdrawn**. Leaving `lastPlan` intact leaves a review row asserting *"the range … is still assigned in Azure to subnet X, re-link it"* over a button that now 409s on every press, and contradicts the server's own instruction. It cannot cause a wrong archive — `BulkDeleteStaleAzureSubnets` re-scans and refuses at `:62`, `:76`, `:96` and `:110` — but it is a weaker posture than HEAD, so the fix must not ship on the stated rationale.
->
-> **(b) `:391` is dead.** `RelinkAzureSubnet`'s only `Ok()` is at `:374` with `success = true`; every failure branch is 403/400/404/409/503. With `dataType "json"`, only the error handler at `:398` can run. Give **that** the new surface and delete the `:391` call.
->
-> **(c) Neither version restores the button label.** `beforeSend` at `:382` does `btn.text("Re-linking...")`; `complete` at `:400-405` re-enables the buttons and never puts the text back, so after **any** failure the row's Re-link button reads *"Re-linking…"* permanently. Same six lines; fix it here.
->
-> **(d) The cheap interim closes only half.** It removes the contradiction and is safe — it loses nothing `invalidateScan()` had not already lost, and is a no-op for the callers where `beforeSend` already hid those panels — but it leaves `_StepReview.cshtml:14` and `:17-20` asserting *"Nothing was checked"* and *"Because Azure could not be read"* for a failure in which Azure **was** read.
->
-> **Recommended shape instead:** a dedicated `showRelinkError(btn, message)` that restores the button's original label, renders the server message in a new `#rec-relink-error` alert placed **outside** `#rec-scan-content` (so a re-scan does not wipe it) with honest prose of its own, and then calls `runScan()`. `runScan`'s `beforeSend` already hides the three panels and `renderPlan` rebuilds every row, so the operator lands on a current, internally consistent screen with the reason still on it — which is exactly what the 409's own text asks for, and it closes all branches including the `:300-308` 400 (a transient ARM failure or throttle during the re-link's own re-scan) that the finder's trigger list omits and that is probably the commonest one in production. If an automatic re-scan is unwanted, the minimum sound alternative is the interim's two lines **plus** moving the two false sentences out of `_StepReview.cshtml`'s static markup into text the caller supplies.
+_Tests: 879 → 879. This is wizard state-machine behaviour in a browser, which the xUnit suite has no infrastructure to reach; the measurement above is recorded as prose per the standing rule. The `#rec-relink-error` panel and `showRelinkError` are exercised by the browser run, not by a unit test._
 
 ---
 

@@ -143,6 +143,10 @@
         });
 
         $("#rec-scan-btn").on("click", function () {
+            // An explicit re-scan is a fresh start; the re-link panel belongs to the attempt before
+            // it. (It is deliberately NOT cleared by runScan itself, because showRelinkError calls
+            // runScan and the message has to survive that.)
+            $("#rec-relink-error").addClass("d-none");
             const selected = $("#rec-subscription-select").find("option:selected");
             selectedSubscriptionId = selected.val();
             selectedSubscriptionName = selected.attr("data-name") || "";
@@ -211,6 +215,26 @@
             invalidateScan();
             $("#rec-scan-error-message").text(message);
             $("#rec-scan-error").removeClass("d-none");
+        }
+
+        // A failed re-link is NOT a failed scan. Routing it through showScanError painted
+        // "Nothing was checked." / "Because Azure could not be read..." directly on top of a
+        // still-visible, still-tickable deletion table - three affirmative falsehoods on a
+        // destructive-decision screen, because #rec-scan-error lives outside #rec-scan-content and
+        // nothing had been hidden. It also disabled the tab for the pane the operator was looking at.
+        //
+        // Its own surface instead, and then a re-scan: the 409 branch means the server has just
+        // re-derived the plan and found the displayed verdict withdrawn, so leaving the old rows up
+        // would keep a row asserting "re-link it" over a button that now 409s on every press. Text
+        // is inserted with .text(), never .html() - the server message can carry an operator-authored
+        // subnet name and an ARM-derived Azure name.
+        function showRelinkError(btn, originalLabel, message) {
+            if (btn && originalLabel) {
+                btn.text(originalLabel);
+            }
+            $("#rec-relink-error-message").text(message);
+            $("#rec-relink-error").removeClass("d-none");
+            runScan();
         }
 
         function statusLabel(statusName) {
@@ -370,6 +394,12 @@
             const btn = $(this);
             const subnetId = btn.data("subnet-id");
 
+            // Captured out here on purpose. Declaring it inside beforeSend block-scopes it to that
+            // callback, so the restore in the failure paths would throw a ReferenceError and
+            // silently no-op - which is how the button came to sit enabled reading "Re-linking..."
+            // for ever after any failure.
+            const originalLabel = btn.text();
+
             $.ajax({
                 url: "@Url.Action("RelinkAzureSubnet", "Subnet")",
                 type: "POST",
@@ -386,17 +416,22 @@
                     if (result && result.success) {
                         // Re-scan rather than patching the row: the repair can change other rows'
                         // verdicts too, and a stale table is what makes an archive click wrong.
+                        $("#rec-relink-error").addClass("d-none");
                         runScan();
                         return;
                     }
-                    showScanError((result && result.error) || "The re-link failed.");
+                    // Unreachable in practice - RelinkAzureSubnet's only Ok() sets success = true
+                    // and every failure branch is a 4xx/503, which with dataType "json" lands in
+                    // the error handler below. Kept as a guard rather than deleted, since a future
+                    // 200-with-success-false would otherwise fall through silently.
+                    showRelinkError(btn, originalLabel, (result && result.error) || "The re-link failed.");
                 },
                 error: function (xhr) {
                     let message = "The re-link failed.";
                     if (xhr && xhr.responseJSON && xhr.responseJSON.error) {
                         message = xhr.responseJSON.error;
                     }
-                    showScanError(message);
+                    showRelinkError(btn, originalLabel, message);
                 },
                 complete: function () {
                     // Re-enable unconditionally: a failed re-link must stay retryable, and runScan
