@@ -230,4 +230,19 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
         // The subnet holding THIS row's range, never the other one.
         Assert.Equal(NewSubnetId, await LinkOf(1));
     }
+
+    /// <summary>
+    /// O16. RelinkAzureSubnet answers AJAX with no redirectUrl and the wizard never navigates, so
+    /// nothing consumed the TempData entry it wrote. ASP.NET Core only removes a TempData entry when
+    /// it is READ, so it survived request after request and surfaced later as a green success banner
+    /// on an unrelated page - measured landing on a delete-confirmation screen five loads later.
+    /// </summary>
+    [Fact]
+    public async Task ASuccessfulRelink_WritesNoTempDataMessage()
+    {
+        IActionResult result = await Relink(1, AzureAfterRename());
+
+        _ = Assert.IsType<OkObjectResult>(result);
+        Assert.False(_controller.TempData.ContainsKey("SuccessMessage"));
+    }
 }

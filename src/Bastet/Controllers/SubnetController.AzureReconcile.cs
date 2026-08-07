@@ -390,8 +390,13 @@ public partial class SubnetController : Controller
             "Azure reconcile: re-linked subnet {SubnetId} to {AzureResourceId}",
             request.SubnetId, target.SuggestedAzureResourceId);
 
-        TempData["SuccessMessage"] =
-            $"Re-linked '{target.Name}' to Azure subnet '{target.SuggestedAzureSubnetName}'.";
+        // Deliberately no TempData here. This endpoint answers AJAX with no redirectUrl and the
+        // wizard never navigates - it just re-scans - and Views/Azure/Reconcile.cshtml does not
+        // render _TempDataAlerts, so nothing consumed the entry. ASP.NET Core only removes a
+        // TempData entry when it is READ, so it survived request after request and then rendered as
+        // a green success banner on whatever page happened to render the partial next - measured
+        // landing on /Subnet/Delete/{id}, a destructive confirmation page, five loads later. The
+        // client already gives correct feedback by re-scanning, and the re-link is logged above.
 
         return Ok(new
         {

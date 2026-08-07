@@ -377,61 +377,21 @@ _Tests: 879 → 879. One expression in a Razor-hosted script; the xUnit suite ha
 
 ---
 
-## O16 — `RelinkAzureSubnet` writes `TempData["SuccessMessage"]` on a JSON-only response the wizard never redirects from, so the *"Re-linked X to Azure subnet Y"* banner surfaces later on an unrelated page `[x1]`
+## O16 — `RelinkAzureSubnet` writes `TempData["SuccessMessage"]` on a JSON-only response the wizard never redirects from, so the *"Re-linked X to Azure subnet Y"* banner surfaces later on an unrelated page `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Controllers/SubnetController.AzureReconcile.cs:371`.
-**Confidence:** confirmed.
+_O16 is fixed and committed. The `TempData["SuccessMessage"]` write is gone from `RelinkAzureSubnet`. The endpoint answers AJAX with no `redirectUrl`, the wizard never navigates — it re-scans — and `Views/Azure/Reconcile.cshtml` does not render `_TempDataAlerts`, so nothing consumed the entry; ASP.NET Core only removes a `TempData` entry when it is **read**, so it survived request after request and then rendered as a green success banner on whatever page happened to render the partial next._
 
-### What goes wrong
+_The client already gives correct feedback by re-scanning, and the action is still logged at `:389-391`, so nothing is lost. `grep` for `TempData["SuccessMessage"]` in this file now returns exactly one hit — `BulkDeleteStaleAzureSubnets`, which **does** return a `redirectUrl` the client navigates to, which is the pattern that makes the write correct there._
 
-Every other `TempData` writer in this app either re-renders a view that includes `Views/Shared/_TempDataAlerts.cshtml` or returns a `redirectUrl` the client navigates to. `RelinkAzureSubnet` returns bare JSON at `:374-380` with no `redirectUrl`, and the client at `_ReconcileScripts.cshtml:384-390` just calls `runScan()` — no navigation. `Views/Azure/Reconcile.cshtml` does not render `_TempDataAlerts`, so nothing reads the entry, and ASP.NET Core retains an unread `TempData` entry across request after request.
+_The inline-message variant was not taken. It would have meant returning the text in the JSON body and rendering it beside the review table, and the verifier flagged that the string interpolates `target.Name` (operator-authored) and `target.SuggestedAzureSubnetName` (ARM-derived), so it would have to be inserted with `.text()` and never `.html()`. Deleting the write is smaller and the re-scan already tells the operator what happened._
 
-`_TempDataAlerts.cshtml:5-7` documents this exact hazard in its own header comment: *"ASP.NET Core only removes a TempData entry when it is **read**, so an unrendered message survives into the next request and can surface later on an unrelated page."* Only 8 views render that partial, and `_Layout.cshtml` is not one of them.
+_**The offered interim was rejected because it degrades the feature.** Returning a `redirectUrl` and having the client navigate would throw away the reconcile results the operator is still working through, and defeat the deliberate re-scan-after-re-link design the client's own comments describe: "the repair can change other rows' verdicts too, and a stale table is what makes an archive click wrong."_
 
-### Reproduced
+_One factual correction from the finding is carried: this was **not** the only writer whose response neither re-renders a `_TempDataAlerts` view nor carries a `redirectUrl` — `SubnetController.Azure.cs:490` is a second. That one is the already-adjudicated, browser-unreachable case from round 11, which is what distinguishes this site rather than what undermines it: here the opposite was measured, a headless Chromium session receiving `Set-Cookie` on the re-link XHR and the banner rendering in that same session five loads later._
 
-Setup was the natural path the endpoint exists for — an Azure subnet "rename", i.e. delete-and-recreate — followed by an ordinary Re-link click.
+_Severity stands at info on consequence: the message was **true**, named an operation the operator really performed, cleared on first read, misreported no allocation, and neither enabled nor blocked anything — but it rendered above a form that still demands a typed `approved` on a delete-confirmation page, which is where it stops being merely untidy._
 
-```
-POST /Subnet/RelinkAzureSubnet -> 200
-  {"success":true,"subnetId":2,"azureResourceId":".../subnets/rig-r15-c16-new2", ...}
-  Set-Cookie: .AspNetCore.Mvc.CookieTempDataProvider=CfDJ8I0Ofd...; path=/; samesite=lax; httponly
-  redirectUrl present in body: False
-(the wizard's automatic POST /Azure/ReconcileScan runs)
-GET /Azure/Reconcile   [200] alert-success -> only the two STATIC panels
-GET /Azure/BulkImport  [200] alert-success -> only the static hidden panel
-GET /                  [200] alert-success -> []
-GET /Subnet/Delete/2   [200] alert-success -> ["Re-linked 'rig-r15-c16-new' to Azure subnet
-                                               'rig-r15-c16-new2'."]
-GET /Subnet            [200] alert-success -> []
-```
-
-The entry survived **four** intervening requests and then rendered as a green success banner on a destructive confirmation page, clearing only once actually read.
-
-**Stronger variant:** re-link, then a *failed* delete POST (`confirmation` not `approved`), then `GET /Subnet/Delete/1`:
-
-```
-success = ["Re-linked 'rig-r15-c16-new' to Azure subnet 'rig-r15-c16-new4'."]
-error   = ["You must type 'approved' to confirm deletion."]
-```
-
-A green success banner and a red failure banner render together on the delete-confirmation page for a subnet that was never re-linked, as the response to a single click that did nothing but fail.
-
-**Control that the mechanism is read-clears and not something else:** in the same harness the bulk import's own banner rendered on the first `GET /Subnet` and was gone on the second. (An earlier attempt was invalidated by the harness scraping its antiforgery token from a page that renders `_TempDataAlerts`, consuming the entry — itself a clean positive control.)
-
-**Severity corrected low → info**, on consequence: the message is **true**, names an operation the operator really performed, clears on first read, misreports no allocation, and neither enables nor blocks anything. On `/Subnet/Delete/{id}` it sits above a form that still demands a typed `approved`, and its text names a re-link, not a delete. It also cannot mask a later message — `SuccessMessage` is a single key, so a subsequent genuine success overwrites it rather than queueing behind it.
-
-This is **not** covered by round 11's standing kill of the same shape at `SubnetController.Azure.cs:490`. That one died on browser-unreachability — *"No browser reaches the JSON branch through the app"* — so the stray entry sat in an API script's cookie jar. Here the opposite was measured: a headless Chromium session, `Set-Cookie` on the re-link XHR, banner rendered in that same session five loads later. It is likewise not round 11's cross-tab watch-list property, which is structural to `CookieTempDataProvider` and unfixable per site; this is site-local, because ~30 other writers redirect to a view that consumes the entry on the very next request.
-
-### Fix
-
-Do not set `TempData` from an endpoint that answers AJAX with no navigation. Delete `:371-372` — the client already gives correct feedback by re-scanning, and the action is logged at `:367-369`. If a banner is wanted, return the message in the JSON body and render it inline next to the review table, the way both other wizards render their own commit outcomes.
-
-**Cheaper interim:** keep the `TempData` write but return a `redirectUrl` and have the client navigate, matching `BulkDeleteStaleAzureSubnets` — at the cost of throwing away the reconcile results the operator is still working through, which is why the inline message is the better fix.
-
-> **The verifier judged the primary fix sound and complete, and confirmed nothing depends on the write** — `grep -n TempData test/Bastet.Tests/Azure/SubnetControllerRelinkAzureSubnetTests.cs` returns no hits, and no other code reads `TempData["SuccessMessage"]` expecting a re-link message. Two notes. If the inline-message variant is taken, the string interpolates `target.Name` (operator-authored) and `target.SuggestedAzureSubnetName` (ARM-derived), so it must be inserted with jQuery `.text()` the way `showScanError` does, never `.html()`. And the offered interim, while functional, **degrades the feature**: it discards the reconcile results the operator is still working through and defeats the deliberate re-scan-after-re-link design the client comments at `:359-362` and `:385-387` state (*"the repair can change other rows' verdicts too, and a stale table is what makes an archive click wrong"*).
->
-> One factual overstatement in the finding's evidence, corrected: *"the only writer whose response neither re-renders a `_TempDataAlerts` view nor carries a `redirectUrl`"* is wrong — `SubnetController.Azure.cs:490` is a second such writer. It is the already-adjudicated, browser-unreachable one, which is exactly what distinguishes this site rather than what undermines it.
+_Tests: 891 → 892. `ASuccessfulRelink_WritesNoTempDataMessage` fails against the unfixed controller. Nothing depended on the write: `grep -n TempData` over the re-link test file returned no hits before this, and no other code reads `TempData["SuccessMessage"]` expecting a re-link message._
 
 ---
 
