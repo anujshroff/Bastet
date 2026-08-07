@@ -52,6 +52,23 @@ public partial class SubnetController : Controller
             return BadRequest(new { success = false, error = "No subnets were selected for deletion." });
         }
 
+        // The collection can be non-null and still contain a null ELEMENT: Statuses holds reference
+        // types, and System.Text.Json materialises "statuses":[null] as a one-element list holding
+        // null. Grouping over it dereferenced that element and threw before this action's only try
+        // block, so the documented JSON API answered an HTML 500 and the wizard rendered
+        // "Server error: 500" in place of a modelled message - the exact failure the sibling bulk
+        // path documents itself as existing to prevent.
+        //
+        // Refused here with its own message rather than only filtered below, and before the ARM
+        // round trip is paid. A mixed [null, {valid}] body IS malformed, and silently dropping the
+        // element would let it through to a destructive write; filtering alone also answers it with
+        // "the reason ... has changed since you reviewed them", which is misleading when nothing
+        // changed and the caller simply sent garbage.
+        if (request.Statuses is not null && request.Statuses.Exists(s => s is null))
+        {
+            return BadRequest(new { success = false, error = "An approved verdict entry was empty." });
+        }
+
         // Re-scan against live Azure and the current tree
         AzureVNetInventory inventory = await azureService.GetVNetInventory(request.SubscriptionId);
         IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
@@ -84,8 +101,13 @@ public partial class SubnetController : Controller
         // cause the wrong subnets to be archived", and comparing ids alone does not deliver that.
         // Ordered before the membership refusal only in the sense that both are computed here; the
         // membership message is more specific, so it still wins when both apply.
+        // Second layer. The guard above already refuses a null element, so this cannot fire today;
+        // it is here so that a future caller reaching this line by another route degrades to
+        // "no approved verdict" - which VerdictMatchesApproval documents as licensing nothing -
+        // rather than throwing. Same two-layer shape the maintainers chose on the bulk-import path.
         Dictionary<int, AzureReconcileApprovedVerdict> approved =
             (request.Statuses ?? [])
+                .Where(s => s is not null)
                 .GroupBy(s => s.SubnetId)
                 .ToDictionary(g => g.Key, g => g.Last());
 

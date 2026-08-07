@@ -247,4 +247,43 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         Assert.Null(await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken));
         Assert.Null(await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken));
     }
+
+    /// <summary>
+    /// O14. Statuses holds reference elements, and System.Text.Json materialises "statuses":[null]
+    /// as a one-element list containing null. Grouping over it dereferenced that element and threw
+    /// before this action's only try block, so the documented JSON API answered an HTML 500 and the
+    /// wizard rendered "Server error: 500" in place of a modelled message.
+    /// </summary>
+    [Fact]
+    public async Task ARequestWithANullVerdictElement_IsRefusedWithModelledJson()
+    {
+        AzureReconcileDeleteDto request = Request();
+        request.Statuses = [null!];
+
+        _ = Assert.IsType<BadRequestObjectResult>(await Delete(request, VNetBackWithADifferentPrefix()));
+        await AssertNothingArchived();
+    }
+
+    /// <summary>
+    /// A mixed body is malformed too, and must not archive on the strength of the valid half -
+    /// with the LINQ filter alone this returned 200 and archived the row.
+    /// </summary>
+    [Fact]
+    public async Task ARequestMixingANullVerdictWithAValidOne_IsRefusedAndArchivesNothing()
+    {
+        AzureReconcileDeleteDto request = Request();
+        request.Statuses =
+        [
+            null!,
+            new AzureReconcileApprovedVerdict
+            {
+                SubnetId = 1,
+                StatusName = nameof(AzureReconcileStatus.VNetPrefixRemoved),
+                Reason = "VNet 'vnet-a' still exists but no longer has the address prefix 10.111.0.0/16."
+            }
+        ];
+
+        _ = Assert.IsType<BadRequestObjectResult>(await Delete(request, VNetBackWithADifferentPrefix()));
+        await AssertNothingArchived();
+    }
 }

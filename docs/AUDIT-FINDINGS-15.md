@@ -339,80 +339,21 @@ _Tests: 886 → 889. Two fail against the unfixed controller — the anonymous c
 
 ---
 
-## O14 — `POST /Subnet/BulkDeleteStaleAzureSubnets` throws `NullReferenceException` (HTTP 500) on a null element in `statuses` — the one null-element shape the codebase guards on every sibling path `[x1]`
+## O14 — `POST /Subnet/BulkDeleteStaleAzureSubnets` throws `NullReferenceException` (HTTP 500) on a null element in `statuses` — the one null-element shape the codebase guards on every sibling path `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Controllers/SubnetController.AzureReconcile.cs:87-90` (throw site `:89`).
-**Confidence:** confirmed.
+_O14 is fixed and committed, in the two layers the verifier asked for rather than the one the finding proposed._
 
-### What goes wrong
+_**Primary: an explicit refusal with its own message**, placed beside the sibling guards and **before** the ARM round trip is paid — `if (request.Statuses is not null && request.Statuses.Exists(s => s is null)) return BadRequest(... "An approved verdict entry was empty.")`. **Second layer: the LINQ filter**, `.Where(s => s is not null)` before the grouping, which cannot fire today and is there so a future caller reaching that line by another route degrades to "no approved verdict" — which `VerdictMatchesApproval` documents as licensing nothing — instead of throwing._
 
-`AzureReconcileDeleteDto.Statuses` is `List<AzureReconcileApprovedVerdict>` — reference elements, added by round 14's `N2`. `(request.Statuses ?? [])` guards only the **collection** being null, not a null **element**. `System.Text.Json` materialises `"statuses":[null]` as a one-element list containing null, and `.GroupBy(s => s.SubnetId)` dereferences it. The throw sits **before** the action's only `try` (which starts at `:143` and catches only `TimeoutException`), so nothing in the action handles it.
+_**Both of the verifier's refinements were the reason for that ordering, and both were measured.** With the LINQ filter alone, a mixed `[null, {valid}]` body **returns 200 and archives the row**: the malformed half is silently dropped and the valid half licenses a destructive write. And the filter alone answers a malformed body with *"The reason 1 of the selected subnet(s) were flagged has changed since you reviewed them… Re-run the scan"* — misleading, because nothing changed and re-running the scan will not help. Making the specific refusal primary fixes both._
 
-Ordering matters: `approved` is computed at `:87-90`, **before** the `noLongerStale` 409 at `:96`, so even a request naming a subnet id that is not stale at all crashes rather than being refused.
+_Proven by live A/B against a running instance, three bodies on each build. Unfixed HEAD: `statuses:[null]` → **HTTP 500, `text/plain`, `System.NullReferenceException`**, and `statuses:[null,{valid}]` → the same. Fixed: both → **HTTP 400, `application/json`, `{"success":false,"error":"An approved verdict entry was empty."}`**. The control `statuses:[]` returns a byte-identical `409 application/json` on **both** builds, which is what shows this is one specific omission rather than general fragility, and that the fix did not disturb the ordinary refusal path._
 
-The wizard's AJAX `error:` handler (`_ReconcileScripts.cshtml:544-547`) cannot `JSON.parse` an HTML body and renders *"Server error: 500"* — the exact failure mode `SubnetController.BulkAzure.cs:78-84` documents itself as existing to prevent: *"a list element can itself be null … the documented JSON API stopped answering JSON and the wizard showed 'Server error: 500' in place of the planner's own message."* That is the sentence this endpoint now earns, on the round-14 code that introduced `Statuses`.
+_The wizard's own `chosen.map` cannot emit a null, so the trigger takes a hand-built, scripted or replayed body — one sentence of scenario, not a severity reduction, and any caller building `statuses` from a sparse array emits null. Nothing was ever written on this path: `Subnets` and `DeletedSubnets` were identical before and after every probe, which is why it is low._
 
-### Reproduced
+_Nothing else in the action needed changing: null `StatusName`/`Reason` are already safe, since `Enum.TryParse(null, …)` returns false and `string.Equals(null, x, Ordinal)` returns false, so the grouping was the only dereference of a status element._
 
-```
-POST /Subnet/BulkDeleteStaleAzureSubnets
-  {"subscriptionId":"f0e8d6db-...","confirmation":"approved","subnetIds":[1],"statuses":[null]}
-
-HTTP 500, content-type: text/plain
-System.NullReferenceException: Object reference not set to an instance of an object.
-   at Bastet.Controllers.SubnetController.<>c.<BulkDeleteStaleAzureSubnets>b__10_2(...)
-      in .../SubnetController.AzureReconcile.cs:line 89
-   at System.Linq.Lookup`2.Create(...) / Enumerable.ToDictionary(...)
-   at ...BulkDeleteStaleAzureSubnets(...) in .../SubnetController.AzureReconcile.cs:line 87
-DB after: Subnets still holds id 1; DeletedSubnets count 0
-```
-
-Identical with `subnetIds:[9999]` (an id that is not stale), and with `statuses:[null, {valid verdict}]` — so it is the null **element**, not an empty list.
-
-**Controls on the same binary and run** — every adjacent malformed shape stays inside the modelled-JSON envelope:
-
-| body | result |
-|---|---|
-| `statuses:null` | 409 application/json |
-| `statuses:[]` | 409 application/json, byte-identical |
-| `subnetIds:[null]` | 400 `{"error":"No request was provided."}` |
-| `subscriptionId:null` | 400 `{"error":"Azure could not be re-checked, so nothing was deleted."}` |
-| `statuses:[{"subnetId":9999,"statusName":null,"reason":null}]` | 409 application/json |
-
-One specific omission, not general fragility. Reachability was checked rather than read around: `GlobalSanitizationFilter` is the only global action filter and explicitly skips null collection elements (`:52-57`), so `:89` is genuinely the first dereference; `SubnetController` carries no `[ApiController]`, so no automatic ModelState 400 intervenes; and with a real subscription id the ARM re-scan succeeds, proven by the `statuses:null` control returning the 409 rather than the "could not be re-checked" 400.
-
-Nothing is written and there is no authorization effect — `Subnets` and `DeletedSubnets` were selected before and after every probe and were identical, and the positive control archives correctly on the same binary. That is why this is **low**. The narrow trigger (the wizard's own `chosen.map` at `:428` cannot emit a null, so it takes a hand-built, scripted or replayed body) is one sentence of scenario and not a severity reduction — and any caller building `statuses` from a sparse array emits null.
-
-### Fix
-
-Drop null elements before grouping:
-
-```csharp
-Dictionary<int, AzureReconcileApprovedVerdict> approved =
-    (request.Statuses ?? [])
-        .Where(s => s is not null)
-        .GroupBy(s => s!.SubnetId)
-        .ToDictionary(g => g.Key, g => g.Last()!);
-```
-
-Fail-closed and needs no new message: a null element establishes no approved verdict, so the row falls to `approved.GetValueOrDefault(id) == null`, `VerdictMatchesApproval` returns false via its documented *"a MISSING verdict … licenses nothing"* case at `:250-254`, and the existing 409 at `:116` refuses it. Matches what `AzureBulkImportPlanner` already does on the two bulk-import paths.
-
-**Cheaper interim** (one guard beside the siblings at `:50-53`, before the ARM round trip is paid):
-
-```csharp
-if (request.Statuses is not null && request.Statuses.Exists(s => s is null))
-{
-    return BadRequest(new { success = false, error = "An approved verdict entry was empty." });
-}
-```
-
-> **The verifier judged the fix sound, built it, and offered two refinements.** Applied to a copy: build 0 warnings, `dotnet test` 847/847, and on a patched instance against a genuinely stale seeded row, `statuses:[null]` returns 409 modelled JSON with nothing archived, via exactly the route claimed; the correct-verdict commit still returns 200 and archives. The two `!` suppressions are redundant but compile clean.
->
-> **Refinement 1: apply both, not one.** A mixed `[null, {valid}]` body **is** malformed, and refusing it with a specific message is better than silently dropping the element — measured with the primary fix alone, that body returns **200 and archives the row**. Defensible per-row, but it means a malformed body still produces a destructive write.
->
-> **Refinement 2: the primary fix alone answers a malformed body with a misleading message** — *"The reason 1 of the selected subnet(s) were flagged has changed since you reviewed them. Nothing was deleted. Re-run the scan and review the results."* Nothing changed, the caller sent garbage, and re-running the scan will not help. Make the interim's *"An approved verdict entry was empty."* the primary fix and keep the LINQ filter as the second layer — the same two-layer shape the maintainers already chose on the sibling path.
->
-> One thing the fix does **not** need: null `StatusName`/`Reason` are already safe — `Enum.TryParse(null, …)` returns false and `string.Equals(null, x, Ordinal)` returns false, so `:89` is the only dereference of a status element in this action.
+_Tests: 889 → 891. Both fail against the unfixed controller with the exact `NullReferenceException` the finding cites — one for `[null]`, one for the mixed body that the single-layer fix would have let through to a 200 and an archive._
 
 ---
 
