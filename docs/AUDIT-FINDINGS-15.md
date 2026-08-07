@@ -238,59 +238,21 @@ _Tests: 872 → 874. `BatchCreateChildSubnets_OnAPopulatedTarget_DoesNotRenameTh
 
 ---
 
-## O9 — Round 14's top-up relaxation was applied to `AzureController.Import` but not to the Details page's duplicate of the same gate, so the single-VNet top-up wizard has no reachable link in the whole application `[x2]`
+## O9 — Round 14's top-up relaxation was applied to `AzureController.Import` but not to the Details page's duplicate of the same gate, so the single-VNet top-up wizard has no reachable link in the whole application `[x2]` — FIXED
 
-**Citation:** `src/Bastet/Controllers/SubnetController.Read.cs:124-129`.
-**Confidence:** confirmed.
+_O9 is fixed and committed. `ViewBag.CanImportFromAzure` now computes the same predicate `AzureController.Import` enforces, including `N4`'s top-up allowance: `bool isTopUp = subnet.ChildSubnets.Count != 0 && !string.IsNullOrEmpty(subnet.AzureResourceId);` and `(subnet.ChildSubnets.Count == 0 || isTopUp)`. That expression is copied from the authority verbatim so the two read identically side by side._
 
-### What goes wrong
+_Proven by live A/B on a target in exactly the steady state the finding describes — `Production Core`, three imported children, Azure-linked, left behind by O8's own reproduction. Unfixed HEAD: `GET /Subnet/Details/1` contains **zero** links matching `Azure/Import`, while `GET /Azure/Import/1` on the same build returns **HTTP 200**. Fixed, same row: exactly one link, `/Azure/Import/1`, and the same 200 behind it. The two predicates were mutually exclusive by construction and now agree._
 
-The "target must be empty" predicate exists in two places. The authority, `AzureController.Import` (`:45-47`), was deliberately relaxed by `N4`. The duplicate, `ViewBag.CanImportFromAzure`, still requires `subnet.ChildSubnets.Count == 0` and was not touched — `git show 8afa2df --stat` does not list `Read.cs`. `_RoleBasedActions.cshtml:25-32` is the **only** place in the entire codebase that links to `/Azure/Import/{id}` (grep for `asp-action="Import"` and `Azure/Import` over `Views` and `wwwroot` returns exactly that one hit), and it is gated on that flag.
+_Both forms the finding offered were set-equivalent to the authority on all three arms, and the fuller one was taken because it names `isTopUp` the way `AzureController.Import` does, which is what makes the duplication visible to the next reader. Details already loads `ChildSubnets`, `HostIpAssignments` and `AzureResourceId`, so neither form costs an extra query._
 
-The two predicates are therefore mutually exclusive by construction: whenever the server would accept a top-up, the button that leads to it is not rendered. `N4`'s relaxed branch, and the server-side `alreadyRecorded` filter added alongside it (`AzureController.cs:165-176`, whose comment says *"On a top-up the target keeps the subnets a previous import created"*), cannot be reached through the application's own UI. The button disappears permanently after the first successful single-VNet import — the steady state of the feature.
+_The one hole worth probing — whether exposing the button opens a re-link to a **different** VNet — is already closed at `SubnetController.Azure.cs` (409 plus rollback when an existing Azure link points elsewhere), and `GetCompatibleVNets` requires an exact address-space match so the wizard cannot offer a second VNet. Nothing new is reachable that the server was not already accepting._
 
-### Reproduced
+_**The consolidation the finding recommended was not done**, and this is a recommendation to the owner rather than a decision taken. This is the third copy of an Azure-import predicate in the tree — `AzureController.IsAzureImportEnabled()`, `Read.cs`'s own flag parse and `_Layout.cshtml` are three copies of the feature-flag parse, and the eligibility gate is now two. Lifting the eligibility test into one internal static helper both callers use is viable (`IsAzureImportEnabled` is already `internal static` and already called cross-controller) but it is a refactor beyond what this finding reproduced, and it is on the watch list as one of four duplicated-predicate findings this round._
 
-Real headless Chromium driving the real wizard end to end on the unmodified build:
+_Two owner notes carried forward unchanged, both already disclosed by the verifier: the button label still reads *"Subnet Azure Import"* on a top-up rather than something that says "add the rest", and the gate remains duplicated until the consolidation above is taken._
 
-```
-STEP1 empty target:  'Subnet Azure Import' link count = 1   hrefs: ['/Azure/Import/1']
-STEP2 rows offered:  3;  ticked: 1 (rig-r15-snet-a1-single 10.10.1.0/24)
-STEP2 flash:         "Successfully renamed parent subnet to 'rig-r15-vnet-a1' and imported 1 child subnets."
-STEP3 'Subnet Azure Import' link count = 0
-STEP3 ALL /Azure/Import hrefs anywhere on page: []
-STEP3 unallocated: ['10.10.0.0 | 10.10.0.255 | 255 IP addresses | Create Subnet',
-                    '10.10.2.0 | 10.10.255.254 | 65,023 IP addresses | Create Subnet']
-STEP4 GET /Azure/Import/1 -> HTTP 200 | title Subnet Azure Import - BASTET | no error flash
-```
-
-Unlinked, not dead — hand-typing the URL runs the whole feature: rows offered `['10.10.2.0/24','10.10.3.0/24']` (`N4`'s server-side filter correctly dropped the already-imported one), flash *"imported 2 child subnets"*, free space 65,023 → 64,511, exactly two `/24`s carved out. Independently reproduced on a second target.
-
-**Refutation attempts that failed:** no other link site exists, and no JS anywhere builds an `/Azure/Import` URL; the reconciler offers no substitute action (6 review items, all `AzureRangeNotImported` with `subnetId=0` and `suggestedAzureResourceId=''`, so `_ReconcileScripts.cshtml:303` renders an empty Action cell); `grep -rn CanImportFromAzure test/` returns zero hits.
-
-**Refutation that partly landed, and drives the severity correction:** `BulkGetVNets` on the same state returns the prefix as `WillUpdateExisting` with *"Will add any missing subnets to existing Bastet subnet 'X'. Subnets already imported are left untouched."*, and Bulk Azure Import is in the nav on every page. A working **linked** route to the same outcome survives.
-
-**Severity corrected medium → low**, on consequence and not on cost or rarity. The false free-space table this finding leans on is a pre-existing, explicitly owner-accepted residue recorded in `N3`'s and `N4`'s struck entries, and it rendered identically on the **patched** build before the top-up ran — charging it here double-counts it. The real delta is that one of two repair routes is missing, on the page that shows the problem, in the steady state of every Azure-linked subnet after its first import. Below `N4` (high — no route existed at all) and above round 12's `L2` (info — a per-user role mismatch on one button).
-
-### Fix
-
-Make `Read.cs:124-129` compute the same predicate `AzureController.Import` enforces:
-
-```csharp
-bool isTopUp = subnet.ChildSubnets.Count != 0 && !string.IsNullOrEmpty(subnet.AzureResourceId);
-ViewBag.CanImportFromAzure =
-    userContextService.UserHasRole(ApplicationRoles.Admin) &&
-    azureImportEnabled &&
-    (subnet.ChildSubnets.Count == 0 || isTopUp) &&
-    subnet.HostIpAssignments.Count == 0 &&
-    !subnet.IsFullyAllocated;
-```
-
-**Better, and what would have prevented this:** this is the third copy of an Azure-import predicate in the tree (`AzureController.IsAzureImportEnabled()`, `Read.cs:121-122` and `_Layout.cshtml:47` are three copies of the flag parse; the eligibility gate is now two). Lift the eligibility test into one internal static helper both call. Then add the assertion that is missing entirely — **no test in `test/` references `CanImportFromAzure`**, which is why `N4` slipped past.
-
-**Cheaper interim**, one line at `:127`: `(subnet.ChildSubnets.Count == 0 || !string.IsNullOrEmpty(subnet.AzureResourceId)) &&`. Restores the button exactly on the set `Import` already admits; the GET remains the authority and still refuses anything else, so a wrong click cannot write anything.
-
-> **The verifier judged the fix sound and checked it rather than nodding it through.** Both forms are set-equivalent to `Import`'s gate on all three arms, and Details already loads `ChildSubnets`, `HostIpAssignments` and `AzureResourceId`, so neither needs an extra query. The full fix was applied in a copy: build 0 warnings, 847/847, and live on the patched instance the button appears on exactly the admitted set — the Azure-linked populated target shows it and the top-up completes from it, while the hand-built populated parent with no Azure link still hides it **and** still gets *"Subnet already has child subnets and is not linked to an Azure VNet"*, and the fully-allocated target still hides it. The one hole worth probing — does exposing the button open a re-link to a different VNet? — is already closed at `SubnetController.Azure.cs:393-405` (409 plus rollback), and `GetCompatibleVNets` requires an exact address-space match so the wizard cannot offer a second VNet. Two owner notes, both already disclosed: the button label still reads *"Subnet Azure Import"* on a top-up, and the suggested consolidation is viable because `IsAzureImportEnabled` is already `internal static` and already called cross-controller.
+_Tests: 874 → 879. A new `SubnetDetailsAzureImportGateTests` with five cases pinning the two predicates as set-equivalent on every arm — populated-and-Azure-linked (the defect; the only one that fails against the unfixed build), empty, populated-with-no-Azure-link, fully-allocated, and host-IPs-assigned. **No test referenced `CanImportFromAzure` at all before this**, which is why `N4` slipped past; that gap is now closed._
 
 ---
 
