@@ -114,95 +114,23 @@ _Tests: 852 → 861. Nine in a new `AzureReconcilerVNetPrefixCoverageTests`: fiv
 
 ---
 
-## O3 — The Re-link repair `N1` added writes an Azure **subnet** resource id onto a VNet-level import target; the reconciler then reclassifies that target from review-only to deletable, and its VNet can never be imported again `[x1]`
+## O3 — The Re-link repair `N1` added writes an Azure **subnet** resource id onto a VNet-level import target; the reconciler then reclassifies that target from review-only to deletable, and its VNet can never be imported again `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Services/Azure/AzureReconciler.cs:185` (the suggestion stamped at `:185-186`; consumed at `SubnetController.AzureReconcile.cs:310-313`, written at `:348`; button at `_ReconcileScripts.cshtml:304`).
-**Confidence:** confirmed.
+_O3 is fixed and committed. The Re-link suggestion is now gated on the row's own link being an Azure **subnet**: `canRelink = stillAllocated.Exact && AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)`. A VNet-level row still becomes `RangeStillAllocatedInAzure` and is still withheld from deletion — it simply carries no suggestion, so the view renders no button and `RelinkAzureSubnet` cannot match it._
 
-### What goes wrong
+_**The finder's proposed fix was a regression and was not used.** It added `if (!IsAzureSubnet(...)) return null;` inside `FindLiveOwnerOfRange`, which makes `stillAllocated` null, skips the `RangeStillAllocatedInAzure` block entirely, and drops the row through to `plan.Items` as a **deletable** `VNetPrefixRemoved` while the range is still assigned — `N1`'s own defect reintroduced on the one path that removes data, with 847/847 still green. The verifier built that and measured it. The corrected form gates the **suggestion** rather than the lookup, and is smaller than what was filed._
 
-`FindLiveOwnerOfRange` accepts four statuses, two of which are VNet-level. For a VNet-level row, `VNetIdOf(snapshot.AzureResourceId)` is the VNet itself, so the index lookup finds any Azure **subnet** holding that prefix inside the VNet, and `:185-186` stamps that subnet's id into `SuggestedAzureResourceId`. The view renders a Re-link button for any review item with a non-empty suggestion; `RelinkAzureSubnet` re-derives and writes it — it checks that the plan still reports the row, never that the row is a subnet-level link.
+_**The reason text was corrected with it.** The shipped sentence ends "Re-link it to that Azure subnet."; with no button that is an instruction to click something that is not there. A VNet-level row now gets its own closing sentence naming why re-link is not offered and what to do instead. `AVNetLevelRowWithNoRelink_DoesNotTellTheOperatorToRelink` pins it._
 
-Real inputs: VNet `rig-r15-c17-vnet` created with address space `10.98.0.0/24` and one subnet `rig-r15-c17-whole` = `10.98.0.0/24`; imported, producing BASTET row 1 with `IsFullyAllocated=1` and `AzureResourceId` = the **VNet** id. The VNet's address space is then widened to `10.98.0.0/23` — one ordinary ARM update, the subnet stays legal. The row becomes `VNetPrefixRemoved`, the range is still held, and the scan renders a review item with `isVNetLevel: true` and a **`Re-link to 'rig-r15-c17-whole'`** button. One click and the row's `AzureResourceId` — a column no screen in the application can edit or clear — is a subnet id.
+_**Fix (b) — a second guard inside `RelinkAzureSubnet` — was deliberately not shipped, and the verifier's own measurement is why.** The endpoint selects its target from `plan.ReviewItems` requiring `Status == RangeStillAllocatedInAzure` **and** a non-empty `SuggestedAzureResourceId` (`SubnetController.AzureReconcile.cs:310-313`). With the suggestion suppressed, a VNet-level row can never match, and the endpoint already returns 409. Adding an unreachable guard on a path that cannot be entered is precisely the residue these rounds keep finding, so the reachability is recorded here instead: if a later edit ever keys the button or the lookup off the status rather than the suggestion, this gate is the thing that must be re-checked._
 
-Three consequences, all measured: **(a)** the reconciler now evaluates the target through `EvaluateSubnetLevel`, so when that Azure subnet is later deleted the target lands in `plan.Items` as `SubnetDeleted` with `canCommit:true`; **(b)** the bulk planner's same-VNet test (`AzureBulkImportPlanner.cs:281-288`) now fails, so that VNet prefix is permanently `Blocked`; **(c)** the refusal message names an Azure subnet id as *"Azure VNet"*.
+_Proven by live A/B on the finding's own fixture. `rig-o3-vnet` created with address space `10.98.0.0/24` and one subnet `rig-o3-whole` covering the whole prefix, imported on both builds as a VNet-level target (`fullyAllocatedTargets: 1`), then the address space widened to `10.98.0.0/23` — one ordinary ARM update. Unfixed HEAD: `REVIEW 10.98.0.0/24 RangeStillAllocatedInAzure isVNetLevel=true`, suggestion = `…/virtualNetworks/rig-o3-vnet/subnets/rig-o3-whole` — **a subnet id offered as the repair for a VNet link** — and the Re-link button renders. Fixed: no suggestion, no button._
 
-This defeats `N1`'s own purpose: the review item exists to stop the reconciler archiving a row whose range is still allocated, and the repair it offers is what makes that row archivable.
+_**One thing the A/B also settled, and it changes how reachable this was.** On the fixed build that same row now reads `VNetPrefixStillCovered`, not `RangeStillAllocatedInAzure` — O2's fix catches it one step earlier, because the widened `/23` overlaps the recorded `/24`. Since ARM will not let a subnet hold a prefix outside its VNet's address space, **every ARM-reachable route into the VNet-level branch of `FindLiveOwnerOfRange` is now closed by O2**, and this gate is what keeps it closed for rows that arrive by other means — a `VNetDeleted` row, or an `AzureResourceId` written by the Admin API, which is free text. The unit tests exercise the gate directly rather than relying on that route._
 
-### Reproduced
+_Not done, deliberately, and this was the owner's call: nothing repairs rows whose `AzureResourceId` this defect already corrupted. `Subnet.AzureResourceId` has no editor anywhere in the application and `DeletedSubnets` has no restore, so a corrupted row is repaired by deleting and re-importing it, and a row already archived cannot be repaired at all. Both remain on the watch list. The owner chose the code fix alone over adding an admin repair action, which would have been new feature work beyond this finding._
 
-Own instance `127.0.0.1:5371`, catalog `bastet_c17ref`. The corrupting write was made by the application's own button in real Chromium — SQL was used only to build the control arm.
-
-```
-az network vnet create -g bastet-visible -n rig-r15-c17-vnet --address-prefixes 10.98.0.0/24 \
-    --subnet-name rig-r15-c17-whole --subnet-prefixes 10.98.0.0/24
-POST /Subnet/BulkCreateFromAzurePlan  -> {"createdTargets":1,"fullyAllocatedTargets":1}
-   SQL: 1|rig-r15-c17-vnet|10.98.0.0|24|IsFullyAllocated=1|.../virtualNetworks/rig-r15-c17-vnet
-az network vnet update -g bastet-visible -n rig-r15-c17-vnet --address-prefixes 10.98.0.0/23
-```
-
-Browser (`/Azure/Reconcile` → Scan → read `#rec-review-rows`):
-
-```
-review rows: 1
-['rig-r15-c17-vnet', '10.98.0.0/24',
- "VNet '...' still exists but no longer has the address prefix 10.98.0.0/24. The range
-  10.98.0.0/24 is still assigned in Azure to subnet 'rig-r15-c17-whole'... Re-link it to
-  that Azure subnet.",
- "Re-link to 'rig-r15-c17-whole'"]
-relink buttons: 1   scan JSON: isVNetLevel:true, suggestedAzureResourceId = the SUBNET id
-```
-
-After one click: `AzureResourceId = .../virtualNetworks/rig-r15-c17-vnet/subnets/rig-r15-c17-whole`.
-
-**A/B on `BulkGetVNets`**, `IsFullyAllocated=0` in both, only `AzureResourceId` differing:
-
-| arm | status | selectable | reason |
-|---|---|---|---|
-| re-linked (subnet id) | `Blocked` | false | *"…is already linked to Azure VNet '`<…>/subnets/rig-r15-c17-whole`'…"* — a subnet id called an Azure VNet |
-| control (VNet id) | `WillUpdateExisting` | **true** | *"Will import into existing Bastet subnet 'rig-r15-c17-vnet'."* |
-
-Correction to the finder: before the click the prefix was already `Blocked`, but on *"is marked as fully allocated"*, which one UI click clears. After the click it is blocked on a column no screen can edit.
-
-**A/B on `ReconcileScan`**, identical Azure state (VNet live, `rig-r15-c17-whole` deleted and replaced by live `rig-r15-c17-lo` `10.98.0.0/25` and `rig-r15-c17-hi` `10.98.0.128/25`):
-
-```
-re-linked:  canCommit True,  ITEM 1 SubnetDeleted "The Azure subnet this was imported from
-            no longer exists.",  ZERO review items
-control:    canCommit False, REVIEW 0 AzureRangeNotImported x2 -- "Azure subnet
-            'rig-r15-c17-lo' ... owns 10.98.0.0/25, which no BASTET subnet records.
-            BASTET is reporting that range as free space."  (and the same for -hi)
-```
-
-`/Subnet/Details/1` in the re-linked arm printed *"10.98.0.0 10.98.0.255 254 IP addresses [Create Subnet]"* above `N4`'s note telling the operator to *"Run Azure Reconcile to check before allocating from these ranges"* — the check that had just gone silent. The archive was then committed: `{"success":true,"targetsDeleted":1,"subnetsArchived":1}`, `SELECT COUNT(*) FROM Subnets` → **0**, and the follow-up scan returned `items 0, reviewItems 0, warnings []` while ARM still reports the `/24` carved into two live `/25`s.
-
-### Fix
-
-Two halves, because the button and the endpoint are separately reachable.
-
-**(a)** Gate the suggestion, at `AzureReconciler.cs:185-186`:
-
-```csharp
-if (AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId))
-{
-    review.SuggestedAzureResourceId = stillAllocated.ResourceId;
-    review.SuggestedAzureSubnetName = stillAllocated.SubnetName;
-}
-```
-
-**(b)** Defence in depth in `RelinkAzureSubnet` (`SubnetController.AzureReconcile.cs:340-350`): refuse under the lock when the row being repaired is a VNet-level link. The endpoint is `[HttpPost]` + antiforgery + Admin, so a stale page can reach it without the button.
-
-**Cheaper interim**, one line, using a flag already on the wire — `_ReconcileScripts.cshtml:304`: `if (item.suggestedAzureResourceId && !item.isVNetLevel)`. It stops the click without touching the reconciler, but the endpoint remains postable directly.
-
-> **The verifier found the finder's proposed fix (a) to be a regression, and measured it rather than arguing it.** The finder proposed adding `if (!AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)) { return null; }` inside `FindLiveOwnerOfRange`. That makes `stillAllocated` null, which **skips the `RangeStillAllocatedInAzure` block at `:179-191` entirely**; control falls to `:193`, where `VNetPrefixRemoved` is not in the review set and lands in `plan.Items`. On the patched build the exact state HEAD reports as review-only became a **deletable** `VNetPrefixRemoved` with `canCommit:true` while the Azure subnet still held the range — `N1`'s own defect reintroduced, on the one path that removes data — and **847/847 tests passed with the regression in place**, so nothing would catch it. The finder's prose says "keep routing them to `ReviewItems`", but the code offered makes that impossible.
->
-> The corrected form is the one written above, and it was built and measured: `RangeStillAllocatedInAzure` retained, `canCommit` false, withhold warning still emitted, `suggestedAzureResourceId` empty so no button renders, `dotnet test` 847/847. It is a **smaller** change than the one proposed.
->
-> Two additions the finding misses. The reason string at `:184` ends *"Re-link it to that Azure subnet."*; with the suggestion suppressed there is no button, so the VNet-level branch needs its own closing sentence (correct the VNet's address space, or re-import) or the operator is told to click something that is not there. And rows already corrupted are unrecoverable through the UI, and unrecoverable at all once archived.
->
-> Fix (b) is sound and worth keeping, but with the corrected (a) it becomes unreachable by construction — no suggestion means `target` is never matched at `:310-313` and the endpoint already 409s. The interim is sound; the line to edit is `:304`, not `:302`.
->
-> **Three corrections to the finding, none of which weaken it.** Severity was raised **high → critical**: the measured end state is BASTET reporting two live Azure allocations as free space with the scan agreeing there is nothing to clean up. Of the two VNet-level statuses named, only `VNetPrefixRemoved` can actually match — a `VNetDeleted` row contributes no key to the index. And the *"taking its whole subtree"* limb was not measured and is structurally awkward, since a re-linkable row is fully-allocated by construction; the measured half stands on its own.
+_Tests: 861 → 863. Two in `AzureReconcilerRangeStillAllocatedTests`, both of which fail against the ungated build — one asserting a VNet-level row carries neither `SuggestedAzureResourceId` nor `SuggestedAzureSubnetName`, one asserting its reason no longer tells the operator to re-link._
 
 ---
 

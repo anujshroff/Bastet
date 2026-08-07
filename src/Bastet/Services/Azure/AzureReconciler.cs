@@ -205,10 +205,26 @@ namespace Bastet.Services.Azure
                     // for an overlapping owner would assert that the whole recorded range is still
                     // assigned, which is false when only part of it is - and this text sits directly
                     // above a decision about irreversible archiving.
-                    string reason = stillAllocated.Exact
+                    // Re-link repairs a row whose link is an Azure SUBNET that was replaced. It is
+                    // not a repair for a VNet-level row: the index only ever holds subnet prefixes,
+                    // so the suggestion offered to a VNet-level row is a SUBNET id, and writing it
+                    // re-points the target at a child of its own VNet. The reconciler would then
+                    // judge it through EvaluateSubnetLevel and offer it for deletion the moment
+                    // that subnet went away, the bulk planner would block its VNet prefix for ever,
+                    // and no screen in the application can edit AzureResourceId back.
+                    bool canRelink = stillAllocated.Exact
+                                     && AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId);
+
+                    string reason = canRelink
                         ? $"{item.Reason} The range {snapshot.NetworkAddress}/{snapshot.Cidr} is still assigned in Azure "
                           + $"to subnet '{stillAllocated.Owner.SubnetName}' in VNet '{stillAllocated.Owner.VNetName}', so archiving this "
                           + "subnet would make BASTET report an allocated range as free. Re-link it to that Azure subnet."
+                        : stillAllocated.Exact
+                        ? $"{item.Reason} The range {snapshot.NetworkAddress}/{snapshot.Cidr} is still assigned in Azure "
+                          + $"to subnet '{stillAllocated.Owner.SubnetName}' in VNet '{stillAllocated.Owner.VNetName}', so archiving this "
+                          + "subnet would make BASTET report an allocated range as free. Re-link is not offered for a VNet-level "
+                          + "import, because that would link this subnet to a child of its own VNet: correct the VNet's address "
+                          + "space, or delete this subnet and import the current prefix again."
                         : $"{item.Reason} Azure subnet '{stillAllocated.Owner.SubnetName}' in VNet "
                           + $"'{stillAllocated.Owner.VNetName}' now holds {stillAllocated.LivePrefix}, which overlaps the "
                           + $"recorded range {snapshot.NetworkAddress}/{snapshot.Cidr}, so archiving this subnet would make "
@@ -224,7 +240,7 @@ namespace Bastet.Services.Azure
                     // which is the intent. Re-linking here would point the row at a subnet holding a
                     // DIFFERENT range, producing SubnetPrefixChanged on the very next scan, on a
                     // column no screen in the application can edit afterwards.
-                    if (stillAllocated.Exact)
+                    if (canRelink)
                     {
                         review.SuggestedAzureResourceId = stillAllocated.Owner.ResourceId;
                         review.SuggestedAzureSubnetName = stillAllocated.Owner.SubnetName;
