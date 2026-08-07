@@ -424,6 +424,89 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.NotNull(childSubnet);
     }
 
+    /// <summary>
+    /// O8. N4 relaxed the wizard's entry gate so a populated target is admitted for a top-up, but
+    /// this commit path kept renaming the parent unconditionally - so a top-up discarded whatever
+    /// the operator had renamed the row to. That is an operator-entered field, nothing archives a
+    /// rename, and the wizard offers no way to decline, unlike the bulk path's opt-in checkbox.
+    ///
+    /// The guard is population, not "is this a top-up", which is the rule the bulk planner already
+    /// applies to the same operation.
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_OnAPopulatedTarget_DoesNotRenameTheParent()
+    {
+        const int ParentId = 2;
+
+        // A first import already happened: the target holds a child, and the operator has since
+        // renamed the row to something they maintain by hand.
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 800,
+            Name = "already-imported",
+            NetworkAddress = "10.0.9.0",
+            Cidr = 24,
+            ParentSubnetId = ParentId
+        });
+        Subnet? parent = await _context.Subnets.FindAsync([ParentId], TestContext.Current.CancellationToken);
+        Assert.NotNull(parent);
+        parent.Name = "Production Core";
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new()
+            {
+                Name = "Azure Subnet Topup",
+                NetworkAddress = "10.0.8.0",
+                Cidr = 24,
+                ParentSubnetId = ParentId
+            }
+        ];
+
+        IActionResult result = await _controller.BatchCreateChildSubnets(
+            ParentId, subnets, "Azure-VNet-1", isAzureImport: true);
+
+        _ = Assert.IsType<RedirectToActionResult>(result);
+
+        Subnet? after = await _context.Subnets.FindAsync([ParentId], TestContext.Current.CancellationToken);
+        Assert.NotNull(after);
+        Assert.Equal("Production Core", after.Name);
+
+        // ...and the flash must not announce a rename that did not happen.
+        string? flash = _controller.TempData["SuccessMessage"] as string;
+        Assert.NotNull(flash);
+        Assert.DoesNotContain("renamed", flash, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The counterpart, and why the guard is population rather than top-up: an EMPTY target is
+    /// still renamed, which is what the bulk planner does for the same case
+    /// (AnEmptyTargetIsStillRenamedWhenRequested).
+    /// </summary>
+    [Fact]
+    public async Task BatchCreateChildSubnets_OnAnEmptyTarget_StillRenamesTheParent()
+    {
+        const int ParentId = 2;
+
+        Subnet? parent = await _context.Subnets.FindAsync([ParentId], TestContext.Current.CancellationToken);
+        Assert.NotNull(parent);
+        parent.Name = "Production Core";
+        parent.AzureResourceId = null;
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "Azure Subnet 1", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = ParentId }
+        ];
+
+        _ = await _controller.BatchCreateChildSubnets(ParentId, subnets, "Azure-VNet-1", isAzureImport: true);
+
+        Subnet? after = await _context.Subnets.FindAsync([ParentId], TestContext.Current.CancellationToken);
+        Assert.NotNull(after);
+        Assert.Equal("Azure-VNet-1", after.Name);
+    }
+
     [Fact]
     public async Task BatchCreateChildSubnets_FromNonAzureImport_DoesNotRenameParent()
     {

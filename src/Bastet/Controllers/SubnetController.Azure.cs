@@ -323,6 +323,11 @@ public partial class SubnetController : Controller
             List<int> createdSubnetIds = [];
             AzureImportSubnetViewModel? fullyEncompassingSubnet = null;
 
+            // Whether the parent's name actually changed, so the success message can stop announcing
+            // a rename that did not happen - the anti-pattern this same file already refuses above,
+            // where a transaction commits having written nothing while the message still claims one.
+            bool parentRenamed = false;
+
             // One read of the tree for the whole batch. Every validation below works from this list,
             // and each row created inside the batch is appended to it, so an entry that overlaps an
             // earlier entry is still caught.
@@ -404,12 +409,37 @@ public partial class SubnetController : Controller
                     return BatchCreateFailure(isAzureImport, parentId, conflict, Conflict(new { success = false, error = conflict }));
                 }
 
-                // Update the name to match the Azure VNet name. Azure VNet names reach 64 characters
-                // and the column holds 100, so this never truncates a real Azure name - it is a guard
-                // against a hand-crafted post, since SanitizeName trims at the same 100.
-                parentSubnet.Name = vnetName.Length > MaxSubnetNameLength
-                    ? vnetName[..MaxSubnetNameLength]
-                    : vnetName;
+                // Do not rename a target that already holds subnets. N4 relaxed the wizard's entry
+                // gate so a populated target is admitted for a top-up, but this commit path was not
+                // changed to match, so a top-up silently discarded whatever the operator had renamed
+                // the row to - an operator-entered field, never archived anywhere, with no way to
+                // decline. The bulk planner decided the opposite for the same operation in the same
+                // commit: "Renaming a target that already holds imported rows changes a label the
+                // operator has been living with."
+                //
+                // This is the bulk rule verbatim - population, not "is this a top-up". The two
+                // diverge in BOTH directions: a target linked to this VNet but holding no children
+                // IS renamed by the bulk planner, and a populated target with no Azure link never
+                // reaches the wizard GET but does reach this commit, where a top-up test would let
+                // the rename through on the one case the bulk planner hard-errors on.
+                //
+                // treeCache is already loaded above and holds every subnet, so this costs nothing.
+                // parentSubnet.ChildSubnets is NOT usable here: the row comes from FindAsync with no
+                // Include and there is no lazy loading, so the collection is always empty.
+                bool targetIsPopulated = treeCache.Exists(s => s.ParentSubnetId == parentId);
+
+                if (!targetIsPopulated)
+                {
+                    // Azure VNet names reach 64 characters and the column holds 100, so this never
+                    // truncates a real Azure name - it is a guard against a hand-crafted post, since
+                    // SanitizeName trims at the same 100.
+                    string proposed = vnetName.Length > MaxSubnetNameLength
+                        ? vnetName[..MaxSubnetNameLength]
+                        : vnetName;
+
+                    parentRenamed = !string.Equals(parentSubnet.Name, proposed, StringComparison.Ordinal);
+                    parentSubnet.Name = proposed;
+                }
 
                 // Stamp the VNet resource ID onto the parent so the Details page can link to Azure.
                 if (!string.IsNullOrEmpty(vnetResourceId))
@@ -487,10 +517,15 @@ public partial class SubnetController : Controller
             await transaction.CommitAsync();
 
             // Add appropriate success message
+            // The encompassing branch needs no rename caveat: ValidateSubnetCanBeFullyAllocated
+            // refuses a parent that has children, so it cannot fire on a top-up and the parent was
+            // always renamed on the path that reaches it.
             TempData["SuccessMessage"] = hasFullyEncompassingSubnet
                 ? $"Successfully renamed parent subnet to '{vnetName}' and marked it as fully allocated by Azure subnet '{fullyEncompassingSubnetName}'."
                 : !string.IsNullOrEmpty(vnetName) && isAzureImport
-                    ? $"Successfully renamed parent subnet to '{vnetName}' and imported {createdSubnetIds.Count} child subnets."
+                    ? parentRenamed
+                        ? $"Successfully renamed parent subnet to '{vnetName}' and imported {createdSubnetIds.Count} child subnets."
+                        : $"Successfully imported {createdSubnetIds.Count} child subnets."
                     : (object)$"Successfully imported {createdSubnetIds.Count} subnets.";
 
             // If this was called from the Azure import flow, redirect to details

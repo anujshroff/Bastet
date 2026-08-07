@@ -218,54 +218,23 @@ _Tests: 872 → 872, no change. The behaviour is a pooled-connection lifetime on
 
 # Low
 
-## O8 — The single-VNet top-up that `N4` newly admits silently overwrites the operator's own name on the target parent — the rename the same fix deliberately suppressed in the bulk planner `[x2]`
+## O8 — The single-VNet top-up that `N4` newly admits silently overwrites the operator's own name on the target parent — the rename the same fix deliberately suppressed in the bulk planner `[x2]` — FIXED
 
-**Citation:** `src/Bastet/Controllers/SubnetController.Azure.cs:410-412` (guard opens at `:384`).
-**Confidence:** confirmed.
+_O8 is fixed and committed. `BatchCreateChildSubnetsCore` no longer renames a target that already holds subnets, and the success flash was changed with it._
 
-### What goes wrong
+_**The guard is the bulk rule verbatim, not the one the finding proposed.** Filed: `isTopUp = !string.IsNullOrEmpty(vnetResourceId) && parentSubnet.AzureResourceId == vnetResourceId`. Shipped: `bool targetIsPopulated = treeCache.Exists(s => s.ParentSubnetId == parentId);` — which is `!exact.HasChildSubnets` as `AzureBulkImportPlanner` already applies it. The verifier showed the two diverge in **both** directions, and both matter: a target linked to this VNet but holding no children **is** renamed by the bulk planner (`AnEmptyTargetIsStillRenamedWhenRequested` pins exactly that) and would not have been by the filed guard; and a populated target with **no** Azure link never reaches the wizard GET but does reach this commit, because `BatchCreateChildSubnetsCore` never re-checks the GET's precondition — there `isTopUp` is false, so the filed guard would still rename the one case the bulk planner hard-errors on. `treeCache` is already loaded one screen up and holds every subnet, so the correct rule costs nothing._
 
-Round 14's `N4` relaxed the single-VNet wizard's entry gate (`AzureController.cs:45-47`) so a populated target is admitted when it already carries an `AzureResourceId`. `BatchCreateChildSubnetsCore` was **not** changed to match: it still sets `parentSubnet.Name = vnetName` unconditionally on every `isAzureImport` commit. A top-up therefore discards whatever the operator renamed the row to.
+_**The offered interim was a no-op and was not shipped.** `parentSubnet` comes from `context.Subnets.FindAsync(parentId)` with no `Include`, and there is no lazy loading anywhere in `src/`, so `parentSubnet.ChildSubnets` is always empty and `!parentSubnet.ChildSubnets.Any()` is always true. The guard would have shipped and never fired. There was no cheaper interim here, only the fix._
 
-Round 14 decided the **opposite** for the bulk wizard in the same commit — `AzureBulkImportPlanner.cs:507`, `renameMatched && !exact.HasChildSubnets`, with the remark *"Renaming a target that already holds imported rows changes a label the operator has been living with."* The two commit paths now disagree about the same operation on the same row.
+_**The flash was incomplete in the finding and is fixed here.** Suppressing the write alone would leave `SubnetController.Azure.cs` announcing *"Successfully renamed parent subnet to 'X'"* for a rename it did not perform — the precise anti-pattern this same file already refuses a few lines above, where a transaction commits having written nothing while the message still claims a rename. The commit now records whether the name actually changed and says *"Successfully imported N child subnets."* when it did not. The encompassing branch needs no caveat: `ValidateSubnetCanBeFullyAllocated` refuses a parent with children, so it cannot fire on a top-up._
 
-### Reproduced
+_Proven by live A/B, both builds against the same Azure fixture `rig-o8-vnet` `10.88.0.0/16` with three subnets. On each build: a target created by an ordinary `POST /Subnet/Create`, a first import through `POST /Subnet/BatchCreateChildSubnets` (which correctly renamed the empty target to the VNet name), the row then renamed to `Production Core`, and finally a **top-up** import of a third subnet posted to the same endpoint — the reachable route, since the commit path never re-checks the GET's gate. Unfixed HEAD: the parent's name came back **`rig-o8-vnet`** — the operator's label discarded. Fixed, identical inputs: **`Production Core`**, preserved, with the child still imported._
 
-```
-POST /Subnet/Create  vc5-target 10.10.0.0/16
-POST /Subnet/BatchCreateChildSubnets  (first import, one child)   -> parent named rig-r15-vnet-a1
-POST /Subnet/Edit/1  Name="Production Core"  Description="hand-maintained label"
-GET  /Azure/Import/1        -> 200, <title>Subnet Azure Import - BASTET</title>   (the N4-relaxed gate)
-GET  /Azure/GetSubnets      -> the two not-yet-imported ranges only
-POST /Subnet/BatchCreateChildSubnets  (top-up, two children)      -> 302
-```
+_The finding's own two corrections are carried: *"silently"* was wrong (the new name is stated on the very next screen), and the real defect is that the **old** value is never shown, is not recorded anywhere, and cannot be declined. Neither changes the severity._
 
-Immediately after:
+_The verifier's note (d) is a test-strength item and is answered: `AzureBulkImportTopUpTests.Target` names its fixture so that `proposed == exact.Name` and `WillRename` is false with or without the bulk guard, which means reverting that guard leaves the suite green. The equivalent assertion now exists for the single-VNet commit, with a fixture whose name genuinely differs, so this path is pinned even though the bulk one still is not. Renaming that bulk fixture is a separate test-strength change and was left alone to stay in scope._
 
-```
-1|rig-r15-vnet-a1|hand-maintained label            <- "Production Core" is gone
-2|rig-r15-snet-a1-single|Imported from Azure VNet: rig-r15-vnet-a1
-3|rig-r15-snet-a1-multi (10.10.2.0-24)|...
-4|rig-r15-snet-a1-multi (10.10.3.0-24)|...
-```
-
-The operator-set Name is replaced by the Azure VNet name; the operator-set Description survives. **Asymmetry control on the same row**, name restored, rename explicitly requested: `POST /Azure/BulkImportPreview` returned `targetType=ExactMatch existingTargetName="Production Core" willRename=False newName=None errors=[]`. Bulk refuses; single-VNet performs. Repeated a second time with the redirect followed, the flash rendered *"Successfully renamed parent subnet to 'rig-r15-vnet-a1' and imported 1 child subnets."*
-
-**Two corrections to the finding, neither fatal.** *"Silently … no message naming it"* is **false** — the new name is stated on the very next screen. The actual defect is that the **old** value is never shown, is not recorded anywhere (nothing archives a rename), and the wizard offers no way to decline, unlike the bulk path's opt-in `renameMatchedBastetSubnets` checkbox. So it is an unavoidable, unrecoverable loss of one operator-entered field, announced but not consented to. And `SubnetController.Read.cs:124-129` still gates `ViewBag.CanImportFromAzure` on `ChildSubnets.Count == 0`, so no rendered link reaches `/Azure/Import/{id}` for a populated target — the route in is the URL itself (bookmark, history, Back after the first import), which is reachable and was entered with an ordinary authenticated GET. That is one sentence of scenario, not a severity reduction. (It is also **O9**.)
-
-### Fix
-
-Skip the parent rename on a top-up, and change the flash with it.
-
-> **The verifier judged the fix right in direction and wrong in three ways, all checked against the tree.**
->
-> **(a) The proposed guard is not the bulk rule it claims to mirror.** Proposed: `isTopUp = !string.IsNullOrEmpty(vnetResourceId) && parentSubnet.AzureResourceId == vnetResourceId`. Bulk uses `!exact.HasChildSubnets`. They diverge in **both** directions. Forward: a target linked to this VNet but holding no children — an import whose children were later deleted, or one that marked the parent fully allocated and was then un-marked — **is** renamed by the bulk planner (`AnEmptyTargetIsStillRenamedWhenRequested` pins exactly that) and would **not** be by the proposed fix. Backward: a populated target with **no** Azure link never reaches the wizard GET but does reach the commit, because `BatchCreateChildSubnetsCore` never re-checks the GET's precondition (round 13 `C4`, unchanged); there `isTopUp` is false, so the proposed fix **still renames** the one case the bulk planner hard-errors on. Use the bulk rule verbatim: `bool targetIsPopulated = treeCache.Exists(s => s.ParentSubnetId == parentId);` — `treeCache` is already loaded one screen up and contains every subnet, so this costs nothing. Checked against the existing pins: `SubnetControllerBatchCreateTests` seeds its parent with no children, so `BatchCreateChildSubnets_WithVNetName_RenamesParentSubnet` and the long-name `InlineData` cases stay green.
->
-> **(b) The fix is incomplete: it leaves the success flash asserting a rename that no longer happens.** `SubnetController.Azure.cs:490-494` builds that string from nothing but `!string.IsNullOrEmpty(vnetName) && isAzureImport`. Suppress the write without touching the message and the app announces a rename it did not perform — the precise anti-pattern this same file already refuses at `:188-191` (*"the transaction commits having written nothing while the success message still announces a rename that never happened"*). Capture whether the name actually changed and branch on it. The encompassing variant at `:491` needs no change: `ValidateSubnetCanBeFullyAllocated` refuses a parent with children, so that branch cannot fire on a top-up.
->
-> **(c) The offered interim is a no-op that would ship a guard which never fires.** `parentSubnet` comes from `context.Subnets.FindAsync(parentId)` at `:307` with no `Include`, and there is no `UseLazyLoadingProxies` anywhere in `src/`, so `parentSubnet.ChildSubnets` is an empty collection at `:410` no matter how many children the row has — `!parentSubnet.ChildSubnets.Any()` is always true. The cache the interim points at is at line **329**, not 333, and is `AsNoTracking()`, so it performs no fixup onto the tracked parent either. The working expression is the `treeCache.Exists(...)` in (a) — which makes the interim and the real fix the same one-line change. **There is no cheaper interim here, just the fix.**
->
-> **(d)** The finder's test observation is right but is a test-strength item, not part of the defect: `AzureBulkImportTopUpTests.Target` sets `Name = "vnet-a"` and `TargetName` returns the sanitized VNet name `"vnet-a"` unqualified for a single-prefix VNet, so `proposed == exact.Name` and `WillRename` is false with or without the `!exact.HasChildSubnets` guard — reverting it leaves 847/847 green. Giving the fixture a different name makes it load-bearing, and the equivalent assertion should be added for the single-VNet commit.
+_Tests: 872 → 874. `BatchCreateChildSubnets_OnAPopulatedTarget_DoesNotRenameTheParent` fails against the unfixed controller (the name is overwritten) and also asserts the flash does not claim a rename; `BatchCreateChildSubnets_OnAnEmptyTarget_StillRenamesTheParent` is the counter-test that the guard is population rather than top-up, and passes on both builds._
 
 ---
 
