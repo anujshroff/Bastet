@@ -317,61 +317,25 @@ _Tests: 883 → 886. One fails against the unfixed planner; two are counter-test
 
 ---
 
-## O13 — `GET /Account/Logout` deletes every cookie the browser presents, not only Bastet's — an anonymous, tokenless, cross-site-triggerable request wipes co-hosted applications' session cookies `[x1]`
+## O13 — `GET /Account/Logout` deletes every cookie the browser presents, not only Bastet's — an anonymous, tokenless, cross-site-triggerable request wipes co-hosted applications' session cookies `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Controllers/AccountController.cs:53-57`.
-**Confidence:** confirmed.
+_O13 is fixed and committed, in both halves. The loop over `Request.Cookies.Keys` is deleted, and the remote OpenID Connect sign-out is now gated on `User.Identity?.IsAuthenticated == true`._
 
-### What goes wrong
+_**The loop.** `SignOutAsync` on the cookie scheme already removes the auth ticket cookie **and its `C1..Cn` chunks** through `ChunkingCookieManager` — the verifier validated that against a Production build carrying `.AspNetCore.Cookies=chunks-2` plus its chunks, all three deleted, while `coapp_session` and `grafana_session` received no `Set-Cookie` at all. The antiforgery and TempData cookies the loop also cleared carry no session state and are re-minted on the next request; the framework never deletes either at sign-out. In Development there is no cookie scheme registered, so the loop was dead weight there too. `grep -rn "Response.Cookies" src/` now returns **nothing**._
 
-`Logout` is `[AllowAnonymous]`, is a GET, and deliberately carries no antiforgery token — the action's own remarks and `ControllerAuthorizationTests.AllowedMissingAntiForgery` record that logout CSRF is accepted because *"the worst outcome is an unwanted sign-out, with nothing read or written."* The loop then walks `Request.Cookies.Keys` — every cookie the browser sent, including ones Bastet never issued — and calls `Response.Cookies.Delete(name)`.
+_**The interim was not shipped, and would have been a bug.** `IOptionsMonitor<CookieAuthenticationOptions>.Get(...).Cookie.Name` is **null in Development**, because `PostConfigureCookieAuthenticationOptions` is registered by `AddCookie` and `Program.cs` never calls it — `Response.Cookies.Delete(null!)` throws, so every Development logout would have become a 500. Its own caveat about not filtering on a `.AspNetCore.` prefix was correct and is recorded here, since a co-hosted ASP.NET Core application shares that prefix._
 
-The stated justification for leaving the endpoint unprotected is measurably wrong on its own terms: something **is** written, and it is not Bastet's.
+_**The remote leg — this was the owner's call.** In Production the same anonymous, tokenless GET ran `SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme)` for a caller with **no** session and 302'd to the IdP's end-session endpoint, ending the SSO session for every relying party of the tenant. The owner chose to confine it. A signed-in caller is unaffected and still gets federated sign-out, which is the point of the leg; an anonymous caller now gets a local redirect and the IdP is never contacted._
 
-The load-bearing precondition is only that another application shares Bastet's **hostname**, and cookies ignore port (RFC 6265 gives no port isolation) — proved rather than assumed: the co-hosted app was on `127.0.0.1:5397` and Bastet on `127.0.0.1:5398`, and an ordinary Sign-out click on Bastet destroyed the other app's session cookie. That is the README's own quickstart shape with any second tool on another port of the same box.
+_Proven live, both builds, same request. `GET /Account/Logout` carrying three cookies Bastet never issued. Unfixed HEAD answered `302` with **three** expiring headers — `other_app_session=; expires=Thu, 01 Jan 1970 …; path=/`, and the same for `grafana_session` and `connect.sid`. Fixed, identical request: `302`, `Location: /Account/SignedOut`, and **no `Set-Cookie` at all**._
 
-### Reproduced
+_**Four existing tests were corrected, and that correction is the interesting part of this entry.** `AccountControllerLogoutTests`' Production cases all built their harness with the default `authenticated: false` and then asserted that the OIDC leg ran — that is, they pinned the defect. They now pass `authenticated: true`, which is the state those assertions were always describing. Nothing was weakened: the anonymous behaviour they used to cover is now covered explicitly, and asserted to be the opposite._
 
-Header emission, anonymous cross-site GET with three cookies Bastet never issued:
+_The finding's own three corrections are carried on the record because they narrow the threat honestly: the `<img>` and refreshing-iframe vectors are **false** (a `SameSite`-unset cookie is Lax by default and not sent on a cross-site subresource, and Bastet answers `frame-ancestors 'none'` plus `X-Frame-Options: DENY`) — what works is a cross-site **top-level navigation**; only host-only, `Path=/`, non-prefixed cookies actually leave the jar, so `__Host-`/`__Secure-` prefixed cookies survived while a plain `Secure` one at `Path=/` did not; and the illustrated path-based deployment is not a working Bastet deployment, since nothing in `src/` handles `PathBase` or `X-Forwarded-Prefix`._
 
-```
-HTTP/1.1 302 Found   Location: /Account/SignedOut
-Set-Cookie: other_app_session=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
-Set-Cookie: grafana_session=;   expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
-Set-Cookie: connect.sid=;       expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/
-```
+_The precondition remains unknowable from here and stays on the watch list: whether any real deployment is co-hosted on a shared hostname. A line in the deployment docs saying Bastet should own its hostname would close it more cheaply than code, and the fix does not depend on it._
 
-Real Chromium, three contexts:
-
-```
-T1 first-party click: before [coapp_httponly path=/, coapp_scoped path=/coapp, grafana_session path=/]
-                      after  [coapp_scoped]
-                      DELETED BY BASTET: ['coapp_httponly', 'grafana_session']
-T1' single antiforgery-shaped cookie: Bastet expires ".AspNetCore.Antiforgery.abc",
-                      a name it never minted (its own is .AspNetCore.Antiforgery.bIgxla0GM5k)
-T2 cross-site <img>:  deleted []       <- nothing
-T3 cross-site nav:    deleted ['grafana_session']; jar empty afterwards
-```
-
-`grep -rn "Response.Cookies" src/` returns exactly one hit — this loop. No `AddSession`/`HttpContext.Session` anywhere; in Development `Program.cs:176-188` registers only `DevAuthScheme`, no `AddCookie`.
-
-**Three corrections the write-up must carry.** The `<img src=...>` vector and the *"refreshing iframe re-kills the session every few seconds"* claim are **false** — a cookie with no explicit `SameSite` is Lax by default and is not sent on a cross-site subresource request, and Bastet additionally answers `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`. What works is a cross-site **top-level navigation** (a clicked link, an attacker-page redirect); "cross-site-triggerable" survives, the embed vectors do not. The finder's curl evidence hid this because curl sends whatever `Cookie` header it is handed. *"Every cookie the browser presents"* is true of the emitted headers but not of the destruction: only host-only, `Path=/`, non-prefixed cookies actually leave the jar — `coapp_scoped` at `Path=/coapp` survived, and `__Host-`/`__Secure-` prefixed cookies survived because `Delete` emits no `Secure` attribute (measured, not reasoned; Chromium treats `127.0.0.1` as trustworthy and accepts `Secure` cookies there). A **plain** `Secure` cookie at `Path=/` **is** destroyed, so "Secure protects you" is not the rule — the prefix is. And the illustrated deployment (`https://ops.example.com/bastet` behind path-based routing) is not a working Bastet deployment: `grep -rn "PathBase|X-Forwarded-Prefix" src/` returns nothing and every URL Bastet generates is root-absolute.
-
-### Fix
-
-Delete the loop. `HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme, properties)` on the line below already removes the auth ticket cookie **and its `C1..Cn` chunks** through `ChunkingCookieManager`. The antiforgery and TempData cookies the loop also clears hold no session state and are re-minted on the next request. In Development there is no cookie scheme at all, so the loop is dead weight there too.
-
-**Cheaper interim, if the belt-and-braces clear is wanted:** filter the loop to the names Bastet actually issues, resolved from options rather than guessed. **Do not** filter on a `.AspNetCore.` prefix — a co-hosted ASP.NET Core application uses the same prefix and would still be clobbered.
-
-> **The verifier judged the headline fix sound and the interim broken as specified.**
->
-> The primary fix was validated on a copy with `:53-57` removed: `dotnet test` **847 passed / 0 failed** — no test asserts the loop's behaviour (`AccountControllerLogoutTests` pins only the redirect target and that the cookie sign-out ran); and against the loop-removed **Production** build, a request carrying `.AspNetCore.Cookies=chunks-2` plus `C1`/`C2` still received all three deletions with `path=/; secure; samesite=lax; httponly`, emitted entirely by `ChunkingCookieManager`, while `coapp_session` and `grafana_session` received no `Set-Cookie` at all. The chunk case the fix depends on is covered.
->
-> **One residue to state rather than assume:** with the loop gone, the two cookies Bastet does issue survive logout — `.AspNetCore.Antiforgery.<hash>` and `.AspNetCore.Mvc.CookieTempDataProvider`. Neither carries session state: the antiforgery cookie token is user-agnostic and validation compares the identity embedded in the **request** token to the current user, so a retained cookie cannot authorise a stale principal. This is stock ASP.NET Core behaviour — the framework never deletes either at sign-out. Worst case is a leftover flash message rendering once after a logout in the same browser.
->
-> **The interim is unsound as specified.** `IOptionsMonitor<CookieAuthenticationOptions>.Get(CookieAuthenticationDefaults.AuthenticationScheme).Cookie.Name` is **null in Development**: `PostConfigureCookieAuthenticationOptions` is registered by `AddCookie`, and `Program.cs:177-189` never calls it. `Response.Cookies.Delete(null!)` throws `ArgumentNullException`, so **every Development logout becomes a 500**. Any implementation must skip null/empty names for all three sources. The antiforgery limb is fine. Its *"do not filter on a `.AspNetCore.` prefix"* caveat is correct and worth keeping — but note the interim is strictly more code for less benefit than deleting the loop, and re-derives what the framework already does.
->
-> **Separately, and for the owner:** in Production this same anonymous GET runs `SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme)` for a caller with **no** session and 302s to the IdP end-session endpoint, ending the SSO session for every relying party — reproduced. Gating the remote leg on `User.Identity?.IsAuthenticated == true` would confine it; leaving it also cleans up an IdP session that outlived an expired Bastet cookie. That is a decision, not part of this defect.
+_Tests: 886 → 889. Two fail against the unfixed controller — the anonymous caller must not reach the IdP, and a co-hosted cookie must not be expired — and one counter-test asserts a signed-in caller still gets federated sign-out, which passes on both._
 
 ---
 
