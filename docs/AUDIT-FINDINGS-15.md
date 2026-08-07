@@ -300,58 +300,20 @@ _Tests: 879 → 883. Three fail against the unfixed planner — the would-contai
 
 ---
 
-## O12 — `N4` added a fully-encompassing-on-populated-target refusal to the bulk planner but not to the availability annotation, so the selection screen offers a run the preview then refuses outright `[x1]`
+## O12 — `N4` added a fully-encompassing-on-populated-target refusal to the bulk planner but not to the availability annotation, so the selection screen offers a run the preview then refuses outright `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:363` (the `if (encompassesAPrefix)` block at `:363-369`; the planner's refusal at `:574-587`; `AnnotatePrefix`'s top-up branch at `:290-321`).
-**Confidence:** confirmed.
+_O12 is fixed and committed. `AnnotateSubnet`'s encompassing branch now looks up the prefix's exact-match target and, when that target already has children, returns `Blocked` with the same fact `BuildPlanItem` refuses on. The two sides of `BulkImportAvailability`'s own contract — "the selection UI and the planner apply one set of rules" — agree again._
 
-### What goes wrong
+_**The offered interim was unsound and was not shipped; the verifier measured both of its defects and both are now counter-tests.** It read: in `AnnotatePrefix`, when the top-up allowance fires and any of the VNet's prefixes equals one of its subnets' prefixes, return `Blocked`. (a) The top-up allowance is computed **before and independently of** `exact.HasChildSubnets`, so the interim would also have blocked an encompassing subnet on an **empty** target — a selection that commits 200 today — which is the other half of the failure mode the enum's contract warns about. (b) *"Any of the VNet's own prefixes"* is not scoped to the prefix being annotated, so on a multi-address-space VNet an encompassing subnet under `192.168.100.0/24` would have blocked an unrelated, importable `10.20.0.0/16`. `Availability_AnEncompassingSubnetOverAnEmptyTarget_StaysAvailable` and `Availability_AnEncompassingSubnetOnOnePrefix_DoesNotBlockAnotherPrefixesSubnet` pin both, and both pass against the unfixed planner too — they exist to stop the interim being reintroduced._
 
-`BulkImportAvailability`'s own contract (`AzureBulkImportViewModels.cs:6-10`) is *"Computed server-side so the selection UI and the planner apply one set of rules. If the UI re-derived this, the two could disagree and either disable an importable item or offer one that fails at preview."*
+_The shipped test is scoped to the prefix being annotated **and** to the target's population, which is what the verifier said a correct interim would have to be — at which point it is no cheaper than the real fix, so the real fix is what was taken._
 
-`N4` introduced a new hard refusal in `BuildPlanItem` — an Azure subnet covering the whole prefix cannot mark a target fully allocated when the target already has children — and noted *"The old blanket refusal of populated targets was preventing this incidentally; the top-up allowance makes it reachable, so it is now refused explicitly."* Neither `AnnotatePrefix`'s new top-up branch nor `AnnotateSubnet`'s encompassing branch (which unconditionally returns `Available`/`IsSelectable=true`) learned the rule.
+_Proven by live A/B, same Azure fixture and same database shape on both builds: `rig-o6-vnet` `10.171.0.0/24` whose only Azure subnet covers the whole prefix, against a BASTET target `10.171.0.0/24` holding one hand-made child. Unfixed HEAD: `status=Available, isSelectable=true`, reason *"Covers the whole VNet prefix, so it marks the target fully allocated instead of being created."* — an offer the preview then refuses. Fixed: `status=Blocked, isSelectable=false`, reason *"Covers the whole VNet prefix, which would mark Bastet subnet 'o12-target' fully allocated, but it already has child subnets."* — the same fact `BuildPlanItem` states, one screen earlier._
 
-The preview then returns `canCommit: false`, and because `CanCommit` is **plan-wide** (`AzureBulkImportViewModels.cs:436`), one such prefix blocks every other VNet in the same bulk run until the operator finds and deselects it.
+_**Residue the fix does not close, and the owner should decide it.** After the subnet is blocked, a single-subnet VNet in this state still shows the **prefix** as *"Will add any missing subnets to existing Bastet subnet…"*, and selecting it alone commits 200 having added nothing. The finding's instinct — that `AnnotatePrefix`'s top-up branch should carry a matching caveat — is right but was left unspecified, and inventing wording for it here would be a behaviour change beyond what was reproduced. It is either a no-op top-up to be accepted explicitly or a caveat to be worded; that is a product call._
 
-### Reproduced
-
-The verifier reached it with **no hand-made BASTET row at all** — every row was written by the bulk wizard itself: import `10.99.0.0/24` with its one subnet `10.99.0.0/25`, then do in Azure what operators routinely do — delete that subnet and create one covering the whole address space.
-
-```
-GET /Azure/BulkGetVNets
-  PREFIX 10.77.0.0/24  WillUpdateExisting  isSelectable=True
-    "Will add any missing subnets to existing Bastet subnet 'rig-r15-b6b-vnet-full'.
-     Subnets already imported are left untouched."
-  SUBNET rig-r15-b6b-snet-full 10.77.0.0/24  Available  isSelectable=True
-    "Covers the whole VNet prefix, so it marks the target fully allocated instead of being created."
-
-POST /Azure/BulkImportPreview -> canCommit: False, globalErrors: [], item errors:
-  ["Cannot import VNet prefix 10.77.0.0/24: Azure subnet 'rig-r15-b6b-snet-full' covers the
-    whole prefix, which would mark Bastet subnet 'rig-r15-b6b-vnet-full' fully allocated,
-    but it already has child subnets."]
-```
-
-**Plan-wide blast radius confirmed:** a preview of two VNets returned `errors: []` for the clean one and the sentence above for the other, `canCommit: False`; the commit returned `400` and the clean VNet wrote nothing.
-
-Browser: both checkboxes `disabled=False`, both ticked without complaint, step 3 renders the Errors panel and `#bulk-go-commit-btn disabled=True`.
-
-**Provenance:** at `6d1a4cb` (pre-`N4`) `AnnotatePrefix:197` blocked any populated exact-match target and `BuildPlanItem:379` errored on the same condition, so the two agreed and the state was unreachable. `N4` relaxed both for top-up and added the compensating refusal to one side only.
-
-Severity **low** stands: nothing wrong is persisted, the refusal names the offending prefix and subnet, the plan tree shows it on the same screen, and one deselect recovers. What is wrong is that the screen whose stated job is to stop the operator assembling an uncommittable run is the thing that assembled it — and it takes every other VNet in the run with it.
-
-### Fix
-
-In `AnnotateSubnet`, the `encompassesAPrefix` branch must look up the prefix's exact-match target and, when that target has children, return `Blocked` with the same sentence `BuildPlanItem` produces. `AnnotatePrefix`'s top-up branch should carry the matching caveat so the two screens agree.
-
-> **The verifier judged the main fix sound and the offered interim unsound — do not ship the interim.**
->
-> The interim read: *"in `AnnotatePrefix`, when the top-up allowance fires and any of the VNet's own prefixes equals one of its subnets' prefixes, return `Blocked`."* Two defects. **(a)** The top-up allowance is `isTopUp = IsSameVNet(exact, vnet)` at `:298`, computed **before and independently of** `exact.HasChildSubnets` — so the interim also blocks top-up + encompassing subnet on an **empty** target, which was measured working at HEAD (preview `canCommit True`, `willMarkFullyAllocated True`, commit `200 {"fullyAllocatedTargets": 1}`). That would disable an importable item, the other half of the very failure mode the enum's contract warns about. **(b)** *"Any of the VNet's own prefixes"* is not scoped to the prefix being annotated; on a multi-address-space VNet (the rig ships one with three) an encompassing subnet under `192.168.100.0/24` would block the unrelated, perfectly importable `10.20.0.0/16` target. A correct interim must be scoped to both the prefix **and** `exact.HasChildSubnets` — at which point it is no cheaper than the real fix.
->
-> **The main fix is complete**, and it was checked: the only other refusal `BuildPlanItem` raises for an encompassing selection is `p.Subnets.Count > 1` (`:564`), which Azure cannot produce and the annotation cannot see, and every other exact-match refusal already blocks the **prefix**, which disables the subnet checkbox through `subnetBlockedByPrefix` (`_BulkScripts.cshtml:238`, `:249`). `AnnotateSubnet` is static and needs no `IIpUtilityService` — the encompassing test is a string equality and the target lookup is an exact `{NetworkAddress, Cidr}` match via the existing static `TryParseCidr`. Cleanest shape is to reuse the prefix annotation already computed in `AnnotateAvailability` (`:242-247`).
->
-> **Residue the fix does not name, and the owner should decide:** after the subnet is blocked, a single-subnet VNet in this state still shows the prefix as *"Will add any missing subnets…"* and selecting it alone commits 200 having added nothing. The finding's *"`AnnotatePrefix`'s top-up branch should carry the matching caveat"* is the right instinct but is left unspecified; state the wording, or accept the no-op top-up explicitly.
->
-> **The second gap bundled into this fix's text is a different defect and is filed separately as O11.** Folding it in here risks it being triaged at this severity; it is more severe, because there the preview affirmatively certifies a committable plan.
+_The second gap the finding's text bundled in here is a different and more severe defect and was filed and fixed separately as **O11**, exactly as the verifier recommended, so it was not triaged at this severity._
+_Tests: 883 → 886. One fails against the unfixed planner; two are counter-tests for the interim's two defects._
 
 ---
 

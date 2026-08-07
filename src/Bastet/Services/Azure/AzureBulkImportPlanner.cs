@@ -362,6 +362,32 @@ namespace Bastet.Services.Azure
 
             if (encompassesAPrefix)
             {
+                // N4 added a hard refusal in BuildPlanItem for exactly this shape - an encompassing
+                // subnet cannot mark a target fully allocated when the target already has children -
+                // and this branch did not learn it, so the screen whose stated job is to stop the
+                // operator assembling an uncommittable run was the thing that assembled it. CanCommit
+                // is plan-wide, so one such prefix blocks every other VNet in the same bulk run.
+                //
+                // Scoped to the prefix being annotated and to the target's population, which is what
+                // makes this correct where the finding's offered interim was not: that would also
+                // have blocked an EMPTY target, which commits 200 today, and on a multi-address-space
+                // VNet it would have blocked unrelated prefixes.
+                ExistingSubnetSnapshot? encompassedTarget =
+                    TryParseCidr(subnet.AddressPrefix, out string encNetwork, out int encCidr)
+                        ? existingSubnets.FirstOrDefault(e =>
+                            e.Cidr == encCidr
+                            && string.Equals(e.NetworkAddress, encNetwork, StringComparison.OrdinalIgnoreCase))
+                        : null;
+
+                if (encompassedTarget is not null && encompassedTarget.HasChildSubnets)
+                {
+                    subnet.Status = BulkImportAvailability.Blocked;
+                    subnet.Reason = $"Covers the whole VNet prefix, which would mark Bastet subnet "
+                                    + $"'{encompassedTarget.Name}' fully allocated, but it already has child subnets.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
                 subnet.Status = BulkImportAvailability.Available;
                 subnet.Reason = "Covers the whole VNet prefix, so it marks the target fully allocated instead of being created.";
                 subnet.IsSelectable = true;

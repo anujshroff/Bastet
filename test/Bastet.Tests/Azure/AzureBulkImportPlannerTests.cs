@@ -1290,4 +1290,66 @@ public class AzureBulkImportPlannerTests
         Assert.False(annotated.IsSelectable);
         Assert.Contains("handmade-half", annotated.Reason!);
     }
+
+    /// <summary>
+    /// O12. N4 added a hard refusal in BuildPlanItem - an encompassing Azure subnet cannot mark a
+    /// target fully allocated when the target already has children - and neither the prefix nor the
+    /// subnet annotation learned it. The selection screen therefore offered a run the preview then
+    /// refused, and CanCommit is plan-wide, so it took every other VNet in the run with it.
+    /// </summary>
+    [Fact]
+    public void Availability_AnEncompassingSubnetOverAPopulatedTarget_IsBlocked()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-full", ["10.77.0.0/24"], AzSub("vnet-full", "full", "10.77.0.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "vnet-full-target", "10.77.0.0", 24, hasChildren: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel annotated = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Blocked, annotated.Status);
+        Assert.False(annotated.IsSelectable);
+        Assert.Contains("already has child subnets", annotated.Reason!);
+    }
+
+    /// <summary>
+    /// The counter-test that kills the interim the finding offered: an EMPTY target in the same
+    /// shape commits 200 today, so blocking it would disable an importable item - the other half of
+    /// the failure mode BulkImportAvailability's own contract warns about.
+    /// </summary>
+    [Fact]
+    public void Availability_AnEncompassingSubnetOverAnEmptyTarget_StaysAvailable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-full", ["10.77.0.0/24"], AzSub("vnet-full", "full", "10.77.0.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "vnet-full-target", "10.77.0.0", 24)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel annotated = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Available, annotated.Status);
+        Assert.True(annotated.IsSelectable);
+    }
+
+    /// <summary>
+    /// And the scoping the interim also got wrong: on a multi-address-space VNet, an encompassing
+    /// subnet under one prefix must not affect an unrelated, importable prefix.
+    /// </summary>
+    [Fact]
+    public void Availability_AnEncompassingSubnetOnOnePrefix_DoesNotBlockAnotherPrefixesSubnet()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-multi",
+            ["192.168.100.0/24", "10.20.0.0/16"],
+            AzSub("vnet-multi", "full", "192.168.100.0/24"),
+            AzSub("vnet-multi", "ordinary", "10.20.5.0/24"));
+
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "hundred-target", "192.168.100.0", 24, hasChildren: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel ordinary = vnet.Subnets.Single(s => s.Name == "ordinary");
+        Assert.Equal(BulkImportAvailability.Available, ordinary.Status);
+        Assert.True(ordinary.IsSelectable);
+    }
 }
