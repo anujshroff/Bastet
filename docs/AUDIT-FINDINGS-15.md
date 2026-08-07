@@ -531,54 +531,21 @@ if (request.Statuses is not null && request.Statuses.Exists(s => s is null))
 
 # Info
 
-## O15 — The reconcile wizard's *"Next: Confirm deletion"* re-arms on any checkbox tick after `lastPlan` was dropped, and is then a permanently live, silently inert button `[x1]`
+## O15 — The reconcile wizard's *"Next: Confirm deletion"* re-arms on any checkbox tick after `lastPlan` was dropped, and is then a permanently live, silently inert button `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:331-333` (`updateGoConfirmBtn`); the inert return is at `:419`.
-**Confidence:** confirmed.
+_O15 is fixed and committed. `updateGoConfirmBtn` gained the snapshot conjunct its sibling `refreshDeleteButton` was deliberately given: `$("#rec-go-confirm-btn").prop("disabled", !lastPlan || selectedIds().length === 0);`. That is now the single definition of "there is something to advance to", so it cannot drift from the `if (ids.length === 0 || !lastPlan) { return; }` guard in the click handler the way it had._
 
-### What goes wrong
+_The verifier's three additive notes were all checked against the file and hold. `updateGoConfirmBtn` is the **only** site that ever arms the button — the element ships `disabled` and `invalidateScan` only ever disables it — and its three callers are `renderPlan` (where `lastPlan` was just assigned and is always truthy), and the two checkbox handlers, so the conjunct cannot wrongly disable the button on the happy path and it closes **both** re-arm routes, including `#rec-select-all` which the finder omitted. `invalidateScan`'s own `prop("disabled", true)` becomes redundant and was kept as defence in depth, as the verifier recommended._
 
-`refreshDeleteButton()` (`:85-89`) was deliberately given a `hasSnapshot` conjunct, and its own comment at `:80-84` says why: gating on the typed text alone *"left the button clickable after the snapshot had been dropped, and clicking it hit a bare `return` in the click handler — no message, no spinner, no state change. A permanently live, inert button."*
+_**The alternative fix the verifier warned against was not taken:** making `showScanError` hide `#rec-scan-content` would have broken the retryability the Re-link buttons depend on, and those buttons live inside that container. O10 was fixed on its own terms instead._
 
-Its sibling `updateGoConfirmBtn()` never got the same treatment: it gates only on `selectedIds().length === 0` and never looks at `lastPlan`. So once `invalidateScan()` has nulled `lastPlan` while the rows are still on screen — reachable through **O10** — the next tick of any `.rec-item-checkbox`, or of `#rec-select-all` (`:353-357`, which the finder omits), re-enables `#rec-go-confirm-btn`. Clicking it hits `if (ids.length === 0 || !lastPlan) { return; }` at `:419` and does nothing at all.
+_**What was measured, and what could not be.** O10's browser run is the same apparatus and was watched for this too. On the fixed build, after the re-link 409, ticking a stale row **does** arm "Next: Confirm deletion" — and that is correct, not a residual defect: `showRelinkError` re-scans, `renderPlan` reassigns `lastPlan`, and the button is advancing to a confirmation built from a plan that genuinely exists. Clicking it reaches step 3 normally._
 
-### Reproduced
+_The state this finding is about — rows on screen with `lastPlan` already nulled — is **no longer reachable on the fixed build**, which the finding itself predicted: "fixing O10 removes the only route that currently reaches it, but the gate is the invariant and should not depend on which caller happens to clear `lastPlan`." Every remaining `showScanError` caller is a scan path, and `runScan`'s `beforeSend` hides `#rec-scan-content` before any of them can fire, so there is no way to leave tickable rows above a dropped plan. That is why this is shipped as an invariant rather than as a closure of a live route, and why the entry says so instead of claiming a reproduction it does not have._
 
-Reached with no second browser tab, no crafted POST and no database edit: scan, then a colleague in the Azure portal deletes the subnet the wizard was suggesting a re-link to (an `az delete` run mid-review), then click Re-link → 409 → `showScanError` → `invalidateScan` drops `lastPlan` while the stale table stays on screen.
+_The finding's own severity reasoning stands unchanged: nothing is written, nothing archived, no range misreported, no destructive path opened — the `:419` guard already refused to build a confirmation from a dropped plan and `confirmedIds` stayed null throughout, so `#rec-confirm-delete-btn` was never armed. This is a correctness-of-state fix, not a data fix._
 
-```
-after the 409:  goConfirmDisabled true,  goConfirmVisibleOnScreen true
-stale checkboxes on screen: 1
-#rec-go-confirm-btn disabled after tick: False        <-- re-armed by updateGoConfirmBtn
-
-=== AFTER CLICKING Next: Confirm deletion ===
-{ "activePane": ["rec-step2"], "pills": [..., "rec-step3-tab:nav-link disabled"],
-  "confirmCount": "0", "confirmList": "", "goConfirmDisabled": false }
-```
-
-Active pane unchanged, step-3 pill still disabled, confirmation screen never built, no message, no spinner, **no network request**. The button stays enabled, so it is clickable again and again with the same nil effect.
-
-**Control**, same button, healthy plan: `"activePane": ["rec-step3"], "confirmCount": "1", "confirmList": "rig-r15-verc14-sn-gone (10.181.2.0/24) - Subnet deleted …"`. The button is not broken in general — only after `lastPlan` was dropped.
-
-**Patched build**, identical scenario: `#rec-go-confirm-btn disabled after tick: True`, and Playwright's click timed out on a disabled element. Happy path on the same patched build still reaches step 3 and the full delete still commits (*"Deleted 1 stale subnet(s), archiving 1 subnet(s)…"*, row gone from `Subnets`).
-
-**Severity corrected low → info**, on consequence and not on rarity. Nothing is written, nothing archived, no allocated range reported free, no false success banner, and no destructive path opens: the guard at `:419` correctly refuses to build a confirmation from a dropped plan, `confirmedIds` stays null so `#rec-confirm-delete-btn` stays disabled (measured throughout), and `renderPlan` is the sole writer of `lastPlan` and always rebuilds the rows with it, so no stale-plan deletion is reachable. Recovery is one click. This is strictly less than round 13's `M2` (graded low, and it produced a false *"deleted 0 stale subnet(s)"* banner **after** a real delete) and is the same shape as round 12's `L4` (graded info — a wizard button re-armed with no data consequence).
-
-### Fix
-
-Give `updateGoConfirmBtn` the same snapshot conjunct its sibling already has:
-
-```javascript
-$("#rec-go-confirm-btn").prop("disabled", !lastPlan || selectedIds().length === 0);
-```
-
-That is the single definition of "there is something to advance to", and it cannot drift from the `:419` guard the way it does now. No cheaper interim is needed — this is one expression. (Fixing O10 removes the only route that currently reaches it, but the gate is the invariant and should not depend on which caller happens to clear `lastPlan`.)
-
-> **The verifier judged the one-liner correct and complete, with three additive notes.** `updateGoConfirmBtn` (`:332`) is the **only** site that ever arms the button (the element ships `disabled`, and `:56` only ever disables it), and its three callers are `:317` `renderPlan` (where `lastPlan` was just assigned and is always truthy), `:349` and `:355` — so the conjunct cannot wrongly disable the button on the happy path and it closes **both** re-arm routes.
->
-> **Do not "fix" this instead by making `showScanError` hide `#rec-scan-content`** the way `runScan`'s `beforeSend` does — the Re-link buttons live inside `#rec-scan-content` and `:400-405` documents that a failed re-link must stay retryable. The minimal gate really is the right shape here. `invalidateScan`'s own `prop("disabled", true)` at `:56` becomes redundant but is harmless; keep it as defence in depth.
->
-> Two adjacent residues this fix does not touch and must not be conflated with it: the static prose in `#rec-scan-error` is false when reached from a re-link 409 (that is **O10**), and after a failed re-link the Re-link button is re-enabled at `:404` but its label is never restored, so it sits enabled reading *"Re-linking…"* indefinitely (also **O10**, correction (c)).
+_Tests: 879 → 879. One expression in a Razor-hosted script; the xUnit suite has no infrastructure that reaches the wizard's state machine, and the browser evidence is recorded above as prose._
 
 ---
 

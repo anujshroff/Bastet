@@ -354,7 +354,13 @@
         }
 
         function updateGoConfirmBtn() {
-            $("#rec-go-confirm-btn").prop("disabled", selectedIds().length === 0);
+            // The !lastPlan conjunct is the same one refreshDeleteButton was deliberately given, and
+            // for the same reason its comment records: gating on the selection alone left the button
+            // clickable after the snapshot had been dropped, and clicking it hit a bare `return` in
+            // the click handler - no message, no spinner, no state change. A permanently live, inert
+            // button. This is the single definition of "there is something to advance to", so it
+            // cannot drift from the guard in the click handler the way it did.
+            $("#rec-go-confirm-btn").prop("disabled", !lastPlan || selectedIds().length === 0);
         }
 
         // Same staleness the import wizard had: nothing recomputed the master from the rows, so
