@@ -220,6 +220,7 @@
                 case "SubnetDeleted": return { text: "Subnet deleted", css: "bg-danger" };
                 case "SubnetPrefixChanged": return { text: "Prefix changed", css: "bg-warning text-dark" };
                 case "FullyAllocatingSubnetDeleted": return { text: "Fully allocated", css: "bg-secondary" };
+                case "VNetPrefixStillCovered": return { text: "Address space changed", css: "bg-secondary" };
                 default: return { text: statusName || "Unknown", css: "bg-secondary" };
             }
         }

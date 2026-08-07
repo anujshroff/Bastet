@@ -92,85 +92,25 @@ _Tests: 847 → 852. Five in `AzureReconcilerRangeStillAllocatedTests`: three th
 
 ---
 
-## O2 — The range index is built only from Azure **subnet** prefixes, so a VNet-level import target whose VNet address space was resized gets no range check at all and is offered for deletion while the VNet still covers it `[x1]`
+## O2 — The range index is built only from Azure **subnet** prefixes, so a VNet-level import target whose VNet address space was resized gets no range check at all and is offered for deletion while the VNet still covers it `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Services/Azure/AzureReconciler.cs:580`.
-**Confidence:** confirmed.
+_O2 is fixed and committed. `EvaluateVNetLevel` no longer treats "the recorded prefix string is absent from `Ipv4AddressPrefixes`" as "the space was released". When the prefix is absent but the VNet's **current** address space still overlaps the recorded range, the row becomes a new report-only status, `VNetPrefixStillCovered`, in `ReviewItems` — never deletable — with a reason naming the covering prefix and the remedy. A prefix that overlaps nothing the VNet still owns is unchanged: `VNetPrefixRemoved`, deletable, exactly as before._
 
-### What goes wrong
+_**The verifier's correction (a) decided the test, and it is the whole fix.** Containment by a single prefix is not enough: re-carving `10.190.0.0/16` into `10.190.0.0/17` + `10.190.128.0/17` releases nothing and neither `/17` contains the `/16`, so a containment guard never fires. The test is overlap in both directions, over the whole prefix list. Expand, shrink and re-carve are all one class and all three are pinned._
 
-`EvaluateVNetLevel` reports `VNetPrefixRemoved` whenever `vnet.Ipv4AddressPrefixes` does not contain the recorded prefix **string**. `VNetPrefixRemoved` is a deletable status that `ConfirmProposedDeletionsAsync` never asks ARM about — `IsAbsenceStatus` (`:381`) covers only `VNetDeleted` and `SubnetDeleted`. The only remaining defence, `FindLiveOwnerOfRange`, cannot help: `livePrefixOwners` is populated exclusively from `vnet.Subnets` (`:85-109`), so a VNet **address prefix** is never an entry in it.
+_**Correction (b) was right and is why `EvaluateVNetLevel` lost `static`** — it needed the primary-constructor `ipUtilityService`. **Correction (c) was taken**: `FullyAllocatingSubnetDeleted` is not reused, because its text is about a different fact and the screen renders the label; `VNetPrefixStillCovered` is a new `AzureReconcileStatus` member with its own client label ("Address space changed") in `_ReconcileScripts.cshtml`, and it is added to the review-set branch so the row lands in `ReviewItems` rather than merely being non-deletable — which is what seeds `ApplyConfirmations`' cascade-withhold set and keeps a descendant safe. `AStillCoveredTarget_ProtectsItsDescendantsFromTheCascade` pins that._
 
-Expanding a VNet's address space (`10.180.0.0/16` → `10.180.0.0/15`) is an ordinary Azure operation. BASTET's target row is then offered for deletion with the reason *"VNet 'X' still exists but no longer has the address prefix 10.180.0.0/16"* — true as stated, but the range is entirely inside the VNet's current address space. Archiving it removes BASTET's only record of the allocation.
+_**Correction (d) was taken by avoiding the shared index entirely.** The finding proposed putting VNet address prefixes into `livePrefixOwners`; the verifier showed that would let `FindLiveOwnerOfRange` match a VNet entry for an ordinary subnet-level row and offer a **VNet** id as a Re-link suggestion, which `RelinkAzureSubnet` writes verbatim onto a column no screen can clear. No index was added at all: `EvaluateVNetLevel` already holds the `BulkAzureVNetViewModel` and tests its `Ipv4AddressPrefixes` directly. That is smaller than the filed fix, and structurally incapable of the corruption (d) describes. **Correction (e)** is satisfied for the same reason — no new prefix-keyed structure exists to throw on a duplicate key._
 
-The reachable shape, measured rather than assumed: when the target still has an Azure-linked child this scan verified live, the cascade guard withholds it. The reachable case is a target with **no** live Azure-linked descendants — a VNet imported for its address space with its subnets managed inside BASTET, or imported before any subnet existed. `descendantCount` was 0 and the checkbox rendered enabled.
+_No Re-link suggestion is set, and that is deliberate rather than incidental: the VNet's resource ID never changed, so there is nothing to re-point at and the button would write the id the row already has. `AStillCoveredVNetPrefix_OffersNoRelinkSuggestion` pins it._
 
-### Reproduced
+_Proven by live A/B, both builds against the same subscription, same moment. Fixture `rig-o2b-vnet` `10.178.0.0/16` with **no subnets at all** — chosen deliberately so O1's subnet-prefix fallback cannot mask the VNet-level verdict and this measures O2 alone — imported as a VNet-level target on both builds, then re-carved to `["10.178.0.0/17","10.178.128.0/17"]`, union byte-identical to the original. Unfixed HEAD: `canCommit: true`, `ITEM 10.180.0.0/16 VNetPrefixRemoved`, `descendantCount 0`, offered for irreversible deletion with no ARM confirmation behind it. Fixed: `canCommit: false`, `REVIEW 10.178.0.0/16 VNetPrefixStillCovered`, suggestion empty, reason "…its address space now includes 10.178.0.0/17, which overlaps that range - so the space was resized or re-carved rather than released."_
 
-Two independent triggers, both driven through the real bulk-import wizard, real ARM and the real reconcile wizard in headless Chromium.
+_**One measured interaction worth recording for the next round.** O1's fix narrows O2's reachable surface: a VNet-level row whose recorded range overlaps a live Azure **subnet** prefix is now already withheld by `FindLiveOwnerOfRange`'s overlap fallback. Measured directly — the audit's own trigger-1 fixture (`rig-o2-vnet` `10.180.0.0/16` expanded to `/15`, holding subnet `10.180.1.0/24`) came back as `RangeStillAllocatedInAzure` on an O1-only build. What O2 closes is the remainder, which is exactly the case the finding called reachable: a target with no live Azure-linked descendants, where nothing inside the VNet overlaps the recorded prefix. The empty-VNet fixture above is that case._
 
-Fixture: a VNet whose Azure subnet is deliberately **not** imported into BASTET.
+_Not done, deliberately, and this is the residue the verifier flagged as **(f)** for the owner: nothing restores rows already archived by this path, and after a resize the importable prefix is the new one, so re-import is only possible if a BASTET parent has room for it. Recovery is not guaranteed. `DeletedSubnets` still has no restore path — carried on the watch list since round 13._
 
-```
-az network vnet create -g bastet-visible -n rig-r15-c9v-vnet \
-    --address-prefixes 10.180.0.0/16 --subnet-name rig-r15-c9v-snet --subnet-prefixes 10.180.1.0/24
-POST /Subnet/Create        Name=manual-supernet 10.180.0.0/14
-POST /Subnet/BulkCreateFromAzurePlan   (the VNet address prefix, subnets:[])
-POST /Azure/ReconcileScan  -> {"items":[],"reviewItems":[],"globalErrors":[],"warnings":[],"canCommit":false}
-```
-
-**Trigger 1 — expand:** `az network vnet update --address-prefixes 10.180.0.0/15` (a strict superset of the recorded `/16`):
-
-```
-items:[{"subnetId":2,"networkAddress":"10.180.0.0","cidr":16,
-        "statusName":"VNetPrefixRemoved",
-        "reason":"VNet 'rig-r15-c9v-vnet' still exists but no longer has the address prefix 10.180.0.0/16.",
-        "descendantCount":0}]
-reviewItems:[]  warnings:[]  canCommit:true
-```
-
-No ARM confirmation was performed. In the browser: `#rec-stale-rows` count 1, checkbox enabled, `#rec-review-section` hidden, `#rec-scan-warnings` hidden; confirm step *"You are about to delete 1 subnet(s) that no longer match Azure."*; after typing `approved`, the flash *"Azure reconcile: deleted 1 stale subnet(s), archiving 1 subnet(s) and 0 host IP assignment(s) in total."*
-
-Database: `Subnets` = {1 | manual-supernet | 10.180.0.0/14}; `DeletedSubnets` = {rig-r15-c9v-vnet | 10.180.0.0/16}.
-
-The wrong output, `GET /Subnet/Details/1`:
-
-```
-Child Subnets: No child subnets have been created yet.
-Unallocated IP Ranges  10.180.0.0  10.183.255.255  262,142 IP addresses  [Create Subnet]
-```
-
-with **no** Azure advisory note at all — the parent carries no `AzureResourceId`, and `N4`'s note is gated on it (`_UnallocatedRanges.cshtml:21`). Azure at that moment: address space `["10.180.0.0/15"]` with live subnet `rig-r15-c9v-snet` = `10.180.1.0/24`, inside the range BASTET now advertises as free.
-
-**Permanence** — re-scan immediately after the archive:
-
-```
-{"items":[],"reviewItems":[],"globalErrors":[],"warnings":[],"canCommit":false}
-```
-
-*"Nothing to clean up."* `ReportAzureRangesNoBastetSubnetRecords` is scoped to `importedVNetIds` built from surviving rows' `AzureResourceId`s (`:410-415`); archiving the only linked row empties that set and the VNet is skipped entirely, permanently. Independently, `AccountsFor`'s containment arm would let the non-Azure parent swallow the live subnet anyway. Both defences silent.
-
-**Trigger 2 — re-carve with identical total coverage:** target `10.180.0.0/15`, VNet re-carved to `["10.180.0.0/16","10.181.0.0/16"]` — nothing released. Same deletable `VNetPrefixRemoved`, `canCommit:true`.
-
-### Fix
-
-Give the range index VNet-level entries. In the inventory loop (`:78-110`) also index each `vnet.Ipv4AddressPrefixes` entry, and match by overlap. When a VNet-level row's recorded prefix is still covered, emit a review-only item — *"VNet 'x' now carries 10.172.0.0/15, which still covers this range"* — not a deletable `VNetPrefixRemoved`. Re-link is **not** the repair here (the resource id is unchanged), so it needs its own review status rather than reusing `RangeStillAllocatedInAzure`.
-
-**Cheaper interim:** one guard inside `EvaluateVNetLevel`, immediately before the return at `:582` — if the recorded prefix is still covered by the VNet's current address prefixes, return a review item instead of `VNetPrefixRemoved`.
-
-> **The verifier judged both halves incomplete, and one actively unsafe.** Measured, not argued.
->
-> **(a) The interim as written is defeated by a case that was reproduced.** Re-carving `10.190.0.0/16` into `10.190.0.0/17` + `10.190.128.0/17` — union byte-identical to the original, live Azure subnet `10.190.1.0/24` still inside — still returned a deletable `VNetPrefixRemoved` with `canCommit:true`. Neither `/17` **contains** the `/16`, so a containment guard never fires. The same flaw is in the main fix's wording ("still covered by **one** of the VNet's current address prefixes"). The test must be **overlap**, not containment by a single prefix: `IsSubnetContainedInParent(recorded, current) || IsSubnetContainedInParent(current, recorded)` over the prefix list. A shrink (`/16` → `/17`) is the same class and is also missed.
->
-> **(b) The interim is not dependency-free.** `EvaluateVNetLevel` is `private static` at `:564` and has no access to `ipUtilityService`; any overlap test requires making it an instance method, as `AccountsFor` already is. Cheap, but "needs no new dependency" is wrong.
->
-> **(c) Reusing `FullyAllocatingSubnetDeleted` writes a false reason.** That status's text is about a different fact and the reconcile screen renders the label. Add a new `AzureReconcileStatus` member to the review-only branch at `:193-197` with its client label in `_ReconcileScripts.cshtml`. The row must land in `ReviewItems`, not merely be non-deletable — `ApplyConfirmations` seeds its cascade-withhold set from `plan.ReviewItems` (`:339`), which is what keeps a descendant safe.
->
-> **(d) The main fix's index change is unsafe as stated.** Putting VNet resource ids into the shared `livePrefixOwners` means `FindLiveOwnerOfRange`, which is shared with the subnet-level statuses (`:522-525`), would match a VNet entry for the ordinary fully-encompassing import and route it to `RangeStillAllocatedInAzure` carrying a **VNet** id as the suggestion. `RelinkAzureSubnet` writes that verbatim (`SubnetController.AzureReconcile.cs:348`) and no screen can clear the column — one click would permanently re-point a child row at a VNet. Keep VNet-level entries in a **separate** index consulted only by the VNet-level branch.
->
-> **(e) Index hygiene, per round 14's watch list.** Any new prefix-keyed structure must accumulate into a `List` and never `ToDictionary`: this subscription already ships `rig-r15-vnet-a1` (`10.10.0.0/16`) and `rig-r15-vnet-a3-overlap` (`10.10.0.0/20`) with a duplicated `10.10.1.0/24`, and a duplicate-key throw turns the whole scan into *"The reconcile scan failed."*
->
-> **(f) For the owner, not a defect in the fix:** nothing restores rows already archived by this path, and after a resize the importable prefix is the **new** one, which only re-imports if a BASTET parent has room for it. Recovery is not guaranteed.
+_Tests: 852 → 861. Nine in a new `AzureReconcilerVNetPrefixCoverageTests`: five that fail against the unfixed reconciler (expand, shrink, re-carve-with-identical-coverage, the no-suggestion assertion, and the cascade guard), and four counter-tests — a prefix overlapping nothing stays deletable, a VNet that is gone entirely stays `VNetDeleted`, an unchanged prefix is reported nowhere, and an overlapping prefix on a **different** VNet does not withhold the deletion._
 
 ---
 

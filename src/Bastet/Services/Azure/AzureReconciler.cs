@@ -236,7 +236,8 @@ namespace Bastet.Services.Azure
                 }
 
                 if (item.Status is AzureReconcileStatus.FullyAllocatingSubnetDeleted
-                    or AzureReconcileStatus.UnrecognisedResourceId)
+                    or AzureReconcileStatus.UnrecognisedResourceId
+                    or AzureReconcileStatus.VNetPrefixStillCovered)
                 {
                     plan.ReviewItems.Add(item);
                 }
@@ -541,6 +542,21 @@ namespace Bastet.Services.Azure
                    && ipUtilityService.IsSubnetContainedInParent(network, cidr, existing.NetworkAddress, existing.Cidr);
         }
 
+        /// <summary>
+        /// True when an Azure prefix string overlaps a row's recorded range, in either direction.
+        /// A prefix that cannot be parsed overlaps nothing: the caller's fallback is the deletable
+        /// status, and inventing coverage from a malformed string would withhold a real deletion.
+        /// </summary>
+        private bool OverlapsRecorded(string azurePrefix, AzureLinkedSubnetSnapshot snapshot)
+        {
+            string[] parts = azurePrefix.Split('/');
+
+            return parts.Length == 2
+                   && int.TryParse(parts[1], out int cidr)
+                   && (ipUtilityService.IsSubnetContainedInParent(parts[0], cidr, snapshot.NetworkAddress, snapshot.Cidr)
+                       || ipUtilityService.IsSubnetContainedInParent(snapshot.NetworkAddress, snapshot.Cidr, parts[0], cidr));
+        }
+
         /// <summary>An Azure subnet that currently holds a given IPv4 range.</summary>
         private sealed record AzurePrefixOwner(string ResourceId, string SubnetName, string VNetName);
 
@@ -647,7 +663,7 @@ namespace Bastet.Services.Azure
         /// <summary>
         /// A row whose recorded resource ID is a VNet: the target a VNet address prefix was imported into.
         /// </summary>
-        private static AzureReconcileItem? EvaluateVNetLevel(
+        private AzureReconcileItem? EvaluateVNetLevel(
             AzureLinkedSubnetSnapshot snapshot,
             Dictionary<string, BulkAzureVNetViewModel> liveVNets)
         {
@@ -665,6 +681,29 @@ namespace Bastet.Services.Azure
 
             if (!vnet.Ipv4AddressPrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
             {
+                // The prefix string is gone, which is not the same as the space being released.
+                // Resizing a VNet's address range, or re-carving it into several prefixes, is
+                // ordinary - and VNetPrefixRemoved is deletable with no ARM confirmation behind it
+                // (IsAbsenceStatus covers only the two "deleted" statuses), while the range index
+                // FindLiveOwnerOfRange consults is built from SUBNET prefixes and so has no entry
+                // for a VNet address prefix at all. Both defences are therefore silent here, and
+                // the row is archived while Azure still covers every address it records.
+                //
+                // Overlap, not containment by a single prefix: re-carving 10.190.0.0/16 into
+                // 10.190.0.0/17 + 10.190.128.0/17 releases nothing, and neither /17 contains the
+                // /16, so a containment test never fires. A shrink is the same class in reverse.
+                string? covering = vnet.Ipv4AddressPrefixes.FirstOrDefault(p => OverlapsRecorded(p, snapshot));
+
+                if (covering is not null)
+                {
+                    return Item(snapshot, AzureReconcileStatus.VNetPrefixStillCovered, true,
+                        $"VNet '{vnet.Name}' no longer has the address prefix {prefix}, but its address space "
+                        + $"now includes {covering}, which overlaps that range - so the space was resized or "
+                        + "re-carved rather than released. Archiving this subnet would remove BASTET's only "
+                        + "record of a range Azure still covers. Correct the recorded range to match the VNet's "
+                        + "current address space, or delete this subnet and import the current prefix again.");
+                }
+
                 return Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved, true,
                     $"VNet '{vnet.Name}' still exists but no longer has the address prefix {prefix}.");
             }
