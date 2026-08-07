@@ -101,7 +101,36 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
             await context.Database.OpenConnectionAsync();
             try
             {
-                int lockResult = await AcquireAppLockAsync(SUBNET_OPERATIONS_LOCK, remainingMs);
+                // The acquire needs the same remedy the release below already has, and for the same
+                // reason. If SQL Server grants the lock but the client never reads the response -
+                // any pause of this process longer than the command timeout, landing between the
+                // batch reaching the server and the reply being read: a cgroup freeze, a VM
+                // live-migration stun, a snapshot quiesce, a supervisor SIGSTOP - then this throws,
+                // control jumps to the outer finally, and CloseConnectionAsync returns the
+                // connection to the POOL with the session still holding the lock. Every subnet and
+                // host-IP write on every replica then parks the full timeout in sp_getapplock and
+                // reports "another subnet operation is in progress", which is false, and retrying
+                // never clears it. Measured: ~4m40s of total write denial, ended only by SqlClient's
+                // idle-pool pruning rather than by anything the app did.
+                //
+                // This deliberately does NOT cover the lockResult < 0 branch below: there the lock
+                // was not granted, so there is nothing stranded and no reason to flush the pool.
+                int lockResult;
+
+                try
+                {
+                    lockResult = await AcquireAppLockAsync(SUBNET_OPERATIONS_LOCK, remainingMs);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex,
+                        "sp_getapplock did not return a result; discarding the pooled connection in case the "
+                        + "lock was granted server-side and would otherwise be stranded on a pooled session");
+
+                    DiscardPooledConnection();
+                    throw;
+                }
+
                 if (lockResult < 0)
                 {
                     throw new TimeoutException($"Could not acquire subnet operation lock within {timeoutMs}ms (result code: {lockResult})");

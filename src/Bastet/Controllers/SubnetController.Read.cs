@@ -121,10 +121,19 @@ public partial class SubnetController : Controller
         bool azureImportEnabled = bool.TryParse(
             Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool result) && result;
 
+        // This predicate must stay set-equivalent to the one AzureController.Import enforces, which
+        // is the authority. N4 relaxed that one to admit a top-up - a populated target that already
+        // carries an Azure link - and did not touch this copy, so the two became mutually exclusive
+        // by construction: whenever the server would accept a top-up, the only link in the whole
+        // application that reaches /Azure/Import/{id} was not rendered. The button therefore
+        // disappeared permanently after the first successful single-VNet import, which is the steady
+        // state of the feature.
+        bool isTopUp = subnet.ChildSubnets.Count != 0 && !string.IsNullOrEmpty(subnet.AzureResourceId);
+
         ViewBag.CanImportFromAzure =
             userContextService.UserHasRole(ApplicationRoles.Admin) &&
             azureImportEnabled &&
-            subnet.ChildSubnets.Count == 0 &&
+            (subnet.ChildSubnets.Count == 0 || isTopUp) &&
             subnet.HostIpAssignments.Count == 0 &&
             !subnet.IsFullyAllocated;
 

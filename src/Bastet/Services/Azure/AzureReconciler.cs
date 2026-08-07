@@ -75,6 +75,15 @@ namespace Bastet.Services.Azure
             // exact failure mode the subnet-prefix index above already avoids.
             Dictionary<string, List<AzurePrefixOwner>> livePrefixOwners = new(StringComparer.OrdinalIgnoreCase);
 
+            // The same live prefixes again, grouped by VNet instead of keyed by exact prefix string.
+            // The index above answers "is this exact range still assigned?" in one lookup; this one
+            // answers "does anything still assigned OVERLAP this range?", which the exact key cannot
+            // - and re-carving a prefix while re-creating the subnet is an ordinary Azure operation,
+            // there being no rename. Built in the same pass so the fallback costs one dictionary
+            // lookup and a walk of one VNet's prefixes, not a scan of every prefix in the
+            // subscription per stale row.
+            Dictionary<string, List<AzureLivePrefix>> livePrefixesByVNet = new(StringComparer.OrdinalIgnoreCase);
+
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
                 if (!string.IsNullOrEmpty(vnet.ResourceId))
@@ -104,7 +113,21 @@ namespace Bastet.Services.Azure
                             livePrefixOwners[key] = owners;
                         }
 
-                        owners.Add(new AzurePrefixOwner(subnet.ResourceId ?? string.Empty, subnet.Name, vnet.Name));
+                        AzurePrefixOwner owner = new(subnet.ResourceId ?? string.Empty, subnet.Name, vnet.Name);
+                        owners.Add(owner);
+
+                        string[] parts = prefix.Split('/');
+
+                        if (parts.Length == 2 && int.TryParse(parts[1], out int prefixCidr))
+                        {
+                            if (!livePrefixesByVNet.TryGetValue(vnet.ResourceId, out List<AzureLivePrefix>? byVNet))
+                            {
+                                byVNet = [];
+                                livePrefixesByVNet[vnet.ResourceId] = byVNet;
+                            }
+
+                            byVNet.Add(new AzureLivePrefix(prefix, parts[0], prefixCidr, owner));
+                        }
                     }
                 }
             }
@@ -174,24 +197,63 @@ namespace Bastet.Services.Azure
                 // archiving on it makes the parent's Details page advertise an allocated range as
                 // free with a Create Subnet button over it. The evidence was always in hand; nothing
                 // consulted it.
-                AzurePrefixOwner? stillAllocated = FindLiveOwnerOfRange(snapshot, item, livePrefixOwners);
+                LiveRangeOwner? stillAllocated = FindLiveOwnerOfRange(snapshot, item, livePrefixOwners, livePrefixesByVNet);
 
                 if (stillAllocated is not null)
                 {
-                    AzureReconcileItem review = Item(snapshot, AzureReconcileStatus.RangeStillAllocatedInAzure, item.IsVNetLevel,
-                        $"{item.Reason} The range {snapshot.NetworkAddress}/{snapshot.Cidr} is still assigned in Azure "
-                        + $"to subnet '{stillAllocated.SubnetName}' in VNet '{stillAllocated.VNetName}', so archiving this "
-                        + "subnet would make BASTET report an allocated range as free. Re-link it to that Azure subnet.");
-                    review.SuggestedAzureResourceId = stillAllocated.ResourceId;
-                    review.SuggestedAzureSubnetName = stillAllocated.SubnetName;
+                    // Two different facts, two different sentences. Reusing the exact-match sentence
+                    // for an overlapping owner would assert that the whole recorded range is still
+                    // assigned, which is false when only part of it is - and this text sits directly
+                    // above a decision about irreversible archiving.
+                    // Re-link repairs a row whose link is an Azure SUBNET that was replaced. It is
+                    // not a repair for a VNet-level row: the index only ever holds subnet prefixes,
+                    // so the suggestion offered to a VNet-level row is a SUBNET id, and writing it
+                    // re-points the target at a child of its own VNet. The reconciler would then
+                    // judge it through EvaluateSubnetLevel and offer it for deletion the moment
+                    // that subnet went away, the bulk planner would block its VNet prefix for ever,
+                    // and no screen in the application can edit AzureResourceId back.
+                    bool canRelink = stillAllocated.Exact
+                                     && AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId);
+
+                    string reason = canRelink
+                        ? $"{item.Reason} The range {snapshot.NetworkAddress}/{snapshot.Cidr} is still assigned in Azure "
+                          + $"to subnet '{stillAllocated.Owner.SubnetName}' in VNet '{stillAllocated.Owner.VNetName}', so archiving this "
+                          + "subnet would make BASTET report an allocated range as free. Re-link it to that Azure subnet."
+                        : stillAllocated.Exact
+                        ? $"{item.Reason} The range {snapshot.NetworkAddress}/{snapshot.Cidr} is still assigned in Azure "
+                          + $"to subnet '{stillAllocated.Owner.SubnetName}' in VNet '{stillAllocated.Owner.VNetName}', so archiving this "
+                          + "subnet would make BASTET report an allocated range as free. Re-link is not offered for a VNet-level "
+                          + "import, because that would link this subnet to a child of its own VNet: correct the VNet's address "
+                          + "space, or delete this subnet and import the current prefix again."
+                        : $"{item.Reason} Azure subnet '{stillAllocated.Owner.SubnetName}' in VNet "
+                          + $"'{stillAllocated.Owner.VNetName}' now holds {stillAllocated.LivePrefix}, which overlaps the "
+                          + $"recorded range {snapshot.NetworkAddress}/{snapshot.Cidr}, so archiving this subnet would make "
+                          + "BASTET report an allocated range as free. Re-link is not offered because the live range is not "
+                          + "the recorded one: correct this subnet to match Azure, or delete it and import the current range "
+                          + "again.";
+
+                    AzureReconcileItem review = Item(snapshot, AzureReconcileStatus.RangeStillAllocatedInAzure, item.IsVNetLevel, reason);
+
+                    // Deliberately left unset for an overlapping owner. The view renders the Re-link
+                    // button on the presence of a suggestion (_ReconcileScripts.cshtml), and
+                    // RelinkAzureSubnet 409s without one, so no suggestion means no repair route -
+                    // which is the intent. Re-linking here would point the row at a subnet holding a
+                    // DIFFERENT range, producing SubnetPrefixChanged on the very next scan, on a
+                    // column no screen in the application can edit afterwards.
+                    if (canRelink)
+                    {
+                        review.SuggestedAzureResourceId = stillAllocated.Owner.ResourceId;
+                        review.SuggestedAzureSubnetName = stillAllocated.Owner.SubnetName;
+                    }
 
                     plan.ReviewItems.Add(review);
-                    rangeStillAllocated.Add(stillAllocated);
+                    rangeStillAllocated.Add(stillAllocated.Owner);
                     continue;
                 }
 
                 if (item.Status is AzureReconcileStatus.FullyAllocatingSubnetDeleted
-                    or AzureReconcileStatus.UnrecognisedResourceId)
+                    or AzureReconcileStatus.UnrecognisedResourceId
+                    or AzureReconcileStatus.VNetPrefixStillCovered)
                 {
                     plan.ReviewItems.Add(item);
                 }
@@ -444,10 +506,39 @@ namespace Bastet.Services.Azure
                             continue;
                         }
 
-                        if (existingSubnets.Any(e => AccountsFor(e, parts[0], cidr)))
+                        // Which of the VNet's address prefixes actually holds this range. A VNet has
+                        // a LIST of prefixes, so this cannot be hoisted out of the loop, and the
+                        // containing one is not necessarily the first.
+                        (string Network, int Cidr)? owner = VNetPrefixContaining(vnet, parts[0], cidr);
+
+                        if (existingSubnets.Any(e => AccountsFor(e, parts[0], cidr, owner)))
                         {
                             continue;
                         }
+
+                        // When the unrecorded range is exactly a VNet-level target's own prefix, the
+                        // remedy is the fully-allocated import, and it is worth naming: otherwise
+                        // the operator only discovers it by opening the import wizard. If that
+                        // target already has children the top-up refuses outright
+                        // (AzureBulkImportPlanner: "…covers the whole prefix, which would mark
+                        // Bastet subnet 'X' fully allocated, but it already has child subnets"), so
+                        // the item is true and unclearable until the conflicting child is removed.
+                        // Say which of the two it is rather than sending them to a wizard that will
+                        // refuse.
+                        ExistingSubnetSnapshot? wholePrefixTarget = existingSubnets.FirstOrDefault(e =>
+                            AzureResourceIdentity.IsAzureVNet(e.AzureResourceId)
+                            && !e.IsFullyAllocated
+                            && string.Equals(e.NetworkAddress, parts[0], StringComparison.OrdinalIgnoreCase)
+                            && e.Cidr == cidr);
+
+                        string remedy = wholePrefixTarget is null
+                            ? string.Empty
+                            : wholePrefixTarget.HasChildSubnets
+                                ? $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Importing it would mark "
+                                  + "that subnet fully allocated, which is refused while it still has child subnets, so remove "
+                                  + "the children that conflict with it first."
+                                : $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Import it to mark that "
+                                  + "subnet fully allocated.";
 
                         plan.ReviewItems.Add(new AzureReconcileItem
                         {
@@ -460,7 +551,8 @@ namespace Bastet.Services.Azure
                             AzureResourceId = subnet.ResourceId ?? string.Empty,
                             Status = AzureReconcileStatus.AzureRangeNotImported,
                             Reason = $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}, "
-                                     + "which no BASTET subnet records. BASTET is reporting that range as free space.",
+                                     + "which no BASTET subnet records. BASTET is reporting that range as free space."
+                                     + remedy,
                             IsVNetLevel = false
                         });
                     }
@@ -483,21 +575,118 @@ namespace Bastet.Services.Azure
         /// Equality is still honoured for targets, because an Azure subnet covering a whole VNet
         /// prefix is recorded by marking that very target fully allocated rather than by creating a
         /// child - so the target genuinely is the record of that range.
+        ///
+        /// EXCLUDING THE TARGET IS NOT ENOUGH, and that was the hole. Any OTHER containing row also
+        /// counted, including an ANCESTOR of the target. ValidateSubnetCreation forces every subnet
+        /// under its most specific container, so an install that models a top-down plan - a 10/8
+        /// root, a regional /12 aggregate - necessarily has such an ancestor above every import
+        /// target, and one hand-created row then made the whole inbound direction vacuous for
+        /// everything beneath it. A containing row is evidence only when it is itself INSIDE the
+        /// VNet address prefix the Azure range belongs to; a row that contains that prefix is an
+        /// ancestor of the target, not an allocation record.
+        ///
+        /// Two edges, both decided deliberately rather than inherited from a helper:
+        ///
+        /// A row EXACTLY the size of the VNet prefix does not account for ranges inside it.
+        /// IsSubnetContainedInParent is strict, so this falls out of the test above - it is pinned
+        /// by a test so that it stays a decision.
+        ///
+        /// When NO VNet prefix contains the range, fall back to the plain containment test rather
+        /// than reporting. ARM normally forbids a subnet outside its VNet's address space, but this
+        /// reconciler also assembles inventory under partial RBAC visibility, and reporting every
+        /// such range would produce items nobody can clear.
         /// </remarks>
-        private bool AccountsFor(ExistingSubnetSnapshot existing, string network, int cidr)
+        private bool AccountsFor(
+            ExistingSubnetSnapshot existing,
+            string network,
+            int cidr,
+            (string Network, int Cidr)? vnetPrefix)
         {
             if (string.Equals(existing.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
                 && existing.Cidr == cidr)
             {
-                return true;
+                // ...but only once the fully-allocated import it stands for has actually happened.
+                // The justification above is that an Azure subnet covering a whole VNet prefix is
+                // recorded by marking the target fully allocated; when the target is linked and NOT
+                // marked, nothing recorded it, and this is the largest range it is possible to be
+                // wrong about. Three routes reach that state without any crafted request: the bulk
+                // wizard's default selection ticks no subnets, an empty VNet imported before Azure
+                // created the covering subnet, and one click on "Mark as Not Fully Allocated".
+                return !AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId) || existing.IsFullyAllocated;
             }
 
-            return !AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId)
-                   && ipUtilityService.IsSubnetContainedInParent(network, cidr, existing.NetworkAddress, existing.Cidr);
+            if (AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId))
+            {
+                return false;
+            }
+
+            if (!ipUtilityService.IsSubnetContainedInParent(network, cidr, existing.NetworkAddress, existing.Cidr))
+            {
+                return false;
+            }
+
+            return vnetPrefix is null
+                   || ipUtilityService.IsSubnetContainedInParent(
+                       existing.NetworkAddress, existing.Cidr, vnetPrefix.Value.Network, vnetPrefix.Value.Cidr);
+        }
+
+        /// <summary>
+        /// The VNet address prefix that contains a given Azure range, or null when none does.
+        /// A VNet has a list of prefixes and the containing one need not be the first.
+        /// </summary>
+        private (string Network, int Cidr)? VNetPrefixContaining(BulkAzureVNetViewModel vnet, string network, int cidr)
+        {
+            foreach (string prefix in vnet.Ipv4AddressPrefixes)
+            {
+                string[] parts = prefix.Split('/');
+
+                if (parts.Length != 2 || !int.TryParse(parts[1], out int prefixCidr))
+                {
+                    continue;
+                }
+
+                if (string.Equals(parts[0], network, StringComparison.OrdinalIgnoreCase) && prefixCidr == cidr)
+                {
+                    return (parts[0], prefixCidr);
+                }
+
+                if (ipUtilityService.IsSubnetContainedInParent(network, cidr, parts[0], prefixCidr))
+                {
+                    return (parts[0], prefixCidr);
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// True when an Azure prefix string overlaps a row's recorded range, in either direction.
+        /// A prefix that cannot be parsed overlaps nothing: the caller's fallback is the deletable
+        /// status, and inventing coverage from a malformed string would withhold a real deletion.
+        /// </summary>
+        private bool OverlapsRecorded(string azurePrefix, AzureLinkedSubnetSnapshot snapshot)
+        {
+            string[] parts = azurePrefix.Split('/');
+
+            return parts.Length == 2
+                   && int.TryParse(parts[1], out int cidr)
+                   && (ipUtilityService.IsSubnetContainedInParent(parts[0], cidr, snapshot.NetworkAddress, snapshot.Cidr)
+                       || ipUtilityService.IsSubnetContainedInParent(snapshot.NetworkAddress, snapshot.Cidr, parts[0], cidr));
         }
 
         /// <summary>An Azure subnet that currently holds a given IPv4 range.</summary>
         private sealed record AzurePrefixOwner(string ResourceId, string SubnetName, string VNetName);
+
+        /// <summary>One live Azure prefix, pre-split so the overlap test does not re-parse it per row.</summary>
+        private sealed record AzureLivePrefix(string Prefix, string Network, int Cidr, AzurePrefixOwner Owner);
+
+        /// <summary>
+        /// A live Azure prefix still covering some or all of a stale row's recorded range.
+        /// <paramref name="Exact"/> distinguishes the two cases the caller must treat differently:
+        /// an exactly-equal owner is a rename and Re-link repairs it, an overlapping owner is a
+        /// re-carve and Re-link would point the row at a range it does not record.
+        /// </summary>
+        private sealed record LiveRangeOwner(AzurePrefixOwner Owner, string LivePrefix, bool Exact);
 
         /// <summary>Index key: a range is only comparable within the VNet that carries it.</summary>
         private static string PrefixKey(string vnetResourceId, string prefix) => $"{vnetResourceId}|{prefix}";
@@ -511,11 +700,22 @@ namespace Bastet.Services.Azure
         /// and never reaches here, so excluding the row's own ID cannot mask a real drift; what it
         /// does exclude is the degenerate case of a subnet reported twice by a paged read, where
         /// treating the row as its own evidence would withhold every genuine deletion.
+        ///
+        /// EQUALITY IS NOT ENOUGH. Matching prefix strings only asks "is this exact range still
+        /// assigned?", and Azure has no subnet rename - re-organising one is delete-and-recreate,
+        /// and re-carving the prefix while doing so is ordinary. One such event produces two rows
+        /// with opposite verdicts: the row whose prefix string survived is protected, and the
+        /// re-carved one is offered for irreversible archive on a plan that states no fact about
+        /// the range Azure is holding. So the exact key is kept as the cheap first test and an
+        /// overlap test in both directions is the fallback. Overlap, not containment one way: a
+        /// re-carve can narrow (/24 -> /25) or widen (/25 -> /24), and for an IPAM the safe answer
+        /// to "part of this range is still assigned" is the same either way.
         /// </remarks>
-        private static AzurePrefixOwner? FindLiveOwnerOfRange(
+        private LiveRangeOwner? FindLiveOwnerOfRange(
             AzureLinkedSubnetSnapshot snapshot,
             AzureReconcileItem item,
-            Dictionary<string, List<AzurePrefixOwner>> livePrefixOwners)
+            Dictionary<string, List<AzurePrefixOwner>> livePrefixOwners,
+            Dictionary<string, List<AzureLivePrefix>> livePrefixesByVNet)
         {
             // FullyAllocatingSubnetDeleted and UnrecognisedResourceId are review-only already and
             // delete nothing, so re-routing them would only muddy the reason they carry.
@@ -534,12 +734,31 @@ namespace Bastet.Services.Azure
                 return null;
             }
 
-            string key = PrefixKey(vnetId, $"{snapshot.NetworkAddress}/{snapshot.Cidr}");
+            string recorded = $"{snapshot.NetworkAddress}/{snapshot.Cidr}";
+            string key = PrefixKey(vnetId, recorded);
 
-            return livePrefixOwners.TryGetValue(key, out List<AzurePrefixOwner>? owners)
-                ? owners.FirstOrDefault(o =>
-                    !string.Equals(o.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase))
-                : null;
+            if (livePrefixOwners.TryGetValue(key, out List<AzurePrefixOwner>? owners))
+            {
+                AzurePrefixOwner? exact = owners.FirstOrDefault(o =>
+                    !string.Equals(o.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase));
+
+                if (exact is not null)
+                {
+                    return new LiveRangeOwner(exact, recorded, true);
+                }
+            }
+
+            if (!livePrefixesByVNet.TryGetValue(vnetId, out List<AzureLivePrefix>? candidates))
+            {
+                return null;
+            }
+
+            AzureLivePrefix? overlapping = candidates.FirstOrDefault(c =>
+                !string.Equals(c.Owner.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase)
+                && (ipUtilityService.IsSubnetContainedInParent(c.Network, c.Cidr, snapshot.NetworkAddress, snapshot.Cidr)
+                    || ipUtilityService.IsSubnetContainedInParent(snapshot.NetworkAddress, snapshot.Cidr, c.Network, c.Cidr)));
+
+            return overlapping is null ? null : new LiveRangeOwner(overlapping.Owner, overlapping.Prefix, false);
         }
 
         /// <summary>Comma-separated "'subnet' in VNet 'vnet'", capped so a warning stays readable.</summary>
@@ -561,7 +780,7 @@ namespace Bastet.Services.Azure
         /// <summary>
         /// A row whose recorded resource ID is a VNet: the target a VNet address prefix was imported into.
         /// </summary>
-        private static AzureReconcileItem? EvaluateVNetLevel(
+        private AzureReconcileItem? EvaluateVNetLevel(
             AzureLinkedSubnetSnapshot snapshot,
             Dictionary<string, BulkAzureVNetViewModel> liveVNets)
         {
@@ -579,6 +798,29 @@ namespace Bastet.Services.Azure
 
             if (!vnet.Ipv4AddressPrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
             {
+                // The prefix string is gone, which is not the same as the space being released.
+                // Resizing a VNet's address range, or re-carving it into several prefixes, is
+                // ordinary - and VNetPrefixRemoved is deletable with no ARM confirmation behind it
+                // (IsAbsenceStatus covers only the two "deleted" statuses), while the range index
+                // FindLiveOwnerOfRange consults is built from SUBNET prefixes and so has no entry
+                // for a VNet address prefix at all. Both defences are therefore silent here, and
+                // the row is archived while Azure still covers every address it records.
+                //
+                // Overlap, not containment by a single prefix: re-carving 10.190.0.0/16 into
+                // 10.190.0.0/17 + 10.190.128.0/17 releases nothing, and neither /17 contains the
+                // /16, so a containment test never fires. A shrink is the same class in reverse.
+                string? covering = vnet.Ipv4AddressPrefixes.FirstOrDefault(p => OverlapsRecorded(p, snapshot));
+
+                if (covering is not null)
+                {
+                    return Item(snapshot, AzureReconcileStatus.VNetPrefixStillCovered, true,
+                        $"VNet '{vnet.Name}' no longer has the address prefix {prefix}, but its address space "
+                        + $"now includes {covering}, which overlaps that range - so the space was resized or "
+                        + "re-carved rather than released. Archiving this subnet would remove BASTET's only "
+                        + "record of a range Azure still covers. Correct the recorded range to match the VNet's "
+                        + "current address space, or delete this subnet and import the current prefix again.");
+                }
+
                 return Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved, true,
                     $"VNet '{vnet.Name}' still exists but no longer has the address prefix {prefix}.");
             }

@@ -142,7 +142,7 @@ public class AccountControllerLogoutTests
     [InlineData(null)]
     public async Task Logout_Production_NonLocalOrMissingReturnUrl_RedirectsToSignedOutPage(string? returnUrl)
     {
-        LogoutHarness harness = CreateHarness(isDevelopment: false);
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
 
         IActionResult result = await harness.Controller.Logout(returnUrl);
 
@@ -153,7 +153,7 @@ public class AccountControllerLogoutTests
     [Fact]
     public async Task Logout_Production_LocalReturnUrl_IsPreserved()
     {
-        LogoutHarness harness = CreateHarness(isDevelopment: false);
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
 
         IActionResult result = await harness.Controller.Logout("/Subnet/Details/5");
 
@@ -180,7 +180,7 @@ public class AccountControllerLogoutTests
     [InlineData("/\u2028next")]                            // line separator; char.IsControl misses it
     public async Task Logout_Production_ReturnUrlKestrelCannotWrite_RedirectsToSignedOutPage(string returnUrl)
     {
-        LogoutHarness harness = CreateHarness(isDevelopment: false);
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
 
         IActionResult result = await harness.Controller.Logout(returnUrl);
 
@@ -230,7 +230,7 @@ public class AccountControllerLogoutTests
     [Fact]
     public async Task Logout_Production_CookieSignOut_CarriesTheRedirectTarget()
     {
-        LogoutHarness harness = CreateHarness(isDevelopment: false);
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
 
         _ = await harness.Controller.Logout("/Subnet/Details/5");
 
@@ -288,5 +288,58 @@ public class AccountControllerLogoutTests
         RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(controller.SignedOut());
         Assert.Equal("Index", redirect.ActionName);
         Assert.Equal("Home", redirect.ControllerName);
+    }
+
+    /// <summary>
+    /// O13. Logout is [AllowAnonymous], carries no antiforgery token and is reachable by a
+    /// cross-site top-level navigation. Running the remote OpenID Connect sign-out for a caller with
+    /// no session therefore let an attacker's link end the SSO session for every relying party of
+    /// the tenant, on behalf of someone who was not signed in to Bastet at all.
+    /// </summary>
+    [Fact]
+    public async Task Logout_Production_AnonymousCaller_DoesNotEndTheIdentityProviderSession()
+    {
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: false);
+
+        IActionResult result = await harness.Controller.Logout(null);
+
+        // Local redirect, and crucially the OIDC leg never ran.
+        RedirectResult redirect = Assert.IsType<RedirectResult>(result);
+        Assert.Equal(SignedOutPath, redirect.Url);
+        Assert.Null(harness.OidcProperties);
+    }
+
+    /// <summary>
+    /// The counterpart: a signed-in caller still gets federated sign-out, which is the whole point
+    /// of the remote leg.
+    /// </summary>
+    [Fact]
+    public async Task Logout_Production_AuthenticatedCaller_StillEndsTheIdentityProviderSession()
+    {
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
+
+        IActionResult result = await harness.Controller.Logout(null);
+
+        _ = Assert.IsType<EmptyResult>(result);
+        Assert.NotNull(harness.OidcProperties);
+    }
+
+    /// <summary>
+    /// O13's other half: the loop that expired every cookie the browser presented is gone, so a
+    /// co-hosted application's session cookie is never touched. Only the framework's own sign-out
+    /// may emit Set-Cookie.
+    /// </summary>
+    [Fact]
+    public async Task Logout_DoesNotExpireCookiesBastetDidNotIssue()
+    {
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
+        harness.Controller.HttpContext.Request.Headers.Cookie =
+            "coapp_session=abc; grafana_session=def";
+
+        _ = await harness.Controller.Logout(null);
+
+        string setCookie = string.Join("\n", harness.Controller.HttpContext.Response.Headers.SetCookie!);
+        Assert.DoesNotContain("coapp_session", setCookie);
+        Assert.DoesNotContain("grafana_session", setCookie);
     }
 }

@@ -1209,4 +1209,147 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
         Assert.True(prefix.IsSelectable);
     }
+
+    // -------------------------------------------------------------------------
+    // O11 - the planner's Bastet-side conflict tests must match ValidateSubnetCreation
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The planner's contract is that "the preview UI shows exactly what commit will do", but its
+    /// only Bastet-side test for a planned CHILD was exact address equality. ValidateSubnetCreation
+    /// also refuses a subnet that would contain an existing Bastet subnet, so the preview certified
+    /// canCommit=true for a plan the commit then 400d - rolling back every other VNet in the run.
+    /// </summary>
+    [Fact]
+    public void APlannedChildThatWouldContainAnExistingSubnet_IsRefusedByThePlan()
+    {
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "target", "10.10.0.0", 16),
+            Existing(2, "handmade-half", "10.10.2.0", 25)
+        ];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Sel(false, Pref("vnet-a", "10.10.0.0/16", Sub("multi", "10.10.2.0/24"))), existing);
+
+        Assert.False(plan.CanCommit);
+        Assert.Contains(plan.GlobalErrors, e => e.Contains("handmade-half"));
+    }
+
+    /// <summary>The second leg: a more specific existing Bastet parent inside the same VNet prefix.</summary>
+    [Fact]
+    public void APlannedChildWithAMoreSpecificExistingParent_IsRefusedByThePlan()
+    {
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "target", "10.20.0.0", 16),
+            Existing(2, "handmade-mid", "10.20.4.0", 22)
+        ];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Sel(false, Pref("vnet-b", "10.20.0.0/16", Sub("gap", "10.20.4.0/24"))), existing);
+
+        Assert.False(plan.CanCommit);
+        Assert.Contains(plan.GlobalErrors, e => e.Contains("handmade-mid"));
+    }
+
+    /// <summary>
+    /// The counter-test that decides the scoping, built by the verifier: an ancestor OUTSIDE the
+    /// VNet prefix must not refuse the import. At commit time the just-created /16 is in the tree
+    /// cache and becomes the child's parent, so this plan commits 200 today - an unscoped check
+    /// would turn a preview/commit divergence into one in the other direction.
+    /// </summary>
+    [Fact]
+    public void AnAncestorOutsideTheVNetPrefix_DoesNotRefuseAnImportThatCommitsToday()
+    {
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "root8", "10.30.0.0", 8)];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Sel(false, Pref("vnet-c", "10.30.0.0/16", Sub("web", "10.30.1.0/24"))), existing);
+
+        Assert.Empty(plan.GlobalErrors);
+        Assert.True(plan.CanCommit);
+    }
+
+    /// <summary>
+    /// The would-contain half is mirrored into the availability annotation, so the selection screen
+    /// greys the row with a reason instead of offering a run the preview then refuses. (The
+    /// more-specific-parent half is not mirrorable: the annotation pass has no prefix-to-target
+    /// binding for a target that does not exist yet.)
+    /// </summary>
+    [Fact]
+    public void Availability_ASubnetThatWouldContainAnExistingSubnet_IsBlockedWithAReason()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.10.0.0/16"], AzSub("vnet-a", "multi", "10.10.2.0/24"));
+        List<ExistingSubnetSnapshot> existing = [Existing(2, "handmade-half", "10.10.2.0", 25)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel annotated = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Blocked, annotated.Status);
+        Assert.False(annotated.IsSelectable);
+        Assert.Contains("handmade-half", annotated.Reason!);
+    }
+
+    /// <summary>
+    /// O12. N4 added a hard refusal in BuildPlanItem - an encompassing Azure subnet cannot mark a
+    /// target fully allocated when the target already has children - and neither the prefix nor the
+    /// subnet annotation learned it. The selection screen therefore offered a run the preview then
+    /// refused, and CanCommit is plan-wide, so it took every other VNet in the run with it.
+    /// </summary>
+    [Fact]
+    public void Availability_AnEncompassingSubnetOverAPopulatedTarget_IsBlocked()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-full", ["10.77.0.0/24"], AzSub("vnet-full", "full", "10.77.0.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "vnet-full-target", "10.77.0.0", 24, hasChildren: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel annotated = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Blocked, annotated.Status);
+        Assert.False(annotated.IsSelectable);
+        Assert.Contains("already has child subnets", annotated.Reason!);
+    }
+
+    /// <summary>
+    /// The counter-test that kills the interim the finding offered: an EMPTY target in the same
+    /// shape commits 200 today, so blocking it would disable an importable item - the other half of
+    /// the failure mode BulkImportAvailability's own contract warns about.
+    /// </summary>
+    [Fact]
+    public void Availability_AnEncompassingSubnetOverAnEmptyTarget_StaysAvailable()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-full", ["10.77.0.0/24"], AzSub("vnet-full", "full", "10.77.0.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "vnet-full-target", "10.77.0.0", 24)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel annotated = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Available, annotated.Status);
+        Assert.True(annotated.IsSelectable);
+    }
+
+    /// <summary>
+    /// And the scoping the interim also got wrong: on a multi-address-space VNet, an encompassing
+    /// subnet under one prefix must not affect an unrelated, importable prefix.
+    /// </summary>
+    [Fact]
+    public void Availability_AnEncompassingSubnetOnOnePrefix_DoesNotBlockAnotherPrefixesSubnet()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-multi",
+            ["192.168.100.0/24", "10.20.0.0/16"],
+            AzSub("vnet-multi", "full", "192.168.100.0/24"),
+            AzSub("vnet-multi", "ordinary", "10.20.5.0/24"));
+
+        List<ExistingSubnetSnapshot> existing =
+            [Existing(1, "hundred-target", "192.168.100.0", 24, hasChildren: true)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel ordinary = vnet.Subnets.Single(s => s.Name == "ordinary");
+        Assert.Equal(BulkImportAvailability.Available, ordinary.Status);
+        Assert.True(ordinary.IsSelectable);
+    }
 }

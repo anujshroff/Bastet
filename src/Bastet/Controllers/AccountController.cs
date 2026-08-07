@@ -50,11 +50,18 @@ public class AccountController(
             ? returnUrl
             : Url.Action(nameof(SignedOut), "Account") ?? "/Account/SignedOut";
 
-        // Clear all cookies
-        foreach (string cookie in Request.Cookies.Keys)
-        {
-            Response.Cookies.Delete(cookie);
-        }
+        // No cookie loop here. It walked Request.Cookies.Keys - every cookie the BROWSER sent,
+        // including ones Bastet never issued - and expired each one. Since cookies ignore port
+        // (RFC 6265 gives no port isolation), any other application sharing this hostname had its
+        // session cookie destroyed by an anonymous, tokenless, cross-site-navigable GET. That is a
+        // write, which is exactly what this endpoint's own remarks claim it does not perform.
+        //
+        // Nothing is lost by removing it. SignOutAsync on the cookie scheme below removes the auth
+        // ticket cookie AND its C1..Cn chunks through ChunkingCookieManager, which is the only
+        // cookie here that carries session state. The antiforgery and TempData cookies the loop also
+        // cleared hold none and are re-minted on the next request - the framework never deletes
+        // either at sign-out. In Development there is no cookie scheme registered at all, so the
+        // loop was dead weight there too.
 
         // No unconditional SignOutAsync here. Development registers a single scheme, DevAuthScheme,
         // and DevAuthHandler is not an IAuthenticationSignOutHandler - so signing out of "Cookies"
@@ -81,6 +88,17 @@ public class AccountController(
 
             await HttpContext.SignOutAsync(
                 CookieAuthenticationDefaults.AuthenticationScheme, properties);
+
+            // Only end the IdP's session for a caller who actually has one here. This action is
+            // [AllowAnonymous], carries no antiforgery token and is reachable by a cross-site
+            // top-level navigation, so without this an attacker's link ended the SSO session for
+            // every relying party of the tenant on behalf of a visitor who was not even signed in
+            // to Bastet. Signed-in callers are unaffected: the remote leg still runs for them, which
+            // is the whole point of federated sign-out.
+            if (User.Identity?.IsAuthenticated != true)
+            {
+                return Redirect(target);
+            }
 
             try
             {

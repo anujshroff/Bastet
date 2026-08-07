@@ -349,7 +349,7 @@ namespace Bastet.Services.Azure
         /// An Azure subnet becomes a child of its prefix's target - unless it covers the whole
         /// prefix, in which case it is never created and only marks the target fully allocated.
         /// </summary>
-        private static void AnnotateSubnet(
+        private void AnnotateSubnet(
             BulkAzureSubnetViewModel subnet,
             BulkAzureVNetViewModel vnet,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets)
@@ -362,6 +362,32 @@ namespace Bastet.Services.Azure
 
             if (encompassesAPrefix)
             {
+                // N4 added a hard refusal in BuildPlanItem for exactly this shape - an encompassing
+                // subnet cannot mark a target fully allocated when the target already has children -
+                // and this branch did not learn it, so the screen whose stated job is to stop the
+                // operator assembling an uncommittable run was the thing that assembled it. CanCommit
+                // is plan-wide, so one such prefix blocks every other VNet in the same bulk run.
+                //
+                // Scoped to the prefix being annotated and to the target's population, which is what
+                // makes this correct where the finding's offered interim was not: that would also
+                // have blocked an EMPTY target, which commits 200 today, and on a multi-address-space
+                // VNet it would have blocked unrelated prefixes.
+                ExistingSubnetSnapshot? encompassedTarget =
+                    TryParseCidr(subnet.AddressPrefix, out string encNetwork, out int encCidr)
+                        ? existingSubnets.FirstOrDefault(e =>
+                            e.Cidr == encCidr
+                            && string.Equals(e.NetworkAddress, encNetwork, StringComparison.OrdinalIgnoreCase))
+                        : null;
+
+                if (encompassedTarget is not null && encompassedTarget.HasChildSubnets)
+                {
+                    subnet.Status = BulkImportAvailability.Blocked;
+                    subnet.Reason = $"Covers the whole VNet prefix, which would mark Bastet subnet "
+                                    + $"'{encompassedTarget.Name}' fully allocated, but it already has child subnets.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
                 subnet.Status = BulkImportAvailability.Available;
                 subnet.Reason = "Covers the whole VNet prefix, so it marks the target fully allocated instead of being created.";
                 subnet.IsSelectable = true;
@@ -383,6 +409,25 @@ namespace Bastet.Services.Azure
 
             if (exact is null)
             {
+                // Mirror of the would-contain half of DetectExistingBastetSubnetConflicts, so the
+                // selection screen greys the row with a reason instead of offering a run the preview
+                // then refuses. Only this half is mirrorable: the annotation pass runs per VNet with
+                // no prefix-to-target binding for a target that does not exist yet, so the
+                // more-specific-parent test has no well-defined answer here and is left to the plan.
+                // The selection UI is therefore strictly weaker than the preview, which is a large
+                // improvement on the current silence rather than a complete answer.
+                ExistingSubnetSnapshot? wouldContain = existingSubnets.FirstOrDefault(e =>
+                    ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr));
+
+                if (wouldContain is not null)
+                {
+                    subnet.Status = BulkImportAvailability.Blocked;
+                    subnet.Reason = $"Would contain existing Bastet subnet '{wouldContain.Name}' "
+                                    + $"({wouldContain.NetworkAddress}/{wouldContain.Cidr}), which would create an invalid hierarchy.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
                 subnet.Status = BulkImportAvailability.Available;
                 subnet.Reason = null;
                 subnet.IsSelectable = true;
@@ -730,7 +775,7 @@ namespace Bastet.Services.Azure
         /// Bastet enforces global uniqueness of network/CIDR; importing a duplicate would fail at commit anyway,
         /// so we surface it during preview.
         /// </summary>
-        private static void DetectExistingBastetSubnetConflicts(
+        private void DetectExistingBastetSubnetConflicts(
             IReadOnlyList<ParsedPrefixSelection> parsed,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
             BulkImportPlanViewModel plan)
@@ -752,6 +797,49 @@ namespace Bastet.Services.Azure
                     {
                         plan.GlobalErrors.Add(
                             $"Azure subnet '{s.Source.Name}' ({s.Source.AddressPrefix}, VNet '{p.Source.VNetName}') already exists in Bastet.");
+                        continue;
+                    }
+
+                    // Exact address equality was the ONLY Bastet-side test for a planned child, but
+                    // ValidateSubnetCreation - which every write funnels through - also refuses a
+                    // subnet that would CONTAIN an existing Bastet subnet, and one for which a MORE
+                    // SPECIFIC Bastet parent exists. Neither was mirrored, so the preview certified
+                    // canCommit=true for a plan the commit then rejected with a 400, rolling back
+                    // every other VNet in the same multi-VNet run.
+                    //
+                    // Both tests are scoped to THIS item's VNet prefix, and that scoping is
+                    // load-bearing rather than tidiness. An AutoCreateChild/AutoCreateTopLevel
+                    // target does not exist yet when the plan is built, so the deepest existing
+                    // container of a planned child is legitimately something other than its
+                    // parent-to-be: with Bastet holding 10.30.0.0/8, importing a new VNet prefix
+                    // 10.30.0.0/16 carrying Azure subnet 10.30.1.0/24 commits 200 today, because at
+                    // commit time the just-created /16 is in the tree cache. An unscoped check would
+                    // read bestParent as the /8 and refuse a plan that works - turning a
+                    // preview/commit divergence into one in the other direction.
+                    foreach (ExistingSubnetSnapshot e in existingSubnets)
+                    {
+                        bool insideThisVNetPrefix = ipUtilityService.IsSubnetContainedInParent(
+                            e.NetworkAddress, e.Cidr, p.PrefixNetwork, p.PrefixCidr);
+
+                        if (!insideThisVNetPrefix)
+                        {
+                            continue;
+                        }
+
+                        if (ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, s.Network, s.Cidr))
+                        {
+                            plan.GlobalErrors.Add(
+                                $"Azure subnet '{s.Source.Name}' ({s.Source.AddressPrefix}, VNet '{p.Source.VNetName}') "
+                                + $"would contain existing Bastet subnet '{e.Name}' ({e.NetworkAddress}/{e.Cidr}). "
+                                + "Importing it would create an invalid hierarchy.");
+                        }
+                        else if (ipUtilityService.IsSubnetContainedInParent(s.Network, s.Cidr, e.NetworkAddress, e.Cidr))
+                        {
+                            plan.GlobalErrors.Add(
+                                $"Azure subnet '{s.Source.Name}' ({s.Source.AddressPrefix}, VNet '{p.Source.VNetName}') "
+                                + $"has a more specific existing Bastet parent '{e.Name}' ({e.NetworkAddress}/{e.Cidr}), "
+                                + "so it cannot be imported into this VNet prefix.");
+                        }
                     }
                 }
             }

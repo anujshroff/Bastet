@@ -138,6 +138,17 @@ namespace Bastet.Models.ViewModels
         RangeStillAllocatedInAzure,
 
         /// <summary>
+        /// The VNet no longer carries the recorded address prefix verbatim, but its current address
+        /// space still overlaps that range - the VNet was resized or re-carved rather than having
+        /// the space released. Reported for review only and never deletable: archiving the row
+        /// would remove BASTET's only record of an allocation Azure still covers.
+        /// Re-link is deliberately NOT the repair, and no suggestion is set: the VNet's resource ID
+        /// never changed, so there is nothing to re-point at. The operator corrects the recorded
+        /// range to match the VNet's new address space, or removes and re-imports it.
+        /// </summary>
+        VNetPrefixStillCovered,
+
+        /// <summary>
         /// Azure has assigned a range inside an imported VNet that no BASTET subnet records, so
         /// BASTET is reporting an allocated range as free space.
         /// Reported for review only and never deletable - it names no BASTET subnet, because the

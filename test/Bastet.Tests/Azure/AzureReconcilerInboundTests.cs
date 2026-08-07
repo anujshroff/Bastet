@@ -205,15 +205,73 @@ public class AzureReconcilerInboundTests
     /// An Azure subnet covering a whole VNet prefix is recorded by marking the TARGET fully
     /// allocated, not by creating a child - so the target genuinely is the record of that range and
     /// an exact match against it must count, even though a target's containment does not.
+    ///
+    /// The fixture sets IsFullyAllocated deliberately: that is the state the docstring's
+    /// justification describes, and without it this test pinned the silence in exactly the state
+    /// where the justification does not hold (O5).
     /// </summary>
     [Fact]
     public void AnAzureSubnetCoveringTheWholeVNetPrefix_IsAccountedForByTheTargetItself()
     {
+        ExistingSubnetSnapshot target = Target(1, "10.90.0.0", 16, "vnet-a");
+        target.IsFullyAllocated = true;
+
         AzureReconcilePlanViewModel plan = Build(
             Live(VNet("vnet-a", ["10.90.0.0/16"], AzSubnet("vnet-a", "sn-whole", "10.90.0.0/16"))),
-            [Target(1, "10.90.0.0", 16, "vnet-a")]);
+            [target]);
 
         Assert.Empty(Inbound(plan));
+    }
+
+    /// <summary>
+    /// O5. The equality arm returned true for ANY row whose address equals the Azure range,
+    /// including a VNet-level target that is linked but NOT marked fully allocated. The remark that
+    /// justifies the arm says the target "is the record of that range" precisely because the
+    /// fully-allocated import happened - so when it has not happened, the largest possible range to
+    /// be wrong about is the one range silently skipped.
+    /// </summary>
+    [Fact]
+    public void ATargetLinkedButNotFullyAllocated_DoesNotAccountForTheWholePrefixSubnet()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.61.0.0/24"], AzSubnet("vnet-a", "sn-whole", "10.61.0.0/24"))),
+            [Target(1, "10.61.0.0", 24, "vnet-a")]);   // IsFullyAllocated defaults to false
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.61.0.0", item.NetworkAddress);
+        Assert.Equal(24, item.Cidr);
+    }
+
+    /// <summary>
+    /// The owner asked for the remedy to be in the item's own Reason rather than left for the
+    /// operator to discover in the import wizard.
+    /// </summary>
+    [Fact]
+    public void AnUnaccountedWholePrefixRange_NamesTheImportRemedyInItsReason()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.61.0.0/24"], AzSubnet("vnet-a", "sn-whole", "10.61.0.0/24"))),
+            [Target(1, "10.61.0.0", 24, "vnet-a")]);
+
+        Assert.Contains("fully allocated", Assert.Single(Inbound(plan)).Reason);
+    }
+
+    /// <summary>
+    /// And when the target already has children the top-up import cannot clear it - the planner
+    /// refuses. The item is true in that state, so the Reason must say what to do about it instead
+    /// of sending the operator to a wizard that will refuse.
+    /// </summary>
+    [Fact]
+    public void AnUnaccountedWholePrefixRangeOnAPopulatedTarget_SaysTheChildMustGoFirst()
+    {
+        ExistingSubnetSnapshot target = Target(1, "10.61.0.0", 24, "vnet-a");
+        target.HasChildSubnets = true;
+
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.61.0.0/24"], AzSubnet("vnet-a", "sn-whole", "10.61.0.0/24"))),
+            [target, Existing(2, "10.61.0.0", 25)]);
+
+        Assert.Contains("child", Assert.Single(Inbound(plan)).Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -228,6 +286,102 @@ public class AzureReconcilerInboundTests
             Live(VNet("vnet-a", ["10.90.0.0/16"], AzSubnet("vnet-a", "sn-new", "10.90.77.0/24"))),
             // The target contains 10.90.77.0/24 by construction. Nothing else records it.
             [Target(1, "10.90.0.0", 16, "vnet-a")]);
+
+        Assert.Single(Inbound(plan));
+    }
+
+    /// <summary>
+    /// O4. The exclusion above was applied to the import target only, so ANY other containing row
+    /// counted - including an ancestor of the target. ValidateSubnetCreation forces every subnet
+    /// under its most specific container, so an install that models a top-down plan (a 10/8 root, a
+    /// regional aggregate) necessarily has such an ancestor above every Azure import target, and
+    /// that one hand-created row makes the whole inbound direction vacuous beneath it, permanently.
+    /// </summary>
+    [Fact]
+    public void AnAncestorAboveTheImportTarget_DoesNotAccountForRangesInsideIt()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.20.0.0/16"], AzSubnet("vnet-a", "sn-unrecorded", "10.20.20.0/24"))),
+            [
+                Existing(1, "10.0.0.0", 8),                 // hand-created aggregate, no Azure link
+                Target(2, "10.20.0.0", 16, "vnet-a")        // the import target
+            ]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.20.20.0", item.NetworkAddress);
+        Assert.Equal(24, item.Cidr);
+    }
+
+    /// <summary>
+    /// The owner's call on the equality edge: a row exactly the size of the VNet address prefix is
+    /// an ancestor of the target, not an allocation record, so it does not account for ranges inside
+    /// it. IsSubnetContainedInParent is strict, so this falls out of the same test - pinned here so
+    /// it stays a decision rather than an artefact of a helper's comparison operator.
+    /// </summary>
+    [Fact]
+    public void ARowExactlyTheSizeOfTheVNetPrefix_DoesNotAccountForRangesInsideIt()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.20.0.0/16"], AzSubnet("vnet-a", "sn-unrecorded", "10.20.20.0/24"))),
+            [
+                Existing(1, "10.20.0.0", 16),               // same size as the VNet prefix, no link
+                Target(2, "10.20.0.0", 16, "vnet-a")
+            ]);
+
+        Assert.Single(Inbound(plan));
+    }
+
+    /// <summary>
+    /// The false-positive counter-test, and the behaviour N3 deliberately shipped: a hand reserve
+    /// created INSIDE the VNet's address space really does record the range, and must keep
+    /// suppressing the report. Only the ancestor case changes.
+    /// </summary>
+    [Fact]
+    public void AHandReserveInsideTheVNetPrefix_StillAccountsForTheRange()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.20.0.0/16"], AzSubnet("vnet-a", "sn-unrecorded", "10.20.20.0/24"))),
+            [
+                Target(1, "10.20.0.0", 16, "vnet-a"),
+                Existing(2, "10.20.16.0", 20)               // inside the VNet prefix, contains the range
+            ]);
+
+        Assert.Empty(Inbound(plan));
+    }
+
+    /// <summary>
+    /// The owner's call on the null case: when no VNet address prefix contains the Azure range, fall
+    /// back to the containment test rather than reporting. ARM normally forbids that shape, but the
+    /// reconciler also assembles inventory under partial RBAC visibility, and reporting ranges
+    /// outside every declared address prefix would spam items nobody can clear.
+    /// </summary>
+    [Fact]
+    public void WhenNoVNetPrefixContainsTheRange_AContainingRowStillAccountsForIt()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            // The subnet's prefix sits outside the VNet's declared address space.
+            Live(VNet("vnet-a", ["10.20.0.0/16"], AzSubnet("vnet-a", "sn-outside", "172.16.5.0/24"))),
+            [
+                Target(1, "10.20.0.0", 16, "vnet-a"),
+                Existing(2, "172.16.0.0", 16)               // records it, but is outside any VNet prefix
+            ]);
+
+        Assert.Empty(Inbound(plan));
+    }
+
+    /// <summary>
+    /// A multi-prefix VNet must pick the prefix that actually contains the range, not the first one.
+    /// </summary>
+    [Fact]
+    public void AMultiPrefixVNet_ScopesTheContainmentTestToThePrefixHoldingTheRange()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["192.168.100.0/24", "10.20.0.0/16"],
+                AzSubnet("vnet-a", "sn-unrecorded", "10.20.20.0/24"))),
+            [
+                Existing(1, "10.0.0.0", 8),                 // ancestor of the /16 prefix
+                Target(2, "10.20.0.0", 16, "vnet-a")
+            ]);
 
         Assert.Single(Inbound(plan));
     }
