@@ -136,87 +136,21 @@ _Tests: 861 → 863. Two in `AzureReconcilerRangeStillAllocatedTests`, both of w
 
 # High
 
-## O4 — The reconciler's inbound check accepts any **containing** BASTET subnet as accounting for an Azure range, so an aggregate parent above the import target silences every `AzureRangeNotImported` report `[x2]`
+## O4 — The reconciler's inbound check accepts any **containing** BASTET subnet as accounting for an Azure range, so an aggregate parent above the import target silences every `AzureRangeNotImported` report `[x2]` — FIXED
 
-**Citation:** `src/Bastet/Services/Azure/AzureReconciler.cs:487-497` — containment arm `:495-496`, consumed at `:447`.
-**Confidence:** confirmed.
+_O4 is fixed and committed. `AccountsFor`'s containment arm now accepts a containing BASTET row as evidence only when that row is itself **inside** the VNet address prefix the Azure range belongs to. A row that contains the VNet prefix is an ancestor of the import target, not an allocation record, and counting it made the whole inbound direction vacuous for everything beneath it._
 
-### What goes wrong
+_**The fix as filed did not exist and could not be applied.** Its sketch used `vnetNetwork, vnetCidr` "already in scope at `:433`"; `:433` iterates the **subnet's** prefixes, and a VNet has a list of address prefixes — the rig's own `rig-r15-vnet-a2-multi` ships three. A new `VNetPrefixContaining(vnet, network, cidr)` selects, per Azure range, the VNet prefix that actually holds it, and `AccountsFor` takes it as a fourth parameter. **The "cheaper interim, one line and no signature change" the finding offered therefore does not exist** — it needs the same lookup — and nothing of that shape was shipped. `AMultiPrefixVNet_ScopesTheContainmentTestToThePrefixHoldingTheRange` pins that the containing prefix is chosen rather than the first one taken._
 
-`AccountsFor` answers "does BASTET already record this Azure range?" with equality **or** containment, excluding only rows whose `AzureResourceId` is a VNet id — the import target itself. Any other containing row counts, **including an ancestor of the target**. Because `ValidateSubnetCreation` forces every subnet under its most specific container (`SubnetController.Helpers.cs:278-302`), an install that models a top-down plan — a `10.0.0.0/8` root, a regional `/12` aggregate — necessarily has such an ancestor above every Azure import target. That one hand-created row makes the whole inbound direction vacuous for everything beneath it, permanently.
+_**Both edges the verifier said must be decided were decided by the owner, and both are pinned by tests rather than left to fall out of a helper.** A BASTET row **exactly** the size of the VNet prefix does not account for ranges inside it — `IsSubnetContainedInParent` returns false when `childCidr <= parentCidr`, so the strictness now expresses a decision instead of an accident (`ARowExactlyTheSizeOfTheVNetPrefix_DoesNotAccountForRangesInsideIt`). And when **no** VNet prefix contains the range, the check **fails open**: it falls back to the plain containment test rather than reporting. ARM normally forbids a subnet outside its VNet's address space, but the reconciler also assembles inventory under partial RBAC visibility, and reporting every such range would produce items nobody can clear (`WhenNoVNetPrefixContainsTheRange_AContainingRowStillAccountsForIt`)._
 
-The method's own remarks argue exactly this for the target: *"counting that as 'accounted for' makes the inbound check vacuous."* The exclusion was applied to the target only.
+_Proven by live A/B on fresh catalogs, both builds against the same Azure state, everything driven through the real antiforgery-tokened endpoints. Fixture: `rig-o4-vnet` `10.20.0.0/16` holding one Azure subnet `rig-o4-unrecorded` `10.20.20.0/24` that is deliberately **not** imported. On each build, an operator-shaped setup: `POST /Subnet/Create` for a hand-made `root10` `10.0.0.0/8` (HTTP 200 on both), then the VNet address prefix imported as a target. Unfixed HEAD: **0** inbound items, and the reconcile screen's green *"Everything imported from this subscription still exists in Azure. There is nothing to clean up."* banner would render — while Azure owns a `/24` inside the target. Fixed, same Azure state and the same two rows: **1** inbound item, `"Azure subnet 'rig-o4-unrecorded' … owns 10.20.20.0/24, which no BASTET subnet records. BASTET is reporting that range as free space."`, and the green banner does not render._
 
-### Reproduced
+_The deliberate-behaviour control from the finding was kept and is now a unit test rather than a one-off measurement: a hand reserve created **inside** the VNet prefix, which also contains the range, still suppresses the report on both builds. That is the `N3` case the method's own remarks defend; only the ancestor case changed._
 
-Three instances of the HEAD build, own ports and catalogs, everything driven through the real antiforgery-tokened endpoints. Instance A holds a hand-created `root10` = `10.0.0.0/8`; instance B is byte-identical without it.
+_No backfill is possible or needed — the inbound verdict is recomputed on every scan, so installs simply start seeing reports they should always have been getting. The consequence is that an install with a top-down aggregate above its Azure targets may see a batch of inbound items on its first scan after upgrading. Every one of them is true._
 
-```
-DEFECT (root10 present):   items=0 reviewItems=2
-  REVIEW  rig-r15-snet-a2-noncontig  172.16.2.0/24     AzureRangeNotImported
-  REVIEW  rig-r15-b2b-snet-toplevel  192.168.100.128/25 AzureRangeNotImported
-  -- NOTHING for 10.20.20.0/24 (rig-r15-b2b-snet-underroot), same VNet, same scan
-
-CONTROL (no root10, byte-identical import):  items=0 reviewItems=3
-  ... plus REVIEW rig-r15-b2b-snet-underroot 10.20.20.0/24
-      "...owns 10.20.20.0/24, which no BASTET subnet records.
-       BASTET is reporting that range as free space."
-```
-
-The trees differ only by `root10`. Two other unrecorded ranges of the same VNet in the same scan **are** reported — they are the ones `10/8` does not contain.
-
-**The harm, same moment**, `GET /Subnet/Details/2` on the defect instance:
-
-```
-10.20.13.0 | 10.20.255.254 | 62,207 IP addresses | Create Subnet   <-- contains 10.20.20.0/24
-N4 note "Run Azure Reconcile" present: True
-```
-
-The aggregate's own page never lists `10.20.20.0/24` either, because free space is range-minus-**children**. So no page in BASTET shows the range as allocated, while the reconcile screen the note points at reports a clean subscription.
-
-**Strongest form**, a third instance with root `10.0.0.0/8` and target `10.10.0.0/16` where only `10.10.1.0/24` was imported:
-
-```
-items=0 reviewItems=0 warnings=[]
-GREEN BANNER "There is nothing to clean up." would render: True
-```
-
-while `/Subnet/Details/2` prints *"10.10.2.0 | 10.10.255.254 | 65,023 IP addresses | Create Subnet"* and Azure owns `10.10.2.0/24` + `10.10.3.0/24` inside it. The control instance reported 5 review items and the banner False.
-
-**Fix A/B on the identical database**, only the binary differing: HEAD `reviewItems=2`, patched `reviewItems=3` (the suppressed range appears); `dotnet test` 847/847. **Deliberate-behaviour check:** a hand reserve `10.20.16.0/20` created *under* the target, which also contains the range, suppresses identically on both builds — the `N3` case the remarks defend is untouched; only the ancestor case changes.
-
-### Fix
-
-A containing row is evidence only when it is itself **inside the VNet address space** the Azure range belongs to; a row that contains the VNet prefix is an ancestor of the target, not an allocation record.
-
-**Regression guard:** an `AzureReconcilerInboundTests` case with an unlinked `10.0.0.0/8` above an Azure-linked `10.20.0.0/16`, asserting an unrecorded range inside the target is still reported. Its exact sibling `ATargetContainingTheRangeIsNotEnough_OrTheCheckWouldBeVacuous` already exists and it should sit next to it. **No backfill is possible or needed** — the verdict is recomputed on every scan, so installs simply start seeing the reports they should have been getting.
-
-> **The verifier found the rule right but the fix unapplicable as written, with three corrections.**
->
-> **1. There is no `vnetNetwork, vnetCidr` at the call site.** The sketch says those values are "already in scope at `:433`"; `:433` is `foreach (string prefix in Ipv4PrefixesOf(subnet))`, i.e. the **subnet's** prefix. A VNet has a *list* of prefixes — three on the rig's own `rig-r15-vnet-a2-multi`. The fix must first select, per Azure range, the VNet prefix that contains it. **So the offered "cheaper interim, one line and no signature change" does not exist** — it needs the same lookup. What was built and measured:
->
-> ```csharp
-> (string Network, int Cidr)? owner = VNetPrefixContaining(vnet, parts[0], cidr);
-> if (existingSubnets.Any(e => AccountsFor(e, parts[0], cidr, owner))) { continue; }
->
-> private bool AccountsFor(ExistingSubnetSnapshot existing, string network, int cidr,
->                          (string Network, int Cidr)? vnetPrefix)
-> {
->     if (string.Equals(existing.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
->         && existing.Cidr == cidr) { return true; }
->     if (AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId) || vnetPrefix is null) { return false; }
->     return ipUtilityService.IsSubnetContainedInParent(existing.NetworkAddress, existing.Cidr,
->                                                       vnetPrefix.Value.Network, vnetPrefix.Value.Cidr)
->            && ipUtilityService.IsSubnetContainedInParent(network, cidr,
->                                                       existing.NetworkAddress, existing.Cidr);
-> }
-> ```
->
-> Measured: 847/847 unchanged; on the identical defect database the suppressed `10.20.20.0/24` is reported and the two already-correct reports are byte-identical; the hand reserve inside the VNet prefix still suppresses exactly as at HEAD.
->
-> **2. The fix's code and its own prose disagree about equality.** `IsSubnetContainedInParent` returns false whenever `childCidr <= parentCidr` (`IpUtilityService.cs:174-178`) — it is **strict**. So the sketch silently excludes a BASTET row **equal** to the VNet prefix, contradicting its own text ("contained in (or equal to) it"), and the full form and the offered interim are therefore **not** equivalent. Pick one deliberately. Excluding it is defensible, but it must be a decision, not an artefact of a helper's `<=`.
->
-> **3. Define the "no containing VNet prefix" case explicitly.** Treating null as "does not account" starts reporting Azure subnet prefixes outside every declared VNet address prefix. ARM normally forbids that shape, but the reconciler also assembles inventory under partial RBAC visibility and must neither throw nor spam. Falling back to the current containment test is the conservative choice. The fix as filed is silent on it.
+_Tests: 863 → 868. Five in `AzureReconcilerInboundTests`, sitting next to `ATargetContainingTheRangeIsNotEnough_OrTheCheckWouldBeVacuous` as the finding asked: three fail against the unfixed reconciler (the ancestor case, the equal-size edge, and the multi-prefix scoping) and two are counter-tests for the decided edges._
 
 ---
 

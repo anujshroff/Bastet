@@ -506,7 +506,12 @@ namespace Bastet.Services.Azure
                             continue;
                         }
 
-                        if (existingSubnets.Any(e => AccountsFor(e, parts[0], cidr)))
+                        // Which of the VNet's address prefixes actually holds this range. A VNet has
+                        // a LIST of prefixes, so this cannot be hoisted out of the loop, and the
+                        // containing one is not necessarily the first.
+                        (string Network, int Cidr)? owner = VNetPrefixContaining(vnet, parts[0], cidr);
+
+                        if (existingSubnets.Any(e => AccountsFor(e, parts[0], cidr, owner)))
                         {
                             continue;
                         }
@@ -545,8 +550,32 @@ namespace Bastet.Services.Azure
         /// Equality is still honoured for targets, because an Azure subnet covering a whole VNet
         /// prefix is recorded by marking that very target fully allocated rather than by creating a
         /// child - so the target genuinely is the record of that range.
+        ///
+        /// EXCLUDING THE TARGET IS NOT ENOUGH, and that was the hole. Any OTHER containing row also
+        /// counted, including an ANCESTOR of the target. ValidateSubnetCreation forces every subnet
+        /// under its most specific container, so an install that models a top-down plan - a 10/8
+        /// root, a regional /12 aggregate - necessarily has such an ancestor above every import
+        /// target, and one hand-created row then made the whole inbound direction vacuous for
+        /// everything beneath it. A containing row is evidence only when it is itself INSIDE the
+        /// VNet address prefix the Azure range belongs to; a row that contains that prefix is an
+        /// ancestor of the target, not an allocation record.
+        ///
+        /// Two edges, both decided deliberately rather than inherited from a helper:
+        ///
+        /// A row EXACTLY the size of the VNet prefix does not account for ranges inside it.
+        /// IsSubnetContainedInParent is strict, so this falls out of the test above - it is pinned
+        /// by a test so that it stays a decision.
+        ///
+        /// When NO VNet prefix contains the range, fall back to the plain containment test rather
+        /// than reporting. ARM normally forbids a subnet outside its VNet's address space, but this
+        /// reconciler also assembles inventory under partial RBAC visibility, and reporting every
+        /// such range would produce items nobody can clear.
         /// </remarks>
-        private bool AccountsFor(ExistingSubnetSnapshot existing, string network, int cidr)
+        private bool AccountsFor(
+            ExistingSubnetSnapshot existing,
+            string network,
+            int cidr,
+            (string Network, int Cidr)? vnetPrefix)
         {
             if (string.Equals(existing.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
                 && existing.Cidr == cidr)
@@ -554,8 +583,48 @@ namespace Bastet.Services.Azure
                 return true;
             }
 
-            return !AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId)
-                   && ipUtilityService.IsSubnetContainedInParent(network, cidr, existing.NetworkAddress, existing.Cidr);
+            if (AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId))
+            {
+                return false;
+            }
+
+            if (!ipUtilityService.IsSubnetContainedInParent(network, cidr, existing.NetworkAddress, existing.Cidr))
+            {
+                return false;
+            }
+
+            return vnetPrefix is null
+                   || ipUtilityService.IsSubnetContainedInParent(
+                       existing.NetworkAddress, existing.Cidr, vnetPrefix.Value.Network, vnetPrefix.Value.Cidr);
+        }
+
+        /// <summary>
+        /// The VNet address prefix that contains a given Azure range, or null when none does.
+        /// A VNet has a list of prefixes and the containing one need not be the first.
+        /// </summary>
+        private (string Network, int Cidr)? VNetPrefixContaining(BulkAzureVNetViewModel vnet, string network, int cidr)
+        {
+            foreach (string prefix in vnet.Ipv4AddressPrefixes)
+            {
+                string[] parts = prefix.Split('/');
+
+                if (parts.Length != 2 || !int.TryParse(parts[1], out int prefixCidr))
+                {
+                    continue;
+                }
+
+                if (string.Equals(parts[0], network, StringComparison.OrdinalIgnoreCase) && prefixCidr == cidr)
+                {
+                    return (parts[0], prefixCidr);
+                }
+
+                if (ipUtilityService.IsSubnetContainedInParent(network, cidr, parts[0], prefixCidr))
+                {
+                    return (parts[0], prefixCidr);
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
