@@ -20,6 +20,24 @@ missing credential, or a result that cannot be classified without a decision.
 
 **State which mode is active before the first phase.**
 
+## All nine phases run. There is no partial pass.
+
+**A run that has not executed A through I is not an e2e pass and must not be reported as one.**
+
+The only legitimate reasons a phase does not run are a **missing prerequisite**, a **missing
+credential**, or a **rig that cannot be built**. Each of those stops the whole run and is reported as
+a **stop**, naming the blocker — not as a result with a gap in it. Running low on time, budget or
+context is **not** one of them; neither is a phase being expensive.
+
+If you genuinely cannot finish, say so **before** the phase table and call it an incomplete run in
+the first line. Never present seven phases as a pass and disclose the missing two underneath, and
+never let *"an explicit statement of what was not covered"* become permission to skip: that clause
+exists for a blocked prerequisite, not for work you chose not to do.
+
+The expensive phases are **F, G and I** — they need scratch builds and a browser. They are the ones
+most coupled to the code that deletes on external evidence, so they are the last things to drop and
+the first things to prepare. See *The rig*: their builds are made up front, not when the phase runs.
+
 ## Why this exists
 
 A green unit suite does not establish that the application works. Several classes of defect compile
@@ -154,6 +172,26 @@ Then:
 - **An inventory file**: append the full resource id of every Azure resource created, one per line.
   That file is what teardown deletes.
 
+## Build all THREE trees here, before any phase runs
+
+Phases F and I each need a modified build. Building them when the phase arrives puts the two most
+expensive setups at the end of the run, which is exactly when they get dropped. Build them now, while
+there is budget, and assert each compiles **0 warnings** before starting phase A:
+
+| tree | what it is | used by |
+|---|---|---|
+| **real** | the working tree, unmodified | A-E, G, H, and I's antiforgery/header/locking half |
+| **fault** | `git archive HEAD` copy + a fault-injecting decorator over `IAzureService`, registered only when `BASTET_E2E_FAULT` is set, plus an `ArmClientOptions.Transport` seam if mechanism (a) is wanted | F |
+| **roles** | `git archive HEAD` copy whose `DevAuthHandler` issues the role set named by `BASTET_E2E_ROLES` (`View`, `Edit`, `Delete`, `Admin`, or `none`) rather than Admin unconditionally | I's role-separation half |
+
+Both modified trees live **under the rig directory**, never in the real tree, and both gate their
+behaviour on an environment variable so the same binary still runs unmodified when it is unset.
+
+The fault decorator is the cheap mechanism (b): it substitutes `IAzureService` to drive the decision
+layer. Point it at `GetVNetInventory` (return `Success=false` with a distinct `ErrorMessage` per mode)
+and at `ConfirmResourcesAsync` (return `Unknown` / `NotVisible` for every id). That covers every case
+in phase F's table except the ones that need the real ARM-walking code, which is mechanism (a).
+
 ## Fixture matrix
 
 Build all of it. Each row exists because something in the application behaves differently for it.
@@ -254,10 +292,17 @@ Mutate Azure to produce all of them at once, then scan and assert each:
 | `RangeStillAllocatedInAzure` | delete and recreate a subnet under a new name, same prefix (Azure has no rename) - must be **withheld**, name the new owner, and warn |
 | `SubnetPrefixChanged` | move a subnet's prefix |
 | `VNetDeleted` | delete a VNet outright |
-| `VNetPrefixRemoved` | drop one address prefix from a two-space VNet |
+| `VNetPrefixRemoved` | drop one address prefix from a two-space VNet - **vacate it first**, see below |
 | `FullyAllocatingSubnetDeleted` | delete the subnet that marked a target fully allocated - review only |
 | `AzureRangeNotImported` | add a prefix to an already-imported subnet - inbound, **never deletable** |
 | `UnrecognisedResourceId` | a row whose `AzureResourceId` is not a parseable ARM id |
+
+> **Read the result of every mutation, and verify the state it was supposed to produce.** ARM refuses
+> to remove a VNet address prefix while a subnet still occupies it - `NetcfgSubnetRangeOutsideVnet` -
+> so the two-space fixture must have its spanning subnet narrowed **before** the prefix is dropped. A
+> builder that fires `az` and ignores the exit code leaves the status unproduced, and the phase then
+> reports a missing verdict as though the application had failed to emit it. Assert the mutation
+> landed (`az network vnet show`) before scanning.
 
 Plus: the inbound report fires **exactly once** for an n-prefix subnet - the inventory emits one row
 per prefix each carrying the whole list, so a naive walk reports it n times; a resource the credential
@@ -306,6 +351,9 @@ otherwise - and its **conditional** feature-flag gate, which applies only when t
 Azure state.
 
 ## F - ARM failure modes
+
+Runs against the **fault** tree, which was already built during the rig phase - see *Build all THREE
+trees here*. Do not build it now; if it is missing, the rig step was skipped and the run is invalid.
 
 There is **no transport seam**: `AzureArmClientProvider` builds `new ArmClient(credential)` with no
 `ArmClientOptions`. So use two mechanisms, both in **scratch copies** of the repo under the rig
@@ -401,8 +449,13 @@ Sweep **every controller action** against its declared policy - `RequireViewRole
 exceptions (`AccessDenied`, `Logout`, `SignedOut`, `SignInFailed`, the error routes).
 
 **The Development `DevAuthHandler` authenticates unconditionally with every role**, so a normal dev run
-makes every policy pass trivially and proves nothing. Role separation must be driven from a **scratch
-copy** whose handler issues a restricted role set, one run per role.
+makes every policy pass trivially and proves nothing. Role separation is driven from the **roles** tree
+built during the rig phase, one restart per role.
+
+> **Do not follow redirects when checking the `[AllowAnonymous]` exceptions.** `SignedOut` and
+> `SignInFailed` redirect an *authenticated* caller into the app, which then correctly refuses a
+> role-less principal - so following the redirect reports a 403 that belongs to `/Home`, not to the
+> anonymous endpoint. Assert on the endpoint's own status: 200 or 302, never 403.
 
 Also: antiforgery rejection on every state-changing endpoint, and the `RequestVerificationToken` header
 path the wizards use; security headers on 200, 404 **and** 500 (the middleware sits below the exception
@@ -429,6 +482,41 @@ So: on any failure, query the database or the API for the precondition, confirm 
 report. When the answer is that the test was wrong, **say so plainly** rather than quietly adjusting
 the check until it goes green.
 
+## Every absence assertion needs a positive control in the same run
+
+**A check that something is absent, suppressed, withheld or not reported proves nothing on its own.**
+It passes identically when the behaviour is correct and when the fixture never existed. So every such
+assertion is paired, in the same run and against the same scan, with a comparable case that *is*
+present, reported or offered.
+
+- "the covered range is not reported inbound" → **and** an uncovered range in the same VNet **is**
+- "the invisible resource is not offered for deletion" → **and** a genuinely deleted one still **is**
+- "nothing is offered while ARM is faulted" → **and** the unfaulted scan had absence rows to withhold
+- "the disabled row was not submitted" → **and** the enabled rows were
+
+Two real failures this rule exists for. A containment check passed while its fixture was an *exact*
+address match, so it exercised the equality arm and never touched containment at all. A locking check
+passed with every write completing in 0.05s, so nothing ever contended and the absence of a stranded
+lock meant nothing. Both looked green. Both measured nothing.
+
+State the control's result in the check's detail, so the report shows the pair.
+
+## Never guess a route, a field name, or a literal
+
+Read it from the controller, or harvest it from the rendered form. Guessing produces a failure that
+looks exactly like a defect, and three separate ones did:
+
+- **`[ActionName]` aliasing** means several POSTs go to the **same URL as their GET**:
+  `/Subnet/Delete/{id}` (field `Id`) and `/HostIp/Delete` (field `ip`), not a `...Confirmed` route.
+- **The typed confirmation word is `approved`** on every delete and purge path - subnet, host IP, both
+  purges and the reconcile commit. It is not `delete` and not `confirm`.
+- **`SetAllocationStatus` lives on `HostIpController`**, not `SubnetController`, and binds
+  `SubnetAllocationDto { SubnetId, IsFullyAllocated }`.
+
+Harvest forms with a real HTML parser over `input`/`textarea`/`select`, not a regex: a regex that
+assumes `name` precedes `value` silently drops `RowVersion`, and the POST then redisplays the form as
+**HTTP 200 with the row unchanged** - indistinguishable from a rejected edit.
+
 ## Restart the application after any rebuild before measuring
 
 `dotnet run` compiles at start. A result measured from a process that predates an edit describes the
@@ -441,6 +529,11 @@ the new build.
 - Kill only by **captured PID**. Never `pkill -f Bastet` or `pkill dotnet` - it kills sibling instances,
   and a careless pattern has more than once killed the operator's own shell.
 - Give every app instance its **own port and own catalog** so runs cannot collide.
+- **One catalog per phase, and every phase builds its own preconditions.** Never inherit state from an
+  earlier phase. Sharing a database is what turns a green check into a meaningless one: a phase that
+  archives absence rows leaves the next one with nothing to select, and a phase that assumes an import
+  an earlier one never performed reports a refusal that never happened. Both occurred. If a phase needs
+  drift, it creates that drift itself and asserts the precondition before asserting the behaviour.
 - Write **nothing** into the repository working tree - no scratch files, no logs, no PID files. One
   untracked file makes the tree dirty and invalidates the closing assertion.
 - Scratch copies of the repo live under the rig directory and are modified freely; the real tree is
@@ -467,9 +560,26 @@ In this order:
    recorded at preflight.
 4. **Report.**
 
-The report carries: a pass/fail table per phase; the full failure list with each failure classified as
-*application defect* or *invalid fixture*; **an explicit statement of what was not covered**; anything
-teardown failed to clean; and - always - a reminder to **revoke both service principal secrets**. This
-skill asked for them; this skill reminds you to kill them.
+## The report, in this shape
 
-A phase that finds nothing still reports its counts. "All green" without numbers is not a result.
+**Application failures come first, before any table.** That is the only part the owner asked for. If
+there are none, say so in one line. Do **not** open with what passed, and do **not** lead with, dwell
+on, or itemise your own broken checks - a bad check is a note in the failure list, not the story.
+
+Then the phase table, with a **run** column, so an unrun phase cannot be written up as a pass:
+
+| phase | run | checks | app failures |
+|---|---|---|---|
+| A discovery | yes | 22/22 | 0 |
+| ... | | | |
+| F ARM failure modes | yes | 20/20 | 0 |
+
+A phase that did not run says **no** and gives the blocker. Any `no` in that column means the run is
+**incomplete**, and the first line of the report says so.
+
+Then, and only then: each failure classified *application defect* or *invalid fixture/check* with the
+evidence that settled it; anything teardown failed to clean; and - always - a reminder to **revoke
+both service principal secrets**. This skill asked for them; this skill reminds you to kill them.
+
+A phase that finds nothing still reports its counts. "All green" without numbers is not a result, and
+neither is a count from a phase whose absence assertions had no positive control.
