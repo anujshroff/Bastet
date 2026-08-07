@@ -500,6 +500,59 @@ public class AzureControllerTests : IDisposable
         Assert.Contains(resultObj.subnets, s => s.Name == "subnet2");
     }
 
+    /// <summary>
+    /// O6. GetSubnets filters out every Azure prefix BASTET already records, and the target's own
+    /// row is always in that table - so the fully-encompassing row, whose address IS the target's
+    /// address by definition, was removed every time. The wizard then said "No compatible subnets
+    /// found in this Virtual Network" about a VNet holding exactly one, and the whole
+    /// mark-fully-allocated import became unreachable from the only UI that produces it.
+    ///
+    /// Neither of round 14's AzureController hunks carried a test, which is why this slipped past.
+    /// </summary>
+    [Fact]
+    public async Task GetSubnets_TheRowEncompassingTheTargetPrefix_SurvivesTheAlreadyRecordedFilter()
+    {
+        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-enc";
+
+        List<AzureVNetViewModel> vnets =
+            [new() { ResourceId = VNetId, Name = "vnet-enc", AddressPrefixes = ["10.171.0.0/24"] }];
+
+        // One subnet covering the whole VNet prefix, and one ordinary child already imported.
+        List<AzureSubnetViewModel> subnets =
+        [
+            new() { Name = "snet-full", AddressPrefix = "10.171.0.0/24", HasMultipleAddressSchemes = false },
+            new() { Name = "snet-child", AddressPrefix = "10.171.0.0/25", HasMultipleAddressSchemes = false }
+        ];
+
+        // The target itself, plus a row recording the ordinary child - the top-up case N4 added the
+        // filter for, which must keep working.
+        _context.Subnets.Add(new Subnet { Id = 90, Name = "target", NetworkAddress = "10.171.0.0", Cidr = 24 });
+        _context.Subnets.Add(new Subnet { Id = 91, Name = "child", NetworkAddress = "10.171.0.0", Cidr = 25, ParentSubnetId = 90 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        AzureController controller = new(
+            _context,
+            new MockAzureService(true, CreateTestSubscriptions(), vnets, subnets),
+            new AzureSubnetSnapshotService(_context),
+            NullLogger<AzureController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        JsonResult json = Assert.IsType<JsonResult>(await controller.GetSubnets(VNetId, 90));
+        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
+
+        Assert.NotNull(response);
+        Assert.True(response.success);
+        Assert.NotNull(response.subnets);
+
+        // The encompassing row survives...
+        Assert.Contains(response.subnets, s => s.Name == "snet-full");
+
+        // ...and N4's top-up filter is untouched: the already-imported child is still dropped.
+        Assert.DoesNotContain(response.subnets, s => s.Name == "snet-child");
+    }
+
     [Fact]
     public async Task BulkGetVNets_AzureReadFails_ReportsFailureNotEmptySubscription()
     {

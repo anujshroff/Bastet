@@ -172,71 +172,23 @@ _Tests: 868 → 871. Three new in `AzureReconcilerInboundTests`, all failing aga
 
 ---
 
-## O6 — Round 14's "already recorded" filter in the single-VNet wizard deletes the fully-encompassing Azure subnet row, so that import path is unreachable and BASTET reports an Azure-allocated range as free with nothing detecting it `[x2]`
+## O6 — Round 14's "already recorded" filter in the single-VNet wizard deletes the fully-encompassing Azure subnet row, so that import path is unreachable and BASTET reports an Azure-allocated range as free with nothing detecting it `[x2]` — FIXED
 
-**Citation:** `src/Bastet/Controllers/AzureController.cs:176`.
-**Confidence:** confirmed.
+_O6 is fixed and committed. `AzureController.GetSubnets` exempts the fully-encompassing row from the already-recorded filter — `a.FullyEncompassesVNetPrefix || !alreadyRecorded.Contains(...)` — exactly as `AzureBulkImportPlanner.AnnotateSubnet` already did by short-circuiting the encompassing case before its exact-match test. One line; one copy of a duplicated rule catching up with the other._
 
-### What goes wrong
+_The premise the fix rests on was checked rather than assumed: `BastetDbContext` declares `HasIndex(s => new { s.NetworkAddress, s.Cidr }).IsUnique()`, and `GetCompatibleVNets` only offers a VNet whose address prefix equals the target's, so the target's own row is the only row that can ever carry the encompassing prefix. The exemption therefore cannot re-admit anything else._
 
-`AzureService.GetCompatibleSubnets` correctly returns a fully-encompassing subnet with `FullyEncompassesVNetPrefix=true` — it only sets that flag when the Azure prefix's network **and** cidr equal the target's. `AzureController.GetSubnets` then filters the list against every `{NetworkAddress}/{Cidr}` in the `Subnets` table, which **by construction** contains the target's own key. The row is therefore always removed, and the wizard renders *"No compatible subnets found in this Virtual Network."* — a false statement about Azure.
+_It degrades safely if the target is later populated: `BatchCreateChildSubnets` already refuses an encompassing entry alongside siblings, and `ValidateSubnetCanBeFullyAllocated` (`Services/Validation/HostIpValidationService.cs:253-258` — the finding's path for this was wrong) already refuses a parent with children, so a top-up that re-offers the row fails with a specific message and a rollback rather than writing anything wrong._
 
-The whole fully-encompassing branch downstream (`_ImportScripts.cshtml:336`, `SubnetController.Azure.cs:193-218`, `:356-381`, `:421-427`) becomes unreachable from the only UI that produces it. `/Subnet/Details/1` goes on printing the `/24` as free with a **Create Subnet** button. Nothing else catches it: the target is never Azure-linked, so it is absent from `GetAzureLinkedSubnetsAsync`, the VNet is outside `importedVNetIds`, and the reconcile scan reports *"nothing to clean up."*
+_Proven by live A/B, both builds against the same Azure fixture `rig-o6-vnet` `10.171.0.0/24` whose one subnet `rig-o6-snetfull` occupies the whole prefix, with a BASTET target created by an ordinary `POST /Subnet/Create`. Unfixed HEAD: `GET /Azure/GetSubnets` returned `subnets: []` and `"No compatible subnets found in this VNet"` — a false statement about a VNet ARM reports as holding exactly one, and a dead end with no checkboxes and no Import button. Fixed, same VNet and same target: the row is offered, carrying `fullyEncompassesVNetPrefix: true`._
 
-On the same build and the same Azure state the **bulk** wizard, whose copy of the identical rule short-circuits the encompassing case **before** the exact-match test (`AzureBulkImportPlanner.AnnotateSubnet:360-369`), still offers the subnet as `Available`/selectable. One copy of the rule was written with the encompassing case in mind and the other was not.
+_The downstream branch was then driven to completion on the fixed build to prove it is reachable again, not merely listed: `POST /Subnet/BatchCreateChildSubnets` with `FullyEncompassesVNetPrefix=true` returned 200, and the row became `IsFullyAllocated=1` with `AzureResourceId` stamped with the VNet id. `GET /Subnet/Details/3` afterwards contains neither "Unallocated IP Ranges" nor "254 IP addresses" — the range Azure has assigned in full is no longer advertised as free space. On HEAD none of that is reachable from this wizard._
 
-`git log -S"alreadyRecorded" -- src/Bastet/Controllers/AzureController.cs` returns exactly one commit: `8afa2df` — round 14's `N4`, one commit before HEAD.
+_**The shared-helper form the verifier recommended was not shipped, and this is a recommendation to the owner rather than a decision taken.** Extracting "a range BASTET already records, unless it is the target itself" into one helper called by both `GetSubnets` and `AnnotateSubnet` would also close the residue the verifier named — a **non**-encompassing Azure subnet whose prefix collides with an unrelated BASTET subnet elsewhere in the tree is still silently dropped from this list, where the bulk planner shows the same collision as `Blocked` with a reason. Closing that means this endpoint returning a status and reason per row and the wizard rendering them, which is a change to the endpoint's contract and the wizard's markup, beyond what this finding reproduced. It is the fourth instance this round of a rule living in two copies, and it is on the watch list as such._
 
-### Reproduced
+_Two corrections to the finding, both recorded because they change what the reader should conclude. The headline's "the whole mark-fully-allocated import path is unreachable" is wrong as written — only the single-VNet wizard's copy was; the bulk wizard reached a completed commit on the HEAD build against the same state. And "with nothing detecting it" is true of the reconciler, the Details page and this wizard, but the bulk wizard both names the condition and can repair it. Nothing on the dead-end screen said so, which is why the severity stands._
 
-Fixture: `az network vnet create -n rig-r15-vc1-vnetfull --address-prefixes 10.171.0.0/24 --subnet-name rig-r15-vc1-snetfull --subnet-prefixes 10.171.0.0/24`, and a BASTET target `10.171.0.0/24` created by an ordinary `POST /Subnet/Create`.
-
-```
-GET /Azure/GetSubnets?vnetResourceId=.../rig-r15-vc1-vnetfull&subnetId=1
-  -> {"success":true,"subnets":[],"message":"No compatible subnets found in this VNet"}
-```
-
-for a VNet ARM reports as having exactly one subnet occupying the whole prefix. In real Chromium: `no-subnets visible: True | subnet-selection visible: False`, message *"No compatible subnets found in this Virtual Network. Back to VNets"* — no checkboxes, no Import button, a dead end.
-
-`GET /Subnet/Details/1`: *"10.171.0.0 | 10.171.0.255 | 254 IP addresses | [Create Subnet]"*, and `N4`'s advisory note **absent** (`'according to what BASTET has imported' in html` → False — it is gated on `AzureResourceId`, which the refused import never stamps). `POST /Azure/ReconcileScan`: `items: [], reviewItems: [], globalErrors: [], warnings: [], canCommit: false`.
-
-**Same build, same database, same Azure state, bulk wizard:** subnet `rig-r15-vc1-snetfull` `statusName "Available"`, `isSelectable true`, reason *"Covers the whole VNet prefix, so it marks the target fully allocated instead of being created."* The two wizards contradict each other on the same row.
-
-**Attribution control** — a copy of the repo with one predicate changed at `:176`, built 0 warnings, run on its own port and catalog:
-
-```
-GET /Azure/GetSubnets -> [{"name":"rig-r15-vc1-snetfull","addressPrefix":"10.171.0.0/24",
-                           "fullyEncompassesVNetPrefix":true}]
-POST /Subnet/BatchCreateChildSubnets ... FullyEncompassesVNetPrefix=true -> 302
-SQL: Id=1 IsFullyAllocated=1  Description="Fully allocated by Azure subnet 'rig-r15-vc1-snetfull'..."
-     AzureResourceId=.../virtualNetworks/rig-r15-vc1-vnetfull
-Details page no longer contains "Unallocated IP Ranges" or "254 IP addresses"
-```
-
-One line is the sole cause. **Fix-soundness control on the same patched build:** `N4`'s top-up filter is fully preserved — after importing `10.10.1.0/24` from a multi-subnet VNet, re-querying returns only the two not-yet-imported prefixes.
-
-### Fix
-
-Exempt the encompassing row from the already-recorded filter, exactly as the bulk planner's `AnnotateSubnet` does:
-
-```csharp
-azureSubnets = [.. azureSubnets.Where(a => a.FullyEncompassesVNetPrefix
-                                        || !alreadyRecorded.Contains(a.AddressPrefix ?? string.Empty))];
-```
-
-It degrades safely if the target is later populated: `BatchCreateChildSubnets` already refuses an encompassing entry alongside siblings (`SubnetController.Azure.cs:210-219`) and `ValidateSubnetCanBeFullyAllocated` already refuses a parent with children (`Services/Validation/HostIpValidationService.cs:253-258`), so a top-up that re-offers the row fails with a specific message and a rollback rather than writing anything wrong.
-
-**Better:** extract the rule — *"a range BASTET already records, unless it is the target itself"* — into one helper both the wizard endpoint and `AnnotateSubnet` call, so the two copies cannot drift again.
-
-**Cheaper interim:** build `alreadyRecorded` from `context.Subnets.Where(s => s.Id != subnetId)`. One clause, no new concept.
-
-> **The verifier judged the fix sound — built and measured, not read — with three non-blocking notes.** The path in the finder's text was wrong: the children guard is at `src/Bastet/Services/Validation/HostIpValidationService.cs:253-258`, not `src/Bastet/Services/`. The cheaper interim's load-bearing premise was checked: `BastetDbContext.cs:31-32` declares `HasIndex(s => new { s.NetworkAddress, s.Cidr }).IsUnique()`, so the target's own row is the only row that can carry the encompassing prefix — and the two forms cannot diverge even in principle, because `GetCompatibleVNets` only offers a VNet whose address prefix equals the target. And the fix deliberately leaves a residue worth one sentence: a **non**-encompassing Azure subnet whose prefix collides with an unrelated BASTET subnet elsewhere in the tree is still silently dropped from this list, where the bulk planner shows the same collision as `Blocked` with a reason. The shared-helper form closes that too and is the version to take.
->
-> One measured behaviour confirmed harmless: after the fix, `GetSubnets` re-offers the encompassing row even when the target is already fully allocated and Azure-linked. It is unreachable through the UI (`GET /Azure/Import/1` 302s once `IsFullyAllocated` is set) and a direct re-post is idempotent — `AzureResourceId` compares equal so the repoint guard at `:391-408` does not fire, and `AppendFullyAllocatedNote` strips before re-appending (`M3`/`N8`), so no note stacks.
->
-> **Regression test the fix should carry**, since neither of `N4`'s `AzureController` hunks has one: a `GetSubnets` test with a persisted target whose `{NetworkAddress, Cidr}` equals the Azure prefix, asserting the `FullyEncompassesVNetPrefix` row survives the filter while a sibling child prefix already recorded in the tree does not.
->
-> **Two corrections to the finding, neither fatal.** The headline's *"the whole mark-fully-allocated import path is unreachable"* is wrong as written — only the single-VNet wizard's copy is; the bulk wizard was driven to a completed commit on the HEAD build against the same database and Azure state. And *"with nothing detecting it"* is true of the reconciler, the Details page and the single-VNet wizard, but the bulk wizard both names the condition and can repair it — and nothing on the dead-end screen says so. Severity stays **high**: the wrong output is a live Azure query answering "no compatible subnets" when the VNet holds exactly one and `GetCompatibleSubnets` returned it, and the consequence that persists is an IPAM advertising 254 free addresses over a `/24` Azure has assigned in full, with `N4`'s own caveat note suppressed. The existence of a working second route does not lower it — nothing points the operator at that route.
+_Tests: 871 → 872. One in `AzureControllerTests`, failing against the unfixed controller: a persisted target whose `{NetworkAddress, Cidr}` equals the Azure prefix, asserting the `FullyEncompassesVNetPrefix` row survives the filter **and** that a sibling child prefix already recorded in the tree is still dropped, so `N4`'s top-up filter is pinned alongside the exemption. Neither of `N4`'s `AzureController` hunks carried a test, which is why this slipped past._
 
 ---
 

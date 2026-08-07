@@ -173,7 +173,20 @@ namespace Bastet.Controllers
                         .ToListAsync(),
                     StringComparer.OrdinalIgnoreCase);
 
-                azureSubnets = [.. azureSubnets.Where(a => !alreadyRecorded.Contains(a.AddressPrefix ?? string.Empty))];
+                // ...except the row that encompasses the target's whole prefix. That row's address
+                // IS the target's address by definition, so the target's own row - which is always
+                // in the table - matched it every time and removed it unconditionally, leaving the
+                // wizard saying "No compatible subnets found in this Virtual Network" about a VNet
+                // holding exactly one. The whole mark-fully-allocated import became unreachable from
+                // this wizard, while the Details page went on advertising the range as free.
+                //
+                // AzureBulkImportPlanner.AnnotateSubnet, which is the same rule, short-circuits the
+                // encompassing case before its exact-match test; this is that copy catching up.
+                // {NetworkAddress, Cidr} is unique (BastetDbContext), and GetCompatibleVNets only
+                // offers a VNet whose address prefix equals the target's, so the target's own row is
+                // the only row that can ever carry this prefix.
+                azureSubnets = [.. azureSubnets.Where(a => a.FullyEncompassesVNetPrefix
+                                                           || !alreadyRecorded.Contains(a.AddressPrefix ?? string.Empty))];
 
                 return azureSubnets.Count == 0
                     ? Json(new
