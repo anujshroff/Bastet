@@ -4,6 +4,27 @@
 
 ---
 
+## Reconciliation — final state
+
+**All sixteen findings are fixed, verified and struck.** One commit per finding, sixteen in all, on `audit/round-15`.
+
+| | |
+|---|---|
+| Build | 0 warnings after deleting `bin`/`obj` and rebuilding `--no-incremental` |
+| Tests | 847 → **892** (+45, none removed) |
+| App sweep | 22 checks over every major area, asserting rendered content and page titles rather than HTTP 200 — all pass |
+| Security headers | `X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy`, `X-Frame-Options` all present on a normal response |
+| Log | **0 `fail:`, 0 `crit:`**. Two `warn:` categories, both pre-existing and environmental: EF's multiple-collection-include advisory on the Details query, and Development's DataProtection "no XML encryptor" notice |
+| Azure end to end | subscriptions → discovery (both wizards) → single-VNet import → bulk preview and commit → reconcile scan → delete commit |
+| Discrimination | **both counter-tests pass** (below) |
+| `main` | `d84fda0`, byte-identical to the pre-round state |
+
+**The two counter-tests, which are what stop an over-blocking regression passing as a fix.** A VNet was created in the resource group only principal B can see and imported while the app ran as B; the app was then restarted as principal A, which has no assignment on that group, against the same database. Scan: **0 items offered for deletion**, `canCommit: false`, and a warning naming the cause — *"2 Azure-linked subnet(s) were missing from the subscription listing, and Azure denied access when asked about them directly … They have been withheld from deletion."* Conversely, a subnet in A's own group was imported and then genuinely deleted in Azure: it was **still offered**, `canCommit: true`, and the delete committed `200 {"targetsDeleted":1,"subnetsArchived":1}`. Withholding what it cannot see, deleting what is really gone.
+
+**Deliberately not done, each recorded in full in the struck entry it belongs to.** Nothing recovers rows already archived by O1, O2 or O3 — `DeletedSubnets` has no restore path and `Subnet.AzureResourceId` has no editor, and the owner chose the code fix over adding an admin repair action. O6's shared-helper consolidation, O9's eligibility-gate consolidation and O12's `AnnotatePrefix` caveat are recommendations to the owner rather than changes taken, because each is a refactor or a behaviour change beyond what the finding reproduced. O7's end-to-end stall was **not** re-reproduced live this round — the mechanism was measured on the rig's own SQL Server but the stall apparatus did not fire, and that entry says so plainly rather than implying a measurement it does not have.
+
+---
+
 ## Verdict
 
 **Eight findings need a decision from you and here is what it costs.** Read this table before anything else in the file; it is the part that cannot be delegated.
