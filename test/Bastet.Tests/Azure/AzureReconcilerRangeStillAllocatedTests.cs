@@ -127,9 +127,99 @@ public class AzureReconcilerRangeStillAllocatedTests
         Assert.Equal(AzureReconcileStatus.RangeStillAllocatedInAzure, Assert.Single(plan.ReviewItems).Status);
     }
 
+    /// <summary>
+    /// O1. The guard above matched prefix STRINGS, so re-carving a range while re-creating the
+    /// subnet - one ordinary Azure operation, there being no rename - defeated it. Both defences
+    /// went quiet at once and the row was offered for irreversible deletion on a plan that stated
+    /// no fact at all about the range Azure was holding at that moment.
+    /// </summary>
+    [Fact]
+    public void SubnetDeleted_ButTheRangeWasRecarvedUnderANewId_IsWithheldAndNamesTheLivePrefix()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.191.0.0/16"], AzSubnet("vnet-a", "sn-c-v2", "10.191.20.0/25"))),
+            Linked(2, "app", "10.191.20.0", 24, SubnetId("vnet-a", "sn-c")));
+
+        Assert.Empty(plan.Items);
+
+        AzureReconcileItem review = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.RangeStillAllocatedInAzure, review.Status);
+        Assert.Contains("10.191.20.0/25", review.Reason);
+        Assert.Contains("sn-c-v2", review.Reason);
+    }
+
+    /// <summary>
+    /// The owner's call on O1: an overlapping owner gets NO Re-link button. Re-linking would point
+    /// the row at a subnet holding a different range, producing SubnetPrefixChanged on the very next
+    /// scan - the same defect on a loop, on a column no screen can edit. The reason must instead
+    /// name the exit that was measured to work.
+    /// </summary>
+    [Fact]
+    public void AnOverlappingLiveOwner_OffersNoRelinkSuggestionAndNamesTheExit()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.191.0.0/16"], AzSubnet("vnet-a", "sn-c-v2", "10.191.20.0/25"))),
+            Linked(2, "app", "10.191.20.0", 24, SubnetId("vnet-a", "sn-c")));
+
+        AzureReconcileItem review = Assert.Single(plan.ReviewItems);
+        Assert.True(string.IsNullOrEmpty(review.SuggestedAzureResourceId));
+        Assert.True(string.IsNullOrEmpty(review.SuggestedAzureSubnetName));
+        Assert.Contains("delete", review.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// An exactly-equal live owner keeps the Re-link it already had. Overlap handling must not cost
+    /// the repair route on the case the repair was designed for.
+    /// </summary>
+    [Fact]
+    public void AnExactlyEqualLiveOwner_StillOffersTheRelinkSuggestion()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.111.0.0/16"], AzSubnet("vnet-a", "sn-a2", "10.111.5.0/24"))),
+            Linked(2, "app", "10.111.5.0", 24, SubnetId("vnet-a", "sn-a")));
+
+        AzureReconcileItem review = Assert.Single(plan.ReviewItems);
+        Assert.Equal(SubnetId("vnet-a", "sn-a2"), review.SuggestedAzureResourceId);
+        Assert.Equal("sn-a2", review.SuggestedAzureSubnetName);
+    }
+
+    /// <summary>
+    /// The other overlap direction: Bastet recorded a /25 and Azure now holds the containing /24.
+    /// Deliberately withheld too - for an IPAM the safe answer to "part of this range is still
+    /// assigned" is the same whichever way the containment runs.
+    /// </summary>
+    [Fact]
+    public void SubnetPrefixChanged_WhereTheLiveOwnerContainsTheRecordedRange_IsWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.191.0.0/16"],
+                AzSubnet("vnet-a", "sn-w", "10.191.40.0/24"))),
+            Linked(2, "app", "10.191.40.0", 25, SubnetId("vnet-a", "sn-old")));
+
+        Assert.Empty(plan.Items);
+        Assert.Equal(AzureReconcileStatus.RangeStillAllocatedInAzure, Assert.Single(plan.ReviewItems).Status);
+    }
+
     // -------------------------------------------------------------------------
     // Counter-tests - the reconciler must still DISCRIMINATE, not merely block
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The over-blocking counter-test for O1. A live range in the row's OWN VNet that does not
+    /// overlap the recorded range must leave the row deletable - otherwise the fix trades a silent
+    /// archive for a reconciler that can never clean anything up.
+    /// </summary>
+    [Fact]
+    public void ALiveRangeInTheSameVNetThatDoesNotOverlap_LeavesTheRowDeletable()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.191.0.0/16"],
+                AzSubnet("vnet-a", "sn-neighbour", "10.191.21.0/24"))),
+            Linked(2, "app", "10.191.20.0", 24, SubnetId("vnet-a", "sn-c")));
+
+        Assert.Equal(AzureReconcileStatus.SubnetDeleted, Assert.Single(plan.Items).Status);
+        Assert.Empty(plan.ReviewItems);
+    }
 
     /// <summary>The whole point of the feature. A genuinely deleted subnet whose range nothing in
     /// Azure holds any more must still be offered for deletion.</summary>

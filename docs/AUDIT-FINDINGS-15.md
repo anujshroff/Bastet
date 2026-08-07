@@ -70,91 +70,25 @@ All five `[x2]` candidates survived; all three refutations were `[x1]`. **All si
 
 # Critical
 
-## O1 — Reconcile archives a row whose address range is still assigned in Azure, silently, whenever the range was re-carved: `N1`'s still-allocated guard matches prefixes byte-for-byte only `[x2]`
+## O1 — Reconcile archives a row whose address range is still assigned in Azure, silently, whenever the range was re-carved: `N1`'s still-allocated guard matches prefixes byte-for-byte only `[x2]` — FIXED
 
-**Citation:** `src/Bastet/Services/Azure/AzureReconciler.cs:515-543` — the exact-prefix key at `:537`; inbound suppression at `:495-496`.
-**Confidence:** confirmed.
+_O1 is fixed and committed. `FindLiveOwnerOfRange` no longer asks only "is this exact prefix string still assigned?". The exact key stays as the cheap first test, and when it misses, a second index — `livePrefixesByVNet`, built in the same inventory pass and grouped by VNet rather than keyed by prefix — is walked for any live Azure prefix that **overlaps** the row's recorded range, in either direction. An overlapping owner routes the row to `ReviewItems` as `RangeStillAllocatedInAzure`, exactly as an exact owner already did, so it is never offered for deletion._
 
-### What goes wrong
+_All five of the verifier's corrections were taken, and the shape follows from them. (1) The method lost `static` so it can reach the primary-constructor `ipUtilityService`; no new dependency, but the signature did change, as the verifier said it would. (2) There was nothing to walk — `livePrefixOwners` is keyed `{vnetResourceId}|{prefix}` and supports exact lookup only — so rather than scanning every key and splitting on `|` per stale row, the second index is built in the same loop at a cost of one dictionary lookup and a walk of one VNet's prefixes. (3) **The shipped sentence is not reused.** It asserts "The range X is still assigned in Azure", which is false when only part of the recorded range is assigned; an overlapping owner gets its own sentence naming the live prefix, the recorded prefix, and the relationship between them. (4) `SuggestedAzureResourceId` is deliberately left unset for a non-equal owner, and the code says so at the assignment: the view renders the Re-link button on the presence of a suggestion and `RelinkAzureSubnet` 409s without one, so no suggestion means no repair route. (5) The review reason names the exit, because the row is otherwise stranded — no screen can edit `AzureResourceId`._
 
-`FindLiveOwnerOfRange` asks "is this range still assigned in Azure?" by building one key, `{vnetId}|{NetworkAddress}/{Cidr}`, and looking it up in an index of live Azure subnet prefixes. It is string equality. Azure has no subnet rename, so re-organising a subnet is delete-and-recreate, and re-carving a prefix while doing so is ordinary.
+_**The owner decided the overlap case gets no Re-link button**, and that decision is why (4) is written as a branch rather than an unconditional assignment. Re-linking an overlapping row would point it at a subnet holding a *different* range, producing `SubnetPrefixChanged` on the very next scan — the same defect on a loop, on a column nothing can subsequently edit. An exactly-equal owner keeps the Re-link it already had; `AnExactlyEqualLiveOwner_StillOffersTheRelinkSuggestion` pins that the overlap work did not cost the repair route on the case the repair was designed for._
 
-Real inputs: VNet `rig-r15-b3deep-vnet1` (`10.90.0.0/16`) with one subnet `rig-r15-b3deep-sn-c` owning `10.90.20.0/24` and `10.90.22.0/24`. Both imported, giving BASTET rows id 2 and id 3, both carrying that subnet's resource id. The subnet is then deleted and recreated as `rig-r15-b3deep-sn-c-v2` owning `10.90.20.0/25` and `10.90.22.0/24`.
+_Proven by live A/B on identical Azure state, both builds driven through the real endpoints against the same subscription. Fixture: `rig-o1-vnet` (`10.191.0.0/16`) with one subnet `rig-o1-sn-c` owning `10.191.20.0/24` and `10.191.22.0/24`; both imported through `POST /Subnet/BulkCreateFromAzurePlan`, baseline scan clean on both builds. The subnet was then deleted and recreated as `rig-o1-sn-c-v2` owning `10.191.20.0/25` and `10.191.22.0/24` — one re-carve, Azure having no rename. Unfixed HEAD (`a5a2c6e`, `git archive` copy, own port and catalog): `canCommit: true`, `ITEM id=2 10.191.20.0/24 SubnetDeleted "The Azure subnet this was imported from no longer exists."`, and `10.191.20.0/25` appears **0 times** in the entire plan — the operator is asked to approve an irreversible archive on a plan that states no fact about the range Azure is holding. Fixed, same Azure state: `canCommit: false`, `items: []`, both rows in `ReviewItems`, the re-carved one carrying `suggestion=(none)` and the reason "Azure subnet 'rig-o1-sn-c-v2' … now holds 10.191.20.0/25, which overlaps the recorded range 10.191.20.0/24", and the plan mentions the live `/25`. The exactly-matched row kept its Re-link suggestion in the same scan, so the two paths are visibly distinguished on one screen._
 
-One event, two rows, two different verdicts. Row 3 is protected as `RangeStillAllocatedInAzure` — review-only, Re-link offered, named in a warning — because its prefix string is unchanged. Row 2 is offered for deletion as `SubnetDeleted` with the reason *"The Azure subnet this was imported from no longer exists."*, and **nothing anywhere in the plan says that `10.90.20.0/25` is at that moment assigned to `rig-r15-b3deep-sn-c-v2`**. Both defences go quiet at once: `FindLiveOwnerOfRange` misses because the live owner holds a `/25`, and `ReportAzureRangesNoBastetSubnetRecords` does not report the `/25` either, because `AccountsFor`'s containment arm treats the very row about to be archived as accounting for it.
+_**The regression the verifier warned about is real, was measured, and is accepted deliberately.** The widen direction — BASTET recorded a `/25`, Azure now holds the containing `/24` — is an overlap too and is now withheld to review where it was previously a deletable `SubnetPrefixChanged`. That converts a class of currently-deletable rows into stranded review rows, which is why correction (5)'s exit route is load-bearing rather than cosmetic. It is the safe direction for an IPAM: the answer to "part of this range is still assigned in Azure" should not depend on which way the containment runs. `SubnetPrefixChanged_WhereTheLiveOwnerContainsTheRecordedRange_IsWithheld` pins it so the behaviour is a decision rather than an accident._
 
-The operator approves an irreversible archive on a plan that states no fact about the live range. `DeletedSubnets` has no restore path. The range only becomes visible on the **next** scan, after the row is gone.
+_The interim the finding offered was **not** shipped and is not needed. It excluded rows already routed into `plan.Items` from `AccountsFor`'s suppression so the inbound pass would name the live range before the archive; with the primary fix the overlapping row never reaches `plan.Items` at all, so there is nothing to exclude. The verifier's correction to that interim — that scoping it to `ReviewItems` as well would print a falsehood — is moot for the same reason, and is recorded here only so a later round does not re-derive it._
 
-### Reproduced
+_Index hygiene, per round 14's watch list and this round's: `livePrefixesByVNet` accumulates into `Dictionary<string, List<AzureLivePrefix>>` and never `ToDictionary`. `DuplicateRangesAcrossVNets_DoNotThrow` already covers the duplicate-prefix case and still passes against the new index._
 
-Own instance `http://127.0.0.1:5378`, catalog `bastet_verc3`, own Azure fixture in `bastet-visible`, independent address space (`10.191.x`, not the finder's `10.90.x`).
+_Not done, deliberately: nothing recovers rows already archived by this defect. `DeletedSubnets` has no restore path and the archive drops `AzureResourceId`, both carried forward on the watch list. The measured recovery is re-import — after the archive, `BulkGetVNets` reports the live prefix as `Available` on a `WillUpdateExisting` target — and the new review reason names that route._
 
-```
-az network vnet create -g bastet-visible -n rig-r15-vc3-vnet1 --address-prefixes 10.191.0.0/16
-az network vnet subnet create -g bastet-visible --vnet-name rig-r15-vc3-vnet1 \
-    -n rig-r15-vc3-sn-c --address-prefixes 10.191.20.0/24 10.191.22.0/24
-drive.py import   # POST /Azure/BulkImportPreview then POST /Subnet/BulkCreateFromAzurePlan
-drive.py scan     # baseline: scanSucceeded True, 0 items, 0 review items, 0 warnings
-az network vnet subnet delete -g bastet-visible --vnet-name rig-r15-vc3-vnet1 -n rig-r15-vc3-sn-c
-az network vnet subnet create -g bastet-visible --vnet-name rig-r15-vc3-vnet1 \
-    -n rig-r15-vc3-sn-c-v2 --address-prefixes 10.191.20.0/25 10.191.22.0/24
-drive.py scan
-```
-
-The scan:
-
-```
-ITEMS:   id=2  10.191.20.0/24  SubnetDeleted
-         "The Azure subnet this was imported from no longer exists."
-REVIEW:  id=3  RangeStillAllocatedInAzure
-         "... The range 10.191.22.0/24 is still assigned in Azure to subnet
-          'rig-r15-vc3-sn-c-v2' ... Re-link it to that Azure subnet."
-WARNINGS: "1 subnet(s) were withheld ... 'rig-r15-vc3-sn-c-v2' in VNet 'rig-r15-vc3-vnet1'."
-
-grep -c "10.191.20.0/25" over the whole saved plan JSON = 0
-```
-
-The archive was then committed the way an operator does — confirmation `"approved"`, statuses carrying the exact approved verdict — and returned `200 {"success":true,"targetsDeleted":1,"subnetsArchived":1,"hostIpsArchived":0}`. Both `N2`'s approved-verdict check and `ConfirmProposedDeletionsAsync` passed it through, correctly: ARM genuinely 404s the old resource id. `Subnets` = {1, 3}; `DeletedSubnets` = `rig-r15-vc3-sn-c (10.191.20.0-24)`.
-
-`GET /Subnet/Details/1` afterwards:
-
-```
-Unallocated IP Ranges
-  10.191.0.0    10.191.21.255     5,631 IP addresses   [Create Subnet]
-  10.191.23.0   10.191.255.254   59,647 IP addresses   [Create Subnet]
-```
-
-The first row covers `10.191.20.0`–`10.191.20.127`, which Azure has assigned. `N4`'s advisory note is present but names no range and no Azure subnet.
-
-The proof that the suppression is the archived row's own doing: re-running the identical scan **after** the archive now emits
-
-```
-id=0  rig-r15-vc3-sn-c-v2  10.191.20.0/25  AzureRangeNotImported
-      "... owns 10.191.20.0/25, which no BASTET subnet records.
-       BASTET is reporting that range as free space."
-```
-
-Nothing changed between the two scans except that row 2 was archived.
-
-**Control arm** (in-place widen `10.191.40.0/25` → `/24`): the row *is* offered for deletion as `SubnetPrefixChanged` and the guard still does not fire — but the plan is not silent there, because the item's own reason names the live prefix and the inbound pass reports it. The superset direction is the weaker variant; the narrowing-under-a-new-resource-id headline, where both channels go silent, is the one that reproduced. **Recovery measured:** after the archive, `GET /Azure/BulkGetVNets` reports `10.191.20.0/25` as `Available` on a `WillUpdateExisting` target, so re-import is possible.
-
-### Fix
-
-Make `FindLiveOwnerOfRange` ask whether any live Azure prefix in the row's own VNet **overlaps** the row's range, not whether a byte-identical prefix string exists. Keep the current exact-key hit as the first, cheap test, then fall back to testing containment in both directions with `IIpUtilityService.IsSubnetContainedInParent` — `AzureReconciler` already takes `IIpUtilityService` for the inbound pass, so no new dependency. An overlapping-but-not-equal owner must not stay in `plan.Items`: route it to `ReviewItems` with a reason that names the live prefix.
-
-**Cheaper interim** (three lines, and it puts the fact in front of the operator *before* the irreversible archive rather than after it): stop `AccountsFor` suppressing the inbound report on behalf of a row this same scan has already routed into `plan.Items`. In `ReportAzureRangesNoBastetSubnetRecords`, which already receives `plan`:
-
-```csharp
-HashSet<int> offeredForDeletion = [.. plan.Items.Select(i => i.SubnetId)];
-// :447
-existingSubnets.Any(e => !offeredForDeletion.Contains(e.Id) && AccountsFor(e, parts[0], cidr))
-```
-
-> **The verifier judged the fix incomplete, and one half of the interim actively wrong.** Five corrections to the primary fix. (1) `FindLiveOwnerOfRange` is `private static` at `:515`; it must lose `static` to reach the primary-constructor `ipUtilityService` — the "no new dependency" claim is true but the signature changes. (2) There is nothing to walk: `livePrefixOwners` is keyed `{vnetResourceId}|{prefix}` at `:503` and supports exact lookup only. Either scan every key and split on `|` per stale row, or build a second index in the same loop at `:97-108` — specify which, or the fallback is O(all prefixes) per row. (3) **The reason must not reuse the shipped sentence.** The current text asserts *"The range {NetworkAddress}/{Cidr} is still assigned in Azure"*, which is **false** for an overlapping owner — only part of the recorded range is assigned. It must say which live prefix overlaps and how. (4) Leaving `SuggestedAzureResourceId` null for non-equal owners does work with the shipped UI — verified: `_ReconcileScripts.cshtml:304` gates the button on the suggestion, not the status, and `RelinkAzureSubnet` 409s without one. State that explicitly, or a later edit that keys the button off the status re-opens it. (5) A row routed to `ReviewItems` is stranded — no screen can edit `AzureResourceId`. The only exit is an ordinary `/Subnet/Delete/{id}` followed by re-import, measured to work; the review reason should say so.
->
-> **On the interim:** *"…routed into `plan.Items` **or** `ReviewItems`"* is wrong and would print a falsehood. `ReviewItems` rows are withheld, not destroyed, so their accounting still stands; excluding them makes the inbound pass emit *"Azure subnet 'rig-r15-vc3-sn-c-v2' owns 10.191.22.0/24, which no BASTET subnet records"* while row 3 records exactly that range and is being protected. Scope the exclusion to `plan.Items` only, and snapshot the id set **before** `ReportAzureRangesNoBastetSubnetRecords` starts appending its own `SubnetId=0` review items. The corrected form is what is written above.
->
-> **Regression the fix must not cause:** the widen arm measured as a control (recorded `/25`, Azure now `/24`) is an overlap in the other direction and would newly be withheld to review. That is the safe direction for an IPAM, but it converts a class of currently-deletable rows into stranded review rows — which makes correction (5)'s exit route load-bearing, not optional.
+_Tests: 847 → 852. Five in `AzureReconcilerRangeStillAllocatedTests`: three that fail against the unfixed reconciler (the re-carve is offered for deletion and `ReviewItems` is empty), one regression guard that the exact-match Re-link survives, and one over-blocking counter-test that a live range in the row's own VNet which does **not** overlap still leaves the row deletable._
 
 ---
 
