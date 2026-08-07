@@ -205,15 +205,73 @@ public class AzureReconcilerInboundTests
     /// An Azure subnet covering a whole VNet prefix is recorded by marking the TARGET fully
     /// allocated, not by creating a child - so the target genuinely is the record of that range and
     /// an exact match against it must count, even though a target's containment does not.
+    ///
+    /// The fixture sets IsFullyAllocated deliberately: that is the state the docstring's
+    /// justification describes, and without it this test pinned the silence in exactly the state
+    /// where the justification does not hold (O5).
     /// </summary>
     [Fact]
     public void AnAzureSubnetCoveringTheWholeVNetPrefix_IsAccountedForByTheTargetItself()
     {
+        ExistingSubnetSnapshot target = Target(1, "10.90.0.0", 16, "vnet-a");
+        target.IsFullyAllocated = true;
+
         AzureReconcilePlanViewModel plan = Build(
             Live(VNet("vnet-a", ["10.90.0.0/16"], AzSubnet("vnet-a", "sn-whole", "10.90.0.0/16"))),
-            [Target(1, "10.90.0.0", 16, "vnet-a")]);
+            [target]);
 
         Assert.Empty(Inbound(plan));
+    }
+
+    /// <summary>
+    /// O5. The equality arm returned true for ANY row whose address equals the Azure range,
+    /// including a VNet-level target that is linked but NOT marked fully allocated. The remark that
+    /// justifies the arm says the target "is the record of that range" precisely because the
+    /// fully-allocated import happened - so when it has not happened, the largest possible range to
+    /// be wrong about is the one range silently skipped.
+    /// </summary>
+    [Fact]
+    public void ATargetLinkedButNotFullyAllocated_DoesNotAccountForTheWholePrefixSubnet()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.61.0.0/24"], AzSubnet("vnet-a", "sn-whole", "10.61.0.0/24"))),
+            [Target(1, "10.61.0.0", 24, "vnet-a")]);   // IsFullyAllocated defaults to false
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.61.0.0", item.NetworkAddress);
+        Assert.Equal(24, item.Cidr);
+    }
+
+    /// <summary>
+    /// The owner asked for the remedy to be in the item's own Reason rather than left for the
+    /// operator to discover in the import wizard.
+    /// </summary>
+    [Fact]
+    public void AnUnaccountedWholePrefixRange_NamesTheImportRemedyInItsReason()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.61.0.0/24"], AzSubnet("vnet-a", "sn-whole", "10.61.0.0/24"))),
+            [Target(1, "10.61.0.0", 24, "vnet-a")]);
+
+        Assert.Contains("fully allocated", Assert.Single(Inbound(plan)).Reason);
+    }
+
+    /// <summary>
+    /// And when the target already has children the top-up import cannot clear it - the planner
+    /// refuses. The item is true in that state, so the Reason must say what to do about it instead
+    /// of sending the operator to a wizard that will refuse.
+    /// </summary>
+    [Fact]
+    public void AnUnaccountedWholePrefixRangeOnAPopulatedTarget_SaysTheChildMustGoFirst()
+    {
+        ExistingSubnetSnapshot target = Target(1, "10.61.0.0", 24, "vnet-a");
+        target.HasChildSubnets = true;
+
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.61.0.0/24"], AzSubnet("vnet-a", "sn-whole", "10.61.0.0/24"))),
+            [target, Existing(2, "10.61.0.0", 25)]);
+
+        Assert.Contains("child", Assert.Single(Inbound(plan)).Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

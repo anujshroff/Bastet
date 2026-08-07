@@ -516,6 +516,30 @@ namespace Bastet.Services.Azure
                             continue;
                         }
 
+                        // When the unrecorded range is exactly a VNet-level target's own prefix, the
+                        // remedy is the fully-allocated import, and it is worth naming: otherwise
+                        // the operator only discovers it by opening the import wizard. If that
+                        // target already has children the top-up refuses outright
+                        // (AzureBulkImportPlanner: "…covers the whole prefix, which would mark
+                        // Bastet subnet 'X' fully allocated, but it already has child subnets"), so
+                        // the item is true and unclearable until the conflicting child is removed.
+                        // Say which of the two it is rather than sending them to a wizard that will
+                        // refuse.
+                        ExistingSubnetSnapshot? wholePrefixTarget = existingSubnets.FirstOrDefault(e =>
+                            AzureResourceIdentity.IsAzureVNet(e.AzureResourceId)
+                            && !e.IsFullyAllocated
+                            && string.Equals(e.NetworkAddress, parts[0], StringComparison.OrdinalIgnoreCase)
+                            && e.Cidr == cidr);
+
+                        string remedy = wholePrefixTarget is null
+                            ? string.Empty
+                            : wholePrefixTarget.HasChildSubnets
+                                ? $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Importing it would mark "
+                                  + "that subnet fully allocated, which is refused while it still has child subnets, so remove "
+                                  + "the children that conflict with it first."
+                                : $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Import it to mark that "
+                                  + "subnet fully allocated.";
+
                         plan.ReviewItems.Add(new AzureReconcileItem
                         {
                             // No Bastet row exists - that is the whole point of the item. Zero is
@@ -527,7 +551,8 @@ namespace Bastet.Services.Azure
                             AzureResourceId = subnet.ResourceId ?? string.Empty,
                             Status = AzureReconcileStatus.AzureRangeNotImported,
                             Reason = $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}, "
-                                     + "which no BASTET subnet records. BASTET is reporting that range as free space.",
+                                     + "which no BASTET subnet records. BASTET is reporting that range as free space."
+                                     + remedy,
                             IsVNetLevel = false
                         });
                     }
@@ -580,7 +605,14 @@ namespace Bastet.Services.Azure
             if (string.Equals(existing.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
                 && existing.Cidr == cidr)
             {
-                return true;
+                // ...but only once the fully-allocated import it stands for has actually happened.
+                // The justification above is that an Azure subnet covering a whole VNet prefix is
+                // recorded by marking the target fully allocated; when the target is linked and NOT
+                // marked, nothing recorded it, and this is the largest range it is possible to be
+                // wrong about. Three routes reach that state without any crafted request: the bulk
+                // wizard's default selection ticks no subnets, an empty VNet imported before Azure
+                // created the covering subnet, and one click on "Mark as Not Fully Allocated".
+                return !AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId) || existing.IsFullyAllocated;
             }
 
             if (AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId))

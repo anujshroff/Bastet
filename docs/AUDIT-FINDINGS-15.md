@@ -154,57 +154,21 @@ _Tests: 863 → 868. Five in `AzureReconcilerInboundTests`, sitting next to `ATa
 
 ---
 
-## O5 — The reconciler counts an Azure-linked import target as the record of its own range even when it is **not** marked fully allocated, so an Azure subnet owning a whole VNet prefix is never reported inbound `[x1]`
+## O5 — The reconciler counts an Azure-linked import target as the record of its own range even when it is **not** marked fully allocated, so an Azure subnet owning a whole VNet prefix is never reported inbound `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Services/Azure/AzureReconciler.cs:489-493`.
-**Confidence:** confirmed.
+_O5 is fixed and committed. `AccountsFor`'s equality arm now honours the premise its own remark rests on: an Azure subnet covering a whole VNet prefix is recorded by marking that target **fully allocated**, so the target is the record of that range only once that has actually happened. The arm returns `!IsAzureVNet(existing.AzureResourceId) || existing.IsFullyAllocated`. `ExistingSubnetSnapshot.IsFullyAllocated` was already populated and simply unread._
 
-### What goes wrong
+_**The pinning test was corrected, not worked around.** `AnAzureSubnetCoveringTheWholeVNetPrefix_IsAccountedForByTheTargetItself` built its target without setting `IsFullyAllocated`, so it pinned the silence in precisely the state where its own docstring's justification does not hold — which is why the defect survived. Its fixture now sets the flag, and the docstring says why. That is a test-strength correction and is recorded as one._
 
-`AccountsFor`'s equality arm returns `true` for **any** BASTET row whose `{NetworkAddress, Cidr}` equals the Azure range, including a VNet-level import target. Its own remark says why that is meant to be sound: *"an Azure subnet covering a whole VNet prefix is recorded by marking that very target fully allocated … so the target genuinely is the record of that range."* That premise fails whenever the target is linked but **not** fully allocated — and `ExistingSubnetSnapshot.IsFullyAllocated` is already populated (`AzureSubnetSnapshotService.cs:29`), so the information needed to be correct is in hand and unread.
+_**The owner asked for the remedy to be in the item's own `Reason`**, and it is, in two forms because the two states call for different actions. When the unrecorded range is exactly a VNet-level target's own prefix and that target has no children: *"It covers the whole of BASTET subnet 'X'. Import it to mark that subnet fully allocated."* When the target already has children — the state this defect produces, because the operator allocated from the false free space — the top-up import refuses outright, so the item says so instead of sending them to a wizard that will reject them: *"…Importing it would mark that subnet fully allocated, which is refused while it still has child subnets, so remove the children that conflict with it first."* The verifier established that this item is **true** and unclearable in that state, so naming the remedy is the whole of what was missing._
 
-Three independent routes reach that state on the unmodified build, none needing a crafted post:
+_Proven by live A/B, both builds against the same Azure fixture `rig-o5-vnet` `10.61.0.0/24` whose single Azure subnet `rig-o5-whole` covers the entire prefix. Imported through the bulk wizard's **default** selection — VNet prefix ticked, no subnets ticked, which is what `buildSelectionFromUI` emits — giving `createdTargets: 1, fullyAllocatedTargets: 0` on both. Unfixed HEAD: **0** inbound items and the green *"nothing to clean up"* banner, for a `/24` Azure has assigned in full. Fixed, same state: **1** inbound item naming the range and the remedy, banner suppressed._
 
-1. **Bulk wizard default.** `_BulkScripts.cshtml:313-331` propagates subnet→prefix only; ticking a VNet address prefix never ticks its subnets, so `buildSelectionFromUI` emits `subnets:[]` by default. Preview returns `errors:[] warnings:[] canCommit:true`; the commit creates the target with `IsFullyAllocated=0`.
-2. **Strongest, and underweighted by the finder:** import an **empty** VNet — there is nothing to tick or untick — then Azure creates a subnet covering the whole prefix. This is precisely the "Azure changed after import" case `N3` built `AzureRangeNotImported` for, and the equality arm swallows it.
-3. One click on the rendered *"Mark as Not Fully Allocated"* form after a correct import.
+_The harm was then driven to completion on both: `POST /Subnet/Create {prod-db-tier, 10.61.0.0/25, ParentSubnetId: 1}` returned **200** and persisted on each build — BASTET accepts an allocation inside a range Azure owns entirely. The difference is what reconcile says afterwards: HEAD still reports nothing at all, while the fixed build reports the range **and** switches to the populated-target wording, because the target now has a child. That switch is the owner's requested behaviour, measured rather than asserted._
 
-### Reproduced
+_The finding's claim that no cheaper interim exists that is also correct was checked and stands: relying on O6's wizard fix does not cover a VNet imported before Azure created the covering subnet, and widening the Details-page note is advisory copy over an answer that is still wrong._
 
-```
-POST /Subnet/BulkCreateFromAzurePlan  (VNet address prefix ticked, its one subnet NOT ticked)
-  -> 200 {"createdTargets":1,"createdChildSubnets":0,"fullyAllocatedTargets":0}   on an EMPTY database
-SQL: 1|rig-r15-vnet-b7bfull|10.61.0.0|24|IsFullyAllocated=0|az=.../virtualNetworks/rig-r15-vnet-b7bfull
-POST /Azure/ReconcileScan -> items: [], reviewItems: [], warnings: []
-```
-
-Nothing at all about `10.61.0.0/24`, which Azure has entirely assigned to `rig-r15-snet-b7bfull`.
-
-`/Subnet/Details/1` renders *"This subnet is linked to Azure. Ranges listed here are free according to what BASTET has imported … Run Azure Reconcile to check before allocating from these ranges."* followed by **"10.61.0.0 | 10.61.0.255 | 254 IP addresses | [Create Subnet]"**. In a real browser the reconcile page renders *"Everything imported from this subscription still exists in Azure. There is nothing to clean up."*
-
-**Control, same action, same wizard, same commit** on a VNet whose subnets do not cover the whole prefix: three `AzureRangeNotImported` items are reported. Every Azure-assigned range inside the target **is** reported; the one range that exactly equals its target is the only one silently skipped — the largest possible range to be wrong about, 254 of 254 addresses.
-
-**The harm driven to completion:** `POST /Subnet/Create {prod-db-tier, 10.61.0.0/25, ParentSubnetId:1}` → 200, row persisted. BASTET accepted an allocation inside a `/24` Azure owns entirely, immediately after the page told the operator to run Reconcile and Reconcile said nothing.
-
-**Counterfactual**, same database, only `:489-493` changed: the review item appears. `dotnet test` on the patched copy: **846/847**, the single failure being `AzureReconcilerInboundTests.AnAzureSubnetCoveringTheWholeVNetPrefix_IsAccountedForByTheTargetItself`, whose fixture `Target(...) -> Existing(...)` (test file `:50-63`) never sets `IsFullyAllocated` — it asserts the silence in precisely the state where its own docstring's justification does not hold.
-
-### Fix
-
-Honour the equality arm for a VNet-level target only once the fully-allocated import it stands for has actually happened:
-
-```csharp
-if (string.Equals(existing.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
-    && existing.Cidr == cidr)
-{
-    return !AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId) || existing.IsFullyAllocated;
-}
-```
-
-Fix the pinning test with it — set `IsFullyAllocated = true` on the target so it pins the state its docstring describes — and add `ATargetLinkedButNotFullyAllocated_DoesNotAccountForTheWholePrefixSubnet`. **No cheaper interim exists that is also correct:** relying on O6's wizard fix does not cover a VNet imported before Azure created the covering subnet, and widening the Details-page note is advisory copy over an answer that is still wrong.
-
-> **The verifier judged the fix sound and checked it rather than nodding it through.** It builds 0 warnings; it changes behaviour only for the exact-equality case with a VNet-level target; the early return loses nothing because the containment arm at `:495-496` already excludes VNet targets; and on the live rig the correct top-up import sets `IsFullyAllocated=1` and silences it — so it does not create the unsilenceable warning the method's own remark at `:393-400` warns about.
->
-> **One residue the owner should see, measured rather than assumed.** If the target already has children — which is exactly the state this defect produces, because the operator allocated from the false free space — the new item **cannot** be cleared by the top-up import: the planner refuses at `AzureBulkImportPlanner.cs:578-586` with *"Cannot import VNet prefix 10.66.0.0/24: Azure subnet 'X' covers the whole prefix, which would mark Bastet subnet 'Y' fully allocated, but it already has child subnets."* The item is **true** in that state and the refusal names the remedy, so this is correct behaviour rather than a defect in the fix — but the warning persists until the conflicting child is removed, and the owner may want the item's `Reason` to say so instead of leaving the operator to discover it in the import wizard.
+_Tests: 868 → 871. Three new in `AzureReconcilerInboundTests`, all failing against the unfixed reconciler — the linked-but-not-fully-allocated target, the remedy sentence, and the populated-target variant of it — plus the corrected fixture on the existing pinning test._
 
 ---
 
