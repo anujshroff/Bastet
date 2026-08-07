@@ -278,64 +278,25 @@ _Tests: 879 → 879. This is wizard state-machine behaviour in a browser, which 
 
 ---
 
-## O11 — Bulk import preview reports `canCommit=true` and an Azure subnet as `Available` when an existing BASTET subnet lies inside that range; the commit then 400s and rolls back the whole multi-VNet import `[x1]`
+## O11 — Bulk import preview reports `canCommit=true` and an Azure subnet as `Available` when an existing BASTET subnet lies inside that range; the commit then 400s and rolls back the whole multi-VNet import `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:733` (`DetectExistingBastetSubnetConflicts`, equality test at `:747-749`); annotation mirror at `:381-399`.
-**Confidence:** confirmed.
+_O11 is fixed and committed. `DetectExistingBastetSubnetConflicts` now runs, for every planned **child**, the two containment tests `ValidateSubnetCreation` applies at commit: would this child contain an existing BASTET subnet, and does a more specific existing BASTET parent already contain it. The would-contain half is mirrored into `AnnotateSubnet`, so the selection screen greys the row with a reason instead of offering a run the preview then refuses._
 
-### What goes wrong
+_**Both tests are scoped to the item's own VNet prefix, and that scoping is the fix rather than a detail.** The verifier built the counter-example: with BASTET holding `10.30.0.0/8`, importing a new VNet prefix `10.30.0.0/16` carrying Azure subnet `10.30.1.0/24` **commits 200 today**, because at commit time the just-created `/16` is in the tree cache and becomes the child's parent. A check reading `existingSubnets` unscoped would see `bestParent` as the `/8` and refuse a plan that works — turning a preview/commit divergence into one in the other direction. `AnAncestorOutsideTheVNetPrefix_DoesNotRefuseAnImportThatCommitsToday` pins that, and it passes on both builds._
 
-The planner's own contract is stated at `:9-10`: *"All decisions and conflict checks are made here so the preview UI shows exactly what commit will do."* Its only BASTET-side conflict test for a planned **child** is exact address equality. `ValidateSubnetCreation`, which every write funnels through, additionally refuses a subnet that would **contain** an existing BASTET subnet (`SubnetController.Helpers.cs:305-316`) and one for which a **more specific** BASTET parent exists (`:288-301`). Neither is mirrored in the plan or in the availability annotation.
+_**The auto-created-target leg the finding asked for was deliberately not added.** `DetectVNetPrefixWouldContainExistingSubnet` and its `AnnotatePrefix` mirror already cover it and both were confirmed working; adding it here would emit the identical global error twice. The new work is restricted to planned children._
 
-`LoadSubnetTreeForBatchAsync` loads the whole table, so the commit-side check is complete and the entire gap is on the planner side. The prefix-level gate that used to stop this (`:300`, `exact.HasChildSubnets && !isTopUp`) is deliberately relaxed for a top-up by `N4`, so the wizard now reaches the child-planning path with a populated target **by design**.
+_**The mirror is half a mirror, on purpose.** `AnnotateSubnet` was `private static` and became an instance method to reach `ipUtilityService`, as the verifier said it must. Only the would-contain half is mirrorable: the annotation pass runs per VNet with no prefix-to-target binding for a target that does not exist yet, so the more-specific-parent test has no well-defined answer at annotation time and is left to the plan. The selection UI is therefore strictly weaker than the preview — which is a large improvement on the previous silence rather than a complete answer, and the code says so where a later reader will find it._
 
-### Reproduced
+_The interim the finding offered — populating `itemErrors` at the two commit sites — was **not** shipped. It is sound and the verifier checked it concretely, but it does not fix the false `canCommit`, and with the plan now refusing these selections the bare-sentence-with-an-empty-list response is no longer reachable through the wizard._
 
-Precondition built through the ordinary `/Subnet/Create` form (302 → Details, zero Azure involvement): a hand-made `handmade-half` `10.10.2.0/25` inside the Azure-linked target `10.10.0.0/16`. Azure subnet `rig-r15-snet-a1-multi` owns `10.10.2.0/24`.
+_Proven by live A/B on the same Azure fixture and the same database contents. `rig-o11-vnet` `10.44.0.0/16` with Azure subnet `rig-o11-multi` `10.44.2.0/24`; the precondition built through the ordinary `/Subnet/Create` form with zero Azure involvement — a hand-made `handmade-half` `10.44.2.0/25` inside the target. Unfixed HEAD: the selection screen offers `rig-o11-multi` as **`Available`, `isSelectable: true`, `reason: null`** — no badge, no colour, no reason line — and the preview returns **`globalErrors: []`**, while the commit 400s naming a BASTET subnet the operator never selected. Fixed, identical inputs: the selection screen shows **`Blocked`, `isSelectable: false`**, reason *"Would contain existing Bastet subnet 'handmade-half' (10.44.2.0/25), which would create an invalid hierarchy."*, and the preview's `globalErrors` carries the same fact naming both the Azure subnet and the BASTET one._
 
-```
-GET /Azure/BulkGetVNets
-  PREFIX 10.10.0.0/16  WillUpdateExisting  "Will add any missing subnets to existing Bastet subnet..."
-  SUBNET rig-r15-snet-a1-multi 10.10.2.0/24  Available  reason=None  isSelectable=True   <-- the defect
+_One honest limit on that measurement: this fixture's preview returned `canCommit: false` on **both** builds, because the target is an exact match that already has a child and the prefix is refused for that separate reason. What the A/B therefore demonstrates is the silence — HEAD reporting no error at all about the conflict that kills the commit — rather than the `canCommit: true` the finding reproduced with its own fixture. The unit tests cover the `canCommit` half directly, on a plan with no other refusal in it._
 
-POST /Azure/BulkImportPreview  (that prefix + an unrelated, error-free VNet in the same selection)
-  canCommit=True globalErrors=[]  item errors: []  for both
+_Two prose overstatements in the finding are corrected on the record: the selection UI did not show the row "green" — it carried no badge, no colour and no reason at all, i.e. **less** flagged than the finding said; and `DetectVNetPrefixWouldContainExistingSubnet`'s exact-match skip is correct, not part of the gap, because on an exact match the target already exists and legitimately contains its own children._
 
-POST /Subnet/BulkCreateFromAzurePlan
-  400 {"success":false,
-       "error":"This subnet would contain existing subnet handmade-half (10.10.2.0/25).
-                This would create an invalid hierarchy.",
-       "globalErrors":[], "itemErrors":[]}
-DB AFTER: unchanged -- the unrelated VNet, which had no conflict of any kind, was rolled back too
-```
-
-**Control**, same selection with only `handmade-half` removed: identical plan, commit `200 {"createdTargets":1,"createdChildSubnets":2}`. The plan the planner produced was unchanged; only the containment fact differed, and the planner never looked at it.
-
-**Second leg** (more-specific existing parent): annotation `Available`/selectable, preview `canCommit=True`, commit `400 {"error":"A more specific parent subnet exists: handmade-mid (10.20.4.0/22). Please select it instead.","itemErrors":[]}` — advice naming a parent selector that does not exist in this wizard.
-
-**Browser, end to end:** checkbox `disabled=False`, row label carries **no badge at all** (`availabilityBadge` returns `""` for `Available`, `_BulkScripts.cshtml:172`), global-errors pane hidden, plan tree renders a green *"Create rig-r15-snet-a2-gap … 10.20.12.0/24"*, Continue-to-Commit and Confirm both enabled — then a red panel naming a BASTET subnet the operator never selected, with an empty `<ul>` beneath it because `globalErrors` and `itemErrors` are both `[]`.
-
-For contrast, in the same `BulkGetVNets` response `AnnotatePrefix` **does** apply the containment rule at prefix level: `rig-r15-vnet-a3-overlap` `10.10.0.0/20` → `Blocked` *"Would contain existing Bastet subnet 'rig-r15-snet-a1-single' (10.10.1.0/24), which would create an invalid hierarchy."*
-
-### Fix
-
-Extend `DetectExistingBastetSubnetConflicts` to run the two containment tests `ValidateSubnetCreation` applies for every planned child, and mirror them in `AnnotateSubnet` so the selection UI greys the row with a reason, exactly as it already does for the exact-address collision.
-
-**Cheaper interim, no planner change:** when `ValidateSubnetCreation` fails inside `BulkCreateFromAzurePlanCore` (`SubnetController.BulkAzure.cs:379-392` and `:457-468`), populate `itemErrors` with the failing item's `VNetName`/`VNetPrefix` instead of `Array.Empty<object>()`, so the wizard can point at the row that killed the import rather than showing a bare sentence about a subnet the operator never selected.
-
-> **The verifier judged the interim sound and the full fix unsound as written, with three defects.**
->
-> **1. The more-specific-parent leg cannot be evaluated against `existingSubnets` alone, and doing so would refuse ordinary imports that work today.** For an `AutoCreateChild`/`AutoCreateTopLevel` item the target does not exist yet when the plan is built, so the deepest existing container of a planned child is legitimately something other than its parent-to-be. Counter-example, built: BASTET holds `10.30.0.0/8`; import a new VNet prefix `10.30.0.0/16` carrying Azure subnet `10.30.1.0/24`. At commit, `ValidateSubnetCreation` sees the just-created `/16` in `treeCache` (`SubnetController.BulkAzure.cs:408` appends it) and accepts the child. A planner check reading only `existingSubnets` sees `bestParent` = the `/8` and would emit a global error for a plan that commits **200 today** — turning a preview/commit divergence into one in the other direction. The rule must be scoped to the item: refuse a planned child when an existing BASTET subnet is contained in **this item's VNet prefix** and strictly contains the planned child.
->
-> **2. "For every auto-created target" duplicates a test that already exists and already fires correctly.** `DetectVNetPrefixWouldContainExistingSubnet` (`:765-794`) plus its `AnnotatePrefix` mirror (`:340-345`) already cover that case — both confirmed working. Adding it here would emit the identical global error twice. Restrict the new work to planned **children**.
->
-> **3. The `AnnotateSubnet` mirror does not compile as described and is only half-mirrorable.** `AnnotateSubnet` is `private static` (`:352`) and has no `ipUtilityService`, so it must become an instance method. More importantly only the **would-contain** half can be mirrored safely: the annotation pass runs per VNet with no prefix-to-target binding for a target that does not exist yet, so the more-specific-parent half has no well-defined answer at annotation time. Mirror the would-contain half and leave the other to the plan, accepting that the selection UI is then strictly weaker than the plan — still a large improvement on the current silence.
->
-> One thing the fix can safely skip: rows created earlier in the same commit. `DetectAzureSubnetOverlaps` (`:696-726`) already forbids overlapping selected Azure subnets.
->
-> **The interim is sound and was checked concretely:** at `:379-392` the loop variable `item` is in scope, and at `:457-468` both `item` and `child` are, so the shaped object is available at both sites, and `showCommitError` (`_BulkScripts.cshtml:734-742`) already renders `itemErrors` as `[vNetName vNetPrefix] message`. It does **not** fix the false `canCommit=true`, so it is a mitigation and not a substitute.
->
-> **Two prose overstatements corrected, neither material.** *"The selection UI shows the row green"* is wrong when measured — the row carries no badge, no colour and no reason line, just a name and a muted CIDR beside an enabled checkbox, i.e. **less** flagged than the finding says. And listing `DetectVNetPrefixWouldContainExistingSubnet`'s exact-match skip (`:773-779`) as part of the gap is wrong: that skip is correct, because on an exact match the target already exists and legitimately contains its own children. The real gap is that no containment test of any kind runs on planned children.
+_Tests: 879 → 883. Three fail against the unfixed planner — the would-contain leg, the more-specific-parent leg, and the annotation mirror — and one is the scoping counter-test that passes on both._
 
 ---
 
