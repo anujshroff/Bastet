@@ -194,71 +194,25 @@ _Tests: 871 → 872. One in `AzureControllerTests`, failing against the unfixed 
 
 # Medium
 
-## O7 — `sp_getapplock` acquisition has no counterpart to the release path's `DiscardPooledConnection`: an exception escaping `AcquireAppLockAsync` returns the connection to the pool with the lock possibly held, and the app then lies about why every write fails `[x1]`
+## O7 — `sp_getapplock` acquisition has no counterpart to the release path's `DiscardPooledConnection`: an exception escaping `AcquireAppLockAsync` returns the connection to the pool with the lock possibly held, and the app then lies about why every write fails `[x1]` — FIXED
 
-**Citation:** `src/Bastet/Services/Locking/SqlServerSubnetLockingService.cs:104`.
-**Confidence:** confirmed.
+_O7 is fixed and committed, and this is the one finding this round whose end-to-end stall was **not** re-reproduced live — that is stated plainly below rather than glossed._
 
-### What goes wrong
+_The acquire now has the same remedy the release already had. `AcquireAppLockAsync` is wrapped so that an exception escaping it logs at Error and calls `DiscardPooledConnection()` before rethrowing, destroying the physical connection rather than returning it to SqlClient's pool with the session still holding `Bastet:SubnetOperations`. `grep -rn DiscardPooledConnection src/` now returns three hits — the declaration and both call sites — where it returned two, and the asymmetry that was the whole defect is gone._
 
-`:101` opens the request's EF connection; `:104` runs `sp_getapplock`. If SQL Server grants the lock but the client abandons the command before reading the response, `AcquireAppLockAsync` throws and control jumps straight past `:110-146` to the outer `finally` at `:148-151`, which calls `CloseConnectionAsync()` — EF returns the connection to SqlClient's **pool**. `DiscardPooledConnection()` is never reached: it is wired only into the release catch at `:138-145`, and `grep -rn DiscardPooledConnection src/` returns exactly two hits, the declaration and that one call site.
+_It deliberately does **not** cover the `lockResult < 0` branch: there the lock was not granted, so nothing is stranded and flushing the pool would cost a reconnect on an ordinary contention timeout. The verifier checked that distinction and it is preserved._
 
-The SQL session stays alive and still owns `Bastet:SubnetOperations`. From that moment every subnet and host-IP write on **every replica** parks the full 30 s in `sp_getapplock` and returns *"The operation timed out due to high concurrency. Please try again."* (`SubnetController.Create.cs:138`, `Edit.cs:228`, `HostIpController.cs:165/:304/:434/:763`) or *"The operation timed out because another subnet operation is in progress. Nothing was deleted."* (`AzureReconcile.cs:221`). No operation is in progress; the statement is false and the prescribed remedy — retry — never clears it. Nothing logs that a lock was stranded, unlike the release path which logs at Error.
+_The `Bastet:Migration` twin needs nothing, for the reason the finding gave and the verifier confirmed: `getLock.ExecuteNonQuery()` at `Program.cs:429` has no enclosing try/catch, so an exception there terminates the process, and process exit ends the session regardless of pooling._
 
-**The trigger is more ordinary than "an Azure SQL gateway hiccup".** A stopped process emits its TDS attention only after it resumes, so the attention ack is always prompt and the connection is never broken. There is no upper bound: **any pause of the BASTET process longer than the 60 s command timeout the code itself sets at `:183`**, landing between the `sp_getapplock` batch reaching the server and the client reading the reply, strands the lock. Producers need no Azure SQL and no gateway: a cgroup freezer or `docker pause`, a VM live-migration stun or snapshot quiesce, a suspended host, or any supervisor `SIGSTOP`.
+_**What was measured, and what was not.** The mechanism the fix rests on was measured on the rig's own SQL Server 2022: a `Session`-owned `sp_getapplock` returns 0 and `sys.dm_tran_locks` shows one `APPLICATION` row held by that session for as long as the session lives, dropping to zero only when the session ends. That is exactly why returning the connection to the pool - which keeps the session alive - strands the lock, and why destroying the connection is what clears it._
 
-### Reproduced
+_**Not measured this round:** the end-to-end stall. A TDS proxy was built to withhold the server's reply to the `sp_getapplock` batch past the 60s command timeout, the unfixed build was run behind it on its own port and catalog, and the injection did not fire - the writes completed normally and the proxy never matched the batch on the wire. Rather than keep extending the apparatus, the fix is recorded as resting on the finding's own three reproductions (two independent apparatus, including one with **no** proxy and no fault injection at all — ordinary contention plus a `SIGSTOP`-class pause) and on the verifier's build-and-measure of this exact patch: identical 62s freeze, the new Error line firing, the physical connection destroyed 9ms after resume, `sys.dm_tran_locks` APPLICATION = 0 rows, and the next replica's write succeeding in 0.27s. Anyone re-checking this should start from the finding's proxy, not the one attempted here._
 
-Three runs, two independent apparatus. A TCP proxy that buffers the server→client direction for the one batch containing `sp_getapplock` and flushes it when the client next speaks:
+_Two things the verifier found in the fix's favour and worth keeping on the record: it also closes a second latent granted-then-throw path, because `return (int)parameters[4].Value;` sits outside the try/finally and an `InvalidCastException` there would today escape with the lock held; and the finder's own interim (log at Critical) is strictly weaker than the fix and was not shipped alongside it._
 
-```
-[1] ARM HIT  txt='EXEC @Result = sp_getapplock @Resource = @Resource, ...'
-[1] s2c BUFFERED len=220                       <- server answered in 1 ms: the lock WAS granted
-[1] c2s during stall len=24 dt=60.0 type=0x06  <- TDS attention, exactly the 60 s command timeout
-[1] RELEASE flush 220 bytes after 60.0s
-[1] POST-RELEASE s2c len=37                    <- attention ack; NO further client traffic
-```
+_Not done, deliberately and in scope: the failing request's **own** message still says "another subnet operation is in progress" when nothing is. Making that honest is a separate change at six controller catch sites, and it is not what this finding reproduced. What the fix stops is that message becoming true for every other replica for the next several minutes._
 
-HTTP: `503 {"success":false,"error":"The operation timed out because another subnet operation is in progress. Please try again."}` after 60.038 s. SQL, app idle, 5 s later:
-
-```
-session 103  status=sleeping  lastreq=05:12:42.540
-103  X  0:[Bastet:SubnetOperations]:(b83d66a6)
-```
-
-Alive, sleeping, no request running, holding the global write mutex.
-
-**A second replica** — own process, own pool, same catalog — at 05:15:10: `POST /Subnet/Create` → 200 after **30.056 s**, *"The operation timed out due to high concurrency. Please try again."*, and `SELECT` confirms nothing was written. Polled every 10 s, the strand held continuously from 05:12:42 to 05:17:15 — **~4 min 40 s of total write denial across every replica** — and ended only when SqlClient's idle-pool pruning destroyed the connection, not by anything the app did.
-
-**Run 3 used no proxy at all**: ordinary lock contention plus a `SIGSTOP`-class process pause over a direct TCP connection. A 150 s freeze stranded the lock exactly like the 62 s one.
-
-**Why the same injection on `POST /Subnet/Create` does *not* strand** (a sharpening, not a rebuttal): the error-view render reuses the same physical connection with the TDS `RESETCONNECTION` bit set, and `sp_reset_connection` drops session-owned app locks. The three JSON handlers that return without touching the DB again are where it sticks. Confirmed both ways: a plain `GET /Subnet` on a poisoned replica cleared a live strand instantly.
-
-### Fix
-
-Give the acquire the same remedy the release already has:
-
-```csharp
-int lockResult;
-try { lockResult = await AcquireAppLockAsync(SUBNET_OPERATIONS_LOCK, remainingMs); }
-catch (Exception ex)
-{
-    logger.LogError(ex, "sp_getapplock did not return a result; discarding the pooled connection "
-                      + "in case the lock was granted server-side");
-    DiscardPooledConnection();
-    throw;
-}
-```
-
-Three lines, no behaviour change on any path that already works, and it costs one pool flush only on a path that has already failed — the same trade the maintainers documented for `DiscardPooledConnection` at `:30-39`. The `Bastet:Migration` twin needs nothing: `getLock.ExecuteNonQuery()` at `Program.cs:429` has no enclosing try/catch, so an exception there terminates the process, and process exit ends the session regardless of pooling.
-
-**Interim if the fix is deferred** (diagnostic only): log at Critical when `AcquireAppLockAsync` throws rather than returning a negative result code. Today the only line emitted is EF's own *"Failed executing DbCommand (62,005ms) … EXEC @Result = sp_getapplock"*, which names the statement but not the consequence, so an operator cannot distinguish a stranded lock from genuine contention.
-
-> **The verifier judged the fix sound and built it.** Applied verbatim to a `git archive HEAD` copy: identical 62 s freeze → the new Error line fires, the physical connection is destroyed 9 ms after resume, `sys.dm_tran_locks` APPLICATION = 0 rows, the next replica's write succeeds in 0.27 s. Build 0 warnings, 847/847. It correctly does **not** cover the `lockResult < 0` branch, where the lock was not granted.
->
-> Two things checked that the finder did not claim, both in its favour: it also closes a second latent granted-then-throw path, because `return (int)parameters[4].Value;` at `:203` sits **outside** the try/finally and an `InvalidCastException` there would today escape with the lock held; and the `Bastet:Migration` claim is right for the reason stated.
->
-> Two non-blocking notes. The fix does not make the failing request's **own** message true — that one request still says "another subnet operation is in progress" when nothing is; what it stops is that message becoming true for every other replica for the next five minutes. Making it honest is a separate change at the six controller catch sites. And `DiscardPooledConnection` flushes the entire pool for the connection string — already documented and accepted at `:30-39` for the release half; this makes it symmetric, which is the point. The finder's own interim is strictly weaker than the fix and should not ship alone.
+_Tests: 872 → 872, no change. The behaviour is a pooled-connection lifetime on a real SQL Server session; the suite runs SQLite, where `SqliteSubnetLockingService` is used instead, so there is no place in the existing infrastructure for a test that would fail against the unfixed code. That is why the measurement above is recorded as prose, per the standing rule for anything a permanent test cannot reach._
 
 ---
 
