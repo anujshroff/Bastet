@@ -1,3 +1,4 @@
+using Bastet.Models;
 using Bastet.Models.ViewModels;
 
 namespace Bastet.Services.Azure
@@ -506,12 +507,7 @@ namespace Bastet.Services.Azure
                             continue;
                         }
 
-                        // Which of the VNet's address prefixes actually holds this range. A VNet has
-                        // a LIST of prefixes, so this cannot be hoisted out of the loop, and the
-                        // containing one is not necessarily the first.
-                        (string Network, int Cidr)? owner = VNetPrefixContaining(vnet, parts[0], cidr);
-
-                        if (existingSubnets.Any(e => AccountsFor(e, parts[0], cidr, owner)))
+                        if (IsRangeRecordedByBastet(existingSubnets, parts[0], cidr))
                         {
                             continue;
                         }
@@ -561,102 +557,94 @@ namespace Bastet.Services.Azure
         }
 
         /// <summary>
-        /// True when a Bastet subnet already accounts for an Azure range - it either IS that range,
-        /// or it is a non-target subnet containing it.
+        /// True when BASTET already records an Azure range - it either IS a Bastet row, or no part
+        /// of it is presented as free space.
         /// </summary>
         /// <remarks>
-        /// The exclusion of VNet-level targets from the containment arm is load-bearing, not a
-        /// detail. An import target holds the VNet's whole address prefix, so it contains every
-        /// range in the VNet by construction; counting that as "accounted for" makes the inbound
-        /// check vacuous - it can never report anything. A target represents the address space the
-        /// VNet owns, not an allocation within it, and BASTET's own free-space table agrees: it
-        /// prints the target's range minus its CHILDREN.
+        /// ASK BASTET'S OWN QUESTION, NOT A PROXY FOR IT. The item this gates asserts "BASTET is
+        /// reporting that range as free space", so the test has to be whether the free-space
+        /// computation actually offers any of it - the same computation that renders the Details
+        /// page. Anything weaker answers a different question and gets a different answer.
         ///
-        /// Equality is still honoured for targets, because an Azure subnet covering a whole VNet
-        /// prefix is recorded by marking that very target fully allocated rather than by creating a
-        /// child - so the target genuinely is the record of that range.
+        /// Two proxies were tried and both are wrong, in opposite directions:
         ///
-        /// EXCLUDING THE TARGET IS NOT ENOUGH, and that was the hole. Any OTHER containing row also
-        /// counted, including an ANCESTOR of the target. ValidateSubnetCreation forces every subnet
-        /// under its most specific container, so an install that models a top-down plan - a 10/8
-        /// root, a regional /12 aggregate - necessarily has such an ancestor above every import
-        /// target, and one hand-created row then made the whole inbound direction vacuous for
-        /// everything beneath it. A containing row is evidence only when it is itself INSIDE the
-        /// VNet address prefix the Azure range belongs to; a row that contains that prefix is an
-        /// ancestor of the target, not an allocation record.
+        /// "Any containing row records it" (the original) is too weak. ValidateSubnetCreation
+        /// forces every subnet under its most specific container, so an install modelling a
+        /// top-down plan - a 10/8 root, a regional /18 aggregate - necessarily has a containing row
+        /// above every import target. One ordinary hand-created aggregate with no children then
+        /// silenced the whole inbound direction beneath it, while its own Details page printed the
+        /// Azure-owned range as free with a Create Subnet button over it.
         ///
-        /// Two edges, both decided deliberately rather than inherited from a helper:
+        /// "The containing row must be marked IsFullyAllocated" is too strong, and it is the one
+        /// that looks right. A partially tiled parent - a /18 holding 10.60.1.0/25 and
+        /// 10.60.1.128/25 - is not fully allocated, yet its free-space table correctly does not
+        /// offer 10.60.1.0/24. Under that gate the /24 becomes an item that is false on the item's
+        /// own wording, cannot be cleared by creating the subnet (the two /25s occupy it), and can
+        /// only be silenced by marking the /18 fully allocated, which hides genuine free space
+        /// elsewhere. An operator who cannot silence a warning stops reading warnings.
         ///
-        /// A row EXACTLY the size of the VNet prefix does not account for ranges inside it.
-        /// IsSubnetContainedInParent is strict, so this falls out of the test above - it is pinned
-        /// by a test so that it stays a decision.
+        /// So: the deepest containing row is the one an operator would allocate from, and the range
+        /// is recorded exactly when that row's free space does not reach into it. IsFullyAllocated
+        /// survives only as a silencer, where it is sound - nothing can be created under such a row
+        /// at all.
         ///
-        /// When NO VNet prefix contains the range, fall back to the plain containment test rather
-        /// than reporting. ARM normally forbids a subnet outside its VNet's address space, but this
-        /// reconciler also assembles inventory under partial RBAC visibility, and reporting every
-        /// such range would produce items nobody can clear.
+        /// Every item this raises is clearable by the action its text implies, which is the property
+        /// the weaker tests could not offer: "offered as free" is precisely the condition under
+        /// which creating or importing a subnet for that range succeeds.
         /// </remarks>
-        private bool AccountsFor(
-            ExistingSubnetSnapshot existing,
+        private bool IsRangeRecordedByBastet(
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
             string network,
-            int cidr,
-            (string Network, int Cidr)? vnetPrefix)
+            int cidr)
         {
-            if (string.Equals(existing.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
-                && existing.Cidr == cidr)
+            ExistingSubnetSnapshot? exact = existingSubnets.FirstOrDefault(e =>
+                string.Equals(e.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
+                && e.Cidr == cidr);
+
+            if (exact is not null)
             {
                 // ...but only once the fully-allocated import it stands for has actually happened.
-                // The justification above is that an Azure subnet covering a whole VNet prefix is
-                // recorded by marking the target fully allocated; when the target is linked and NOT
-                // marked, nothing recorded it, and this is the largest range it is possible to be
-                // wrong about. Three routes reach that state without any crafted request: the bulk
-                // wizard's default selection ticks no subnets, an empty VNet imported before Azure
-                // created the covering subnet, and one click on "Mark as Not Fully Allocated".
-                return !AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId) || existing.IsFullyAllocated;
+                // An Azure subnet covering a whole VNet prefix is recorded by marking the target
+                // fully allocated; when the target is linked and NOT marked, nothing recorded it,
+                // and this is the largest range it is possible to be wrong about. Three routes
+                // reach that state without any crafted request: the bulk wizard's default selection
+                // ticks no subnets, an empty VNet imported before Azure created the covering subnet,
+                // and one click on "Mark as Not Fully Allocated".
+                return !AzureResourceIdentity.IsAzureVNet(exact.AzureResourceId) || exact.IsFullyAllocated;
             }
 
-            if (AzureResourceIdentity.IsAzureVNet(existing.AzureResourceId))
+            // The row the operator would allocate from: the most specific one containing the range.
+            // Containment is strict, so an exactly-equal row is not a container - that case is the
+            // equality arm above.
+            ExistingSubnetSnapshot? deepest = existingSubnets
+                .Where(e => ipUtilityService.IsSubnetContainedInParent(network, cidr, e.NetworkAddress, e.Cidr))
+                .OrderByDescending(e => e.Cidr)
+                .FirstOrDefault();
+
+            if (deepest is null)
             {
+                // No row contains it at all, so no row records it.
                 return false;
             }
 
-            if (!ipUtilityService.IsSubnetContainedInParent(network, cidr, existing.NetworkAddress, existing.Cidr))
+            if (deepest.IsFullyAllocated)
             {
-                return false;
+                // Nothing can be created under a fully-allocated row (SubnetController.Helpers
+                // refuses it outright), so BASTET cannot hand this range out and does not present
+                // it as available. This is the only sound use of the flag here - as a silencer,
+                // never as the positive test for "recorded", which is what it cannot support.
+                return true;
             }
 
-            return vnetPrefix is null
-                   || ipUtilityService.IsSubnetContainedInParent(
-                       existing.NetworkAddress, existing.Cidr, vnetPrefix.Value.Network, vnetPrefix.Value.Cidr);
-        }
+            // The question the item's own text asks: does BASTET present any part of this range as
+            // free space? Answered with the SAME computation that renders the Details page, so the
+            // reconciler and the screen cannot disagree - the range is recorded exactly when no
+            // part of it is left unallocated by the rows sitting inside it.
+            List<Subnet> rowsInsideTheRange = [.. existingSubnets
+                .Where(e => ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr))
+                .Select(e => new Subnet { NetworkAddress = e.NetworkAddress, Cidr = e.Cidr })];
 
-        /// <summary>
-        /// The VNet address prefix that contains a given Azure range, or null when none does.
-        /// A VNet has a list of prefixes and the containing one need not be the first.
-        /// </summary>
-        private (string Network, int Cidr)? VNetPrefixContaining(BulkAzureVNetViewModel vnet, string network, int cidr)
-        {
-            foreach (string prefix in vnet.Ipv4AddressPrefixes)
-            {
-                string[] parts = prefix.Split('/');
-
-                if (parts.Length != 2 || !int.TryParse(parts[1], out int prefixCidr))
-                {
-                    continue;
-                }
-
-                if (string.Equals(parts[0], network, StringComparison.OrdinalIgnoreCase) && prefixCidr == cidr)
-                {
-                    return (parts[0], prefixCidr);
-                }
-
-                if (ipUtilityService.IsSubnetContainedInParent(network, cidr, parts[0], prefixCidr))
-                {
-                    return (parts[0], prefixCidr);
-                }
-            }
-
-            return null;
+            return !ipUtilityService.CalculateUnallocatedRanges(network, cidr, rowsInsideTheRange).Any();
         }
 
         /// <summary>

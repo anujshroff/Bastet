@@ -126,16 +126,88 @@ public class AzureReconcilerInboundTests
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// An IPAM routinely records a coarser allocation than Azure carves out of it. Bastet holds
-    /// 10.90.64.0/18; Azure creates 10.90.77.0/24 inside it. That range IS accounted for.
-    /// Equality matching would report it forever.
+    /// P2 reversed this. Bastet holds 10.90.64.0/18 with nothing under it; Azure creates
+    /// 10.90.77.0/24 inside it. The /18 does NOT record that range - open its Details page and
+    /// 10.90.77.0/24 is printed as free with a Create Subnet button over it, and creating there
+    /// succeeds while Azure is holding the addresses.
+    ///
+    /// The owner's call, taken on this round: report it. One line per Azure range Bastet has no
+    /// record of, each cleared for good by importing it or creating the subnet.
     /// </summary>
     [Fact]
-    public void ARangeContainedByACoarserBastetSubnet_IsNotReported()
+    public void ARangeInsideACoarserRowThatNothingRecords_IsReported()
     {
         AzureReconcilePlanViewModel plan = Build(
             Live(VNet("vnet-a", ["10.90.0.0/16"], AzSubnet("vnet-a", "sn-new", "10.90.77.0/24"))),
             [Target(1, "10.90.0.0", 16, "vnet-a"), Existing(2, "10.90.64.0", 18)]);
+
+        Assert.Single(Inbound(plan));
+    }
+
+    /// <summary>
+    /// The counter-test that decides the predicate, and the reason IsFullyAllocated cannot be it.
+    /// The /18 is not fully allocated, but 10.60.1.0/25 and 10.60.1.128/25 sit inside it and
+    /// together cover 10.60.1.0/24 exactly. Bastet's free-space table does not offer that /24, so
+    /// nothing is being reported as free and there is nothing to say.
+    ///
+    /// Gating on IsFullyAllocated instead would raise an item here that cannot be cleared: creating
+    /// 10.60.1.0/24 is refused because the two /25s occupy it, and the only way to silence it would
+    /// be marking the /18 fully allocated, which hides real free space elsewhere.
+    /// </summary>
+    [Fact]
+    public void ARangeFullyCoveredByRowsInsideIt_IsNotReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.60.0.0/16"], AzSubnet("vnet-a", "sn-tiled", "10.60.1.0/24"))),
+            [
+                Target(1, "10.60.0.0", 16, "vnet-a"),
+                Existing(2, "10.60.0.0", 18),
+                Existing(3, "10.60.1.0", 25),
+                Existing(4, "10.60.1.128", 25)
+            ]);
+
+        Assert.Empty(Inbound(plan));
+    }
+
+    /// <summary>
+    /// Partial coverage is still coverage of only part: one /25 inside the Azure /24 leaves the
+    /// other half offered as free, so the range is reported.
+    /// </summary>
+    [Fact]
+    public void ARangeOnlyHalfCoveredByRowsInsideIt_IsReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.62.0.0/16"], AzSubnet("vnet-a", "sn-half", "10.62.1.0/24"))),
+            [
+                Target(1, "10.62.0.0", 16, "vnet-a"),
+                Existing(2, "10.62.0.0", 18),
+                Existing(3, "10.62.1.0", 25)
+            ]);
+
+        Assert.Single(Inbound(plan));
+    }
+
+    /// <summary>
+    /// A fully-allocated row cannot receive children at all - SubnetController.Helpers refuses it -
+    /// so Bastet cannot hand the range out and is not presenting it as free. Silence is right, and
+    /// this is the one place the flag is sound: as a silencer, never as the test for "recorded".
+    /// </summary>
+    [Fact]
+    public void ARangeUnderAFullyAllocatedRow_IsNotReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.91.0.0/16"], AzSubnet("vnet-a", "sn-new", "10.91.77.0/24"))),
+            [
+                Target(1, "10.91.0.0", 16, "vnet-a"),
+                new ExistingSubnetSnapshot
+                {
+                    Id = 2,
+                    Name = "reserved",
+                    NetworkAddress = "10.91.64.0",
+                    Cidr = 18,
+                    IsFullyAllocated = true
+                }
+            ]);
 
         Assert.Empty(Inbound(plan));
     }
@@ -332,12 +404,13 @@ public class AzureReconcilerInboundTests
     }
 
     /// <summary>
-    /// The false-positive counter-test, and the behaviour N3 deliberately shipped: a hand reserve
-    /// created INSIDE the VNet's address space really does record the range, and must keep
-    /// suppressing the report. Only the ancestor case changes.
+    /// N3 shipped this as a false positive to suppress; P2 measured it as the defect. A /20 hand
+    /// reserve holding nothing does not record 10.20.20.0/24 - its own Details page offers that
+    /// range as free. Whether the containing row sits inside the VNet prefix or above it never
+    /// mattered; whether anything under it records the range is what does.
     /// </summary>
     [Fact]
-    public void AHandReserveInsideTheVNetPrefix_StillAccountsForTheRange()
+    public void AHandReserveInsideTheVNetPrefixWithNothingUnderIt_IsReported()
     {
         AzureReconcilePlanViewModel plan = Build(
             Live(VNet("vnet-a", ["10.20.0.0/16"], AzSubnet("vnet-a", "sn-unrecorded", "10.20.20.0/24"))),
@@ -346,27 +419,27 @@ public class AzureReconcilerInboundTests
                 Existing(2, "10.20.16.0", 20)               // inside the VNet prefix, contains the range
             ]);
 
-        Assert.Empty(Inbound(plan));
+        Assert.Single(Inbound(plan));
     }
 
     /// <summary>
-    /// The owner's call on the null case: when no VNet address prefix contains the Azure range, fall
-    /// back to the containment test rather than reporting. ARM normally forbids that shape, but the
-    /// reconciler also assembles inventory under partial RBAC visibility, and reporting ranges
-    /// outside every declared address prefix would spam items nobody can clear.
+    /// The same answer when the Azure range falls outside the VNet's declared address space, which
+    /// a partially-visible subscription can produce. The old fallback stayed quiet here to avoid
+    /// items nobody could clear; under the free-space test the item IS clearable - create
+    /// 172.16.5.0/24 under the /16 and it goes away - so the reason for the fallback is gone.
     /// </summary>
     [Fact]
-    public void WhenNoVNetPrefixContainsTheRange_AContainingRowStillAccountsForIt()
+    public void ARangeOutsideEveryVNetPrefixThatNothingRecords_IsReported()
     {
         AzureReconcilePlanViewModel plan = Build(
             // The subnet's prefix sits outside the VNet's declared address space.
             Live(VNet("vnet-a", ["10.20.0.0/16"], AzSubnet("vnet-a", "sn-outside", "172.16.5.0/24"))),
             [
                 Target(1, "10.20.0.0", 16, "vnet-a"),
-                Existing(2, "172.16.0.0", 16)               // records it, but is outside any VNet prefix
+                Existing(2, "172.16.0.0", 16)               // contains it, but nothing under it records it
             ]);
 
-        Assert.Empty(Inbound(plan));
+        Assert.Single(Inbound(plan));
     }
 
     /// <summary>
