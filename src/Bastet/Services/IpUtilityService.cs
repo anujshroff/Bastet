@@ -281,7 +281,7 @@ public class IpUtilityService : IIpUtilityService
             {
                 (uint Start, uint End) next = allocatedRanges[i];
 
-                if (next.Start <= current.End + 1)
+                if (next.Start <= (long)current.End + 1)
                 {
                     current.End = Math.Max(current.End, next.End);
                 }

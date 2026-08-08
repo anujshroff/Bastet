@@ -1,3 +1,4 @@
+using System.Net;
 using Bastet.Models;
 using Bastet.Services;
 
@@ -56,6 +57,66 @@ public class IpUtilityServiceTests
         Assert.Equal("0.0.0.0", range.StartIp);
         Assert.Equal("254.255.255.255", range.EndIp);
     }
+
+    [Fact]
+    public void CalculateUnallocatedRanges_ANestedRowUnderAnAllocationEndingAtTheTopOfTheSpace_DoesNotOpenTheAllocationUp()
+    {
+        List<Subnet> children =
+        [
+            new() { NetworkAddress = "255.255.254.0", Cidr = 24 },
+            new() { NetworkAddress = "255.255.255.0", Cidr = 24 },
+            new() { NetworkAddress = "255.255.255.0", Cidr = 26 }
+        ];
+
+        Assert.Empty(_svc.CalculateUnallocatedRanges("255.255.254.0", 23, children, []));
+    }
+
+    [Fact]
+    public void CalculateUnallocatedRanges_NeverReturnsSpaceInsideAnAllocationItWasGiven()
+    {
+        Random rng = new(20260808);
+        int[] parentCidrs = [0, 1, 2, 3, 7, 8, 15, 16, 22, 23, 24, 29, 30];
+
+        for (int iteration = 0; iteration < 4000; iteration++)
+        {
+            int parentCidr = parentCidrs[rng.Next(parentCidrs.Length)];
+            ulong parentSize = 1UL << (32 - parentCidr);
+            uint parentStart = iteration % 2 == 0
+                ? (uint)(0x1_0000_0000UL - parentSize)
+                : (uint)((ulong)rng.NextInt64(0, (long)(0x1_0000_0000UL / parentSize)) * parentSize);
+
+            List<(uint Start, uint End)> allocations = [];
+            List<Subnet> children = [];
+
+            for (int c = 0; c < rng.Next(1, 5); c++)
+            {
+                int childCidr = Math.Min(32, parentCidr + rng.Next(1, 9));
+                ulong childSize = 1UL << (32 - childCidr);
+                ulong blocks = parentSize / childSize;
+                ulong offset = (c == 0 && iteration % 2 == 0)
+                    ? parentSize - childSize
+                    : (ulong)rng.NextInt64(0, (long)blocks) * childSize;
+
+                uint childStart = parentStart + (uint)offset;
+                children.Add(new Subnet { NetworkAddress = ToIp(childStart), Cidr = childCidr });
+                allocations.Add((childStart, (uint)(childStart + childSize - 1)));
+            }
+
+            foreach (IPRange range in _svc.CalculateUnallocatedRanges(ToIp(parentStart), parentCidr, children, []))
+            {
+                uint rangeStart = ToUInt(range.StartIp);
+                uint rangeEnd = ToUInt(range.EndIp);
+
+                Assert.DoesNotContain(allocations, a => rangeStart <= a.End && a.Start <= rangeEnd);
+            }
+        }
+    }
+
+    private static string ToIp(uint value) =>
+        new IPAddress(BitConverter.GetBytes(value).Reverse().ToArray()).ToString();
+
+    private static uint ToUInt(string ip) =>
+        BitConverter.ToUInt32([.. IPAddress.Parse(ip).GetAddressBytes().Reverse()], 0);
 
     [Fact]
     public void CalculateUnallocatedRanges_MidSpaceSubnet_IsUnaffected()
