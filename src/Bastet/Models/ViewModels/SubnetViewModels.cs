@@ -9,13 +9,13 @@ public class CreateSubnetViewModel
     [StringLength(100, ErrorMessage = "Name cannot be longer than 100 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in subnet names")]
     [SafeText(ErrorMessage = "Subnet name contains invalid characters")]
-    [SanitizeName] // Auto-sanitization
+    [SanitizeName]
     [Display(Name = "Subnet Name")]
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Network address is required")]
     [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid network address format")]
-    [SanitizeNetworkInput] // Auto-sanitization
+    [SanitizeNetworkInput]
     [Display(Name = "Network Address")]
     public string NetworkAddress { get; set; } = string.Empty;
 
@@ -26,7 +26,7 @@ public class CreateSubnetViewModel
 
     [StringLength(1000, ErrorMessage = "Description cannot be longer than 1000 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in descriptions")]
-    [SanitizeDescription] // Auto-sanitization
+    [SanitizeDescription]
     [Display(Name = "Description")]
     public string? Description { get; set; }
 
@@ -35,32 +35,20 @@ public class CreateSubnetViewModel
 
     [StringLength(255, ErrorMessage = "Tags cannot be longer than 255 characters")]
     [Bastet.Services.Security.Tags(MaxTags = 10, MaxTagLength = 50, ErrorMessage = "Invalid tags format")]
-    [SanitizeTags] // Auto-sanitization
+    [SanitizeTags]
     [Display(Name = "Tags")]
     public string? Tags { get; set; }
 
-    // Navigation properties (not mapped to database)
     public List<SubnetViewModel> ParentSubnetOptions { get; set; } = [];
 
-    // Helper property for display
     public string CalculatedSubnetMask { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// A subnet arriving through the Azure import flows. Carries the import-only fields so they are
-/// bindable only where import posts them - the interactive Create form binds the base class and
-/// can never smuggle them in.
-/// </summary>
 public class AzureImportSubnetViewModel : CreateSubnetViewModel
 {
-    /// <summary>
-    /// Indicates whether this subnet fully encompasses a VNet address prefix.
-    /// </summary>
+
     public bool FullyEncompassesVNetPrefix { get; set; }
 
-    /// <summary>
-    /// Azure resource ID of the source resource (VNet or subnet).
-    /// </summary>
     public string? AzureResourceId { get; set; }
 }
 
@@ -96,27 +84,21 @@ public class SubnetDetailsViewModel
     public string? CreatedBy { get; set; }
     public string? ModifiedBy { get; set; }
 
-    // Calculated properties
     public string SubnetMask { get; set; } = string.Empty;
     public string BroadcastAddress { get; set; } = string.Empty;
     public long TotalIpAddresses { get; set; }
     public long UsableIpAddresses { get; set; }
 
-    // Child subnets
     public List<SubnetViewModel> ChildSubnets { get; set; } = [];
 
-    // Host IP assignments
     public List<HostIpViewModel> HostIpAssignments { get; set; } = [];
     public bool IsFullyAllocated { get; set; }
 
-    // Helper properties for UI logic
     public bool CanAddHostIp => ChildSubnets.Count == 0 && !IsFullyAllocated;
     public bool CanAddChildSubnet => HostIpAssignments.Count == 0 && !IsFullyAllocated;
 
-    // Unallocated ranges
     public List<IPRange> UnallocatedRanges { get; set; } = [];
 
-    // Parent subnet info (for display)
     public string? ParentSubnetName { get; set; }
     public string? ParentNetworkAddress { get; set; }
 }

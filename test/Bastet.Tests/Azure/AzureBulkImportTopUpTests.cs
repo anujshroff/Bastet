@@ -5,16 +5,6 @@ using Bastet.Services.Security;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// Top-up import. A populated target used to be refused outright, which left an Azure subnet that
-/// gained a prefix after import impossible to import by any route - while BASTET went on advertising
-/// the Azure-assigned range as free space with a Create Subnet button over it.
-///
-/// The allowance is deliberately narrow: the target must already be linked to THIS VNet. That
-/// separates a top-up from adopting a subtree somebody built by hand, which is what re-stamps
-/// AzureResourceId on rows nobody imported and pulls them into a later reconcile cascade. The
-/// refusal tests below are the fix as much as the permission tests are.
-/// </summary>
 public class AzureBulkImportTopUpTests
 {
     private const string VNetA = "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-a";
@@ -61,11 +51,6 @@ public class AzureBulkImportTopUpTests
     private BulkImportPlanItem Plan(BulkImportSelectionDto selection, params ExistingSubnetSnapshot[] existing) =>
         _planner.BuildPlan(selection, existing).Items[0];
 
-    // -------------------------------------------------------------------------
-    // The allowance
-    // -------------------------------------------------------------------------
-
-    /// <summary>The defect: the one genuinely-new subnet could not be imported by any route.</summary>
     [Fact]
     public void ATargetAlreadyLinkedToThisVNet_AcceptsTheMissingSubnet()
     {
@@ -78,14 +63,6 @@ public class AzureBulkImportTopUpTests
         Assert.Single(item.ChildSubnets);
     }
 
-    // -------------------------------------------------------------------------
-    // The refusals - each one is a way the allowance could have gone wrong
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Adoption. A populated target with no Azure link was built by hand; claiming it would stamp
-    /// this VNet's id on rows nobody imported, after which a reconcile cascade can archive them.
-    /// </summary>
     [Fact]
     public void APopulatedTargetWithNoAzureLink_IsStillRefused()
     {
@@ -126,16 +103,11 @@ public class AzureBulkImportTopUpTests
         Assert.Contains(item.Errors, e => e.Contains("fully allocated"));
     }
 
-    /// <summary>
-    /// The gap the verifier named. The commit marks the target fully allocated INSTEAD of creating
-    /// children, so a populated target would be left claiming nothing more fits while already
-    /// holding rows. The old blanket refusal was preventing this incidentally.
-    /// </summary>
     [Fact]
     public void ATopUpCannotMarkAPopulatedTargetFullyAllocated()
     {
         BulkImportPlanItem item = Plan(
-            // An Azure subnet covering the whole VNet prefix
+
             Selection(false, Sub("sn-whole", "10.90.0.0/16")),
             Target(linkedTo: VNetA));
 
@@ -143,10 +115,6 @@ public class AzureBulkImportTopUpTests
         Assert.False(item.WillMarkFullyAllocated);
     }
 
-    /// <summary>
-    /// Renaming a target that already holds imported rows changes a label the operator has been
-    /// living with, for a run whose purpose is to add the one subnet that was missing.
-    /// </summary>
     [Fact]
     public void ATopUpNeverRenamesThePopulatedTarget()
     {
@@ -158,7 +126,6 @@ public class AzureBulkImportTopUpTests
         Assert.Empty(item.Errors);
     }
 
-    /// <summary>An empty target is still renamed when asked - the top-up guard must not disable it.</summary>
     [Fact]
     public void AnEmptyTargetIsStillRenamedWhenRequested()
     {
@@ -177,10 +144,6 @@ public class AzureBulkImportTopUpTests
         Assert.True(item.WillRename);
         Assert.Equal("vnet-a", item.NewName);
     }
-
-    // -------------------------------------------------------------------------
-    // The preview must not describe a top-up as a first import
-    // -------------------------------------------------------------------------
 
     [Fact]
     public void ThePreviewSaysItIsAddingToAnExistingSubnet_NotImportingIntoIt()

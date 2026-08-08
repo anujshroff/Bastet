@@ -12,15 +12,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// The single-VNet import wizard's commit path, driven with the two rows an Azure subnet owning two
-/// IPv4 prefixes now produces. Both must be created, and their names must not collide: Subnet.Name
-/// carries a NON-unique index, so two identically-named rows would persist silently and be
-/// indistinguishable in every list and dropdown.
-///
-/// The browser is not the authority here. These tests post the rows directly, which is also what a
-/// crafted or replayed request looks like, so the disambiguation has to be server-side.
-/// </summary>
 [Collection(AzureFeatureFlagCollection.Name)]
 public class AzureMultiPrefixImportCommitTests : IDisposable
 {
@@ -59,7 +50,6 @@ public class AzureMultiPrefixImportCommitTests : IDisposable
         _controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/Azure/Import/1";
 
-        // A /16 target that comfortably contains both prefixes of the Azure subnet.
         _context.Subnets.Add(new Subnet
         {
             Id = 1,
@@ -92,10 +82,6 @@ public class AzureMultiPrefixImportCommitTests : IDisposable
             AzureResourceId = SubnetResourceId
         };
 
-    /// <summary>
-    /// Both prefixes of one Azure subnet are created, and each Bastet row is named for the range it
-    /// actually holds rather than both taking the bare Azure name.
-    /// </summary>
     [Fact]
     public async Task BothPrefixesOfOneAzureSubnet_AreCreatedWithDistinctNames()
     {
@@ -119,19 +105,13 @@ public class AzureMultiPrefixImportCommitTests : IDisposable
         Assert.Equal(2, created.Count);
         Assert.Equal(["10.31.0.0", "10.31.1.0"], created.Select(s => s.NetworkAddress));
 
-        // The names must differ, and each must name its own range.
         Assert.Equal(2, created.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Equal("sn-multi (10.31.0.0-24)", created[0].Name);
         Assert.Equal("sn-multi (10.31.1.0-24)", created[1].Name);
 
-        // Both stay linked to the one Azure subnet they came from.
         Assert.All(created, s => Assert.Equal(SubnetResourceId, s.AzureResourceId));
     }
 
-    /// <summary>
-    /// The guard for every existing install: a single-prefix import is byte-for-byte what it was.
-    /// No suffix appears when there is nothing to disambiguate.
-    /// </summary>
     [Fact]
     public async Task SinglePrefixImport_KeepsThePlainAzureName()
     {
@@ -146,10 +126,6 @@ public class AzureMultiPrefixImportCommitTests : IDisposable
         Assert.Equal("web", created.Name);
     }
 
-    /// <summary>
-    /// Two genuinely different Azure subnets that happen to share a name must also stop colliding -
-    /// same non-unique index, same consequence. They are distinguished by their own prefixes.
-    /// </summary>
     [Fact]
     public async Task TwoDifferentAzureSubnetsSharingAName_AreAlsoDisambiguated()
     {
@@ -168,11 +144,6 @@ public class AzureMultiPrefixImportCommitTests : IDisposable
         Assert.Equal(2, created.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
-    /// <summary>
-    /// Overlap validation still runs across the batch: a second row covering the same range as the
-    /// first is refused, not silently renamed and created. Disambiguating names must not become a
-    /// way to smuggle in a duplicate allocation.
-    /// </summary>
     [Fact]
     public async Task TwoRowsCoveringTheSameRange_AreStillRefused()
     {

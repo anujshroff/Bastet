@@ -13,9 +13,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// Integration tests for batch subnet creation functionality in the SubnetController
-/// </summary>
 [Collection(Bastet.Tests.Azure.AzureFeatureFlagCollection.Name)]
 public class SubnetControllerBatchCreateTests : IDisposable
 {
@@ -28,11 +25,9 @@ public class SubnetControllerBatchCreateTests : IDisposable
 
     public SubnetControllerBatchCreateTests()
     {
-        // These tests drive the Azure import path, which is now behind the feature flag the
-        // other eleven Azure write paths were always behind.
+
         Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "true");
 
-        // Use SQLite in-memory database for tests
         DbContextOptions<BastetDbContext> options = new DbContextOptionsBuilder<BastetDbContext>()
             .UseSqlite("DataSource=:memory:")
             .Options;
@@ -41,13 +36,11 @@ public class SubnetControllerBatchCreateTests : IDisposable
         _context.Database.OpenConnection();
         _context.Database.EnsureCreated();
 
-        // Set up services
         _userContextService = ControllerTestHelper.CreateMockUserContextService();
         _ipUtilityService = new IpUtilityService();
         _validationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
 
-        // Create and configure the controller
         _controller = new SubnetController(
             _context,
             _ipUtilityService,
@@ -59,16 +52,13 @@ public class SubnetControllerBatchCreateTests : IDisposable
         );
         ControllerTestHelper.SetupController(_controller);
 
-        // Setup controller context with HttpContext
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext()
         };
 
-        // Add Referer header for testing
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/Azure/Import/1";
 
-        // Set up test data
         SeedTestData();
     }
 
@@ -82,9 +72,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
 
     private void SeedTestData()
     {
-        // Create a hierarchy of test subnets
 
-        // Root subnet - no parent
         Subnet rootSubnet = new()
         {
             Id = 1,
@@ -96,7 +84,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
         };
         _context.Subnets.Add(rootSubnet);
 
-        // Parent subnet - for import testing
         Subnet parentSubnet = new()
         {
             Id = 2,
@@ -109,7 +96,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
         };
         _context.Subnets.Add(parentSubnet);
 
-        // Parent subnet with children - to test conflicts
         Subnet parentWithChildren = new()
         {
             Id = 3,
@@ -122,7 +108,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
         };
         _context.Subnets.Add(parentWithChildren);
 
-        // Child subnet of parentWithChildren
         Subnet childSubnet = new()
         {
             Id = 4,
@@ -135,15 +120,9 @@ public class SubnetControllerBatchCreateTests : IDisposable
         };
         _context.Subnets.Add(childSubnet);
 
-        // Save all changes
         _context.SaveChanges();
     }
 
-    /// <summary>
-    /// The Azure import wizard posts as a full-page form, so its failures redirect to the parent's
-    /// Details page carrying the reason in TempData rather than returning a raw error body the
-    /// browser would render in place of the wizard. Asserts both halves.
-    /// </summary>
     private void AssertImportFailureRedirect(IActionResult result, int parentId)
     {
         RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
@@ -156,8 +135,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_ValidSubnets_CreatesSubnets()
     {
-        // Arrange
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         List<AzureImportSubnetViewModel> subnets =
         [
             new()
@@ -180,15 +159,12 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, isAzureImport: true);
 
-        // Assert - the controller redirects when the caller declares this is an Azure import
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
 
-        // Verify subnets were created in the database
         List<Subnet> createdSubnets = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .ToListAsync(TestContext.Current.CancellationToken);
@@ -199,13 +175,13 @@ public class SubnetControllerBatchCreateTests : IDisposable
     }
 
     [Theory]
-    // 54 characters: a realistic Azure VNet name, which the 100-character column keeps whole.
+
     [InlineData("corporate-network-westeurope-production-environment-01", 54)]
-    // Azure's own limit is 64 characters, still comfortably inside the column.
+
     [InlineData("corporate-network-westeurope-production-environment-01-secondary", 64)]
     public async Task BatchCreateChildSubnets_WithLongVNetName_KeepsTheWholeName(string vnetName, int expectedLength)
     {
-        int parentId = 2; // Parent Subnet
+        int parentId = 2;
         Assert.Equal(expectedLength, vnetName.Length);
 
         List<AzureImportSubnetViewModel> subnets =
@@ -232,9 +208,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_WithVNetNameBeyondTheColumn_TruncatesToColumnLength()
     {
-        // Beyond any real Azure name, so this only guards a hand-crafted post: the value still has to
-        // fit Subnet.Name rather than fail the insert with a SQL truncation error.
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         string vnetName = new('v', 150);
 
         List<AzureImportSubnetViewModel> subnets =
@@ -261,10 +236,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_WithLongAzureSubnetName_ImportsItWhole()
     {
-        // Azure subnet names go up to 80 characters. While Subnet.Name held 50, the inherited
-        // [StringLength] rejected these during model binding - before the action ran - so the import
-        // returned raw ModelState JSON to a full-page form post and nothing could be imported.
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         string azureName = new('s', 80);
 
         List<AzureImportSubnetViewModel> subnets =
@@ -278,7 +251,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // The length limit lives in a validation attribute, which only runs during model binding.
         List<System.ComponentModel.DataAnnotations.ValidationResult> validationResults = [];
         System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
             subnets[0],
@@ -300,11 +272,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_WithOverLongAzureResourceId_IsRejectedAndStoresNothing()
     {
-        // Sanitization trims resource IDs at 1000 while the column holds 500, so an over-long value
-        // used to reach the insert and fail it behind a generic 500. Rejected rather than truncated:
-        // reconcile matches subnets to live Azure by this ID, so a shortened one would report the
-        // subnet as deleted in Azure permanently.
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         int subnetCountBefore = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
 
         List<AzureImportSubnetViewModel> subnets =
@@ -330,8 +299,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_WithRealisticAzureResourceId_ImportsIt()
     {
-        // A full-length ARM ID for a subnet is roughly 330 characters, comfortably inside the column.
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         string resourceId =
             "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/" + new string('r', 80) +
             "/providers/Microsoft.Network/virtualNetworks/" + new string('v', 64) + "/subnets/" + new string('s', 80);
@@ -362,9 +331,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_WithAzureResourceId_PersistsItOnTheCreatedSubnet()
     {
-        // The import wizard posts the Azure resource ID with each subnet; reconcile and the portal
-        // link both depend on it landing on the entity.
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         string resourceId = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-a/subnets/web";
         List<AzureImportSubnetViewModel> subnets =
         [
@@ -389,8 +357,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_WithVNetName_RenamesParentSubnet()
     {
-        // Arrange
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         string vnetName = "Azure-VNet-1";
         List<AzureImportSubnetViewModel> subnets =
         [
@@ -405,41 +373,26 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName, isAzureImport: true);
 
-        // Assert - the controller redirects when the caller declares this is an Azure import
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
 
-        // Verify parent subnet was renamed
         Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.Equal(vnetName, parentSubnet.Name);
 
-        // Verify child subnet was created
         Subnet? childSubnet = await _context.Subnets
             .FirstOrDefaultAsync(s => s.ParentSubnetId == parentId && s.Name == "Azure Subnet 1", TestContext.Current.CancellationToken);
         Assert.NotNull(childSubnet);
     }
 
-    /// <summary>
-    /// O8. N4 relaxed the wizard's entry gate so a populated target is admitted for a top-up, but
-    /// this commit path kept renaming the parent unconditionally - so a top-up discarded whatever
-    /// the operator had renamed the row to. That is an operator-entered field, nothing archives a
-    /// rename, and the wizard offers no way to decline, unlike the bulk path's opt-in checkbox.
-    ///
-    /// The guard is population, not "is this a top-up", which is the rule the bulk planner already
-    /// applies to the same operation.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_OnAPopulatedTarget_DoesNotRenameTheParent()
     {
         const int ParentId = 2;
 
-        // A first import already happened: the target holds a child, and the operator has since
-        // renamed the row to something they maintain by hand.
         _context.Subnets.Add(new Subnet
         {
             Id = 800,
@@ -473,17 +426,11 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.NotNull(after);
         Assert.Equal("Production Core", after.Name);
 
-        // ...and the flash must not announce a rename that did not happen.
         string? flash = _controller.TempData["SuccessMessage"] as string;
         Assert.NotNull(flash);
         Assert.DoesNotContain("renamed", flash, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// The counterpart, and why the guard is population rather than top-up: an EMPTY target is
-    /// still renamed, which is what the bulk planner does for the same case
-    /// (AnEmptyTargetIsStillRenamedWhenRequested).
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_OnAnEmptyTarget_StillRenamesTheParent()
     {
@@ -510,8 +457,8 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_FromNonAzureImport_DoesNotRenameParent()
     {
-        // Arrange
-        int parentId = 2; // Parent Subnet
+
+        int parentId = 2;
         string originalName = "Parent Subnet";
         string vnetName = "Should-Not-Rename";
 
@@ -526,13 +473,10 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // Act - isAzureImport defaults to false, so this is a plain batch create
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName);
 
-        // Assert
         _ = Assert.IsType<OkObjectResult>(result);
 
-        // Verify parent subnet was NOT renamed
         Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.Equal(originalName, parentSubnet.Name);
@@ -541,17 +485,15 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_OverlappingSubnets_ReturnsValidationError()
     {
-        // Arrange
-        int parentId = 2; // Parent Subnet
 
-        // First clear any existing subnets with this parent to ensure clean test state
+        int parentId = 2;
+
         List<Subnet> existingSubnets = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .ToListAsync(TestContext.Current.CancellationToken);
         _context.Subnets.RemoveRange(existingSubnets);
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        // Set referer to a non-Azure URL to get a BadRequest result instead of a redirect
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/SomeOtherController/Action";
 
         List<AzureImportSubnetViewModel> subnets =
@@ -567,37 +509,26 @@ public class SubnetControllerBatchCreateTests : IDisposable
             {
                 Name = "Overlapping Subnet 2",
                 NetworkAddress = "10.0.1.0",
-                Cidr = 24, // Same as Subnet 1 - should cause conflict
+                Cidr = 24,
                 ParentSubnetId = parentId
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
 
-        // Assert - when overlapping subnets are provided, controller returns BadRequest
         BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
 
-        // Verify no subnets were created
         int subnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .CountAsync(TestContext.Current.CancellationToken);
 
-        // With proper transaction management, no subnets should be created when there's an overlap
-        // The transaction should roll back all changes
         Assert.Equal(0, subnetCount);
     }
 
-    /// <summary>
-    /// An entry contained inside an earlier entry of the same batch must be refused. The batch reads
-    /// the subnet tree once and appends each row it creates, so this is the case that proves the
-    /// appending happens: without it the second entry is validated against a snapshot that predates
-    /// the first, finds only the real parent, and is created nested wrongly.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_EntryContainedInAnEarlierEntry_ReturnsValidationError()
     {
-        int parentId = 2; // 10.0.0.0/16
+        int parentId = 2;
 
         List<Subnet> existingSubnets = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
@@ -610,7 +541,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
         List<AzureImportSubnetViewModel> subnets =
         [
             new() { Name = "Outer", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = parentId },
-            // Inside Outer, not equal to it, so the duplicate index would not catch this one.
+
             new() { Name = "Inner", NetworkAddress = "10.0.1.0", Cidr = 25, ParentSubnetId = parentId }
         ];
 
@@ -627,26 +558,23 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_SubnetsOutsideParent_ReturnsValidationError()
     {
-        // Arrange
-        int parentId = 2; // Parent Subnet - 10.0.0.0/16
+
+        int parentId = 2;
         List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
                 Name = "Outside Parent Range",
-                NetworkAddress = "192.168.1.0", // Outside parent range
+                NetworkAddress = "192.168.1.0",
                 Cidr = 24,
                 ParentSubnetId = parentId
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets);
 
-        // Assert - when subnets outside parent range are passed in, controller returns BadRequest
         BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
 
-        // Verify no subnets were created
         int subnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .CountAsync(TestContext.Current.CancellationToken);
@@ -657,8 +585,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_EmptyList_ReturnsValidationError()
     {
-        // An empty list means nothing was selected, or nothing bound. It used to fall through to the
-        // parent rename and report "imported 0 child subnets" as a success.
+
         int parentId = 2;
         string originalName = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!.Name;
 
@@ -667,7 +594,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
 
         AssertImportFailureRedirect(result, parentId);
 
-        // The parent must be left exactly as it was
         _context.ChangeTracker.Clear();
         Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
         Assert.Equal(originalName, parent.Name);
@@ -677,7 +603,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_ParentNotFound_ReturnsNotFound()
     {
-        // Arrange
+
         int nonExistentParentId = 999;
         List<AzureImportSubnetViewModel> subnets =
         [
@@ -690,17 +616,15 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(nonExistentParentId, subnets);
 
-        // Assert - The controller returns BadRequestObjectResult for invalid parent
         _ = Assert.IsType<NotFoundObjectResult>(result);
     }
 
     [Fact]
     public async Task BatchCreateChildSubnets_FromAzureImport_ReturnsRedirect()
     {
-        // Arrange
+
         int parentId = 2;
         List<AzureImportSubnetViewModel> subnets =
         [
@@ -715,30 +639,18 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, isAzureImport: true);
 
-        // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
 
-        // Verify subnet was created
         Subnet? createdSubnet = await _context.Subnets
             .FirstOrDefaultAsync(s => s.ParentSubnetId == parentId && s.Name == "Azure Import Subnet", TestContext.Current.CancellationToken);
 
         Assert.NotNull(createdSubnet);
     }
 
-    // -------------------------------------------------------------------------
-    // Failures must be shaped for whoever posted them
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The wizard posts a full-page form, so a raw error body would replace the wizard on screen -
-    /// UseStatusCodePagesWithReExecute skips responses that already have a body, so not even the
-    /// error page steps in. The import path redirects and carries the reason in TempData instead.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_ImportFailure_RedirectsWithTheReasonInTempData()
     {
@@ -751,10 +663,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.Contains("No subnets were submitted", _controller.TempData["ErrorMessage"] as string);
     }
 
-    /// <summary>
-    /// The other half: a direct JSON caller must keep the status codes it relies on. Without this
-    /// the redirect could quietly be applied to every caller.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_ApiFailure_StillReturnsBadRequest()
     {
@@ -767,12 +675,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.False(_controller.TempData.ContainsKey("ErrorMessage"));
     }
 
-    /// <summary>
-    /// This was the one Azure write path with no feature-flag guard while its eleven siblings all had
-    /// one, so an Admin could stamp AzureResourceId in a deployment with Azure deliberately off - a
-    /// column no other write path exposes and no UI can clear. The Details page then renders a live
-    /// "View in Azure Portal" link from it, and the row arms itself if the flag is later enabled.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_AzureImportWithFeatureDisabled_IsRefused()
     {
@@ -792,15 +694,10 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Subnet? parent = await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken);
         Assert.NotNull(parent);
         Assert.Null(parent.AzureResourceId);
-        Assert.Equal("Parent Subnet", parent.Name);   // not renamed to the VNet name
+        Assert.Equal("Parent Subnet", parent.Name);
         _ = result;
     }
 
-    /// <summary>
-    /// The gap the finding's own proposed fix would have left: the child stamp is behind no
-    /// isAzureImport test at all, so gating on that flag alone still let an Admin create Azure-linked
-    /// rows with the feature off. The guard is on the Azure state being written, not on the claim.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_ChildAzureIdWithFeatureDisabled_IsRefused()
     {
@@ -815,17 +712,12 @@ public class SubnetControllerBatchCreateTests : IDisposable
             }
         ];
 
-        // isAzureImport deliberately absent - this is the path the flag-only guard would have missed.
         IActionResult result = await _controller.BatchCreateChildSubnets(2, subnets);
 
         Assert.Empty(await _context.Subnets.Where(s => s.Name == "smuggled").ToListAsync(TestContext.Current.CancellationToken));
         _ = result;
     }
 
-    /// <summary>
-    /// The guard must not break the documented non-Azure use of this endpoint: a plain batch create,
-    /// carrying no Azure state, still works with the feature off.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_PlainBatchWithFeatureDisabled_StillCreates()
     {
@@ -843,15 +735,6 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Assert.Null(created.AzureResourceId);
         _ = result;
     }
-
-    // -------------------------------------------------------------------------
-    // Re-pointing an already-linked parent at a different VNet
-    //
-    // Two VNets in one subscription may carry the same prefix, so importing the second one into a
-    // subnet already imported from the first used to overwrite the recorded resource ID in place.
-    // Reconcile then measured the row against the wrong VNet and reported it deleted once that VNet
-    // went away, archiving the row and its subtree with no in-app way back.
-    // -------------------------------------------------------------------------
 
     private const string VNetVa = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/va";
     private const string VNetVb = "/subscriptions/test/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vb";
@@ -872,14 +755,12 @@ public class SubnetControllerBatchCreateTests : IDisposable
         IActionResult result = await _controller.BatchCreateChildSubnets(
             2, subnets, vnetName: "vb", vnetResourceId: VNetVb, isAzureImport: true);
 
-        // The Azure import path reports failure by redirecting with a TempData message.
         RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirect.ActionName);
         string message = Assert.IsType<string>(_controller.TempData["ErrorMessage"]);
         Assert.Contains(VNetVa, message);
         Assert.Contains(VNetVb, message);
 
-        // Nothing was written: the link is intact, the parent keeps its name, no child was created.
         _context.ChangeTracker.Clear();
         Subnet after = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
         Assert.Equal(VNetVa, after.AzureResourceId);
@@ -890,8 +771,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_ParentLinkedToTheSameVNet_StillImports()
     {
-        // Re-importing the same VNet must keep working. ARM IDs survive delete-and-recreate, so
-        // this is also the path a re-created VNet takes.
+
         Subnet parent = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
         parent.AzureResourceId = VNetVa;
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -915,7 +795,7 @@ public class SubnetControllerBatchCreateTests : IDisposable
     [Fact]
     public async Task BatchCreateChildSubnets_UnlinkedParent_IsStampedAndCounted()
     {
-        // The first import of a hand-created subnet: no recorded link, so the stamp is not a relink.
+
         List<AzureImportSubnetViewModel> subnets =
         [
             new() { Name = "web", NetworkAddress = "10.0.1.0", Cidr = 24, ParentSubnetId = 2 }

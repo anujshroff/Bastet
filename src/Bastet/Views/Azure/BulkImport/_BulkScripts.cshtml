@@ -2,20 +2,15 @@
 
 <script>
     $(document).ready(function () {
-        // ---------------------------------------------------------------
-        // State
-        // ---------------------------------------------------------------
+
         let selectedSubscriptionId = "";
         let selectedSubscriptionName = "";
-        let vnets = []; // [{ resourceId, name, ipv4AddressPrefixes:[], subnets:[{name, addressPrefix}] }]
-        let lastSelection = null; // last BulkImportSelectionDto submitted
-        let previewSeq = 0;       // bumped per preview so a superseded response can be told apart
-        let committing = false;   // a commit POST is in flight
-        let committed = false;    // this plan has already been committed successfully
+        let vnets = [];
+        let lastSelection = null;
+        let previewSeq = 0;
+        let committing = false;
+        let committed = false;
 
-        // ---------------------------------------------------------------
-        // Step navigation helpers
-        // ---------------------------------------------------------------
         function activateTab(tabId) {
             $("#bulk-import-tabs .nav-link").removeClass("active");
             $("#bulk-import-tab-content .tab-pane").removeClass("show active");
@@ -24,15 +19,9 @@
             $("#" + tabId).addClass("show active");
         }
 
-        // Once a step has been visited its pill stays clickable, so without this the user could go
-        // back to step 2, change the selection, then jump straight to the preview or commit pill and
-        // act on a plan that no longer matches what is on screen. Any change to the selection
-        // re-locks the later steps and drops the cached selection.
         function invalidatePlan() {
             lastSelection = null;
-            // A new plan has not been committed yet. `committing` is deliberately NOT cleared here:
-            // a commit already in flight belongs to the old plan and is still running, and clearing
-            // it would re-arm Confirm underneath that request.
+
             committed = false;
             $("#step3-tab, #step4-tab").addClass("disabled");
             $("#bulk-go-commit-btn").prop("disabled", true);
@@ -104,9 +93,7 @@
             // A plan belongs to the subscription it was built from, so choosing a different one
             // re-locks the later steps rather than leaving them reachable through their pills.
             // Step 2 belongs to it too: its tree is the previous subscription's. Re-lock it here
-            // rather than inside invalidatePlan(), which also runs on every checkbox tick and
-            // while step 2 is itself the active step - the tree only goes stale when the
-            // subscription changes. #bulk-select-subscription-btn re-opens it via activateTab.
+
             $("#step2-tab").addClass("disabled");
             invalidatePlan();
         });
@@ -121,9 +108,6 @@
             loadVNets();
         });
 
-        // ---------------------------------------------------------------
-        // Step 2: Selection tree
-        // ---------------------------------------------------------------
         function loadVNets() {
             $.ajax({
                 url: '@Url.Action("BulkGetVNets", "Azure")',
@@ -131,9 +115,7 @@
                 data: { subscriptionId: selectedSubscriptionId },
                 dataType: "json",
                 beforeSend: function () {
-                    // Invalidate here rather than on the success path: a load that fails, or that
-                    // finds no VNets, returns early, which would otherwise leave the previous
-                    // subscription's plan committable while step 2 reports the new one as empty.
+
                     invalidatePlan();
                     $("#bulk-vnet-loading").removeClass("d-none");
                     $("#bulk-vnet-selection").addClass("d-none");
@@ -165,8 +147,6 @@
             });
         }
 
-        // Badge for a server-computed availability status. Switches on the name rather than the
-        // enum ordinal, and falls back rather than rendering nothing for an unknown value.
         function availabilityBadge(statusName) {
             switch (statusName) {
                 case "Available": return "";
@@ -185,9 +165,6 @@
             const $tree = $("#bulk-vnet-tree").empty();
             const hideImported = $("#bulk-hide-imported").is(":checked");
 
-            // Subscription-wide, so it must live in this scope and not the per-VNet loop below:
-            // the empty-state message reads "in this subscription", and a `let` declared inside the
-            // $.each callback is not in scope where that message is built.
             let suppressedPrefixes = 0;
 
             $.each(vnets, function (vIdx, vnet) {
@@ -200,7 +177,7 @@
 
                     if (hideImported && !prefixInfo.isSelectable) {
                         suppressedPrefixes++;
-                        return; // continue
+                        return;
                     }
                     visiblePrefixes++;
 
@@ -219,7 +196,6 @@
                     $prefixDiv.append($prefixCheckbox).append($prefixLabel);
                     $prefixDiv.append(reasonHtml(prefixInfo.reason));
 
-                    // Filter Azure subnets that are contained in this prefix only
                     const containedSubnets = vnet.subnets.filter(function (s) { return prefixContainsCidr(prefix, s.addressPrefix); });
                     const shownSubnets = hideImported
                         ? containedSubnets.filter(function (s) { return s.isSelectable; })
@@ -230,11 +206,7 @@
                         $.each(shownSubnets, function (sIdx, subnet) {
                             const subnetId = `bulk-subnet-${vIdx}-${pIdx}-${sIdx}`;
                             const $subnetDiv = $('<div class="form-check"></div>');
-                            // Declared here, ahead of the label and the reason below that both read
-                            // it. Referencing a `const` earlier in the block than its declaration is
-                            // a temporal dead zone, and Razor does not parse embedded script - so it
-                            // would build at 0 warnings and then throw inside this render loop,
-                            // leaving step 2 spinning with no checkboxes at all.
+
                             const subnetBlockedByPrefix = subnet.isSelectable && !prefixInfo.isSelectable;
                             const $subnetCheckbox = $('<input type="checkbox" class="form-check-input bulk-subnet-checkbox">')
                                 .attr('id', subnetId)
@@ -243,32 +215,20 @@
                                 .attr('data-name', subnet.name)
                                 .attr('data-address-prefix', subnet.addressPrefix)
                                 .attr('data-resource-id', subnet.resourceId || '')
-                                // A subnet is only ever imported underneath its prefix, so a blocked
-                                // prefix blocks its children too. Without this they'd stay tickable
-                                // but never submit: buildSelectionFromUI walks checked prefixes.
+
                                 .prop('disabled', !subnet.isSelectable || !prefixInfo.isSelectable);
                             const $subnetLabel = $('<label class="form-check-label"></label>')
                                 .attr('for', subnetId)
                                 .html(`${escapeHtml(subnet.name)} <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>`
                                     + availabilityBadge(subnet.statusName)
-                                    // Its own status is Available - it is only unselectable because
-                                    // its prefix is. Deliberately not the red "Cannot import" badge,
-                                    // which the legend defines as conflicting with something already
-                                    // in BASTET; that is untrue here and would trade one inaccurate
-                                    // legend entry for another.
+
                                     + (subnetBlockedByPrefix
                                         ? '<span class="badge bg-secondary ms-1">Blocked by VNet prefix</span>'
                                         : ""));
                             $subnetDiv.append($subnetCheckbox).append($subnetLabel);
 
-                            // Unconditional. The old !isSelectable guard also swallowed the reason of
-                            // a *selectable* row, and AnnotateSubnet produces exactly one: the
-                            // encompassing subnet, whose "Covers the whole VNet prefix..." explains
-                            // why it marks the target fully allocated instead of being created.
                             $subnetDiv.append(reasonHtml(subnet.reason));
 
-                            // Only when the row has nothing more specific to say, so a subnet with
-                            // its own conflict keeps that reason rather than this generic one.
                             if (subnetBlockedByPrefix && !subnet.reason) {
                                 $subnetDiv.append(reasonHtml(
                                     "Its VNet prefix cannot be imported, so this subnet cannot be either."));
@@ -277,14 +237,7 @@
                         });
                         $prefixDiv.append($subList);
                     } else if (containedSubnets.length > 0) {
-                        // isSelectable === false covers two different verdicts. AlreadyImported means
-                        // the row really was imported from this Azure resource; Blocked means it was
-                        // never imported and cannot be - "Would contain existing Bastet subnet ..." or
-                        // "Bastet subnet 'X' already uses ...". Asserting "already imported" over the
-                        // second is a positive false statement, and it hides the red Cannot import
-                        // badge that carries the only text saying what is actually wrong. Azure has no
-                        // subnet rename, so renaming is delete-and-recreate under a new ARM id, which
-                        // lands every previously imported subnet in the VNet on the Blocked branch.
+
                         const importedCount = containedSubnets.filter(function (s) {
                             return s.statusName === "AlreadyImported";
                         }).length;
@@ -312,9 +265,8 @@
                     $body.append($prefixDiv);
                 });
 
-                // Don't render a card whose every prefix was filtered out
                 if (visiblePrefixes === 0) {
-                    return; // continue
+                    return;
                 }
 
                 $card.append($body);
@@ -322,14 +274,7 @@
             });
 
             if ($tree.children().length === 0) {
-                // AnnotatePrefix never returns AlreadyImported - a target that really was imported
-                // comes back Blocked with "already has child subnets", the same bucket as a prefix
-                // blocked by a conflict with a hand-made subnet. So "already imported" was asserted
-                // over rows that had never been imported at all, with the red explanation hidden
-                // rather than shown. Say how many were suppressed and how to see why.
-                // Only suppression can empty the tree: loadVNets returns early to #bulk-no-vnets on
-                // an empty list, GetVNetInventory skips VNets with no IPv4 prefix, and BulkGetVNets
-                // always annotates - so every VNet reaching here has at least one prefix.
+
                 const $empty = $('<div class="alert alert-info mb-0"></div>');
                 $empty.append($('<span></span>').text(
                     suppressedPrefixes + ' VNet prefix(es) in this subscription cannot be selected, '
@@ -337,8 +282,6 @@
                 $tree.append($empty);
             }
 
-            // Subnet checked → check its prefix (never force a disabled prefix on; a blocked target
-            // means the child can't be imported either)
             $(".bulk-subnet-checkbox").on("change", function () {
                 if ($(this).is(":checked")) {
                     const vIdx = $(this).attr('data-vnet-idx');
@@ -348,7 +291,6 @@
                 updateGoPreviewBtn();
             });
 
-            // Prefix unchecked → uncheck its subnets
             $(".bulk-prefix-checkbox").on("change", function () {
                 if (!$(this).is(":checked")) {
                     const vIdx = $(this).attr('data-vnet-idx');
@@ -360,22 +302,17 @@
         }
 
         function updateGoPreviewBtn() {
-            // :not(:disabled) throughout - jQuery's :checked matches disabled inputs, so without it
-            // a greyed-out row would still count and still be submitted.
+
             const anyPrefix = $(".bulk-prefix-checkbox:checked:not(:disabled)").length > 0;
             $("#bulk-go-preview-btn").prop("disabled", !anyPrefix);
 
-            // Every selection change routes through here, so this is where a previously-built plan
-            // stops matching the UI.
             invalidatePlan();
         }
 
-        // The rename switch is part of the selection but doesn't touch the checkboxes.
         $("#bulk-rename-matched").on("change", invalidatePlan);
 
         $("#bulk-select-all-btn").on("click", function () {
-            // Skip anything that can't be imported, so Select all is safe on a subscription that has
-            // already been imported once.
+
             $(".bulk-prefix-checkbox:not(:disabled), .bulk-subnet-checkbox:not(:disabled)").prop("checked", true);
             updateGoPreviewBtn();
         });
@@ -385,9 +322,6 @@
             updateGoPreviewBtn();
         });
 
-        // Purely a display filter, but re-rendering wipes the checkboxes, so capture the selection
-        // and restore it afterwards. This still re-locks the later steps via updateGoPreviewBtn,
-        // which is deliberate: cheaper to re-run the preview than to trust a restore to be perfect.
         $("#bulk-hide-imported").on("change", function () {
             const checkedPrefixes = $(".bulk-prefix-checkbox:checked:not(:disabled)")
                 .map(function () { return $(this).attr("data-vnet-idx") + "|" + $(this).attr("data-prefix"); }).get();
@@ -412,8 +346,6 @@
             activateTab("step1");
         });
 
-        // Quick CIDR-contains check used only for *display grouping* in step 2.
-        // Server-side checks are still authoritative; this is best-effort.
         function ipToInt(ip) {
             const parts = ip.split('.');
             if (parts.length !== 4) return null;
@@ -433,7 +365,7 @@
             const pc = parseInt(pp[1], 10);
             const cc = parseInt(cp[1], 10);
             if (isNaN(pc) || isNaN(cc)) return false;
-            // Equal prefix counts as contained for our purposes (fully encompassing case)
+
             if (cc < pc) return false;
             const pInt = ipToInt(pp[0]);
             const cInt = ipToInt(cp[0]);
@@ -442,23 +374,9 @@
             return ((pInt & mask) >>> 0) === ((cInt & mask) >>> 0);
         }
 
-        // ---------------------------------------------------------------
-        // Step 3: Preview
-        // ---------------------------------------------------------------
         $("#bulk-go-preview-btn").on("click", function () {
             const selection = buildSelectionFromUI();
 
-            // Re-lock the later steps before re-previewing. A pill stays clickable once its step has
-            // been visited, and invalidatePlan is the only writer that puts the disabled state back -
-            // so without this, one visit to Commit left step 4 live for the rest of the page's life.
-            // Every later preview then ran with the commit button still armed over a plan that had
-            // not been rendered: if the preview failed, or simply had not landed yet, the operator
-            // could confirm an import whose plan they never saw, and the approved-plan check would
-            // not fire because the fresh selection had never been stamped with an expectation.
-            //
-            // Ordering is load-bearing twice: invalidatePlan nulls lastSelection, so it must run
-            // before the reassignment below, and it re-disables #step3-tab, so it must run before
-            // activateTab re-opens that one step.
             invalidatePlan();
 
             lastSelection = selection;
@@ -470,8 +388,6 @@
             const renameMatched = $("#bulk-rename-matched").is(":checked");
             const prefixSelections = [];
 
-            // :not(:disabled) is load-bearing here - jQuery's :checked matches disabled inputs, so
-            // without it "Select all" would submit the very rows the server marked un-importable.
             $(".bulk-prefix-checkbox:checked:not(:disabled)").each(function () {
                 const vIdx = parseInt($(this).attr('data-vnet-idx'), 10);
                 const prefix = $(this).attr('data-prefix');
@@ -504,10 +420,7 @@
         }
 
         function loadPreview(selection) {
-            // Preview latency scales with (existing subnets x selected prefixes), so two previews
-            // can answer out of order. Commit posts lastSelection, which is set on the click - if a
-            // superseded response were allowed to repaint, the screen would show one plan while the
-            // button posted another, and the server re-plans what it is sent and cannot tell.
+
             const seq = ++previewSeq;
             $.ajax({
                 url: '@Url.Action("BulkImportPreview", "Azure")',
@@ -529,17 +442,13 @@
                         $("#bulk-preview-error").removeClass("d-none");
                         return;
                     }
-                    // Record what this preview promised for each prefix, on the very object the
-                    // commit posts. The commit re-plans server-side and refuses anything that no
-                    // longer matches, so a subnet created by someone else while this screen is up
-                    // cannot be silently adopted instead of a new one being created.
+
                     attachApprovedOutcomes(selection, result.plan);
                     renderPlan(result.plan);
                     $("#bulk-preview-content").removeClass("d-none");
                 },
                 error: function (xhr, status, error) {
-                    // Without this a superseded request that fails paints its error over a current,
-                    // valid plan.
+
                     if (seq !== previewSeq) {
                         return;
                     }
@@ -547,8 +456,7 @@
                     $("#bulk-preview-error").removeClass("d-none");
                 },
                 complete: function () {
-                    // jQuery always runs complete, so a superseded request would otherwise hide the
-                    // spinner of one still in flight.
+
                     if (seq !== previewSeq) {
                         return;
                     }
@@ -557,9 +465,6 @@
             });
         }
 
-        // Copies each planned outcome onto the matching selected prefix, so the commit can send back
-        // what was approved. Only the plan's own decision fields are carried - the server describes
-        // any divergence from its own re-derived plan and never echoes these values.
         function attachApprovedOutcomes(selection, plan) {
             const planned = {};
             $.each((plan && plan.items) || [], function (i, item) {
@@ -569,8 +474,7 @@
             $.each((selection && selection.vNetPrefixes) || [], function (i, prefix) {
                 const item = planned[prefix.vNetResourceId + "|" + prefix.addressPrefix];
                 if (!item) {
-                    // No plan item means nothing was approved for it; the server treats a missing
-                    // expectation as unverified rather than as agreement.
+
                     prefix.expected = null;
                     return;
                 }
@@ -581,16 +485,14 @@
                     willRename: item.willRename === true,
                     newName: typeof item.newName === "string" ? item.newName : null,
                     willMarkFullyAllocated: item.willMarkFullyAllocated === true,
-                    // The names actually on screen. Defensive `|| []` because this runs in a preview
-                    // success handler: a TypeError here would leave step 3 blank with the commit
-                    // button live over a stale plan.
+
                     childNames: (item.childSubnets || []).map(function (c) { return c.name; })
                 };
             });
         }
 
         function renderPlan(plan) {
-            // Global errors
+
             const $globalErrorsList = $("#bulk-global-errors-list").empty();
             if (plan.globalErrors && plan.globalErrors.length > 0) {
                 $.each(plan.globalErrors, function (i, e) {
@@ -608,8 +510,6 @@
                 const headerCss = item.errors && item.errors.length > 0 ? "card-header bg-danger text-white" : "card-header bg-light";
                 const $header = $('<div></div>').addClass(headerCss);
 
-                // Switch on the name rather than the enum ordinal, so reordering BulkImportTargetType
-                // or serializing it as a string can't silently blank out the description.
                 let targetText = "";
                 switch (item.targetTypeName) {
                     case "ExactMatch":
@@ -679,18 +579,12 @@
             activateTab("step2");
         });
 
-        // ---------------------------------------------------------------
-        // Step 4: Commit
-        // ---------------------------------------------------------------
         $("#bulk-go-commit-btn").on("click", function () {
             activateTab("step4");
-            // reset commit-step state
+
             $("#bulk-commit-success").addClass("d-none");
             $("#bulk-commit-error").addClass("d-none");
-            // Re-entering step 4 used to re-arm Confirm unconditionally, so an operator who came
-            // back here while a commit was in flight - or after one had already succeeded - could
-            // fire a second commit for the same plan. The server refuses it, but the refusal is
-            // what they are left looking at, naming the rows their own import just created.
+
             $("#bulk-confirm-commit-btn").prop("disabled", committing || committed).toggle(!committed);
         });
 
@@ -723,11 +617,7 @@
                     if (result && result.success) {
                         committed = true;
                         $("#bulk-commit-success-message").text(
-                            // linkedTargets counts the existing Bastet subnets this commit stamped
-                            // with an ARM id. Without it a link-only import reports every counter as
-                            // zero, which is byte-identical to the banner for a commit that wrote
-                            // nothing at all. Counter order matches TempData["SuccessMessage"] so the
-                            // two summaries of one commit agree.
+
                             ` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s), linked ${result.linkedTargets} existing target(s) to Azure, marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
                         );
                         $("#bulk-commit-success").removeClass("d-none");
@@ -752,9 +642,7 @@
         }
 
         function showCommitError(payload) {
-            // The fallback is the floor under a body this handler does not recognise - without it an
-            // unexpected shape renders the panel with no text at all. The reconcile wizard's
-            // equivalent has always had one.
+
             $("#bulk-commit-error-message").text(payload && payload.error ? payload.error : "The import failed.");
             const $list = $("#bulk-commit-error-list").empty();
             if (payload && payload.globalErrors && payload.globalErrors.length > 0) {
@@ -769,19 +657,12 @@
                     }
                 });
             }
-            // The approved-plan 409 carries neither globalErrors nor itemErrors - the reason the
-            // commit was refused travels in `differences`, and without this the operator is told the
-            // plan changed but never told how, with the delta the server had already computed
-            // dropped on the floor. The reconcile wizard renders its own 409's `warnings` for
-            // exactly this reason. .text(), not .html(): these sentences name caller-influenced
-            // values and the blocks either side encode too.
+
             if (payload && payload.differences && payload.differences.length > 0) {
                 $.each(payload.differences, function (i, d) { $list.append($('<li></li>').text(d)); });
             }
             $("#bulk-commit-error").removeClass("d-none");
-            // Deliberately ungated by `committed`, which is still false on every path that reaches
-            // here: this is the retry-after-a-genuine-failure route, and gating it would strand an
-            // operator whose commit was legitimately refused.
+
             $("#bulk-confirm-commit-btn").prop("disabled", false);
         }
     });

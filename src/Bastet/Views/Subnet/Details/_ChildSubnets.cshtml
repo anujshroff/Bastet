@@ -4,10 +4,7 @@
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Child Subnets</h5>
         @inject Bastet.Services.IUserContextService ChildSubnetsUserContext
-        @* CanAddChildSubnet is a capacity predicate with no user in it, so on its own it offered
-           this link to a View-only principal that GET /Subnet/Create refuses. ANDed rather than
-           replaced: the else-if branches below print the Fully Allocated and Has Host IPs badges,
-           which are capacity statements a read-only user must keep seeing. *@
+
         @if (Model.CanAddChildSubnet && ChildSubnetsUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
         {
             <div>

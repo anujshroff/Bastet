@@ -10,13 +10,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// When the global subnet lock cannot be acquired, every guarded action must surface a friendly
-/// "try again" response in its own shape (status code, ModelState, TempData) rather than a 500.
-/// </summary>
 public class SubnetLockTimeoutTests : IDisposable
 {
-    /// <summary>Simulates lock contention: every acquisition attempt times out.</summary>
+
     private sealed class AlwaysTimingOutLockService : ISubnetLockingService
     {
         public Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null) =>

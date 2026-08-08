@@ -3,14 +3,9 @@ using System.Net;
 
 namespace Bastet.Services;
 
-/// <summary>
-/// Service for IP subnet calculations and utilities
-/// </summary>
 public class IpUtilityService : IIpUtilityService
 {
-    /// <summary>
-    /// Calculates the subnet mask from a CIDR value
-    /// </summary>
+
     public string CalculateSubnetMask(int cidr)
     {
         if (cidr is < 0 or > 32)
@@ -21,19 +16,14 @@ public class IpUtilityService : IIpUtilityService
         uint mask = 0;
         if (cidr > 0)
         {
-            // Create a bit mask based on the CIDR
-            // For example, CIDR 24 = 11111111.11111111.11111111.00000000 = 255.255.255.0
+
             mask = ~((1u << (32 - cidr)) - 1);
         }
 
-        // Convert to IP format
         byte[] bytes = [(byte)(mask >> 24), (byte)(mask >> 16), (byte)(mask >> 8), (byte)mask];
         return new IPAddress(bytes).ToString();
     }
 
-    /// <summary>
-    /// Calculates the broadcast address for a given network and CIDR
-    /// </summary>
     public string CalculateBroadcastAddress(string networkAddress, int cidr)
     {
         if (string.IsNullOrEmpty(networkAddress))
@@ -46,35 +36,28 @@ public class IpUtilityService : IIpUtilityService
             throw new ArgumentOutOfRangeException(nameof(cidr), "CIDR must be between 0 and 32");
         }
 
-        // Special case for CIDR 0 (entire internet)
         if (cidr == 0)
         {
             return "255.255.255.255";
         }
 
-        // Parse the network address
         IPAddress network = IPAddress.Parse(networkAddress);
         byte[] networkBytes = network.GetAddressBytes();
 
-        // Verify this is an IPv4 address
         if (networkBytes.Length != 4)
         {
             throw new ArgumentException("Only IPv4 addresses are supported", nameof(networkAddress));
         }
 
-        // Create inverse of the subnet mask
         uint inverseMask = (1u << (32 - cidr)) - 1;
 
-        // Get the network address as an unsigned integer
         uint networkInt = (uint)(networkBytes[0] << 24 |
                                 networkBytes[1] << 16 |
                                 networkBytes[2] << 8 |
                                 networkBytes[3]);
 
-        // Calculate broadcast by OR'ing the network with inverse mask
         uint broadcastInt = networkInt | inverseMask;
 
-        // Convert back to IP address
         byte[] broadcastBytes =
         [
             (byte)(broadcastInt >> 24),
@@ -85,16 +68,10 @@ public class IpUtilityService : IIpUtilityService
         return new IPAddress(broadcastBytes).ToString();
     }
 
-    /// <summary>
-    /// Calculates the total number of IP addresses in a subnet
-    /// </summary>
     public long CalculateTotalIpAddresses(int cidr) => cidr is < 0 or > 32
             ? throw new ArgumentOutOfRangeException(nameof(cidr), "CIDR must be between 0 and 32")
             : (long)Math.Pow(2, 32 - cidr);
 
-    /// <summary>
-    /// Calculates the number of usable IP addresses in a subnet
-    /// </summary>
     public long CalculateUsableIpAddresses(int cidr)
     {
         if (cidr is < 0 or > 32)
@@ -104,17 +81,13 @@ public class IpUtilityService : IIpUtilityService
 
         if (cidr >= 31)
         {
-            // Special cases: /31 allows 2 usable addresses (RFC 3021)
-            // /32 is a single host
+
             return cidr == 31 ? 2 : 1;
         }
 
         return Math.Max(0, (long)Math.Pow(2, 32 - cidr) - 2);
     }
 
-    /// <summary>
-    /// Verifies if a subnet is valid (network address aligns with CIDR)
-    /// </summary>
     public bool IsValidSubnet(string networkAddress, int cidr)
     {
         if (string.IsNullOrEmpty(networkAddress))
@@ -127,7 +100,6 @@ public class IpUtilityService : IIpUtilityService
             return false;
         }
 
-        // Special case for CIDR 0 (entire internet)
         if (cidr == 0 && networkAddress == "0.0.0.0")
         {
             return true;
@@ -138,19 +110,15 @@ public class IpUtilityService : IIpUtilityService
             IPAddress ip = IPAddress.Parse(networkAddress);
             byte[] addressBytes = ip.GetAddressBytes();
 
-            // Verify this is an IPv4 address
             if (addressBytes.Length != 4)
             {
                 return false;
             }
 
-            // Convert to one 32-bit number
             uint addressValue = BitConverter.ToUInt32([.. addressBytes.Reverse()], 0);
 
-            // Calculate number of host bits
             int hostBits = 32 - cidr;
 
-            // Check if any host bits are set (which would make it invalid)
             uint hostBitMask = hostBits == 32 ? 0xFFFFFFFF : (1u << hostBits) - 1;
 
             return (addressValue & hostBitMask) == 0;
@@ -161,9 +129,6 @@ public class IpUtilityService : IIpUtilityService
         }
     }
 
-    /// <summary>
-    /// Checks if a subnet is contained within a parent subnet
-    /// </summary>
     public bool IsSubnetContainedInParent(string childNetwork, int childCidr, string parentNetwork, int parentCidr)
     {
         if (string.IsNullOrEmpty(childNetwork) || string.IsNullOrEmpty(parentNetwork))
@@ -171,7 +136,6 @@ public class IpUtilityService : IIpUtilityService
             return false;
         }
 
-        // Child CIDR must be larger than parent CIDR (smaller network)
         if (childCidr <= parentCidr)
         {
             return false;
@@ -182,7 +146,6 @@ public class IpUtilityService : IIpUtilityService
             IPAddress childIp = IPAddress.Parse(childNetwork);
             IPAddress parentIp = IPAddress.Parse(parentNetwork);
 
-            // Both must be IPv4 addresses
             byte[] childBytes = childIp.GetAddressBytes();
             byte[] parentBytes = parentIp.GetAddressBytes();
 
@@ -191,25 +154,19 @@ public class IpUtilityService : IIpUtilityService
                 return false;
             }
 
-            // Create a subnet mask for the parent
             uint parentMask = (parentCidr == 0) ? 0 : ~((1u << (32 - parentCidr)) - 1);
 
-            // Get the network addresses as unsigned integers
             uint childNet = BitConverter.ToUInt32([.. childBytes.Reverse()], 0);
             uint parentNet = BitConverter.ToUInt32([.. parentBytes.Reverse()], 0);
 
-            // For CIDR 0 (entire internet), any child subnet is contained within it
             if (parentCidr == 0)
             {
                 return true;
             }
 
-            // Apply the parent subnet mask to both addresses
             uint maskedChild = childNet & parentMask;
             uint maskedParent = parentNet & parentMask;
 
-            // If they match, child is within parent
-            // Example: 10.0.0.0/16 contains 10.0.1.0/24 but not 10.1.0.0/24
             return maskedChild == maskedParent;
         }
         catch
@@ -218,15 +175,9 @@ public class IpUtilityService : IIpUtilityService
         }
     }
 
-    /// <summary>
-    /// Calculates unallocated IP ranges within a subnet, taking into account child subnets
-    /// </summary>
     public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets) =>
         CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, []);
 
-    /// <summary>
-    /// Calculates unallocated IP ranges within a subnet, taking into account child subnets and host IP assignments
-    /// </summary>
     public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets, IEnumerable<HostIpAssignment> hostIpAssignments)
     {
         if (string.IsNullOrEmpty(networkAddress))
@@ -242,7 +193,6 @@ public class IpUtilityService : IIpUtilityService
         IPAddress network = IPAddress.Parse(networkAddress);
         byte[] networkBytes = network.GetAddressBytes();
 
-        // Verify this is an IPv4 address
         if (networkBytes.Length != 4)
         {
             throw new ArgumentException("Only IPv4 addresses are supported", nameof(networkAddress));
@@ -250,12 +200,10 @@ public class IpUtilityService : IIpUtilityService
 
         List<IPRange> unallocatedRanges = [];
 
-        // Get the subnet range. long avoids the 1u << 32 wrap and the 2^32 overflow for a /0 subnet.
         uint startIp = BitConverter.ToUInt32([.. networkBytes.Reverse()], 0);
         long subnetSize = 1L << (32 - cidr);
         uint endIp = (uint)(startIp + subnetSize - 1);
 
-        // Get valid child subnets
         List<Subnet> validChildren = [.. childSubnets
             .Where(s => IsSubnetContainedInParent(s.NetworkAddress, s.Cidr, networkAddress, cidr))
             .OrderBy(s => IPAddress.Parse(s.NetworkAddress).GetAddressBytes()[0])
@@ -263,7 +211,6 @@ public class IpUtilityService : IIpUtilityService
             .ThenBy(s => IPAddress.Parse(s.NetworkAddress).GetAddressBytes()[2])
             .ThenBy(s => IPAddress.Parse(s.NetworkAddress).GetAddressBytes()[3])];
 
-        // Get all Host IP assignments that are within this subnet
         List<(uint IpAddress, string IpString)> validHostIps = [];
 
         if (hostIpAssignments != null && hostIpAssignments.Any())
@@ -280,13 +227,12 @@ public class IpUtilityService : IIpUtilityService
             }
         }
 
-        // If no child subnets and no host IPs
         if (validChildren.Count == 0 && validHostIps.Count == 0)
         {
-            // No allocations, entire subnet is unallocated
+
             if (cidr >= 31)
             {
-                // For /31 or /32, the entire range is usable according to RFC 3021
+
                 unallocatedRanges.Add(new IPRange
                 {
                     StartIp = UIntToIpString(startIp),
@@ -296,23 +242,20 @@ public class IpUtilityService : IIpUtilityService
             }
             else
             {
-                // For normal subnets, always start with the network address for subnet creation
-                // purposes, but display the correct usable address count
+
                 unallocatedRanges.Add(new IPRange
                 {
-                    StartIp = UIntToIpString(startIp), // Return the network address for subnetting
-                    EndIp = UIntToIpString(endIp),     // Return the broadcast address for range display
-                    AddressCount = subnetSize - 2      // But still show correct usable IP count
+                    StartIp = UIntToIpString(startIp),
+                    EndIp = UIntToIpString(endIp),
+                    AddressCount = subnetSize - 2
                 });
             }
 
             return unallocatedRanges;
         }
 
-        // Build a list of all allocated ranges - both child subnets and individual host IPs
         List<(uint Start, uint End)> allocatedRanges = [];
 
-        // Add child subnets to allocated ranges
         foreach (Subnet? child in validChildren)
         {
             byte[] childBytes = IPAddress.Parse(child.NetworkAddress).GetAddressBytes();
@@ -323,16 +266,13 @@ public class IpUtilityService : IIpUtilityService
             allocatedRanges.Add((childStart, childEnd));
         }
 
-        // Add host IPs to allocated ranges (each as a single-address range)
         foreach ((uint IpAddress, _) in validHostIps)
         {
             allocatedRanges.Add((IpAddress, IpAddress));
         }
 
-        // Sort all allocated ranges by start address
         allocatedRanges = [.. allocatedRanges.OrderBy(r => r.Start)];
 
-        // Merge overlapping or adjacent allocated ranges
         List<(uint Start, uint End)> mergedRanges = [];
         if (allocatedRanges.Count > 0)
         {
@@ -341,44 +281,31 @@ public class IpUtilityService : IIpUtilityService
             {
                 (uint Start, uint End) next = allocatedRanges[i];
 
-                // If ranges overlap or are adjacent, merge them
                 if (next.Start <= current.End + 1)
                 {
                     current.End = Math.Max(current.End, next.End);
                 }
                 else
                 {
-                    // No overlap, add current to list and move to next
+
                     mergedRanges.Add(current);
                     current = next;
                 }
             }
-            // Add the last range
+
             mergedRanges.Add(current);
         }
 
-        // Find gaps between allocated ranges. This is a long because the position after the last
-        // address is one past the end of the IPv4 space: as a uint it wraps to 0, and the trailing
-        // check below then reads a fully allocated subnet as having the whole address space free.
         long currentPosition = startIp;
 
         foreach ((uint Start, uint End) in mergedRanges)
         {
             if (Start > currentPosition)
             {
-                // Found a gap
-                // For the first gap that starts at the network address, adjust the address count to show usable IPs
+
                 if (currentPosition == startIp && cidr < 31)
                 {
-                    // This branch runs only when the gap begins at the network address, which is
-                    // never assignable - so exactly one address is always unusable, whatever the
-                    // gap's size. The threshold this replaces applied that subtraction only above
-                    // two, so a gap of two reported both addresses as usable and a gap of one
-                    // reported the network address itself as a usable address. The enclosing
-                    // Start > currentPosition guarantees at least one address, so this cannot go
-                    // negative. A zero-usable row is still emitted rather than suppressed: StartIp
-                    // is the network address, and _UnallocatedRanges.cshtml offers it as a place to
-                    // create a child subnet, which remains valid even with no assignable host IP.
+
                     unallocatedRanges.Add(new IPRange
                     {
                         StartIp = UIntToIpString((uint)currentPosition),
@@ -397,16 +324,13 @@ public class IpUtilityService : IIpUtilityService
                 }
             }
 
-            // Move position to after this allocated range
             currentPosition = (long)End + 1;
         }
 
-        // Check if there's space after the last allocated range
         if (currentPosition < endIp || (currentPosition == endIp && cidr >= 31))
         {
             uint lastIp = endIp;
 
-            // Exclude broadcast address if not /31 or /32
             if (cidr < 31)
             {
                 lastIp--;
@@ -414,11 +338,7 @@ public class IpUtilityService : IIpUtilityService
 
             if (currentPosition <= lastIp)
             {
-                // lastIp already excludes the broadcast address above, so the range is simply
-                // inclusive of both ends. The special case this replaces subtracted the broadcast a
-                // second time, reporting one address too few for every trailing gap of two or more
-                // while the middle gaps above counted correctly - two rows on the same page
-                // disagreeing about how to count.
+
                 unallocatedRanges.Add(new IPRange
                 {
                     StartIp = UIntToIpString((uint)currentPosition),
@@ -431,9 +351,6 @@ public class IpUtilityService : IIpUtilityService
         return unallocatedRanges;
     }
 
-    /// <summary>
-    /// Checks if an IP address is within a subnet's range
-    /// </summary>
     public bool IsIpInSubnet(string ip, string networkAddress, int cidr)
     {
         if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(networkAddress))
@@ -448,27 +365,23 @@ public class IpUtilityService : IIpUtilityService
 
         try
         {
-            // Parse IP addresses
+
             IPAddress ipAddress = IPAddress.Parse(ip);
             IPAddress networkIpAddress = IPAddress.Parse(networkAddress);
 
             byte[] ipBytes = ipAddress.GetAddressBytes();
             byte[] networkBytes = networkIpAddress.GetAddressBytes();
 
-            // Verify both are IPv4
             if (ipBytes.Length != 4 || networkBytes.Length != 4)
             {
                 return false;
             }
 
-            // Convert to UInt32 for bitwise operations
             uint ipValue = BitConverter.ToUInt32([.. ipBytes.Reverse()], 0);
             uint networkValue = BitConverter.ToUInt32([.. networkBytes.Reverse()], 0);
 
-            // Create subnet mask
             uint mask = (cidr == 0) ? 0 : ~((1u << (32 - cidr)) - 1);
 
-            // Check if IP is in subnet (they have the same network portion)
             return (ipValue & mask) == (networkValue & mask);
         }
         catch
@@ -479,9 +392,6 @@ public class IpUtilityService : IIpUtilityService
 
     #region Helper Methods
 
-    /// <summary>
-    /// Converts a uint to an IPv4 address string
-    /// </summary>
     private static string UIntToIpString(uint ipInt)
     {
         byte[] bytes = [(byte)(ipInt >> 24), (byte)(ipInt >> 16), (byte)(ipInt >> 8), (byte)ipInt];

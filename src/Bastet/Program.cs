@@ -23,30 +23,13 @@ if (!builder.Environment.IsDevelopment())
     builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", Enum.TryParse(Environment.GetEnvironmentVariable("BASTET_LOG_LEVEL_ENTITYFRAMEWORK") ?? "Warning", true, out LogLevel efLevel) ? efLevel : LogLevel.Warning);
 }
 
-// Deliberately outside the block above, which only runs outside Development. The console sink writes
-// the exception itself, and an exception can carry a request-supplied value verbatim - so without a
-// sanitizing formatter a crafted identifier reaches the terminal with its control characters intact
-// and can erase a real log line to print a fabricated one. A developer's console deserves the same
-// protection as a production one, so this is registered unconditionally.
 builder.Logging.AddConsoleFormatter<SanitizingConsoleFormatter, ConsoleFormatterOptions>();
 builder.Logging.AddConsole(options => options.FormatterName = SanitizingConsoleFormatter.FormatterName);
 
-// Add services to the container.
-// MVC with global sanitization and response-cache filters
 builder.Services.AddControllersWithViews(options =>
 {
     options.Filters.Add<GlobalSanitizationFilter>();
 
-    // Every page here is authenticated and most of them list inventory, so none of it may sit in a
-    // shared or on-disk browser cache. Until this was global, the directives arrived only by
-    // accident: the antiforgery middleware sets no-cache/no-store on views that happen to render a
-    // token, so /Subnet/Create and /Subnet/Details were covered while /Subnet, /HostIp/AllHostIps,
-    // /Account/Roles and / were not - coverage tracked "does this view render a token" rather than
-    // "is this page authenticated". A signed-out user pressing Back was served the previous user's
-    // inventory from the disk cache.
-    //
-    // Applies to controller responses only, so UseStaticFiles keeps serving CSS and JS cacheably.
-    // Names no scheme, so plain-HTTP and air-gapped deployments are unaffected.
     options.Filters.Add(new Microsoft.AspNetCore.Mvc.ResponseCacheAttribute
     {
         NoStore = true,
@@ -54,45 +37,34 @@ builder.Services.AddControllersWithViews(options =>
     });
 });
 
-// Allow antiforgery tokens to be sent via the "RequestVerificationToken" header in addition to
-// the default form field. Required by AJAX endpoints that POST application/json (e.g. the
-// Bulk Azure Import preview/commit endpoints).
 builder.Services.AddAntiforgery(options => options.HeaderName = "RequestVerificationToken");
 
-
-// Get connection string (used by both DbContexts)
 string? connectionString = Environment.GetEnvironmentVariable("BASTET_CONNECTION_STRING")
     ?? (builder.Environment.IsDevelopment()
         ? builder.Configuration.GetConnectionString("DefaultConnection")
         : throw new InvalidOperationException("Production environment requires BASTET_CONNECTION_STRING environment variable to be set."));
 
-// Add DbContext
 builder.Services.AddDbContext<BastetDbContext>(options =>
 {
     options.UseSqlServer(connectionString);
 });
 
-// Add DataProtection DbContext for storing Data Protection keys
-// This enables multi-replica deployments without session affinity
 builder.Services.AddDbContext<DataProtectionDbContext>(options =>
 {
     options.UseSqlServer(connectionString);
 });
 
-// Determine if we should use database for Data Protection keys
-// If auto-migrate is enabled, assume the table will exist after migration runs
-// Otherwise, check if the table currently exists
 bool autoMigrate = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AUTO_MIGRATE"), out bool autoMigrateResult) && autoMigrateResult;
 bool dataProtectionTableExists = false;
 
 if (autoMigrate)
 {
-    // Auto-migrate will create the table, so we can use database persistence
+
     dataProtectionTableExists = true;
 }
 else
 {
-    // Check if table exists in database
+
     try
     {
         using SqlConnection connection = new(connectionString);
@@ -104,14 +76,11 @@ else
     }
     catch
     {
-        // Connection failed or query failed - assume table doesn't exist
+
         dataProtectionTableExists = false;
     }
 }
 
-// Configure Data Protection
-// If table exists (or will exist via auto-migrate), use database for key storage (enables multi-replica without session affinity)
-// If table doesn't exist, use default ephemeral keys (works for single replica only)
 if (dataProtectionTableExists)
 {
     builder.Services.AddDataProtection()
@@ -124,7 +93,6 @@ else
         .SetApplicationName("Bastet");
 }
 
-// Register services
 builder.Services.AddScoped<IIpUtilityService, IpUtilityService>();
 builder.Services.AddScoped<Bastet.Services.Validation.ISubnetValidationService, Bastet.Services.Validation.SubnetValidationService>();
 builder.Services.AddScoped<Bastet.Services.Validation.IHostIpValidationService, Bastet.Services.Validation.HostIpValidationService>();
@@ -137,7 +105,6 @@ builder.Services.AddScoped<Bastet.Services.Azure.IAzureReconciler, Bastet.Servic
 builder.Services.AddScoped<Bastet.Services.Security.IInputSanitizationService, Bastet.Services.Security.InputSanitizationService>();
 builder.Services.AddSingleton<IVersionService, VersionService>();
 
-// Register subnet locking service with auto-detection based on database provider
 builder.Services.AddScoped<Bastet.Services.Locking.ISubnetLockingService>(provider =>
 {
     BastetDbContext context = provider.GetRequiredService<BastetDbContext>();
@@ -148,21 +115,14 @@ builder.Services.AddScoped<Bastet.Services.Locking.ISubnetLockingService>(provid
     {
         "microsoft.entityframeworkcore.sqlite" => new Bastet.Services.Locking.SqliteSubnetLockingService(),
         "microsoft.entityframeworkcore.sqlserver" => new Bastet.Services.Locking.SqlServerSubnetLockingService(context, lockLogger),
-        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context, lockLogger) // Default to SQL Server
+        _ => new Bastet.Services.Locking.SqlServerSubnetLockingService(context, lockLogger)
     };
 });
 
-// Add HttpContextAccessor for accessing the current user
 builder.Services.AddHttpContextAccessor();
 
-// Register UserContextService
 builder.Services.AddScoped<IUserContextService, UserContextService>();
 
-// CORS is opt-in. Bastet renders its own UI and all of its AJAX is same-origin, so no cross-origin
-// access is needed by default. Set BASTET_CORS_ORIGINS to a comma-separated list of origins to
-// allow specific callers. Credentials are deliberately not allowed: the antiforgery token is
-// accepted via the RequestVerificationToken header, so permitting cross-origin credentialed
-// requests would open up CSRF.
 string[] corsOrigins = (Environment.GetEnvironmentVariable("BASTET_CORS_ORIGINS") ?? string.Empty)
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -173,23 +133,20 @@ if (corsOrigins.Length > 0)
                   .AllowAnyMethod()));
 }
 
-// Configure authentication based on environment
 if (builder.Environment.IsDevelopment())
 {
-    // Development authentication (always succeeds with all roles)
+
     builder.Services.AddAuthentication(options =>
     {
         options.DefaultScheme = "DevAuthScheme";
         options.DefaultChallengeScheme = "DevAuthScheme";
     })
-    // No options to configure: DevAuthHandler authenticates unconditionally. The cookie handler
-    // below sets a genuine AccessDeniedPath - the two lines look interchangeable, but only that
-    // one has any effect.
+
     .AddScheme<DevAuthOptions, DevAuthHandler>("DevAuthScheme", _ => { });
 }
 else
 {
-    // Production authentication with OIDC
+
     builder.Services.AddAuthentication(options =>
     {
         options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -221,19 +178,6 @@ else
          options.Scope.Add("email");
          options.Scope.Add("roles");
 
-         // Keep only the id_token in the auth cookie. Nothing in Bastet ever reads an access or
-         // refresh token - the id_token alone is load-bearing, supplying id_token_hint on the
-         // end-session request in AccountController.Logout. Storing the others meant that anyone
-         // who could read the database (where the DataProtection key ring is persisted unencrypted)
-         // and capture one cookie could lift a long-lived credential redeemable at the identity
-         // provider - reach beyond anything Bastet itself controls.
-         //
-         // This runs after SaveTokens has written them, which is deliberate: SaveTokens has no
-         // scope gate, so an provider that returns a refresh token without being asked (Keycloak's
-         // standard flow does) would still have put one in the cookie. Dropping the
-         // offline_access scope alone is a best effort; this makes it a guarantee. It also shrinks
-         // the cookie, which matters because a realistically sized refresh token pushes it past
-         // 4096 bytes and into chunking, on every request from every signed-in user.
          options.Events.OnTicketReceived = context =>
          {
              AuthenticationProperties? properties = context.Properties;
@@ -242,22 +186,9 @@ else
              return Task.CompletedTask;
          };
 
-         // Declined or pending consent, an expired or already-consumed correlation cookie and a
-         // replayed callback are all normal events, not server faults. Left unhandled they escape
-         // RemoteAuthenticationHandler as AuthenticationFailureException, so UseExceptionHandler
-         // answers HTTP 500 "An unexpected error occurred on the server" - telling a user who simply
-         // pressed Cancel that the server broke - and writes a stack trace at Error level for
-         // anything an anonymous caller can post to /signin-oidc.
-         //
-         // The framework's own escape hatch does not apply: OpenIdConnectHandler only redirects on
-         // access_denied when AccessDeniedPath is set on *these* options, and the only AccessDeniedPath
-         // in the tree belongs to the cookie handler. The destination here is a dedicated page rather
-         // than AccessDenied, because that page states the account lacks the necessary roles, which is
-         // untrue for every cause but a declined consent prompt.
          options.Events.OnRemoteFailure = context =>
          {
-             // The message, not the exception object: passing context.Failure re-creates the same
-             // ten-line stack trace per anonymous request, merely relabelled as a warning.
+
              context.HttpContext.RequestServices
                  .GetRequiredService<ILoggerFactory>()
                  .CreateLogger("Bastet.Authentication")
@@ -271,8 +202,7 @@ else
 }
 
 builder.Services.AddAuthorizationBuilder()
-    // Anything without an explicit [Authorize] or [AllowAnonymous] requires an authenticated user,
-    // so a new action that forgets its attribute fails closed rather than being served anonymously.
+
     .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
     .AddPolicy("RequireViewRole", policy =>
         policy.RequireRole(Bastet.Models.ApplicationRoles.View, Bastet.Models.ApplicationRoles.Edit, Bastet.Models.ApplicationRoles.Delete, Bastet.Models.ApplicationRoles.Admin))
@@ -292,34 +222,10 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 WebApplication app = builder.Build();
 
-// Auto-run migrations if environment variable is set to true
 if (autoMigrate)
 {
     using IServiceScope scope = app.Services.CreateScope();
 
-    // EF Core's Migrate() is not safe to run concurrently from multiple processes: on a
-    // multi-replica cold start (e.g. Container Apps scale-out), two instances can both see a
-    // pending migration and both apply it. Serialize replicas with a session-owned application
-    // lock held on a dedicated connection for the duration of both Migrate() calls. A replica
-    // that cannot get the lock within the timeout fails startup loudly; on restart it finds the
-    // migrations applied and Migrate() no-ops.
-    // The lock is taken on the configured catalog, and only falls back to master when that catalog
-    // does not exist yet. The order matters and is not cosmetic: the documented deployment model
-    // (README, "Database Setup") is a user inside the application database, which on Azure SQL is a
-    // contained user with no login in master at all. Opening master unconditionally - as this did
-    // in v3.3.0 - fails every managed-identity deployment with SQL 18456 before a request is served.
-    //
-    // The fallback still exists because Migrate() is what creates the database on a first run, and
-    // opening the lock connection against a catalog that does not exist fails first with SQL 4060 -
-    // so without it BASTET_AUTO_MIGRATE could never bootstrap an empty server. Holding the lock on
-    // master for that case also means CREATE DATABASE happens inside it, which EF Core's own
-    // __EFMigrationsLock never covers: two simultaneous cold starts against a missing catalog
-    // otherwise race and one dies with "Database already exists".
-    //
-    // Accepted narrow window: a replica that finds the catalog missing locks on master while a peer
-    // that finds it present locks on the catalog, so the two are in different scopes. That is
-    // reachable only mid-bootstrap, and EF Core's __EFMigrationsLock still serialises the half that
-    // applies migrations.
     using SqlConnection migrationLockConnection = OpenMigrationLockConnection();
 
     SqlConnection OpenMigrationLockConnection()
@@ -330,8 +236,7 @@ if (autoMigrate)
         }
         catch (SqlException ex) when (ex.Number == 4060)
         {
-            // 4060 is "cannot open database". Every other failure, a bad credential included, is
-            // left to surface as itself rather than being reinterpreted as a missing database.
+
             SqlConnection bootstrapConnection;
 
             try
@@ -340,9 +245,7 @@ if (autoMigrate)
             }
             catch (SqlException bootstrapException)
             {
-                // Unhandled, this arrives as a bare stack trace naming neither catalog nor the
-                // setting that asked for it, and the login failure on master reads as the whole
-                // problem when the actual problem is the missing database behind it.
+
                 throw new InvalidOperationException(
                     "BASTET_AUTO_MIGRATE is enabled, but the configured database does not exist and the "
                     + $"login could not open '{MigrationLockConnectionString.BootstrapCatalog}' to create it. "
@@ -351,18 +254,6 @@ if (autoMigrate)
                     + "See BASTET_CONNECTION_STRING and BASTET_AUTO_MIGRATE.", bootstrapException);
             }
 
-            // 4060 is byte-identical for three different conditions: the catalog is absent, the
-            // login has no user inside a catalog that exists, and the catalog is offline. Assuming
-            // the first sends a deployment whose database is present and full of data down the
-            // bootstrap path, where Migrate() issues CREATE DATABASE against it and startup dies
-            // with a diagnostic about master permissions that names nothing real.
-            //
-            // HAS_DBACCESS separates them: 0 = it exists but cannot be used, NULL = no such
-            // database, 1 = healthy. It is used rather than DB_ID or sys.databases because it keeps
-            // answering when VIEW ANY DATABASE has been revoked from public - ordinary hardening,
-            // under which DB_ID returns NULL for a database that plainly exists - and because it
-            // returns int where DB_ID returns smallint. Fail open: if the probe cannot run at all,
-            // behave exactly as before.
             string configuredCatalog = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
             int? catalogAccess = null;
 
@@ -374,16 +265,13 @@ if (autoMigrate)
             }
             catch (SqlException)
             {
-                // Probe unavailable - keep today's behaviour rather than refusing to start.
+
             }
 
             if (catalogAccess == 0)
             {
                 bootstrapConnection.Dispose();
 
-                // This must abort startup, not log and continue: EF Core's
-                // SqlServerDatabaseCreator.Exists() misreads 4060 the same way, so anything short of
-                // throwing is overruled by Migrate() a few lines below.
                 throw new InvalidOperationException(
                     $"The configured database '{configuredCatalog}' exists on this server but could not be "
                     + "opened, which SQL Server reports as error 4060 using the same text it uses for a "
@@ -398,7 +286,6 @@ if (autoMigrate)
             return bootstrapConnection;
         }
 
-        // Disposes on any failed open, so neither attempt above can leak a connection.
         static SqlConnection Open(string? lockConnectionString)
         {
             SqlConnection connection = new(lockConnectionString);
@@ -419,11 +306,11 @@ if (autoMigrate)
     using (SqlCommand getLock = new("sp_getapplock", migrationLockConnection))
     {
         getLock.CommandType = System.Data.CommandType.StoredProcedure;
-        getLock.CommandTimeout = 330; // seconds; must exceed @LockTimeout below
+        getLock.CommandTimeout = 330;
         getLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
         getLock.Parameters.AddWithValue("@LockMode", "Exclusive");
         getLock.Parameters.AddWithValue("@LockOwner", "Session");
-        getLock.Parameters.AddWithValue("@LockTimeout", 300000); // 5 min - a peer may be mid-migration
+        getLock.Parameters.AddWithValue("@LockTimeout", 300000);
         SqlParameter lockResult = getLock.Parameters.Add("@ReturnValue", System.Data.SqlDbType.Int);
         lockResult.Direction = System.Data.ParameterDirection.ReturnValue;
         getLock.ExecuteNonQuery();
@@ -439,38 +326,16 @@ if (autoMigrate)
 
     try
     {
-        // Migrate main application database
+
         BastetDbContext dbContext = scope.ServiceProvider.GetRequiredService<BastetDbContext>();
         dbContext.Database.Migrate();
 
-        // Migrate Data Protection keys database
         DataProtectionDbContext dpContext = scope.ServiceProvider.GetRequiredService<DataProtectionDbContext>();
         dpContext.Database.Migrate();
     }
     finally
     {
-        // Closing the connection would release the session lock too; releasing explicitly keeps
-        // the intent visible and covers connection-pool reuse.
-        //
-        // Logged rather than thrown, matching SqlServerSubnetLockingService. An exception raised in
-        // a finally replaces the one in flight, so a release that fails on a dead connection would
-        // report a lock-release error while destroying the migration failure that actually stopped
-        // startup - with nothing to say the schema was interrupted mid-flight. The reverse case is
-        // worse and was reproduced against a real SQL Server: both migrations succeed, an idle
-        // gateway drops the lock connection, and an unguarded release turns a completed migration
-        // into a hard startup crash.
-        //
-        // Swallowing alone is not enough though, and the claim that used to end this comment - "if
-        // it is alive the using block closes it here" - was false. Disposing a SqlConnection returns
-        // it to the POOL; the SQL session stays open and a Session-owned lock outlives it until that
-        // pooled connection is reused or destroyed. On the bootstrap path the connection lives in a
-        // master-catalog pool this process never touches again, so a stranded 'Bastet:Migration'
-        // lock persists for the process lifetime and later cold starts burn the full @LockTimeout
-        // before aborting with "Another replica appears to be stuck applying migrations".
-        // So a failed release discards the pooled connection, ending the session and the lock.
-        //
-        // Deliberately not guarded by a State != Open check: SqlClient does not poll the socket, so
-        // State still reports Open after a silent failover and the guard would not fire.
+
         try
         {
             using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
@@ -485,11 +350,6 @@ if (autoMigrate)
                 "Failed to release the 'Bastet:Migration' application lock after migration; discarding the pooled "
                 + "connection so the session-owned lock is dropped rather than stranded. Startup continues.");
 
-            // Same remedy as SqlServerSubnetLockingService, and for the same reason. Deliberately
-            // NOT Pooling=false on MigrationLockConnectionString.Configured: that method's contract
-            // is the connection string returned verbatim - MigrationLockConnectionStringTests asserts
-            // exactly that - and routing it through SqlConnectionStringBuilder would also destroy its
-            // documented null-in/null-out behaviour.
             try
             {
                 SqlConnection.ClearPool(migrationLockConnection);
@@ -503,8 +363,6 @@ if (autoMigrate)
     }
 }
 
-// Log warning if DataProtectionKeys table doesn't exist
-// This helps users understand why multi-replica deployments may have authentication issues
 if (!dataProtectionTableExists)
 {
     app.Logger.LogWarning(
@@ -513,19 +371,8 @@ if (!dataProtectionTableExists)
         "without session affinity. Run the 2.5.sql or higher migration script or enable BASTET_AUTO_MIGRATE=true to resolve this.");
 }
 
-// Configure the HTTP request pipeline.
-app.UseForwardedHeaders(); // Process forwarded headers early to ensure HTTPS scheme is preserved
+app.UseForwardedHeaders();
 
-// Security response headers on every response (any scheme/host, so plain-HTTP self-hosting and any
-// proxy work). Framing is configurable for hosts that legitimately embed the app; it defaults to
-// disallowing all framing (clickjacking protection). A full CSP is intentionally not added - the app
-// uses many inline <script> blocks.
-// Trimmed and checked once here rather than per request: this value is written to a header on every
-// response, and Kestrel rejects a header containing a non-ASCII or control character - so a stray
-// character (a CRLF from an env file edited on Windows, a curly quote pasted from a document) would
-// fail every request, including the error pages, with nothing pointing at the variable. Trimming
-// rescues the common accidental case; anything still invalid stops startup with a message naming it,
-// rather than silently applying a framing policy the operator did not write.
 string? configuredFrameAncestors = Environment.GetEnvironmentVariable("BASTET_FRAME_ANCESTORS")?.Trim();
 if (!string.IsNullOrWhiteSpace(configuredFrameAncestors)
     && !Bastet.Services.Security.HttpHeaderValue.IsValid(configuredFrameAncestors))
@@ -541,31 +388,19 @@ if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
 
-    // In development, also use status code pages but with direct re-execution
-    // This allows us to see the custom error pages while still getting detailed error info
     app.UseStatusCodePagesWithReExecute("/Error/{0}");
 }
 else
 {
-    // Configure status code pages with re-execution
+
     app.UseStatusCodePagesWithReExecute("/Error/{0}");
 
-    // Configure global exception handler
     app.UseExceptionHandler("/Error");
 
-    // Use HSTS and HTTPS redirection in non-development environments
     app.UseHsts();
     app.UseHttpsRedirection();
 }
 
-// Registered *below* UseExceptionHandler on purpose, so it also runs on a re-executed error request.
-// When the exception handler catches, it calls Response.Clear(), which clears Response.Headers
-// outright, and then re-runs the pipeline from its own position inward - so a header middleware
-// registered above it sets these once, has them wiped, and never gets a second chance. Production
-// 500s therefore shipped with none of them. Status-code pages are unaffected either way, since that
-// re-execute does not clear the response, but keeping both below the handlers means there is only
-// one rule to remember. Nothing here depends on the request having reached routing, so running
-// later costs nothing.
 app.Use(async (context, next) =>
 {
     IHeaderDictionary headers = context.Response.Headers;
@@ -574,16 +409,14 @@ app.Use(async (context, next) =>
     headers.ContentSecurityPolicy = $"frame-ancestors {frameAncestors}";
     if (frameAncestors == "'none'")
     {
-        headers.XFrameOptions = "DENY"; // legacy-browser parity with frame-ancestors 'none'
+        headers.XFrameOptions = "DENY";
     }
 
     await next();
 });
 
-// Enable static files
 app.UseStaticFiles();
 
-// Only registered when BASTET_CORS_ORIGINS is set; calling UseCors without a policy would throw.
 if (corsOrigins.Length > 0)
 {
     app.UseCors();
@@ -591,14 +424,11 @@ if (corsOrigins.Length > 0)
 
 app.UseRouting();
 
-// Always use Authentication and Authorization in all environments
-// In development, our DevAuthHandler will auto-authenticate
 app.UseAuthentication();
 app.UseAuthorization();
 
 var defaultRoute = new { name = "default", pattern = "{controller=Home}/{action=Index}/{id?}" };
 
-// No need for RequireAuthorization anymore since we're handling auth with policies
 app.MapControllers();
 app.MapControllerRoute(defaultRoute.name, defaultRoute.pattern);
 

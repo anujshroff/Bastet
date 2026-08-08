@@ -6,11 +6,6 @@ using System.Text.Encodings.Web;
 
 namespace Bastet.Services;
 
-/// <summary>
-/// Options for the development authentication scheme. Deliberately empty: the handler below
-/// authenticates unconditionally and reads nothing, so anything added here would be write-only.
-/// AuthenticationHandler still requires an options type, which is why the class remains.
-/// </summary>
 public class DevAuthOptions : AuthenticationSchemeOptions
 {
 }
@@ -22,12 +17,12 @@ public class DevAuthHandler(
 {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // Create identity with development user
+
         Claim[] claims =
         [
             new Claim(ClaimTypes.Name, "development-user"),
             new Claim(ClaimTypes.Email, "dev@example.com"),
-            // Add all defined roles
+
             new Claim(ClaimTypes.Role, ApplicationRoles.Admin)
         ];
 
@@ -35,7 +30,6 @@ public class DevAuthHandler(
         ClaimsPrincipal principal = new(identity);
         AuthenticationTicket ticket = new(principal, Scheme.Name);
 
-        // Return success with the ticket
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
 }

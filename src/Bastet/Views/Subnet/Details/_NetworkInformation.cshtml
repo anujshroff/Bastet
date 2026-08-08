@@ -8,18 +8,15 @@
         <dl class="row">
             <dt class="col-sm-4">Network Address</dt>
             <dd class="col-sm-8">@Model.NetworkAddress</dd>
-            
+
             <dt class="col-sm-4">CIDR Notation</dt>
             <dd class="col-sm-8">/@Model.Cidr</dd>
-            
+
             <dt class="col-sm-4">Subnet Mask</dt>
             <dd class="col-sm-8">@Model.SubnetMask</dd>
-            
+
             <dt class="col-sm-4">Broadcast Address</dt>
-            @* Discriminated rather than blank, and /31 and /32 are not the same case: RFC 3021 is
-               about 31-bit point-to-point prefixes and says nothing about /32, which has none
-               because it is a single host. Labelling both "RFC 3021" would replace one false
-               statement with a differently false one. *@
+
             <dd class="col-sm-8">
                 @(Model.Cidr == 31
                     ? "None (RFC 3021 point-to-point)"
@@ -27,10 +24,10 @@
                         ? "None (single host)"
                         : Model.BroadcastAddress)
             </dd>
-            
+
             <dt class="col-sm-4">Total IP Addresses</dt>
             <dd class="col-sm-8">@Model.TotalIpAddresses.ToString("N0")</dd>
-            
+
             <dt class="col-sm-4">Usable IP Addresses</dt>
             <dd class="col-sm-8">@Model.UsableIpAddresses.ToString("N0")</dd>
         </dl>

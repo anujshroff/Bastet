@@ -4,11 +4,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.Security;
 
-/// <summary>
-/// The console sink is where a forged log entry lands. LogSanitizer already protects values passed
-/// as template arguments, but an exception is written by the sink itself and never went through it,
-/// so a request-supplied value echoed back inside ex.Message reached the terminal intact.
-/// </summary>
 public class SanitizingConsoleFormatterTests
 {
     private const char Esc = (char)0x1B;
@@ -31,13 +26,9 @@ public class SanitizingConsoleFormatterTests
         string output = Format($"subscription {Esc}[1A{Esc}[2Kwarn: forged entry");
 
         Assert.DoesNotContain(Esc, output);
-        Assert.Contains("[1A[2Kwarn: forged entry", output); // the text survives, the control byte does not
+        Assert.Contains("[1A[2Kwarn: forged entry", output);
     }
 
-    /// <summary>
-    /// The defect itself: the template argument was sanitized, the exception was not, and the ARM
-    /// SDK's own validation echoes the caller's string into ex.Message verbatim.
-    /// </summary>
     [Fact]
     public void EscapeSequenceInTheException_IsStripped()
     {
@@ -49,11 +40,6 @@ public class SanitizingConsoleFormatterTests
         Assert.Contains("Archived 42 subnets", output);
     }
 
-    /// <summary>
-    /// Sanitizing the exception as one string would collapse the stack trace onto a single line,
-    /// because a newline is a control character. Lines are split first and sanitized individually,
-    /// so genuine structure comes from the split and never from the content.
-    /// </summary>
     [Fact]
     public void MultiLineExceptionKeepsItsLines()
     {
@@ -65,7 +51,7 @@ public class SanitizingConsoleFormatterTests
         }
         catch (InvalidOperationException caught)
         {
-            outer = caught; // caught so it carries a real stack trace
+            outer = caught;
         }
 
         string output = Format("something failed", outer);

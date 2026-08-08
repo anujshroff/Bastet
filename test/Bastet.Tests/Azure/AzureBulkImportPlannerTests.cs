@@ -5,11 +5,6 @@ using Bastet.Services.Security;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// Unit tests for the bulk Azure import planner. The planner has no DB dependency,
-/// so these tests construct it directly with the real <see cref="IpUtilityService"/>
-/// and <see cref="InputSanitizationService"/>.
-/// </summary>
 public class AzureBulkImportPlannerTests
 {
     private readonly AzureBulkImportPlanner _planner;
@@ -45,11 +40,6 @@ public class AzureBulkImportPlannerTests
             VNetPrefixes = [.. prefixes]
         };
 
-    /// <summary>
-    /// A VNet name that is entirely markup sanitizes to empty, and ValidateSubnetCreation never
-    /// inspects Name - so the bulk path persisted a subnet with no name at all while every
-    /// interactive write path refuses one. The child names four lines away always had this fallback.
-    /// </summary>
     [Theory]
     [InlineData("<b></b>")]
     [InlineData("   ")]
@@ -64,7 +54,6 @@ public class AzureBulkImportPlannerTests
         Assert.Equal("192.168.0.0_16", item.AutoCreateTargetName);
     }
 
-    /// <summary>The guard: an ordinary VNet name is still used verbatim.</summary>
     [Fact]
     public void OrdinaryVNetName_IsUsedAsTheTargetName()
     {
@@ -74,13 +63,6 @@ public class AzureBulkImportPlannerTests
         Assert.Equal("prod-vnet", Assert.Single(plan.Items).AutoCreateTargetName);
     }
 
-    /// <summary>
-    /// System.Text.Json overwrites a collection initialiser when the body carries an explicit null,
-    /// so `= []` on the DTO is not a guarantee. Dereferencing produced an unhandled
-    /// NullReferenceException - and on the commit path that happens inside the subnet lock and
-    /// outside the action's only catch, so the caller got an HTML 500 where every other malformed
-    /// body returns modelled JSON.
-    /// </summary>
     [Fact]
     public void NullVNetPrefixes_ReportsAnError_DoesNotThrow()
     {
@@ -117,7 +99,6 @@ public class AzureBulkImportPlannerTests
 
         BulkImportPlanViewModel plan = _planner.BuildPlan(selection, []);
 
-        // A VNet prefix with no subnets is a legitimate selection - the target is still created.
         Assert.Empty(plan.GlobalErrors);
         Assert.Single(plan.Items);
     }
@@ -137,10 +118,6 @@ public class AzureBulkImportPlannerTests
             IsFullyAllocated = fullyAllocated,
             AzureResourceId = azureResourceId
         };
-
-    // -------------------------------------------------------------------------
-    // Exact-match target
-    // -------------------------------------------------------------------------
 
     [Fact]
     public void ExactMatch_EmptyTarget_PlansChildCreations()
@@ -238,14 +215,10 @@ public class AzureBulkImportPlannerTests
         Assert.False(plan.Items[0].WillRename);
     }
 
-    // -------------------------------------------------------------------------
-    // Auto-create child target
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void AutoCreateChild_WhenContainerExists()
     {
-        // Bastet has 10.0.0.0/8 and 10.1.0.0/16. We import VNet 10.2.0.0/16. Container is /8.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-x", "10.2.0.0/16", Sub("default", "10.2.5.0/24")));
 
@@ -268,8 +241,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void AutoCreateChild_PicksDeepestContainer()
     {
-        // Existing: 10.0.0.0/8 contains 10.0.0.0/16 contains 10.0.0.0/20.
-        // We import 10.0.1.0/24. Deepest container is 10.0.0.0/20.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-deep", "10.0.1.0/24", Sub("a", "10.0.1.0/25")));
 
@@ -304,10 +276,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(plan.Items[0].Errors, e => e.Contains("host IP assignments"));
     }
 
-    // -------------------------------------------------------------------------
-    // Auto-create top-level target
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void AutoCreateTopLevel_WhenNoContainerAndNoExactMatch()
     {
@@ -326,14 +294,10 @@ public class AzureBulkImportPlannerTests
         Assert.Single(item.ChildSubnets);
     }
 
-    // -------------------------------------------------------------------------
-    // Multiple VNet prefixes
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void MultipleVNetPrefixes_EachIsIndependentTarget()
     {
-        // One VNet with two non-overlapping IPv4 prefixes.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-multi", "10.0.0.0/16", Sub("a", "10.0.1.0/24")),
             Pref("vnet-multi", "10.1.0.0/16", Sub("b", "10.1.1.0/24")));
@@ -346,28 +310,17 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(2, plan.Items.Count);
         Assert.All(plan.Items, i => Assert.Equal(BulkImportTargetType.AutoCreateTopLevel, i.TargetType));
 
-        // Each plan item is for a distinct prefix.
         Assert.Contains(plan.Items, i => i.PrefixNetworkAddress == "10.0.0.0" && i.PrefixCidr == 16);
         Assert.Contains(plan.Items, i => i.PrefixNetworkAddress == "10.1.0.0" && i.PrefixCidr == 16);
 
-        // Each auto-created target is named for the range it holds. This assertion previously
-        // pinned the opposite - both targets keeping the bare VNet name - with a comment saying a
-        // future change introducing auto-disambiguation would be caught here. It was: two Bastet
-        // subnets with the identical name AND the identical VNet resource id, distinguishable only
-        // by network address, on every multi-address-space VNet import. Changed deliberately.
         Assert.Contains(plan.Items, i => i.AutoCreateTargetName == "vnet-multi (10.0.0.0-16)");
         Assert.Contains(plan.Items, i => i.AutoCreateTargetName == "vnet-multi (10.1.0.0-16)");
     }
 
-
-    // -------------------------------------------------------------------------
-    // Conflict detection — VNet vs VNet
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void VNetPrefixOverlap_HardFails()
     {
-        // 10.0.0.0/16 and 10.0.0.0/24 overlap.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-a", "10.0.0.0/16"),
             Pref("vnet-b", "10.0.0.0/24"));
@@ -393,10 +346,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(plan.GlobalErrors, e => e.Contains("overlaps"));
     }
 
-    // -------------------------------------------------------------------------
-    // Conflict detection — Azure subnets across VNets
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void AzureSubnetsAcrossVNets_DontOverlap_OK()
     {
@@ -409,20 +358,10 @@ public class AzureBulkImportPlannerTests
         Assert.True(plan.CanCommit);
     }
 
-    // -------------------------------------------------------------------------
-    // Conflict detection — Azure subnet already in Bastet
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void AzureSubnetAlreadyInBastet_HardFails()
     {
-        // Plan attempts to import 10.2.5.0/24 from VNet 10.2.0.0/16. Bastet has
-        // 10.0.0.0/8 + 10.2.5.0/24 (no /16 between them), so the planner will
-        // simultaneously trip two distinct hard fails — both correct, both expected:
-        //   * the Azure subnet 10.2.5.0/24 already exists in Bastet (the case under test)
-        //   * the auto-created /16 target would contain the existing /24
-        // We assert the duplicate-existence error is present; the would-contain
-        // error is exercised independently by VNetPrefixWouldContainExistingSubnet_HardFails.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-x", "10.2.0.0/16", Sub("default", "10.2.5.0/24")));
 
@@ -438,15 +377,10 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(plan.GlobalErrors, e => e.Contains("already exists in Bastet"));
     }
 
-
-    // -------------------------------------------------------------------------
-    // Conflict detection — VNet prefix would contain existing Bastet subnet
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void VNetPrefixWouldContainExistingSubnet_HardFails()
     {
-        // Bastet has 10.0.5.0/24. We import 10.0.0.0/16 with no exact match. Would create invalid hierarchy.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-broad", "10.0.0.0/16", Sub("a", "10.0.1.0/24")));
 
@@ -464,7 +398,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void VNetPrefixContainedByExisting_DoesNotTriggerWouldContainError()
     {
-        // Importing 10.0.5.0/24, existing 10.0.0.0/16 contains it. This is the normal AutoCreateChild case.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-narrow", "10.0.5.0/24", Sub("a", "10.0.5.0/25")));
 
@@ -478,10 +412,6 @@ public class AzureBulkImportPlannerTests
         Assert.True(plan.CanCommit);
         Assert.Equal(BulkImportTargetType.AutoCreateChild, plan.Items[0].TargetType);
     }
-
-    // -------------------------------------------------------------------------
-    // Fully encompassing Azure subnet
-    // -------------------------------------------------------------------------
 
     [Fact]
     public void AzureSubnetEqualsVNetPrefix_MarksTargetFullyAllocated_AndNoChildren()
@@ -501,12 +431,6 @@ public class AzureBulkImportPlannerTests
         Assert.Empty(item.ChildSubnets);
     }
 
-    /// <summary>
-    /// This name is the one Azure-derived value in BuildPlanItem that used to skip sanitization, and
-    /// it lands in the target's Description via AppendFullyAllocatedNote - a column every other write
-    /// in the commit guarantees is HTML-stripped. GlobalSanitizationFilter does not descend into the
-    /// nested selection list, so the planner is the only place this can be handled.
-    /// </summary>
     [Fact]
     public void AzureSubnetEqualsVNetPrefix_SanitizesTheNameThatReachesTheDescription()
     {
@@ -522,13 +446,6 @@ public class AzureBulkImportPlannerTests
         Assert.DoesNotContain(">", name);
     }
 
-    /// <summary>
-    /// The commit treats "mark fully allocated" and "create children" as mutually exclusive, so a
-    /// selection carrying both previewed children that were then silently not created, while the
-    /// target came back flagged fully allocated - a state in which they can never be added later.
-    /// Azure cannot produce this selection (subnets in a VNet may not overlap, so a subnet covering
-    /// the whole prefix leaves no room for siblings), so it is refused rather than partly applied.
-    /// </summary>
     [Fact]
     public void AzureSubnetEqualsVNetPrefix_AlongsideSiblings_IsRejectedRatherThanPartlyApplied()
     {
@@ -543,11 +460,10 @@ public class AzureBulkImportPlannerTests
         Assert.False(plan.CanCommit);
         BulkImportPlanItem item = plan.Items[0];
         Assert.NotEmpty(item.Errors);
-        Assert.False(item.WillMarkFullyAllocated);   // nothing half-planned
+        Assert.False(item.WillMarkFullyAllocated);
         Assert.Empty(item.ChildSubnets);
     }
 
-    /// <summary>An encompassing subnet on its own is still the supported case.</summary>
     [Fact]
     public void AzureSubnetEqualsVNetPrefix_OnItsOwn_IsStillAccepted()
     {
@@ -579,16 +495,10 @@ public class AzureBulkImportPlannerTests
         Assert.Empty(item.ChildSubnets);
     }
 
-    // -------------------------------------------------------------------------
-    // Naming
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void IdenticalChildNamesInDifferentTargets_AreNotDisambiguated()
     {
-        // Disambiguation is only needed when names collide *within the same target*.
-        // Two VNets in non-overlapping space land in different targets, so each can
-        // keep the name "default" without conflict.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-a", "10.0.0.0/16", Sub("default", "10.0.1.0/24")),
             Pref("vnet-b", "10.1.0.0/16", Sub("default", "10.1.1.0/24"))
@@ -602,12 +512,10 @@ public class AzureBulkImportPlannerTests
         Assert.Equal("default", plan.Items[1].ChildSubnets[0].Name);
     }
 
-
     [Fact]
     public void NameCollisionWithinSameTarget_GetsDisambiguated()
     {
-        // Test specifically within one target. We can't really get duplicate names in real Azure,
-        // but the planner should still defensively disambiguate.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-x", "10.0.0.0/16",
                 Sub("dup", "10.0.1.0/24"),
@@ -619,7 +527,7 @@ public class AzureBulkImportPlannerTests
         Assert.True(plan.CanCommit);
         BulkImportPlanItem item = plan.Items[0];
         Assert.Equal(2, item.ChildSubnets.Count);
-        // Names are unique within the target
+
         Assert.NotEqual(item.ChildSubnets[0].Name, item.ChildSubnets[1].Name);
         Assert.Equal("dup", item.ChildSubnets[0].Name);
         Assert.Contains("vnet-x", item.ChildSubnets[1].Name);
@@ -628,11 +536,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void NamesCollidingAfterTruncation_AreDisambiguatedWithoutStalling()
     {
-        // Two names sharing everything up to Subnet.Name's 100-character limit. Suffixing the
-        // truncated name and cutting the result back to 100 reproduces the base name, so the
-        // disambiguator used to search every int for a free name it could never build, holding the
-        // global subnet lock on the commit path. (Real Azure names stop at 80 and so no longer
-        // truncate at all - this is the boundary the code still has to survive.)
+
         string shared = new('a', 100);
         string nameA = shared + "-tierA";
         string nameB = shared + "-tierB";
@@ -650,15 +554,14 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(2, item.ChildSubnets.Count);
         Assert.NotEqual(item.ChildSubnets[0].Name, item.ChildSubnets[1].Name);
         Assert.All(item.ChildSubnets, c => Assert.InRange(c.Name.Length, 1, 100));
-        // The disambiguating suffix has to survive, which is what forces the base name to be shortened.
+
         Assert.Contains("vnet-prod", item.ChildSubnets[1].Name);
     }
 
     [Fact]
     public void ManyNamesCollidingAfterTruncation_AreAllDistinct()
     {
-        // Several collisions in one target exercise the numeric fallback, whose candidates must stay
-        // distinct rather than converging back onto the truncated base name.
+
         string prefix = new('x', 100);
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-y", "10.0.0.0/16",
@@ -679,8 +582,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void MaximumLengthAzureName_IsKeptIntact()
     {
-        // Azure subnet names stop at 80 characters, which the column now holds whole - importing one
-        // must not shorten it.
+
         string azureMaxName = new('a', 80);
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-w", "10.0.0.0/16", Sub(azureMaxName, "10.0.1.0/24")));
@@ -704,10 +606,6 @@ public class AzureBulkImportPlannerTests
         Assert.True(plan.Items[0].ChildSubnets[0].Name.Length <= 100);
     }
 
-    // -------------------------------------------------------------------------
-    // Validation of inputs
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void InvalidVNetPrefix_HardFails()
     {
@@ -723,7 +621,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void MisalignedVNetPrefix_HardFails()
     {
-        // 10.0.0.5/16 — host bits are set
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("misaligned", "10.0.0.5/16"));
 
@@ -755,10 +653,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(plan.GlobalErrors, e => e.Contains("No VNet"));
     }
 
-    // -------------------------------------------------------------------------
-    // Azure resource ID propagation
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void AzureResourceIds_AreForwardedFromSelectionToPlan()
     {
@@ -781,14 +675,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(item.ChildSubnets, c => c.Name == "web" && c.AzureResourceId == webId);
         Assert.Contains(item.ChildSubnets, c => c.Name == "app" && c.AzureResourceId == appId);
     }
-
-    // -------------------------------------------------------------------------
-    // Availability annotation
-    // -------------------------------------------------------------------------
-    //
-    // Drives the selection UI: anything left selectable must produce a committable
-    // plan, and anything blocked must be something BuildPlan would reject. The two
-    // agreeing is the whole point of computing this on the server.
 
     private static string AzSubnetId(string vnetName, string subnetName) =>
         $"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}";
@@ -836,7 +722,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void Availability_PrefixTargetHasChildren_IsNotSelectable()
     {
-        // Re-importing a VNet you already imported: its target now has children.
+
         BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
         List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16, hasChildren: true)];
 
@@ -888,8 +774,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void Availability_PrefixContainerHasHostIps_IsNotSelectable()
     {
-        // The prefix would be auto-created as a child of the /16, which BuildPlanItem rejects
-        // because a subnet with host IPs cannot have children. The badge must agree.
+
         BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.1.0/24"]);
         List<ExistingSubnetSnapshot> existing = [Existing(1, "Container", "10.0.0.0", 16, hasHostIps: true)];
 
@@ -931,9 +816,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void Availability_OnlyTheDeepestContainerDecides_JustLikeBuildPlanItem()
     {
-        // The parent is always the deepest container, so only its eligibility matters:
-        // an ineligible /16 blocks even under a clean /8, and a clean /16 imports
-        // even under an ineligible /8.
+
         List<ExistingSubnetSnapshot> deepIneligible =
         [
             Existing(1, "Clean root", "10.0.0.0", 8),
@@ -976,8 +859,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void Availability_SubnetAddressTakenByHandMadeSubnet_IsBlockedNotAlreadyImported()
     {
-        // Bastet requires {NetworkAddress, Cidr} to be unique, so a hand-made subnet blocks the
-        // import just as hard - but it isn't "already imported", and the wording should say so.
+
         BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
         List<ExistingSubnetSnapshot> existing =
         [
@@ -1011,9 +893,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void Availability_EncompassingSubnet_IsSelectableEvenWhenTargetExists()
     {
-        // VNet 10.11.0.0/24 whose only subnet is also 10.11.0.0/24. The subnet is never created -
-        // it marks the target fully allocated - so it must not be reported as a duplicate of the
-        // very target it would mark. Without this it would always look blocked once imported.
+
         BulkAzureVNetViewModel vnet = AzVNet("vnet-e", ["10.11.0.0/24"], AzSub("vnet-e", "default", "10.11.0.0/24"));
         List<ExistingSubnetSnapshot> existing = [Existing(1, "Target", "10.11.0.0", 24)];
 
@@ -1028,7 +908,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void Availability_InvalidPrefix_IsNotSelectable()
     {
-        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.1/16"]); // not CIDR-aligned
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.1/16"]);
 
         _planner.AnnotateAvailability([vnet], []);
 
@@ -1049,10 +929,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void Availability_SelectableItems_ProduceACommittablePlan()
     {
-        // The property the whole feature rests on: if the UI lets you check it, importing it works.
-        // Mixes every state - a fresh VNet, a clean exact match, an already-imported subnet, a
-        // blocked target with children, an encompassing subnet, and a prefix whose containing
-        // subnet has host IPs.
+
         BulkAzureVNetViewModel fresh = AzVNet("vnet-fresh", ["10.40.0.0/16"], AzSub("vnet-fresh", "new", "10.40.1.0/24"));
         BulkAzureVNetViewModel partial = AzVNet("vnet-partial", ["10.41.0.0/16"],
             AzSub("vnet-partial", "old", "10.41.1.0/24"),
@@ -1072,7 +949,6 @@ public class AzureBulkImportPlannerTests
         List<BulkAzureVNetViewModel> vnets = [fresh, partial, blocked, encompass, nested];
         _planner.AnnotateAvailability(vnets, existing);
 
-        // Build a selection from ONLY what the UI would leave enabled
         List<BulkImportSelectedVNetPrefixDto> selected = [];
         foreach (BulkAzureVNetViewModel vnet in vnets)
         {
@@ -1098,7 +974,6 @@ public class AzureBulkImportPlannerTests
             }
         }
 
-        // The blocked and nested VNets must have been filtered out, and the rest must import cleanly
         Assert.DoesNotContain(selected, p => p.VNetName == "vnet-blocked");
         Assert.DoesNotContain(selected, p => p.VNetName == "vnet-nested");
         Assert.Equal(3, selected.Count);
@@ -1110,20 +985,6 @@ public class AzureBulkImportPlannerTests
             + string.Join(" | ", plan.GlobalErrors.Concat(plan.Items.SelectMany(i => i.Errors))));
     }
 
-    // -------------------------------------------------------------------------
-    // Re-pointing an existing subnet's Azure link at a different VNet
-    //
-    // Two VNets in one subscription may carry the same RFC1918 prefix, so an exact match on the
-    // address says nothing about which Azure resource the target was imported from. Importing the
-    // second VNet used to overwrite the first one's resource ID in place, after which reconcile
-    // read the row against the wrong VNet and offered the whole subtree for deletion once that
-    // VNet was decommissioned.
-    //
-    // ARM IDs are path-based, so deleting a VNet and re-creating it under the same name in the
-    // same resource group yields a byte-identical ID - the ordinary re-import case compares equal
-    // and is unaffected by these rules.
-    // -------------------------------------------------------------------------
-
     private static string AzVNetId(string vnetName) =>
         $"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/{vnetName}";
 
@@ -1133,7 +994,6 @@ public class AzureBulkImportPlannerTests
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-vb", "10.98.0.0/16", Sub("web", "10.98.1.0/24")));
 
-        // The target was imported from vnet-va; the operator is now importing vnet-vb.
         List<ExistingSubnetSnapshot> existing =
             [Existing(1, "va-target", "10.98.0.0", 16, azureResourceId: AzVNetId("vnet-va"))];
 
@@ -1148,8 +1008,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void ExactMatch_TargetLinkedToTheSameVNet_StillCommits()
     {
-        // Re-importing the same VNet - including after a delete and re-create, which returns the
-        // same ARM ID - must stay possible.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-va", "10.98.0.0/16", Sub("web", "10.98.1.0/24")));
 
@@ -1165,7 +1024,7 @@ public class AzureBulkImportPlannerTests
     [Fact]
     public void ExactMatch_TargetNotLinkedToAzure_StillCommits()
     {
-        // A hand-created subnet with no Azure link is what the first import stamps.
+
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-vb", "10.98.0.0/16", Sub("web", "10.98.1.0/24")));
 
@@ -1190,8 +1049,6 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
         Assert.False(prefix.IsSelectable);
 
-        // The wizard has to be able to say which resource it is already linked to, and to what the
-        // operator just selected - "blocked" on its own does not explain a same-prefix collision.
         Assert.Contains(AzVNetId("vnet-va"), prefix.Reason);
         Assert.Contains(AzVNetId("vnet-vb"), prefix.Reason);
     }
@@ -1210,16 +1067,6 @@ public class AzureBulkImportPlannerTests
         Assert.True(prefix.IsSelectable);
     }
 
-    // -------------------------------------------------------------------------
-    // O11 - the planner's Bastet-side conflict tests must match ValidateSubnetCreation
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The planner's contract is that "the preview UI shows exactly what commit will do", but its
-    /// only Bastet-side test for a planned CHILD was exact address equality. ValidateSubnetCreation
-    /// also refuses a subnet that would contain an existing Bastet subnet, so the preview certified
-    /// canCommit=true for a plan the commit then 400d - rolling back every other VNet in the run.
-    /// </summary>
     [Fact]
     public void APlannedChildThatWouldContainAnExistingSubnet_IsRefusedByThePlan()
     {
@@ -1236,7 +1083,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(plan.GlobalErrors, e => e.Contains("handmade-half"));
     }
 
-    /// <summary>The second leg: a more specific existing Bastet parent inside the same VNet prefix.</summary>
     [Fact]
     public void APlannedChildWithAMoreSpecificExistingParent_IsRefusedByThePlan()
     {
@@ -1253,12 +1099,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains(plan.GlobalErrors, e => e.Contains("handmade-mid"));
     }
 
-    /// <summary>
-    /// The counter-test that decides the scoping, built by the verifier: an ancestor OUTSIDE the
-    /// VNet prefix must not refuse the import. At commit time the just-created /16 is in the tree
-    /// cache and becomes the child's parent, so this plan commits 200 today - an unscoped check
-    /// would turn a preview/commit divergence into one in the other direction.
-    /// </summary>
     [Fact]
     public void AnAncestorOutsideTheVNetPrefix_DoesNotRefuseAnImportThatCommitsToday()
     {
@@ -1271,12 +1111,6 @@ public class AzureBulkImportPlannerTests
         Assert.True(plan.CanCommit);
     }
 
-    /// <summary>
-    /// The would-contain half is mirrored into the availability annotation, so the selection screen
-    /// greys the row with a reason instead of offering a run the preview then refuses. (The
-    /// more-specific-parent half is not mirrorable: the annotation pass has no prefix-to-target
-    /// binding for a target that does not exist yet.)
-    /// </summary>
     [Fact]
     public void Availability_ASubnetThatWouldContainAnExistingSubnet_IsBlockedWithAReason()
     {
@@ -1291,12 +1125,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains("handmade-half", annotated.Reason!);
     }
 
-    /// <summary>
-    /// O12. N4 added a hard refusal in BuildPlanItem - an encompassing Azure subnet cannot mark a
-    /// target fully allocated when the target already has children - and neither the prefix nor the
-    /// subnet annotation learned it. The selection screen therefore offered a run the preview then
-    /// refused, and CanCommit is plan-wide, so it took every other VNet in the run with it.
-    /// </summary>
     [Fact]
     public void Availability_AnEncompassingSubnetOverAPopulatedTarget_IsBlocked()
     {
@@ -1312,11 +1140,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains("already has child subnets", annotated.Reason!);
     }
 
-    /// <summary>
-    /// The counter-test that kills the interim the finding offered: an EMPTY target in the same
-    /// shape commits 200 today, so blocking it would disable an importable item - the other half of
-    /// the failure mode BulkImportAvailability's own contract warns about.
-    /// </summary>
     [Fact]
     public void Availability_AnEncompassingSubnetOverAnEmptyTarget_StaysAvailable()
     {
@@ -1331,10 +1154,6 @@ public class AzureBulkImportPlannerTests
         Assert.True(annotated.IsSelectable);
     }
 
-    /// <summary>
-    /// And the scoping the interim also got wrong: on a multi-address-space VNet, an encompassing
-    /// subnet under one prefix must not affect an unrelated, importable prefix.
-    /// </summary>
     [Fact]
     public void Availability_AnEncompassingSubnetOnOnePrefix_DoesNotBlockAnotherPrefixesSubnet()
     {
@@ -1352,13 +1171,7 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(BulkImportAvailability.Available, ordinary.Status);
         Assert.True(ordinary.IsSelectable);
     }
-    /// <summary>
-    /// P13. O11 added two commit-side tests and mirrored only the would-contain half, on the stated
-    /// ground that the more-specific-parent test "has no well-defined answer here". It does: the
-    /// plan-side test is scoped by the VNet PREFIX, which AnnotateSubnet already holds. So the
-    /// selection screen certified a row as importable and the preview then returned a plan-wide
-    /// error that set CanCommit=false for every other VNet in the run.
-    /// </summary>
+
     [Fact]
     public void Availability_SubnetWithAMoreSpecificExistingParent_IsBlocked()
     {
@@ -1378,10 +1191,6 @@ public class AzureBulkImportPlannerTests
         Assert.Contains("rig-a", subnet.Reason);
     }
 
-    /// <summary>
-    /// The supernet counter-test the plan's own comment protects: an existing row ABOVE the VNet
-    /// prefix is not a more specific parent, and blocking on it would refuse ordinary imports.
-    /// </summary>
     [Fact]
     public void Availability_AnExistingRowAboveTheVNetPrefix_DoesNotBlock()
     {
@@ -1393,10 +1202,6 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(BulkImportAvailability.Available, Assert.Single(vnet.Subnets).Status);
     }
 
-    /// <summary>
-    /// The exact-match target must not block its own children, or every ordinary top-up breaks:
-    /// the existing parent has to be STRICTLY inside the owning VNet prefix.
-    /// </summary>
     [Fact]
     public void Availability_TheTargetItself_IsNotAMoreSpecificParent()
     {

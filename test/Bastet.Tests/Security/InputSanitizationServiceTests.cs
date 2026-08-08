@@ -16,10 +16,9 @@ public class InputSanitizationServiceTests
     [InlineData("Text with & symbols", "Text with & symbols")]
     public void StripHtml_RemovesHtmlTags(string input, string expected)
     {
-        // Act
+
         string result = _sanitizationService.StripHtml(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
@@ -29,24 +28,21 @@ public class InputSanitizationServiceTests
     [InlineData("Name with <b>bold</b>", "Name with bold")]
     public void SanitizeName_SanitizesCorrectly(string input, string expected)
     {
-        // Act
+
         string result = _sanitizationService.SanitizeName(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
     [Fact]
     public void SanitizeName_TruncatesLongInput()
     {
-        // Arrange
-        string longInput = "A" + new string('B', 200); // 201 characters
-        string expected = "A" + new string('B', 99);   // 100 characters max
 
-        // Act
+        string longInput = "A" + new string('B', 200);
+        string expected = "A" + new string('B', 99);
+
         string result = _sanitizationService.SanitizeName(longInput);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
@@ -59,10 +55,9 @@ public class InputSanitizationServiceTests
     [InlineData("invalid@chars#", "invalidchars")]
     public void SanitizeNetworkInput_SanitizesCorrectly(string input, string expected)
     {
-        // Act
+
         string result = _sanitizationService.SanitizeNetworkInput(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
@@ -78,10 +73,9 @@ public class InputSanitizationServiceTests
     [InlineData(null, false)]
     public void IsValidIpAddress_ValidatesCorrectly(string? input, bool expected)
     {
-        // Act
+
         bool result = _sanitizationService.IsValidIpAddress(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
@@ -97,10 +91,9 @@ public class InputSanitizationServiceTests
     [InlineData(null, true)]
     public void IsSafeText_ValidatesCorrectly(string? input, bool expected)
     {
-        // Act
+
         bool result = _sanitizationService.IsSafeText(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
@@ -108,23 +101,17 @@ public class InputSanitizationServiceTests
     [InlineData("tag1,tag2,tag3", "tag1,tag2,tag3")]
     [InlineData("tag1, tag2, tag3", "tag1,tag2,tag3")]
     [InlineData("<script>evil</script>,goodtag", "evil,goodtag")]
-    [InlineData("a,b,c,d,e,f,g,h,i,j,k,l", "a,b,c,d,e,f,g,h,i,j")] // Max 10 tags
+    [InlineData("a,b,c,d,e,f,g,h,i,j,k,l", "a,b,c,d,e,f,g,h,i,j")]
     [InlineData("", "")]
     [InlineData(null, "")]
     public void SanitizeTags_SanitizesCorrectly(string? input, string expected)
     {
-        // Act
+
         string result = _sanitizationService.SanitizeTags(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
-    /// <summary>
-    /// Sanitization runs after model validation, so a value that satisfied [StringLength(255)] must
-    /// not come back out longer than the column. Ten 24-character tags comma-joined is 249
-    /// characters - legal input, and previously rewritten to 258.
-    /// </summary>
     [Fact]
     public void SanitizeTags_TenMaximumLengthTags_DoesNotGrowPastTheColumn()
     {
@@ -136,10 +123,9 @@ public class InputSanitizationServiceTests
         string result = _sanitizationService.SanitizeTags(input);
 
         Assert.True(result.Length <= 255, $"sanitized tags grew to {result.Length} characters");
-        Assert.Equal(input, result);          // every tag survives intact
+        Assert.Equal(input, result);
     }
 
-    /// <summary>Sanitizing must never lengthen a tag list, whatever the separators look like.</summary>
     [Theory]
     [InlineData("a,b,c")]
     [InlineData("a, b, c")]
@@ -158,26 +144,23 @@ public class InputSanitizationServiceTests
     [InlineData("<p>HTML description</p>", "HTML description")]
     public void SanitizeDescription_SanitizesCorrectly(string input, string expected)
     {
-        // Act
+
         string result = _sanitizationService.SanitizeDescription(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
     [Fact]
     public void SanitizeDescription_TruncatesLongInput()
     {
-        // Arrange
+
         string prefix = "Very long description that exceeds the maximum length limit";
         string longInput = prefix + new string('X', 1000);
-        // The service truncates at 1000 characters total
+
         string expected = longInput[..1000];
 
-        // Act
         string result = _sanitizationService.SanitizeDescription(longInput);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 
@@ -189,10 +172,9 @@ public class InputSanitizationServiceTests
     [InlineData("Text with onload='alert(1)'", true, "Text with ='alert(1)'")]
     public void SanitizeString_SanitizesCorrectly(string input, bool allowHtml, string expected)
     {
-        // Act
+
         string result = _sanitizationService.SanitizeString(input, allowHtml);
 
-        // Assert
         Assert.Contains(expected, result.Replace("&amp;", "&").Replace("&#39;", "'"));
     }
 
@@ -205,10 +187,9 @@ public class InputSanitizationServiceTests
     [InlineData(null, "")]
     public void EncodeHtml_EncodesCorrectly(string? input, string expected)
     {
-        // Act
+
         string result = _sanitizationService.EncodeHtml(input);
 
-        // Assert
         Assert.Equal(expected, result);
     }
 }

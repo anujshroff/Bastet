@@ -10,8 +10,6 @@
     @await Html.PartialAsync("Details/_SubnetCalculationScripts", Model)
 }
 
-@* Create, Edit, the Azure import and the host-IP guards all redirect here with a message. Without
-   these blocks every one of them was dropped silently. Same markup as HostIp/Index. *@
 @await Html.PartialAsync("_TempDataAlerts")
 
 <div class="mb-4">
@@ -31,7 +29,7 @@
     <div class="col-md-6">
         @await Html.PartialAsync("Details/_NetworkInformation", Model)
     </div>
-    
+
     <div class="col-md-6">
         @await Html.PartialAsync("Details/_SubnetDetails", Model)
     </div>

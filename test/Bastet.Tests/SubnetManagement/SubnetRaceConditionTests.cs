@@ -13,9 +13,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// Tests to verify that race conditions are properly prevented in subnet operations
-/// </summary>
 public class SubnetRaceConditionTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -28,20 +25,17 @@ public class SubnetRaceConditionTests : IDisposable
 
     public SubnetRaceConditionTests()
     {
-        // Create in-memory database context
+
         _context = TestDbContextFactory.CreateDbContext();
 
-        // Create services
         _userContextService = ControllerTestHelper.CreateMockUserContextService();
         _ipUtilityService = new IpUtilityService();
         _subnetValidationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
         _sanitizationService = new InputSanitizationService();
 
-        // Use the real SQLite locking service for these tests
         _lockingService = new SqliteSubnetLockingService();
 
-        // Set up test data
         SeedTestData();
     }
 
@@ -54,7 +48,7 @@ public class SubnetRaceConditionTests : IDisposable
 
     private void SeedTestData()
     {
-        // Create a parent subnet for testing
+
         Subnet parentSubnet = new()
         {
             Id = 1,
@@ -71,7 +65,7 @@ public class SubnetRaceConditionTests : IDisposable
     [Fact]
     public async Task ConcurrentSubnetCreation_WithLocking_PreventsDuplicates()
     {
-        // Arrange - Create two identical subnet creation requests
+
         CreateSubnetViewModel createViewModel1 = new()
         {
             Name = "Test Subnet 1",
@@ -85,14 +79,13 @@ public class SubnetRaceConditionTests : IDisposable
         CreateSubnetViewModel createViewModel2 = new()
         {
             Name = "Test Subnet 2",
-            NetworkAddress = "10.0.1.0", // Same network address - should conflict
+            NetworkAddress = "10.0.1.0",
             Cidr = 24,
             Description = "Test subnet from task 2",
             Tags = "test",
             ParentSubnetId = 1
         };
 
-        // Create two controllers with real locking service
         SubnetController controller1 = new(_context, _ipUtilityService,
             _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
         SubnetController controller2 = new(_context, _ipUtilityService,
@@ -101,11 +94,9 @@ public class SubnetRaceConditionTests : IDisposable
         ControllerTestHelper.SetupController(controller1);
         ControllerTestHelper.SetupController(controller2);
 
-        // Track results
         List<IActionResult> results = [];
         List<Exception> exceptions = [];
 
-        // Act - Execute both creations concurrently
         Task[] tasks =
         [
             Task.Run(async () =>
@@ -136,23 +127,18 @@ public class SubnetRaceConditionTests : IDisposable
 
         await Task.WhenAll(tasks).WaitAsync(TestContext.Current.CancellationToken);
 
-        // Assert - Only one subnet should be created, one should fail
-        Assert.Empty(exceptions); // No unhandled exceptions should occur
+        Assert.Empty(exceptions);
 
-        // Check database state
         List<Subnet> createdSubnets = await _context.Subnets
             .Where(s => s.ParentSubnetId == 1 && s.Id != 1)
             .ToListAsync(TestContext.Current.CancellationToken);
 
-        // With proper locking, only one subnet should be created
         Assert.Single(createdSubnets);
 
-        // One request should succeed (redirect), one should fail (view with validation error)
         Assert.Equal(2, results.Count);
         Assert.Single(results.OfType<RedirectToActionResult>());
         Assert.Single(results.OfType<ViewResult>());
 
-        // The failed request should have validation errors
         ViewResult viewResult = results.OfType<ViewResult>().First();
         Assert.False(viewResult.ViewData.ModelState.IsValid);
     }
@@ -160,7 +146,7 @@ public class SubnetRaceConditionTests : IDisposable
     [Fact]
     public async Task ConcurrentSubnetEdit_WithLocking_PreventsConcurrencyIssues()
     {
-        // Arrange - Create a subnet to edit
+
         Subnet subnet = new()
         {
             Id = 10,
@@ -174,12 +160,10 @@ public class SubnetRaceConditionTests : IDisposable
         _context.Subnets.Add(subnet);
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        // Store original state for comparison
         string originalName = subnet.Name;
         string? originalDescription = subnet.Description;
         byte[]? originalRowVersion = subnet.RowVersion;
 
-        // Create two edit requests that modify different properties
         EditSubnetViewModel editViewModel1 = new()
         {
             Id = 10,
@@ -199,10 +183,9 @@ public class SubnetRaceConditionTests : IDisposable
             Cidr = 24,
             OriginalCidr = 24,
             Description = "Updated by second user",
-            RowVersion = originalRowVersion // Same row version - will cause concurrency conflict
+            RowVersion = originalRowVersion
         };
 
-        // Create two controllers with real locking service
         SubnetController controller1 = new(_context, _ipUtilityService,
             _subnetValidationService, _hostIpValidationService, _userContextService, _lockingService, NullLogger<SubnetController>.Instance);
         SubnetController controller2 = new(_context, _ipUtilityService,
@@ -211,11 +194,9 @@ public class SubnetRaceConditionTests : IDisposable
         ControllerTestHelper.SetupController(controller1);
         ControllerTestHelper.SetupController(controller2);
 
-        // Track results
         List<IActionResult> results = [];
         List<Exception> exceptions = [];
 
-        // Act - Execute both edits concurrently
         Task[] tasks =
         [
             Task.Run(async () =>
@@ -246,55 +227,40 @@ public class SubnetRaceConditionTests : IDisposable
 
         await Task.WhenAll(tasks).WaitAsync(TestContext.Current.CancellationToken);
 
-        // Assert - No unhandled exceptions should occur
         Assert.Empty(exceptions);
 
-        // Check results
         Assert.Equal(2, results.Count);
 
-        // Verify the subnet state in database - this is the most important check
         Subnet? updatedSubnet = await _context.Subnets.FindAsync([10], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
 
-        // Check result types to understand what happened
         List<RedirectToActionResult> redirectResults = [.. results.OfType<RedirectToActionResult>()];
         List<ViewResult> viewResults = [.. results.OfType<ViewResult>()];
 
-        // At least one operation should have had some result
         Assert.True(redirectResults.Count + viewResults.Count == 2,
             "Both operations should have returned some result");
 
-        // Determine if any updates actually succeeded by checking the database state
         bool wasActuallyUpdated = updatedSubnet.Name != originalName ||
                                  updatedSubnet.Description != originalDescription;
 
-        // The core test: verify that the locking mechanism prevents data corruption
-        // We test this by examining the actual database state, not just the HTTP result types
         if (wasActuallyUpdated)
         {
-            // At least one operation succeeded in updating the database
-            // The successful update should have persisted one of the two edit attempts
+
             Assert.True(updatedSubnet.Name is "Updated by User 1" or "Updated by User 2",
                 $"Expected subnet name to be one of the edit attempts, but was: {updatedSubnet.Name}");
             Assert.True(updatedSubnet.Description is "Updated by first user" or "Updated by second user",
                 $"Expected subnet description to be one of the edit attempts, but was: {updatedSubnet.Description}");
 
-            // If RowVersion is supported in the test environment, it should have changed
             if (originalRowVersion != null && updatedSubnet.RowVersion != null)
             {
                 Assert.NotEqual(originalRowVersion, updatedSubnet.RowVersion);
             }
 
-            // The key test: even if both operations appear to succeed at the HTTP level,
-            // only one set of changes should have been persisted to the database
-            // This verifies that the locking prevented data corruption
             bool nameFromUser1 = updatedSubnet.Name == "Updated by User 1";
             bool descFromUser1 = updatedSubnet.Description == "Updated by first user";
             bool nameFromUser2 = updatedSubnet.Name == "Updated by User 2";
             bool descFromUser2 = updatedSubnet.Description == "Updated by second user";
 
-            // The changes should be consistent - all from one user or all from the other
-            // Mixed changes would indicate a race condition/data corruption
             bool consistentFromUser1 = nameFromUser1 && descFromUser1;
             bool consistentFromUser2 = nameFromUser2 && descFromUser2;
 
@@ -303,23 +269,17 @@ public class SubnetRaceConditionTests : IDisposable
         }
         else
         {
-            // No updates succeeded - both operations should have failed gracefully
-            // This can happen in CI environments due to timing or strict concurrency control
+
             Assert.Equal(originalName, updatedSubnet.Name);
             Assert.Equal(originalDescription, updatedSubnet.Description);
 
-            // This is still a valid test result - it shows that when operations conflict,
-            // they fail gracefully rather than corrupting data
         }
     }
 
     [Fact]
     public async Task ConcurrentCreateAndBatchImport_WithLocking_CannotCreateOverlappingSiblings()
     {
-        // The A1 write-skew scenario: an interactive create of 10.0.9.0/24 races a batch import of
-        // 10.0.9.0/25 under the same parent. Each validates overlap against committed rows, so
-        // without the shared global lock both would pass validation and commit overlapping
-        // siblings. With it, whichever runs second must see the first's row and fail validation.
+
         CreateSubnetViewModel createViewModel = new()
         {
             Name = "Interactive",
@@ -367,8 +327,6 @@ public class SubnetRaceConditionTests : IDisposable
 
         Assert.Empty(exceptions);
 
-        // Exactly one of the two overlapping subnets may exist; both committing as siblings is the
-        // hierarchy corruption A1 describes.
         List<Subnet> created = await _context.Subnets
             .Where(s => s.ParentSubnetId == 1 && s.NetworkAddress == "10.0.9.0")
             .ToListAsync(TestContext.Current.CancellationToken);

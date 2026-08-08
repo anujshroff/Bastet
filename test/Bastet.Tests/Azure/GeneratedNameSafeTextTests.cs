@@ -6,16 +6,6 @@ using Bastet.Services.Security;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// The guard that was missing. `SubnetNamingSafeTextTests` pins `ToSafeText` character by character,
-/// but nothing asserted that a name the application GENERATES satisfies the application's own input
-/// rules - which is exactly how round 13 reintroduced the "/" that round 4 removed.
-///
-/// The consequence was not cosmetic: the Details page's Create Subnet button prefills the child name
-/// from its parent through `SubnetNaming.ToSafeText`, which DELETES a forbidden character rather than
-/// rejecting it, so "(10.20.40.0/24)" silently became the false token "(10.20.40.024)" and an
-/// operator accepting the default persisted it.
-/// </summary>
 public class GeneratedNameSafeTextTests
 {
     private const string VNetA = "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-a";
@@ -26,10 +16,6 @@ public class GeneratedNameSafeTextTests
     private static BulkImportSelectedSubnetDto Sub(string name, string prefix) =>
         new() { Name = name, AddressPrefix = prefix, AzureResourceId = MultiPrefixSubnet };
 
-    /// <summary>
-    /// Every child name the bulk planner produces must be a name the Create form would accept.
-    /// This is the assertion whose absence let the character back in.
-    /// </summary>
     [Fact]
     public void EveryNameTheBulkPlannerGenerates_SatisfiesTheAppsOwnInputRules()
     {
@@ -72,7 +58,6 @@ public class GeneratedNameSafeTextTests
         }
     }
 
-    /// <summary>The same guard over the single-VNet wizard's server-side name resolution.</summary>
     [Fact]
     public void EveryNameResolveImportNamesGenerates_SatisfiesTheAppsOwnInputRules()
     {
@@ -94,11 +79,6 @@ public class GeneratedNameSafeTextTests
         }
     }
 
-    /// <summary>
-    /// The prefill an operator actually sees. It composes the parent's name through ToSafeText, so a
-    /// generated parent name carrying a forbidden character loses it silently rather than being
-    /// rejected - which is what produced "(10.20.40.024)".
-    /// </summary>
     [Theory]
     [InlineData("sn-multi (10.20.40.0-24)")]
     [InlineData("vnet-a (10.71.0.0-16)")]
@@ -108,7 +88,6 @@ public class GeneratedNameSafeTextTests
         Assert.Equal(generatedParentName, SubnetNaming.ToSafeText(generatedParentName));
     }
 
-    /// <summary>The character that caused it, pinned so its return is a test failure.</summary>
     [Fact]
     public void TheForwardSlashIsStillForbidden_SoTheSeparatorMayNotGoBack()
     {

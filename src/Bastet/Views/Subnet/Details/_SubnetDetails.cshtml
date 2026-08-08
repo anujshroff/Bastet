@@ -8,7 +8,7 @@
         <dl class="row">
             <dt class="col-sm-4">Description</dt>
             <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.Description) ? "N/A" : Model.Description)</dd>
-            
+
             <dt class="col-sm-4">Tags</dt>
             <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.Tags) ? "None" : Model.Tags)</dd>
 
@@ -29,13 +29,13 @@
 
             <dt class="col-sm-4">Created</dt>
             <dd class="col-sm-8">@Model.CreatedAt.ToString("g")</dd>
-            
+
             <dt class="col-sm-4">Last Modified</dt>
             <dd class="col-sm-8">@(Model.LastModifiedAt.HasValue ? Model.LastModifiedAt.Value.ToString("g") : "Never")</dd>
-            
+
             <dt class="col-sm-4">Created By</dt>
             <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.CreatedBy) ? "Unknown" : Model.CreatedBy)</dd>
-            
+
             <dt class="col-sm-4">Modified By</dt>
             <dd class="col-sm-8">@(string.IsNullOrEmpty(Model.ModifiedBy) ? "Never" : Model.ModifiedBy)</dd>
         </dl>

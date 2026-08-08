@@ -8,7 +8,7 @@ namespace Bastet.Controllers;
 
 public partial class SubnetController : Controller
 {
-    // GET: Subnet/Delete/5
+
     [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> Delete(int id)
     {
@@ -22,13 +22,10 @@ public partial class SubnetController : Controller
             return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
-        // Count all descendants (not just direct children)
         int descendantCount = await CountAllDescendants(id);
 
-        // Count all host IPs in this subnet
         int hostIpCount = subnet.HostIpAssignments.Count;
 
-        // Count host IPs in all descendant subnets
         hostIpCount += await CountAllDescendantHostIps(id);
 
         DeleteSubnetViewModel viewModel = new()
@@ -45,20 +42,17 @@ public partial class SubnetController : Controller
         return View(viewModel);
     }
 
-    // Helper method to count all host IPs in descendant subnets
     private async Task<int> CountAllDescendantHostIps(int subnetId)
     {
-        // Get all subnets with their host IP assignments
+
         List<Subnet> allSubnets = await context.Subnets
             .Include(s => s.HostIpAssignments)
             .ToListAsync();
 
         int hostIpCount = 0;
 
-        // Set to keep track of processed IDs to avoid circular references
         HashSet<int> processedIds = [];
 
-        // Queue for breadth-first traversal
         Queue<int> queue = new();
         queue.Enqueue(subnetId);
         processedIds.Add(subnetId);
@@ -67,14 +61,13 @@ public partial class SubnetController : Controller
         {
             int currentId = queue.Dequeue();
 
-            // Find all direct children of the current subnet
             List<Subnet> childSubnets = [.. allSubnets.Where(s => s.ParentSubnetId == currentId)];
 
             foreach (Subnet? child in childSubnets)
             {
                 if (!processedIds.Contains(child.Id))
                 {
-                    // Count host IPs in this child subnet
+
                     hostIpCount += child.HostIpAssignments.Count;
 
                     queue.Enqueue(child.Id);
@@ -86,13 +79,12 @@ public partial class SubnetController : Controller
         return hostIpCount;
     }
 
-    // POST: Subnet/Delete/5
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> DeleteConfirmed(int id, string confirmation)
     {
-        // Verify the confirmation text
+
         if (confirmation != "approved")
         {
             TempData["ErrorMessage"] = "You must type 'approved' to confirm deletion.";
@@ -101,9 +93,7 @@ public partial class SubnetController : Controller
 
         try
         {
-            // The load, archive, and delete all run under the global lock so a concurrent host IP
-            // or child-subnet create cannot slip into the subtree mid-archive (and be cascaded
-            // away without an archive record).
+
             return await subnetLockingService.ExecuteWithSubnetLockAsync(() => DeleteConfirmedCore(id));
         }
         catch (TimeoutException)
@@ -115,7 +105,7 @@ public partial class SubnetController : Controller
 
     private async Task<IActionResult> DeleteConfirmedCore(int id)
     {
-        // Load the main subnet with its child relationships and host IPs
+
         Subnet? subnet = await context.Subnets
             .Include(s => s.ChildSubnets)
             .Include(s => s.HostIpAssignments)
@@ -126,17 +116,14 @@ public partial class SubnetController : Controller
             return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
         }
 
-        // Begin a transaction to ensure data consistency
         using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
         try
         {
             (int subnetsArchived, int hostIpsArchived) = await ArchiveSubnetSubtreeAsync(subnet);
 
-            // Save all changes
             await context.SaveChangesAsync();
 
-            // Commit the transaction
             await transaction.CommitAsync();
 
             TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' and {subnetsArchived - 1} child subnet(s) were deleted successfully. " +
@@ -146,9 +133,7 @@ public partial class SubnetController : Controller
         }
         catch (Exception ex)
         {
-            // Log before rolling back. If the commit itself is what failed, the transaction is
-            // already complete and RollbackAsync throws, which would replace this exception before
-            // it was ever recorded - the message the user is about to be shown promises otherwise.
+
             logger.LogError(ex, "Subnet delete failed for subnet {SubnetId}", id);
             await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
             TempData["ErrorMessage"] = "Error deleting subnet. Details have been logged.";
@@ -156,30 +141,10 @@ public partial class SubnetController : Controller
         }
     }
 
-    /// <summary>
-    /// Archives <paramref name="subnet"/> and every descendant into the DeletedSubnets /
-    /// DeletedHostIpAssignments tables and removes them from the live tables.
-    /// </summary>
-    /// <remarks>
-    /// Does not save or manage a transaction - the caller owns both, so several subtrees can be
-    /// archived atomically. Entities are queued deepest-first because the self-referencing FK is
-    /// Restrict, so a parent cannot be removed before its children.
-    /// </remarks>
-    /// <param name="subnet">The root of the subtree to archive.</param>
-    /// <param name="treeCache">
-    /// An already-loaded, <b>tracking</b> copy of the Subnets table - see
-    /// <see cref="GetAllDescendantsOrdered"/>. Lets a caller archiving several subtrees read the
-    /// table once rather than once per subtree.
-    /// </param>
-    /// <param name="archivedSubnetIds">
-    /// Receives the id of every subnet archived here, so a caller looping over targets can skip ones
-    /// already cascaded away without re-walking the tree to find out.
-    /// </param>
-    /// <returns>How many subnets and host IP assignments were archived.</returns>
     private async Task<(int SubnetsArchived, int HostIpsArchived)> ArchiveSubnetSubtreeAsync(
         Subnet subnet, List<Subnet>? treeCache = null, List<int>? archivedSubnetIds = null)
     {
-        // Deepest first, with the subnet itself processed last
+
         List<Subnet> toDelete = await GetAllDescendantsOrdered(subnet.Id, treeCache);
         toDelete.Add(subnet);
 
@@ -188,7 +153,6 @@ public partial class SubnetController : Controller
         string? deletedBy = userContextService.GetCurrentUsername();
         DateTime deletedAt = DateTime.UtcNow;
 
-        // Host IPs are not loaded by GetAllDescendantsOrdered, so fetch them per subnet
         List<HostIpAssignment> allHostIps = [];
         foreach (Subnet subnetToProcess in toDelete)
         {
@@ -245,16 +209,14 @@ public partial class SubnetController : Controller
         return (toDelete.Count, allHostIps.Count);
     }
 
-    // GET: Subnet/DeletedSubnets
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> DeletedSubnets()
     {
-        // Get deleted subnets from the database
+
         List<DeletedSubnet> deletedSubnets = await context.DeletedSubnets
             .OrderByDescending(s => s.DeletedAt)
             .ToListAsync();
 
-        // Map to view models
         List<DeletedSubnetsViewModel> viewModels = [.. deletedSubnets.Select(ds => new DeletedSubnetsViewModel
         {
             OriginalId = ds.OriginalId,
@@ -271,7 +233,6 @@ public partial class SubnetController : Controller
             ModifiedBy = ds.ModifiedBy
         })];
 
-        // Create the list view model
         DeletedSubnetListViewModel model = new()
         {
             DeletedSubnets = viewModels,
@@ -281,17 +242,10 @@ public partial class SubnetController : Controller
         return View(model);
     }
 
-    // GET: Subnet/PurgeAllDeletedSubnets
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> PurgeAllDeletedSubnets()
     {
-        // Bound first, then count inside the bound. Counting first and reading the bound afterwards
-        // are two round trips, and anything archived between them lands inside the bound the POST
-        // carries while sitting outside the count this page prints - so the purge destroys records the
-        // operator was never shown, irreversibly. Id is IDENTITY and nothing else deletes from this
-        // table, so COUNT(Id <= maxId) is exactly the POST's scope. This also removes the variant
-        // where a concurrent purge left count > 0 beside maxId == 0 and the POST then refused the
-        // operator's own form: maxId == 0 now implies count == 0, so the honest redirect fires.
+
         int maxId = await context.DeletedSubnets.MaxAsync(d => (int?)d.Id) ?? 0;
         int count = await context.DeletedSubnets.CountAsync(d => d.Id <= maxId);
         if (count == 0)
@@ -303,7 +257,6 @@ public partial class SubnetController : Controller
         return View(new PurgeAllDeletedSubnetsViewModel { Count = count, MaxId = maxId });
     }
 
-    // POST: Subnet/PurgeAllDeletedSubnets
     [HttpPost, ActionName("PurgeAllDeletedSubnets")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
@@ -315,13 +268,6 @@ public partial class SubnetController : Controller
             return RedirectToAction(nameof(PurgeAllDeletedSubnets));
         }
 
-        // The confirmation page states a count, and this is what makes that statement true: the
-        // purge is bounded to the records that existed when the operator read it. Without the bound
-        // the POST carries no scope at all and destroys whatever exists at execution time, which is
-        // a different set whenever anything was archived in between.
-        //
-        // Bound as int? and refuse a missing value rather than defaulting: a POST without the field
-        // would otherwise bind 0, delete nothing, and report "Permanently purged 0 record(s)".
         if (confirmedMaxId is null or <= 0)
         {
             TempData["ErrorMessage"] =

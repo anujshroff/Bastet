@@ -13,10 +13,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.HostIpManagement;
 
-/// <summary>
-/// Tests the interactions between subnet operations and host IP assignments
-/// Including CIDR modifications, subnet deletion, and full allocation
-/// </summary>
 public class SubnetHostIpInteractionTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -30,17 +26,15 @@ public class SubnetHostIpInteractionTests : IDisposable
 
     public SubnetHostIpInteractionTests()
     {
-        // Create in-memory database context
+
         _context = TestDbContextFactory.CreateDbContext();
 
-        // Create services
         _userContextService = ControllerTestHelper.CreateMockUserContextService();
         _ipUtilityService = new IpUtilityService();
         _subnetValidationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
         _sanitizationService = new InputSanitizationService();
 
-        // Create controllers
         _subnetController = new SubnetController(_context, _ipUtilityService,
             _subnetValidationService, _hostIpValidationService, _userContextService,
             ControllerTestHelper.CreateMockSubnetLockingService(), NullLogger<SubnetController>.Instance);
@@ -51,7 +45,6 @@ public class SubnetHostIpInteractionTests : IDisposable
             NullLogger<HostIpController>.Instance);
         ControllerTestHelper.SetupController(_hostIpController);
 
-        // Set up test data
         SeedTestData();
     }
 
@@ -64,9 +57,7 @@ public class SubnetHostIpInteractionTests : IDisposable
 
     private void SeedTestData()
     {
-        // Create subnets for various scenarios
 
-        // Subnet that can be expanded (192.168.0.0/24)
         Subnet expandableSubnet = new()
         {
             Id = 1,
@@ -78,7 +69,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.Subnets.Add(expandableSubnet);
 
-        // Add host IPs to the expandable subnet
         HostIpAssignment hostIp1 = new()
         {
             IP = "192.168.0.10",
@@ -99,7 +89,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.HostIpAssignments.Add(hostIp2);
 
-        // Subnet that can be shrunk (172.16.0.0/23) to (172.16.0.0/24)
         Subnet shrinkableSubnet = new()
         {
             Id = 2,
@@ -111,7 +100,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.Subnets.Add(shrinkableSubnet);
 
-        // Add host IPs to the first half of the shrinkable subnet
         HostIpAssignment hostIp3 = new()
         {
             IP = "172.16.0.10",
@@ -132,7 +120,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.HostIpAssignments.Add(hostIp4);
 
-        // Subnet that cannot be shrunk (10.0.0.0/23) to (10.0.0.0/24)
         Subnet unshrinkableSubnet = new()
         {
             Id = 3,
@@ -144,7 +131,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.Subnets.Add(unshrinkableSubnet);
 
-        // Add host IPs to both halves of the unshrinkable subnet
         HostIpAssignment hostIp5 = new()
         {
             IP = "10.0.0.10",
@@ -165,7 +151,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.HostIpAssignments.Add(hostIp6);
 
-        // Parent subnet for deletion testing (10.10.0.0/16)
         Subnet parentSubnet = new()
         {
             Id = 4,
@@ -177,7 +162,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.Subnets.Add(parentSubnet);
 
-        // Child subnet 1 (10.10.1.0/24)
         Subnet childSubnet1 = new()
         {
             Id = 5,
@@ -190,7 +174,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.Subnets.Add(childSubnet1);
 
-        // Host IPs in child subnet 1
         HostIpAssignment hostIp7 = new()
         {
             IP = "10.10.1.10",
@@ -201,7 +184,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.HostIpAssignments.Add(hostIp7);
 
-        // Child subnet 2 (10.10.2.0/24)
         Subnet childSubnet2 = new()
         {
             Id = 6,
@@ -214,7 +196,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         };
         _context.Subnets.Add(childSubnet2);
 
-        // Empty subnet for allocation testing (10.20.0.0/24)
         Subnet emptySubnet = new()
         {
             Id = 7,
@@ -232,58 +213,50 @@ public class SubnetHostIpInteractionTests : IDisposable
     [Fact]
     public async Task EditSubnet_DecreaseCidr_WithHostIps_Succeeds()
     {
-        // Arrange - Expand 192.168.0.0/24 to 192.168.0.0/23
-        // Note: 192.168.0.0 works for both /24 and /23 subnets
+
         int subnetId = 1;
         EditSubnetViewModel viewModel = new()
         {
             Id = subnetId,
             Name = "Expandable Subnet",
-            NetworkAddress = "192.168.0.0", // Correct network address for a /23
-            Cidr = 23, // Decrease from 24 to 23 (expand)
+            NetworkAddress = "192.168.0.0",
+            Cidr = 23,
             OriginalCidr = 24,
             Description = "Expanded subnet"
         };
 
-        // Act
         IActionResult result = await _subnetController.Edit(subnetId, viewModel);
 
-        // Assert - This should be a successful operation
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
-        // Verify database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
-        Assert.Equal(23, updatedSubnet.Cidr); // CIDR was decreased from 24 to 23
+        Assert.Equal(23, updatedSubnet.Cidr);
     }
 
     [Fact]
     public async Task EditSubnet_IncreaseCidr_AllHostIpsStillInRange_Succeeds()
     {
-        // Arrange - Shrink 172.16.0.0/23 to 172.16.0.0/24
-        // (All host IPs are in first half of subnet, so this is valid)
+
         int subnetId = 2;
         EditSubnetViewModel viewModel = new()
         {
             Id = subnetId,
             Name = "Shrinkable Subnet",
             NetworkAddress = "172.16.0.0",
-            Cidr = 24, // Increase from 23 to 24 (shrink)
+            Cidr = 24,
             OriginalCidr = 23,
             Description = "Shrunk subnet"
         };
 
-        // Act
         IActionResult result = await _subnetController.Edit(subnetId, viewModel);
 
-        // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
-        // Verify database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         Assert.Equal(24, updatedSubnet.Cidr);
@@ -292,52 +265,45 @@ public class SubnetHostIpInteractionTests : IDisposable
     [Fact]
     public async Task EditSubnet_IncreaseCidr_HostIpOutOfRange_Fails()
     {
-        // Arrange - Try to shrink 10.0.0.0/23 to 10.0.0.0/24
-        // but there are host IPs in second half of subnet, so this should fail
+
         int subnetId = 3;
         EditSubnetViewModel viewModel = new()
         {
             Id = subnetId,
             Name = "Unshrinkable Subnet",
             NetworkAddress = "10.0.0.0",
-            Cidr = 24, // Increase from 23 to 24 (shrink)
+            Cidr = 24,
             OriginalCidr = 23,
             Description = "Attempted to shrink"
         };
 
-        // Act
         IActionResult result = await _subnetController.Edit(subnetId, viewModel);
 
-        // Assert
         _ = Assert.IsType<ViewResult>(result);
         Assert.False(_subnetController.ModelState.IsValid);
 
-        // Verify database was not updated
         Subnet? unchangedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(unchangedSubnet);
-        Assert.Equal(23, unchangedSubnet.Cidr); // CIDR remains unchanged
+        Assert.Equal(23, unchangedSubnet.Cidr);
     }
 
     [Fact]
     public async Task SetAllocationStatus_EmptySubnet_Succeeds()
     {
-        // Arrange
-        int subnetId = 7; // Empty subnet
+
+        int subnetId = 7;
         SubnetAllocationDto dto = new()
         {
             SubnetId = subnetId,
             IsFullyAllocated = true
         };
 
-        // Act
         IActionResult result = await _hostIpController.SetAllocationStatus(dto);
 
-        // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
-        // Verify database was updated
         Subnet? updatedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(updatedSubnet);
         Assert.True(updatedSubnet.IsFullyAllocated);
@@ -346,65 +312,55 @@ public class SubnetHostIpInteractionTests : IDisposable
     [Fact]
     public async Task SetAllocationStatus_SubnetWithHostIps_Fails()
     {
-        // Arrange
-        int subnetId = 1; // Subnet with host IPs
+
+        int subnetId = 1;
         SubnetAllocationDto dto = new()
         {
             SubnetId = subnetId,
             IsFullyAllocated = true
         };
 
-        // Act
         IActionResult result = await _hostIpController.SetAllocationStatus(dto);
 
-        // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
-        // Verify error message in TempData
         Assert.Contains("host IP assignments", _hostIpController.TempData["ErrorMessage"]?.ToString() ?? "");
 
-        // Verify database was not updated
         Subnet? unchangedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(unchangedSubnet);
-        Assert.False(unchangedSubnet.IsFullyAllocated); // Still not fully allocated
+        Assert.False(unchangedSubnet.IsFullyAllocated);
     }
 
     [Fact]
     public async Task SetAllocationStatus_SubnetWithChildren_Fails()
     {
-        // Arrange
-        int subnetId = 4; // Parent subnet with child subnets
+
+        int subnetId = 4;
         SubnetAllocationDto dto = new()
         {
             SubnetId = subnetId,
             IsFullyAllocated = true
         };
 
-        // Act
         IActionResult result = await _hostIpController.SetAllocationStatus(dto);
 
-        // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(subnetId, redirectResult.RouteValues?["id"]);
 
-        // Verify error message in TempData
         Assert.Contains("child subnets", _hostIpController.TempData["ErrorMessage"]?.ToString() ?? "");
 
-        // Verify database was not updated
         Subnet? unchangedSubnet = await _context.Subnets.FindAsync([subnetId], TestContext.Current.CancellationToken);
         Assert.NotNull(unchangedSubnet);
-        Assert.False(unchangedSubnet.IsFullyAllocated); // Still not fully allocated
+        Assert.False(unchangedSubnet.IsFullyAllocated);
     }
 
     [Fact]
     public async Task CreateSubnet_UnderParentWithHostIps_IsRejected()
     {
-        // Subnet 1 (192.168.0.0/24) has host IPs .10 and .20. Creating a child /25 that contains
-        // them would leave the parent with both a child and a host IP inside that child's range -
-        // the "children XOR host IPs" invariant the reverse path already enforces.
+
         CreateSubnetViewModel viewModel = new()
         {
             Name = "Child under host-IP parent",
@@ -413,14 +369,10 @@ public class SubnetHostIpInteractionTests : IDisposable
             ParentSubnetId = 1
         };
 
-        // A real request uses a fresh DbContext that has not tracked the parent's host IPs. Clear
-        // the tracker so the controller reloads the parent from the DB, or EF relationship fixup
-        // would populate HostIpAssignments from the seeded-and-tracked entities and mask the bug.
         _context.ChangeTracker.Clear();
 
         IActionResult result = await _subnetController.Create(viewModel);
 
-        // Must be rejected, not created
         _ = Assert.IsType<ViewResult>(result);
         Assert.False(_subnetController.ModelState.IsValid);
 
@@ -432,8 +384,7 @@ public class SubnetHostIpInteractionTests : IDisposable
     [Fact]
     public async Task CreateSubnet_UnderFullyAllocatedParent_IsRejected()
     {
-        // Mark the empty subnet (id 7, 10.20.0.0/24) fully allocated, then try to nest a child.
-        // A "fully allocated" subnet with a child is an inconsistent state the model forbids.
+
         Subnet parent = (await _context.Subnets.FindAsync([7], TestContext.Current.CancellationToken))!;
         parent.IsFullyAllocated = true;
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -461,58 +412,40 @@ public class SubnetHostIpInteractionTests : IDisposable
     [Fact]
     public async Task DeleteSubnet_WithNestedHostIps_ArchivesAllHostIps()
     {
-        // Arrange
-        int subnetId = 4; // Parent subnet with children that have host IPs
 
-        // First simulate a form submission with "approved" confirmation
+        int subnetId = 4;
+
         _subnetController.TempData.Clear();
 
-        // Record initial counts
         int initialSubnetCount = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
         int initialHostIpCount = await _context.HostIpAssignments.CountAsync(TestContext.Current.CancellationToken);
         int initialDeletedSubnetCount = await _context.DeletedSubnets.CountAsync(TestContext.Current.CancellationToken);
         int initialDeletedHostIpCount = await _context.DeletedHostIpAssignments.CountAsync(TestContext.Current.CancellationToken);
 
-        // Act
         IActionResult result = await _subnetController.DeleteConfirmed(subnetId, "approved");
 
-        // Assert
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Index", redirectResult.ActionName);
 
-        // Verify success message
         Assert.Contains("successfully", _subnetController.TempData["SuccessMessage"]?.ToString() ?? "");
 
-        // Verify subnets were deleted from main table
-        int expectedDeletedSubnets = 3; // Parent + 2 children
+        int expectedDeletedSubnets = 3;
         Assert.Equal(initialSubnetCount - expectedDeletedSubnets, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
 
-        // Verify host IPs were deleted from main table
-        int expectedDeletedHostIps = 1; // One host IP in child subnet
+        int expectedDeletedHostIps = 1;
         Assert.Equal(initialHostIpCount - expectedDeletedHostIps, await _context.HostIpAssignments.CountAsync(TestContext.Current.CancellationToken));
 
-        // Verify subnets were archived in deleted table
         Assert.Equal(initialDeletedSubnetCount + expectedDeletedSubnets, await _context.DeletedSubnets.CountAsync(TestContext.Current.CancellationToken));
 
-        // Verify host IPs were archived in deleted table
         Assert.Equal(initialDeletedHostIpCount + expectedDeletedHostIps, await _context.DeletedHostIpAssignments.CountAsync(TestContext.Current.CancellationToken));
 
-        // Check that the host IP specifically was archived with the correct original subnet ID
         DeletedHostIpAssignment? archivedHostIp = await _context.DeletedHostIpAssignments
             .FirstOrDefaultAsync(h => h.OriginalIP == "10.10.1.10", TestContext.Current.CancellationToken);
         Assert.NotNull(archivedHostIp);
-        Assert.Equal(5, archivedHostIp.OriginalSubnetId); // Child subnet ID
+        Assert.Equal(5, archivedHostIp.OriginalSubnetId);
         Assert.Equal("Host 7", archivedHostIp.Name);
     }
 
-    // -------------------------------------------------------------------------
-    // A CIDR increase moves the broadcast address. Creation refuses to assign it, so the edit
-    // path must not be able to hand it out by the back door.
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Seeds a subnet holding one host IP, so each case below starts from a legal state.
-    /// </summary>
     private void SeedSubnetWithHostIp(int subnetId, string network, int cidr, string hostIp)
     {
         _context.Subnets.Add(new Subnet
@@ -535,12 +468,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         _context.SaveChanges();
     }
 
-    /// <summary>
-    /// 10.0.0.127 is an ordinary host in a /24 (broadcast is .255) but becomes the broadcast address
-    /// of a /25. It is still inside the range, which is the only thing the CIDR-edit path checked,
-    /// so the edit saved and left an assigned host IP sitting on the broadcast address - a state
-    /// ValidateNewHostIp rejects outright, and so unreachable through the validated path.
-    /// </summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_HostIpBecomesBroadcastAddress_IsRejected()
     {
@@ -553,7 +480,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Contains(result.Errors, e => e.Message.Contains("10.0.0.127"));
     }
 
-    /// <summary>A host IP that is merely inside the narrowed range must still be allowed.</summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_HostIpStillOrdinary_IsAllowed()
     {
@@ -565,11 +491,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.True(result.IsValid);
     }
 
-    /// <summary>
-    /// A /31 has no reserved addresses (RFC 3021, established by round 3's C7) and
-    /// CalculateBroadcastAddress still returns a value for one - 10.2.0.1 - so a broadcast check
-    /// that forgot the cidr &lt; 31 guard would reject a perfectly legal point-to-point assignment.
-    /// </summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_NarrowingToSlash31_DoesNotReserveEitherAddress()
     {
@@ -581,7 +502,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.True(result.IsValid);
     }
 
-    /// <summary>The pre-existing out-of-range rule must keep working.</summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_HostIpFallsOutsideRange_IsStillRejected()
     {
@@ -594,18 +514,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Contains(result.Errors, e => e.Message.Contains("outside the subnet range"));
     }
 
-    // -------------------------------------------------------------------------
-    // The mirror image: a CIDR *decrease* cannot move the network address, but dropping below /31
-    // makes it reserved for the first time. A /31 or /32 is allowed to hand out its network address
-    // (RFC 3021), so widening one is the only way an assigned host IP can become the network
-    // address without the operator touching it.
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// 10.4.0.0 is a legal assignment in a /31, where nothing is reserved. Widening to /30 keeps the
-    /// same network address but reinstates the reservation, so the row becomes one ValidateNewHostIp
-    /// refuses to create - delete it and it cannot be re-added.
-    /// </summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_WideningFromSlash31_HostIpBecomesNetworkAddress_IsRejected()
     {
@@ -619,7 +527,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Contains(result.Errors, e => e.Message.Contains("network address"));
     }
 
-    /// <summary>The same from a /32, whose single address is also its network address.</summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_WideningFromSlash32_HostIpBecomesNetworkAddress_IsRejected()
     {
@@ -632,10 +539,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.Contains(result.Errors, e => e.Message.Contains("10.5.0.0"));
     }
 
-    /// <summary>
-    /// The other half of a /31 is an ordinary host once widened - 10.6.0.1 sits between the /30's
-    /// network and broadcast addresses - so widening must still be allowed.
-    /// </summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_WideningFromSlash31_OtherAddress_IsAllowed()
     {
@@ -647,11 +550,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.True(result.IsValid);
     }
 
-    /// <summary>
-    /// The boundary that matters: widening a /32 to a /31 lands on a CIDR that still reserves
-    /// nothing, so the host IP sitting on the network address stays legal. Checking the network
-    /// address without the newCidr &lt; 31 guard would wrongly reject this.
-    /// </summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_WideningToSlash31_ReservesNothing()
     {
@@ -663,10 +561,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.True(result.IsValid);
     }
 
-    /// <summary>
-    /// An ordinary widening between two CIDRs that both reserve the network address cannot create a
-    /// new collision, because the address was already reserved before the change.
-    /// </summary>
     [Fact]
     public void ValidateSubnetCidrChangeWithHostIps_OrdinaryWidening_IsAllowed()
     {

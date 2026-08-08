@@ -11,13 +11,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// Subnet creation must only accept canonical dotted-quad IPv4 network addresses.
-/// IPAddress.Parse also accepts partial ("10.0.0"), hex ("0x0A.0.0.0") and zero-padded/octal
-/// ("010.0.0.0") forms, which the numeric validation happily aligns while the address is stored
-/// and displayed exactly as typed - so the record documents a different network than the one
-/// every containment calculation uses.
-/// </summary>
 public class SubnetNetworkAddressCanonicalizationTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -92,17 +85,14 @@ public class SubnetNetworkAddressCanonicalizationTests : IDisposable
         _context.SaveChanges();
     }
 
-    /// <summary>
-    /// Mirrors a fresh request: the controller must not see entities this test tracked.
-    /// </summary>
     private void ResetTracking() => _context.ChangeTracker.Clear();
 
     [Theory]
-    // Zero-padded octets are read as octal: this is 8.0.0.0, not 10.0.0.0.
+
     [InlineData("010.0.0.0", 8)]
-    // Hex octets: this is 11.0.0.0.
+
     [InlineData("0x0B.0.0.0", 8)]
-    // Partial form: the trailing part fills the remaining octets, so this is 12.0.0.0.
+
     [InlineData("12.0", 8)]
     public async Task Create_WithNonCanonicalTopLevelAddress_IsRejectedAndStoresNothing(string networkAddress, int cidr)
     {
@@ -129,9 +119,6 @@ public class SubnetNetworkAddressCanonicalizationTests : IDisposable
         ResetTracking();
         int subnetCountBefore = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
 
-        // "10.0.010.0" parses to 10.0.8.0 (010 is octal) - inside the /16 parent, correctly aligned
-        // for /24, and colliding with nothing, so every numeric check passes and only the stored
-        // text is wrong: the subnet reads as 10.0.10.0/24 everywhere it is displayed.
         CreateSubnetViewModel viewModel = new()
         {
             Name = "Alias Child",
@@ -153,8 +140,6 @@ public class SubnetNetworkAddressCanonicalizationTests : IDisposable
         ResetTracking();
         int subnetCountBefore = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
 
-        // "10.0.0" is 10.0.0.0 - the same network as the seeded /24. The duplicate lookup and the
-        // parent self-skip both compare NetworkAddress as text, so neither recognises it.
         CreateSubnetViewModel viewModel = new()
         {
             Name = "Alias Duplicate",
@@ -189,10 +174,6 @@ public class SubnetNetworkAddressCanonicalizationTests : IDisposable
         Assert.True(await _context.Subnets.AnyAsync(s => s.NetworkAddress == "10.1.0.0" && s.Cidr == 16, TestContext.Current.CancellationToken));
     }
 
-    /// <summary>
-    /// The Azure import paths build their view models in code, so the model-binding attributes never
-    /// run for them - the guard has to live in the shared creation validation.
-    /// </summary>
     [Fact]
     public async Task BatchCreateChildSubnets_WithNonCanonicalAddress_IsRejectedAndStoresNothing()
     {
@@ -203,7 +184,7 @@ public class SubnetNetworkAddressCanonicalizationTests : IDisposable
         [
             new()
             {
-                // Hex octet: parses to 10.0.11.0, aligned and inside the parent.
+
                 Name = "Imported Alias",
                 NetworkAddress = "10.0.0x0B.0",
                 Cidr = 24,
@@ -217,4 +198,3 @@ public class SubnetNetworkAddressCanonicalizationTests : IDisposable
         Assert.Equal(subnetCountBefore, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
     }
 }
-

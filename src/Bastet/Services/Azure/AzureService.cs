@@ -6,15 +6,7 @@ using Bastet.Models.ViewModels;
 
 namespace Bastet.Services.Azure
 {
-    /// <summary>
-    /// Implementation of the Azure service for interacting with Azure APIs
-    /// </summary>
-    /// <remarks>
-    /// Creates a new instance of the AzureService
-    /// </remarks>
-    /// <param name="ipUtilityService">The IP utility service for subnet calculations</param>
-    /// <param name="armClientProvider">Provides the shared ArmClient</param>
-    /// <param name="logger">Logger for reporting Azure access failures</param>
+
     public class AzureService(
         IIpUtilityService ipUtilityService,
         AzureArmClientProvider armClientProvider,
@@ -24,7 +16,6 @@ namespace Bastet.Services.Azure
         private readonly IIpUtilityService _ipUtilityService = ipUtilityService;
         private readonly ILogger<AzureService> _logger = logger;
 
-        /// <inheritdoc/>
         public async Task<bool> IsCredentialValid()
         {
             if (_armClient == null)
@@ -34,16 +25,15 @@ namespace Bastet.Services.Azure
 
             try
             {
-                // Try to access Azure resources to verify credentials
+
                 SubscriptionCollection subscriptions = _armClient.GetSubscriptions();
-                // Just check if we can enumerate subscriptions without error
+
                 await foreach (SubscriptionResource? _ in subscriptions)
                 {
-                    // Just need one subscription to verify credentials
+
                     return true;
                 }
 
-                // No error, but no subscriptions either
                 return false;
             }
             catch (Exception ex)
@@ -53,7 +43,6 @@ namespace Bastet.Services.Azure
             }
         }
 
-        /// <inheritdoc/>
         public async Task<List<AzureSubscriptionViewModel>> GetSubscriptions()
         {
             if (_armClient == null)
@@ -78,18 +67,12 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
-                // Rethrown rather than collapsed to an empty list. Every caller renders an empty
-                // result as "Azure has none of these", which is a different fact from "Azure could
-                // not be asked" - and the difference decides whether an admin retries or rebuilds
-                // the hierarchy by hand, permanently unlinked from Azure. The controllers already
-                // have catch blocks that report success = false; swallowing here made them
-                // unreachable. Same rule GetVNetInventory applies with its Success flag.
+
                 _logger.LogError(ex, "Failed to retrieve Azure subscriptions");
                 throw;
             }
         }
 
-        /// <inheritdoc/>
         public async Task<List<AzureVNetViewModel>> GetCompatibleVNets(
             string subscriptionId, string networkAddress, int cidr)
         {
@@ -112,7 +95,6 @@ namespace Bastet.Services.Azure
                         continue;
                     }
 
-                    // Check if any address prefix matches our Bastet subnet
                     foreach (string? addressPrefix in vnet.Data.AddressSpace.AddressPrefixes)
                     {
                         if (string.IsNullOrEmpty(addressPrefix))
@@ -120,11 +102,9 @@ namespace Bastet.Services.Azure
                             continue;
                         }
 
-                        // Parse the CIDR notation
                         string vnetNetworkAddress = GetNetworkAddressFromCidr(addressPrefix);
                         int vnetCidr = GetCidrFromAddressPrefix(addressPrefix);
 
-                        // Check if this VNet address space matches our Bastet subnet
                         if (vnetNetworkAddress == networkAddress && vnetCidr == cidr)
                         {
                             result.Add(new AzureVNetViewModel
@@ -133,7 +113,7 @@ namespace Bastet.Services.Azure
                                 Name = vnet.Data.Name,
                                 AddressPrefixes = [.. vnet.Data.AddressSpace.AddressPrefixes]
                             });
-                            break; // Found a match, no need to check other address prefixes
+                            break;
                         }
                     }
                 }
@@ -142,14 +122,12 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
-                // See GetSubscriptions: a failed read must reach the caller as a failure, not as an
-                // empty subscription. The wizard already renders #vnet-error for it.
+
                 _logger.LogError(ex, "Failed to retrieve compatible Azure VNets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
                 throw;
             }
         }
 
-        /// <inheritdoc/>
         public async Task<List<AzureSubnetViewModel>> GetCompatibleSubnets(
             string vnetResourceId, string networkAddress, int cidr)
         {
@@ -162,24 +140,22 @@ namespace Bastet.Services.Azure
 
             try
             {
-                // Get the VNet resource and its address prefixes for comparison
+
                 VirtualNetworkResource vnetResource = _armClient.GetVirtualNetworkResource(new ResourceIdentifier(vnetResourceId));
                 vnetResource = vnetResource.Get();
                 List<string> vnetAddressPrefixes = vnetResource.Data.AddressSpace.AddressPrefixes?.ToList() ?? [];
 
                 await foreach (SubnetResource? subnet in vnetResource.GetSubnets())
                 {
-                    // Case 1: Only has one IP scheme (either IPv4 or IPv6)
+
                     if (subnet.Data.AddressPrefix is not null)
                     {
                         if (IsIpv4AddressPrefix(subnet.Data.AddressPrefix))
                         {
-                            // Check if this subnet's prefix exactly matches any VNet address prefix
+
                             bool fullyEncompassesVNetPrefix = vnetAddressPrefixes.Any(prefix =>
                                 string.Equals(prefix, subnet.Data.AddressPrefix, StringComparison.OrdinalIgnoreCase));
 
-                            // If subnet fully encompasses a VNet prefix AND matches the parent subnet's network and CIDR,
-                            // add it to results regardless of containment validation
                             if (fullyEncompassesVNetPrefix &&
                                 string.Equals(GetNetworkAddressFromCidr(subnet.Data.AddressPrefix), networkAddress, StringComparison.OrdinalIgnoreCase) &&
                                 GetCidrFromAddressPrefix(subnet.Data.AddressPrefix) == cidr)
@@ -193,7 +169,7 @@ namespace Bastet.Services.Azure
                                     FullyEncompassesVNetPrefix = true
                                 });
                             }
-                            // Otherwise apply normal containment validation
+
                             else
                             {
                                 TryAddCompatibleSubnet(
@@ -207,10 +183,10 @@ namespace Bastet.Services.Azure
                             }
                         }
                     }
-                    // Case 2: Has address prefixes (could be IPv4 only or both IPv4 and IPv6)
+
                     else if (subnet.Data.AddressPrefixes?.Any() == true)
                     {
-                        // Check if the subnet actually has both IPv4 and IPv6 prefixes
+
                         bool hasIpv4 = false;
                         bool hasIpv6 = false;
 
@@ -225,7 +201,6 @@ namespace Bastet.Services.Azure
                                 hasIpv6 = true;
                             }
 
-                            // If we found both types, we can stop checking
                             if (hasIpv4 && hasIpv6)
                             {
                                 break;
@@ -234,18 +209,14 @@ namespace Bastet.Services.Azure
 
                         bool hasMultipleAddressSchemes = hasIpv4 && hasIpv6;
 
-                        // Per requirements: "If an Azure subnet in an Azure vnet is assigned to both 
-                        // IPv4 and IPv6, we ignore IPv6 for that subnet here and in subsequent steps."
                         foreach (string? addressPrefix in subnet.Data.AddressPrefixes)
                         {
                             if (IsIpv4AddressPrefix(addressPrefix))
                             {
-                                // Check if this subnet's prefix exactly matches any VNet address prefix
+
                                 bool fullyEncompassesVNetPrefix = vnetAddressPrefixes.Any(prefix =>
                                     string.Equals(prefix, addressPrefix, StringComparison.OrdinalIgnoreCase));
 
-                                // If subnet fully encompasses a VNet prefix AND matches the parent subnet's network and CIDR,
-                                // add it to results regardless of containment validation
                                 if (fullyEncompassesVNetPrefix &&
                                     string.Equals(GetNetworkAddressFromCidr(addressPrefix), networkAddress, StringComparison.OrdinalIgnoreCase) &&
                                     GetCidrFromAddressPrefix(addressPrefix) == cidr)
@@ -259,7 +230,7 @@ namespace Bastet.Services.Azure
                                         FullyEncompassesVNetPrefix = true
                                     });
                                 }
-                                // Otherwise apply normal containment validation
+
                                 else
                                 {
                                     TryAddCompatibleSubnet(
@@ -272,12 +243,6 @@ namespace Bastet.Services.Azure
                                         cidr);
                                 }
 
-                                // Every IPv4 prefix gets its own entry. This used to `break` after
-                                // the first, which was right only while Azure allowed one prefix per
-                                // subnet. Azure has allowed several since September 2025, so the
-                                // rest were silently dropped: never offered, never created, and then
-                                // shown on the target's Details page as free space over a range
-                                // Azure had already assigned.
                             }
                         }
                     }
@@ -287,15 +252,12 @@ namespace Bastet.Services.Azure
             }
             catch (Exception ex)
             {
-                // See GetSubscriptions. This one also covers vnetResource.Get() 404ing because the
-                // VNet was deleted between step 2 and step 3 of the wizard, which is a real failure
-                // rather than a VNet that happens to contain no compatible subnets.
+
                 _logger.LogError(ex, "Failed to retrieve compatible Azure subnets for VNet {VNetResourceId}", SanitizeForLog(vnetResourceId));
                 throw;
             }
         }
 
-        /// <inheritdoc/>
         public async Task<AzureVNetInventory> GetVNetInventory(string subscriptionId)
         {
             if (_armClient == null)
@@ -327,7 +289,6 @@ namespace Bastet.Services.Azure
                         Name = vnet.Data.Name
                     };
 
-                    // Collect IPv4 prefixes only
                     if (vnet.Data.AddressSpace?.AddressPrefixes != null)
                     {
                         foreach (string? prefix in vnet.Data.AddressSpace.AddressPrefixes)
@@ -339,19 +300,11 @@ namespace Bastet.Services.Azure
                         }
                     }
 
-                    // Skip VNets that have no IPv4 prefixes (IPv6-only is out of scope)
                     if (vnetVm.Ipv4AddressPrefixes.Count == 0)
                     {
                         continue;
                     }
 
-                    // Read the subnets the listing already returned rather than issuing a separate
-                    // ARM call per VNet. The extra calls made this method 1+N: a VNet deleted after
-                    // the listing but before its own call - exactly the event reconcile exists to
-                    // detect - threw a 404 that escaped to the single outer catch and reported the
-                    // whole subscription unreadable, disabling bulk import and reconcile until the
-                    // next request. Throttling (429) on any one of those calls did the same with no
-                    // delete involved. The list response carries every field used here.
                     foreach (SubnetData subnet in vnet.Data.Subnets ?? [])
                     {
                         vnetVm.Subnets.AddRange(BuildInventorySubnetRows(
@@ -369,24 +322,10 @@ namespace Bastet.Services.Azure
             {
                 _logger.LogError(ex, "Failed to retrieve Azure VNets with subnets for subscription {SubscriptionId}", SanitizeForLog(subscriptionId));
 
-                // Report the failure rather than an empty inventory: callers must be able to tell
-                // "this subscription has no VNets" apart from "Azure could not be reached". The
-                // message can end up in the UI, so keep the exception text in the log only.
                 return new AzureVNetInventory { Success = false, ErrorMessage = "Azure could not be read for this subscription. Details have been logged." };
             }
         }
 
-        /// <summary>
-        /// Returns the first IPv4 prefix associated with the given Azure subnet, or null if none exists.
-        /// Handles both single-prefix subnets and dual-stack subnets.
-        /// </summary>
-        /// <summary>
-        /// Every IPv4 prefix the subnet owns, in the order ARM reports them. Azure has allowed
-        /// several prefixes on one subnet since September 2025 and reports the singular
-        /// <c>AddressPrefix</c> as null once there is more than one, so anything comparing what
-        /// Bastet recorded against what Azure holds has to look at all of them - the recorded
-        /// prefix need not be the first.
-        /// </summary>
         private static IEnumerable<string> ExtractIpv4Prefixes(SubnetData subnet)
         {
             if (subnet.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.AddressPrefix))
@@ -410,13 +349,12 @@ namespace Bastet.Services.Azure
 
         private static string? ExtractIpv4Prefix(SubnetData subnet)
         {
-            // Case 1: Single address prefix
+
             if (subnet.AddressPrefix is not null && IsIpv4AddressPrefix(subnet.AddressPrefix))
             {
                 return subnet.AddressPrefix;
             }
 
-            // Case 2: Multiple address prefixes (dual-stack)
             if (subnet.AddressPrefixes?.Any() == true)
             {
                 foreach (string? prefix in subnet.AddressPrefixes)
@@ -431,9 +369,6 @@ namespace Bastet.Services.Azure
             return null;
         }
 
-        /// <summary>
-        /// Tries to add a subnet to the result list if it's a valid child of the specified parent subnet
-        /// </summary>
         private void TryAddCompatibleSubnet(
             List<AzureSubnetViewModel> result,
             string resourceId,
@@ -447,7 +382,6 @@ namespace Bastet.Services.Azure
 
             int subnetCidr = GetCidrFromAddressPrefix(addressPrefix);
 
-            // Check if this subnet would be a valid child of our Bastet subnet
             if (_ipUtilityService.IsSubnetContainedInParent(
                 networkAddress,
                 subnetCidr,
@@ -465,27 +399,11 @@ namespace Bastet.Services.Azure
             }
         }
 
-        /// <summary>
-        /// One selectable inventory row per IPv4 prefix the Azure subnet owns.
-        /// </summary>
-        /// <remarks>
-        /// Azure has allowed several IPv4 prefixes on a single subnet since September 2025. This used
-        /// to emit one row carrying only the first, so the remaining prefixes were never offered,
-        /// never created, and the target's Details page then advertised them as unallocated space -
-        /// an operator allocating from Bastet would hand out addresses Azure had already assigned.
-        ///
-        /// Every row keeps the subnet's COMPLETE prefix list. The reconciler shares this inventory
-        /// and indexes prefixes by resource id, so a row reporting only its own prefix would make it
-        /// believe the subnet had lost the others - and a drift row is offered for deletion.
-        /// </remarks>
         public static List<BulkAzureSubnetViewModel> BuildInventorySubnetRows(
             string resourceId, string name, IReadOnlyList<string> ipv4Prefixes)
         {
             ArgumentNullException.ThrowIfNull(ipv4Prefixes);
 
-            // Distinct because ARM may report a single prefix in both the singular property and the
-            // collection; a duplicate would offer the operator the same range twice and the second
-            // would fail as an overlap.
             List<string> prefixes = [.. ipv4Prefixes
                 .Where(p => !string.IsNullOrEmpty(p))
                 .Distinct(StringComparer.OrdinalIgnoreCase)];
@@ -499,9 +417,6 @@ namespace Bastet.Services.Azure
             })];
         }
 
-        /// <summary>
-        /// Determines if an address prefix is IPv4
-        /// </summary>
         private static bool IsIpv4AddressPrefix(string addressPrefix)
         {
             if (string.IsNullOrEmpty(addressPrefix))
@@ -509,14 +424,10 @@ namespace Bastet.Services.Azure
                 return false;
             }
 
-            // Basic validation - IPv4 addresses have 4 octets separated by dots
             string ipPart = addressPrefix.Split('/')[0];
             return ipPart.Split('.').Length == 4;
         }
 
-        /// <summary>
-        /// Extracts the network address from a CIDR notation string
-        /// </summary>
         private static string GetNetworkAddressFromCidr(string addressPrefix)
         {
             if (string.IsNullOrEmpty(addressPrefix))
@@ -528,9 +439,6 @@ namespace Bastet.Services.Azure
             return parts.Length > 0 ? parts[0] : string.Empty;
         }
 
-        /// <summary>
-        /// Extracts the CIDR from a CIDR notation string
-        /// </summary>
         private static int GetCidrFromAddressPrefix(string addressPrefix)
         {
             if (string.IsNullOrEmpty(addressPrefix))
@@ -542,7 +450,6 @@ namespace Bastet.Services.Azure
             return parts.Length > 1 && int.TryParse(parts[1], out int cidr) ? cidr : 0;
         }
 
-        /// <inheritdoc/>
         public async Task<IReadOnlyDictionary<string, AzureResourceConfirmation>> ConfirmResourcesAsync(
             IEnumerable<string> resourceIds)
         {
@@ -559,16 +466,11 @@ namespace Bastet.Services.Azure
 
             if (_armClient == null)
             {
-                // No credential means no answers, and an unanswered question must never read as a
-                // deletion. Report every ID as unknown rather than leaving it absent from the map.
+
                 return distinct.ToDictionary(
                     id => id, _ => AzureResourceConfirmation.Unknown, StringComparer.OrdinalIgnoreCase);
             }
 
-            // Bounded concurrency: reconcile can be asked about a lot of subnets at once, and a
-            // serial pass would make the delete path's latency the sum of every check. The cap keeps
-            // us well clear of ARM throttling, which would come back as Unknown and block deletions
-            // the operator legitimately wants.
             using SemaphoreSlim gate = new(MaxConcurrentResourceChecks);
 
             IEnumerable<Task<KeyValuePair<string, AzureResourceConfirmation>>> checks = distinct.Select(async id =>
@@ -588,35 +490,17 @@ namespace Bastet.Services.Azure
             return new Dictionary<string, AzureResourceConfirmation>(results, StringComparer.OrdinalIgnoreCase);
         }
 
-        /// <summary>How many resource checks to have in flight at once.</summary>
         private const int MaxConcurrentResourceChecks = 8;
 
-        /// <summary>
-        /// Reads one resource and maps Azure's answer onto <see cref="AzureResourceConfirmation"/>.
-        /// </summary>
-        /// <remarks>
-        /// The status code carries the meaning, not the error code string: a missing VNet reports
-        /// "ResourceNotFound" while a missing subnet reports "NotFound", and both are 404. Subnets
-        /// are child resources, so they need the subnet accessor - the generic resource API rejects
-        /// their IDs outright.
-        /// </remarks>
         private async Task<AzureResourceConfirmation> ConfirmOneAsync(string resourceId)
         {
-            // Free text on the entity, so a malformed value is possible. TryParse rather than the
-            // constructor: it returns false instead of throwing, and it throws for exactly one input
-            // anyway (the empty string), which the caller already filters - so the catch this
-            // replaces could never run.
+
             if (!ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? identifier) || identifier is null)
             {
                 _logger.LogWarning("Could not parse the Azure resource ID {ResourceId}", SanitizeForLog(resourceId));
                 return AzureResourceConfirmation.Unknown;
             }
 
-            // The type has to be established before reading, not assumed. The SDK's accessors build
-            // their request from (subscription, resource group, last path segment) and discard the
-            // provider namespace and type without validating them, so reading an ID of some other
-            // type asks about a different resource - and its 404 would come back here as a confirmed
-            // deletion. Unknown is the only honest answer for anything else.
             bool isSubnet = AzureResourceIdentity.IsAzureSubnet(resourceId);
             if (!isSubnet && !AzureResourceIdentity.IsAzureVNet(resourceId))
             {
@@ -657,10 +541,6 @@ namespace Bastet.Services.Azure
             }
         }
 
-        /// <summary>
-        /// Strips line breaks from request-supplied values before logging, so crafted input can't
-        /// forge additional log entries (CodeQL: log entries created from user input).
-        /// </summary>
         private static string SanitizeForLog(string? value) =>
             Bastet.Services.Security.LogSanitizer.SanitizeForLog(value);
     }

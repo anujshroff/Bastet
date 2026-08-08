@@ -17,16 +17,14 @@ namespace Bastet.Controllers
         ILogger<AzureController> logger) : Controller
     {
 
-        // GET: Azure/Import/{id}
         public async Task<IActionResult> Import(int id)
         {
-            // Check environment variable
+
             if (!IsAzureImportEnabled())
             {
                 return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
-            // Get the subnet
             Models.Subnet? subnet = await context.Subnets
                 .Include(s => s.ChildSubnets)
                 .Include(s => s.HostIpAssignments)
@@ -37,13 +35,6 @@ namespace Bastet.Controllers
                 return this.RedirectToErrorPage(404, $"Subnet with ID {id} could not be found.");
             }
 
-            // A populated target used to be refused outright, which left an Azure subnet that gained
-            // a prefix after import impossible to import by any route while BASTET went on
-            // advertising the Azure-assigned range as free space. Narrowed rather than removed: a
-            // subnet that already has children may only be topped up when it is ALREADY LINKED to a
-            // VNet - i.e. an import put those children there. Adopting a hand-built subtree stays
-            // refused, because that is what re-stamps AzureResourceId on rows nobody imported.
-            // Host IPs and the fully-allocated flag are refused exactly as before.
             bool isTopUp = subnet.ChildSubnets.Count != 0 && !string.IsNullOrEmpty(subnet.AzureResourceId);
 
             if ((subnet.ChildSubnets.Count != 0 && !isTopUp) || subnet.HostIpAssignments.Count != 0 || subnet.IsFullyAllocated)
@@ -56,7 +47,6 @@ namespace Bastet.Controllers
                 return RedirectToAction("Details", "Subnet", new { id });
             }
 
-            // Create initial view model
             AzureImportViewModel viewModel = new()
             {
                 SubnetId = subnet.Id,
@@ -65,7 +55,6 @@ namespace Bastet.Controllers
                 Cidr = subnet.Cidr
             };
 
-            // Initial connectivity check
             try
             {
                 if (!await azureService.IsCredentialValid())
@@ -82,11 +71,10 @@ namespace Bastet.Controllers
             return View(viewModel);
         }
 
-        // AJAX: Get Azure Subscriptions
         [HttpGet]
         public async Task<IActionResult> GetSubscriptions()
         {
-            // Check environment variable
+
             if (!IsAzureImportEnabled())
             {
                 return Json(new { success = false, error = "Azure Import feature is not enabled" });
@@ -104,17 +92,15 @@ namespace Bastet.Controllers
             }
         }
 
-        // AJAX: Get Azure VNets for a subscription
         [HttpGet]
         public async Task<IActionResult> GetVNets(string subscriptionId, int subnetId)
         {
-            // Check environment variable
+
             if (!IsAzureImportEnabled())
             {
                 return Json(new { success = false, error = "Azure Import feature is not enabled" });
             }
 
-            // Get the subnet
             Models.Subnet? subnet = await context.Subnets.FindAsync(subnetId);
             if (subnet == null)
             {
@@ -142,17 +128,15 @@ namespace Bastet.Controllers
             }
         }
 
-        // AJAX: Get Azure Subnets for a VNet
         [HttpGet]
         public async Task<IActionResult> GetSubnets(string vnetResourceId, int subnetId)
         {
-            // Check environment variable
+
             if (!IsAzureImportEnabled())
             {
                 return Json(new { success = false, error = "Azure Import feature is not enabled" });
             }
 
-            // Get the subnet
             Models.Subnet? subnet = await context.Subnets.FindAsync(subnetId);
             if (subnet == null)
             {
@@ -164,13 +148,6 @@ namespace Bastet.Controllers
                 List<AzureSubnetViewModel> azureSubnets = await azureService.GetCompatibleSubnets(
                     vnetResourceId, subnet.NetworkAddress, subnet.Cidr);
 
-                // ANNOTATE, DO NOT FILTER. This used to drop every row whose exact prefix string was
-                // already recorded, which decided what the wizard offered using one of the three
-                // rules the commit actually applies. ValidateSubnetCreation also refuses a subnet
-                // that would CONTAIN an existing row, and one for which a MORE SPECIFIC parent
-                // exists - so rows this endpoint offered were refused at commit, and because
-                // BatchCreateChildSubnets rolls the whole batch back, one such row discarded every
-                // other selection with it. A dropped row also told the operator nothing.
                 List<ExistingSubnetSnapshot> existing = await context.Subnets
                     .AsNoTracking()
                     .Select(s => new ExistingSubnetSnapshot
@@ -204,22 +181,6 @@ namespace Bastet.Controllers
             }
         }
 
-        /// <summary>
-        /// Decides whether one Azure subnet may be imported into <paramref name="target"/>, mirroring
-        /// the rules <c>ValidateSubnetCreation</c> applies at commit.
-        /// </summary>
-        /// <remarks>
-        /// This endpoint can answer a question the bulk annotator cannot, and the difference is the
-        /// whole reason the rule is written here rather than shared verbatim: it has a BOUND TARGET.
-        /// <c>AzureBulkImportPlanner.AnnotateSubnet</c> leaves the more-specific-parent test "to the
-        /// plan" because it has no target to measure against yet; here the target is known, so the
-        /// test is well defined - an existing row blocks only when it is strictly more specific than
-        /// the target, which is exactly when the commit would refuse.
-        ///
-        /// Rows contained only by the TARGET must stay selectable. Every Azure subnet offered here is
-        /// inside the target's prefix by construction and the target's own row is always in the
-        /// table, so any test that does not exclude it empties the list on every VNet.
-        /// </remarks>
         private void AnnotateImportCandidate(
             AzureSubnetViewModel azureSubnet,
             Models.Subnet target,
@@ -234,12 +195,6 @@ namespace Bastet.Controllers
 
             string network = parts[0];
 
-            // The row covering the target's whole prefix is imported by marking the target fully
-            // allocated rather than by creating a child, so it is never "already recorded" by the
-            // target's own row - which carries that same prefix and would otherwise remove it every
-            // time. It is refused only when the target already holds children, which is what
-            // ValidateSubnetCanBeFullyAllocated enforces at commit and what the bulk screen already
-            // says out loud.
             if (azureSubnet.FullyEncompassesVNetPrefix)
             {
                 if (existing.Exists(e => e.Id != target.Id
@@ -273,8 +228,6 @@ namespace Bastet.Controllers
                 return;
             }
 
-            // Would contain an existing row: importing it would put a Bastet subnet above one that
-            // already exists, which the commit refuses as an invalid hierarchy.
             ExistingSubnetSnapshot? wouldContain = existing.Find(e =>
                 ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr));
 
@@ -286,9 +239,6 @@ namespace Bastet.Controllers
                 return;
             }
 
-            // A more specific parent exists. Well defined here because the target is known: a row
-            // that contains this range and is itself strictly inside the target would be the correct
-            // parent, and this wizard always parents to the target, so the commit refuses it.
             ExistingSubnetSnapshot? moreSpecificParent = existing.Find(e =>
                 ipUtilityService.IsSubnetContainedInParent(network, cidr, e.NetworkAddress, e.Cidr)
                 && ipUtilityService.IsSubnetContainedInParent(
@@ -310,13 +260,6 @@ namespace Bastet.Controllers
             azureSubnet.IsSelectable = false;
         }
 
-        // Removed ImportSubnets action - we now submit directly to SubnetController.BatchCreate
-
-        // -------------------------------------------------------------------
-        // Bulk Azure Import endpoints
-        // -------------------------------------------------------------------
-
-        // GET: /Azure/BulkImport — landing page; user picks subscription and selects VNets/subnets via AJAX
         public async Task<IActionResult> BulkImport()
         {
             if (!IsAzureImportEnabled())
@@ -326,7 +269,6 @@ namespace Bastet.Controllers
 
             BulkImportInitialViewModel viewModel = new() { IsFeatureEnabled = true };
 
-            // Initial connectivity check (mirrors the single-import flow)
             try
             {
                 if (!await azureService.IsCredentialValid())
@@ -343,10 +285,6 @@ namespace Bastet.Controllers
             return View(viewModel);
         }
 
-        /// <summary>
-        /// AJAX: every IPv4 VNet+subnet in the chosen subscription, annotated with what Bastet
-        /// already has so the selection UI can grey out anything that cannot be imported.
-        /// </summary>
         [HttpGet]
         public async Task<IActionResult> BulkGetVNets(
             string subscriptionId,
@@ -364,9 +302,7 @@ namespace Bastet.Controllers
 
             try
             {
-                // A failed Azure read must be reported as a failure, not an empty subscription -
-                // otherwise the wizard renders "nothing to import" over a credential or throttling
-                // error. Same fail-loud treatment as ReconcileScan.
+
                 AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
                 if (!inventory.Success)
                 {
@@ -375,8 +311,6 @@ namespace Bastet.Controllers
 
                 List<BulkAzureVNetViewModel> vnets = inventory.VNets;
 
-                // Annotate with the planner's own rules, so what the UI lets you select and what the
-                // planner will accept cannot drift apart.
                 IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
                 planner.AnnotateAvailability(vnets, existing);
 
@@ -389,7 +323,6 @@ namespace Bastet.Controllers
             }
         }
 
-        // AJAX: Build a plan from a selection. Plan includes any conflict errors.
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> BulkImportPreview(
@@ -419,11 +352,6 @@ namespace Bastet.Controllers
             }
         }
 
-        // -------------------------------------------------------------------
-        // Azure Reconcile — find Bastet subnets whose Azure resources are gone
-        // -------------------------------------------------------------------
-
-        // GET: /Azure/Reconcile — landing page; user picks a subscription and scans it via AJAX
         public async Task<IActionResult> Reconcile()
         {
             if (!IsAzureImportEnabled())
@@ -433,7 +361,6 @@ namespace Bastet.Controllers
 
             AzureReconcileInitialViewModel viewModel = new() { IsFeatureEnabled = true };
 
-            // Initial connectivity check (mirrors the import flows)
             try
             {
                 if (!await azureService.IsCredentialValid())
@@ -450,13 +377,6 @@ namespace Bastet.Controllers
             return View(viewModel);
         }
 
-        /// <summary>
-        /// AJAX: compare one subscription's live VNets against the Azure-linked subnets in Bastet.
-        /// </summary>
-        /// <remarks>
-        /// Uses <see cref="IAzureService.GetVNetInventory"/> so a failed Azure call is reported as a
-        /// failure instead of an empty inventory that would make every imported subnet look deleted.
-        /// </remarks>
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ReconcileScan(
@@ -478,14 +398,10 @@ namespace Bastet.Controllers
             {
                 AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
                 IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-                // The whole tree, not just the linked rows: the inbound direction has to know about
-                // a range someone created by hand, which carries no Azure resource ID.
+
                 IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
                 AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked, existing);
 
-                // The inventory is a list result and ARM filters those by RBAC, so "missing" is not
-                // the same fact as "deleted". Read each proposed row directly before offering it for
-                // archival. Only the proposed rows are checked, so a healthy scan costs nothing.
                 await ConfirmProposedDeletionsAsync(plan, azureService, reconciler);
 
                 return Json(new { success = true, plan });
@@ -497,19 +413,6 @@ namespace Bastet.Controllers
             }
         }
 
-        /// <summary>
-        /// Confirms every row a reconcile plan proposes for deletion by reading it from Azure
-        /// directly, and drops any that Azure will not confirm is gone.
-        /// </summary>
-        /// <remarks>
-        /// <see cref="IAzureReconciler.BuildPlan"/> can only work from a subscription listing, and
-        /// ARM filters those by RBAC: a credential that has lost access to a resource group gets
-        /// HTTP 200 with those resources simply absent, which is indistinguishable from deletion. A
-        /// direct read tells them apart (404 versus 403). Only the rows that claim the resource is
-        /// gone are read: a drift row was built from a listing that contained the resource, so
-        /// reading it back can only ever answer Live and would withhold the row for no reason.
-        /// Shared by the scan and the delete paths so the two cannot diverge on what is deletable.
-        /// </remarks>
         internal static async Task ConfirmProposedDeletionsAsync(
             AzureReconcilePlanViewModel plan,
             IAzureService azureService,
@@ -519,12 +422,6 @@ namespace Bastet.Controllers
                 .Where(i => AzureReconciler.IsAbsenceStatus(i.Status))
                 .Select(i => i.AzureResourceId)];
 
-            // No absence claim means there is nothing to ask Azure about, so the ARM round trip is
-            // skipped - but ApplyConfirmations must still run. It also applies the cascade guard that
-            // protects plan.ReviewItems, and those are independent of any confirmation: a plan made
-            // entirely of drift would otherwise archive a review-item descendant this same scan had
-            // just verified live. Returning early here made that guard conditional on some unrelated
-            // row happening to be absent.
             IReadOnlyDictionary<string, AzureResourceConfirmation> confirmations =
                 absenceClaims.Length == 0
                     ? new Dictionary<string, AzureResourceConfirmation>(StringComparer.OrdinalIgnoreCase)
@@ -533,7 +430,6 @@ namespace Bastet.Controllers
             reconciler.ApplyConfirmations(plan, confirmations);
         }
 
-        // Helper method to check Azure Import environment variable
         internal static bool IsAzureImportEnabled() => bool.TryParse(
                 Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"),
                 out bool result) && result;
