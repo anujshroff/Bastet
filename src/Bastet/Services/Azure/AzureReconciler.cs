@@ -497,7 +497,8 @@ namespace Bastet.Services.Azure
                 .Where(e => ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr))
                 .Select(e => new Subnet { NetworkAddress = e.NetworkAddress, Cidr = e.Cidr })];
 
-            return ipUtilityService.CalculateUnallocatedRanges(network, cidr, rowsInsideTheRange).Any();
+            return ipUtilityService.CalculateUnallocatedRanges(network, cidr, rowsInsideTheRange)
+                .Any(r => r.AddressCount > 0);
         }
 
         private bool IsRangeRecordedByBastet(
@@ -536,7 +537,8 @@ namespace Bastet.Services.Azure
                 .Where(e => ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr))
                 .Select(e => new Subnet { NetworkAddress = e.NetworkAddress, Cidr = e.Cidr })];
 
-            return !ipUtilityService.CalculateUnallocatedRanges(network, cidr, rowsInsideTheRange).Any();
+            return !ipUtilityService.CalculateUnallocatedRanges(network, cidr, rowsInsideTheRange)
+                .Any(r => r.AddressCount > 0);
         }
 
         private bool OverlapsRecorded(string azurePrefix, AzureLinkedSubnetSnapshot snapshot)

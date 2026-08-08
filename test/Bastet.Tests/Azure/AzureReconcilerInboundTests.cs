@@ -505,6 +505,63 @@ public class AzureReconcilerInboundTests
     }
 
     [Fact]
+    public void ARangeWhoseOnlyUncoveredAddressIsItsOwnNetworkAddress_IsNotReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-c", ["10.100.0.0/16"], AzSubnet("vnet-c", "default", "10.100.1.0/24"))),
+            [
+                Target(1, "10.100.0.0", 16, "vnet-c"),
+                Existing(2, "10.100.1.1", 32),
+                Existing(3, "10.100.1.2", 31),
+                Existing(4, "10.100.1.4", 30),
+                Existing(5, "10.100.1.8", 29),
+                Existing(6, "10.100.1.16", 28),
+                Existing(7, "10.100.1.32", 27),
+                Existing(8, "10.100.1.64", 26),
+                Existing(9, "10.100.1.128", 25)
+            ]);
+
+        Assert.Empty(Inbound(plan));
+    }
+
+    [Fact]
+    public void ATiledTargetWhoseOnlyGapIsItsOwnNetworkAddress_IsNotDescribedAsFreeSpace()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-e", ["10.173.0.0/24"], AzSubnet("vnet-e", "whole", "10.173.0.0/24"))),
+            [
+                Target(1, "10.173.0.0", 24, "vnet-e"),
+                Existing(2, "10.173.0.1", 32),
+                Existing(3, "10.173.0.2", 31),
+                Existing(4, "10.173.0.4", 30),
+                Existing(5, "10.173.0.8", 29),
+                Existing(6, "10.173.0.16", 28),
+                Existing(7, "10.173.0.32", 27),
+                Existing(8, "10.173.0.64", 26),
+                Existing(9, "10.173.0.128", 25)
+            ]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.DoesNotContain("reporting that range as free space", item.Reason);
+    }
+
+    [Fact]
+    public void ARangeWithGenuinelyFreeAddressesLeftInIt_IsStillReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-d", ["10.110.0.0/16"], AzSubnet("vnet-d", "default", "10.110.1.0/24"))),
+            [
+                Target(1, "10.110.0.0", 16, "vnet-d"),
+                Existing(2, "10.110.1.1", 32),
+                Existing(3, "10.110.1.2", 31),
+                Existing(4, "10.110.1.4", 30)
+            ]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.110.1.0", item.NetworkAddress);
+    }
+
+    [Fact]
     public void AChildlessWholePrefixTarget_IsStillReportedAsFreeSpace()
     {
         AzureReconcilePlanViewModel plan = Build(
