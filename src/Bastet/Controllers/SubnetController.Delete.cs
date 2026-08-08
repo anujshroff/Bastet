@@ -1,4 +1,5 @@
 using Bastet.Models;
+using Bastet.Services.Data;
 using Bastet.Models.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -129,6 +130,15 @@ public partial class SubnetController : Controller
             TempData["SuccessMessage"] = $"Subnet '{subnet.Name}' and {subnetsArchived - 1} child subnet(s) were deleted successfully. " +
                                        $"{hostIpsArchived} host IP assignment(s) were archived.";
 
+            return RedirectToAction(nameof(Index));
+        }
+        catch (Exception ex) when (SqlSaveOutcome.IsIndeterminateTransaction(ex))
+        {
+            logger.LogError(ex, "Subnet delete outcome unknown for subnet {SubnetId}", id);
+            await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
+            TempData["ErrorMessage"] =
+                "BASTET could not confirm whether this subnet was deleted. "
+                + "Check the subnet list and the deleted-subnets list before retrying.";
             return RedirectToAction(nameof(Index));
         }
         catch (Exception ex)

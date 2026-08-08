@@ -24,9 +24,12 @@ public class SqlSaveOutcomeTests
     [InlineData(547)]
     [InlineData(1205)]
     [InlineData(229)]
-    [InlineData(0)]
     public void ADeterminateFailure_IsNotTreatedAsUnknown(int errorNumber) =>
         Assert.False(SqlSaveOutcome.IsIndeterminateErrorNumber(errorNumber));
+
+    [Fact]
+    public void AZeroErrorNumber_IsNotDecidedByTheNumberAlone() =>
+        Assert.False(SqlSaveOutcome.IsIndeterminateErrorNumber(0));
 
     [Fact]
     public void AnExceptionThatIsNotASaveFailure_IsNeverUnknown()
