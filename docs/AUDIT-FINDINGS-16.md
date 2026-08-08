@@ -4,6 +4,33 @@
 
 ---
 
+## Reconciliation — final state
+
+**All fifteen findings are fixed, verified and struck.** One commit per finding on `audit/round-16`, except P14, which is recorded as closed inside P5's commit because both are the same endpoint and P14's own text says the decision should be taken once.
+
+| | |
+|---|---|
+| Build | 0 warnings after deleting `bin`/`obj` and rebuilding `--no-incremental` |
+| Tests | 892 → **929** (+37, none removed) |
+| App sweep | 13 areas requested, asserting rendered content rather than HTTP 200 — all pass |
+| Security headers | `X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy`, `X-Frame-Options` all present on a normal response |
+| Log | **0 `fail:` outside the two deliberate lock-timeout reproductions** (P4, P12). Warnings are the pre-existing DataProtection and EF multiple-include advisories, plus the 403s counter-test 1 logs by design |
+| Azure end to end | discovery → both wizards → reconcile scan → delete commit, against live ARM |
+| Discrimination | **both counter-tests pass** (below) |
+| `main` | `1a31228`, byte-identical to the pre-round state |
+
+**The two counter-tests, which are what stop an over-blocking regression passing as a fix.** A VNet was created in the resource group only principal B can see and imported while the app ran as B; the app was then restarted as principal A, which has no assignment on that group, against the same database. Scan: **0 items offered for deletion**, `canCommit: false`, and a warning naming the cause — *"2 Azure-linked subnet(s) were missing from the subscription listing, and Azure denied access when asked about them directly…"*. Conversely, a VNet in A's own group was imported and then genuinely deleted in Azure: it was **still offered**, `canCommit: true`, and the delete committed `200 {"targetsDeleted":1,"subnetsArchived":2}` with the next scan returning 0 items. Withholding what it cannot see, deleting what is really gone.
+
+**Residue rate: round 16 filed 15 findings, of which 11 were residue of round 15's own fixes.**
+
+`P1←O1,O2,O3 · P5←O6 · P6←O16 · P7←O13 · P8←O1 · P9←O1,O2 · P10←O5 · P11←O8 · P13←O11,O12 · P14←O6,O12 · P15←O14`
+
+Only P2, P3, P4 and P12 are independent of the previous round. That number is the reason `/audit-reconcile` gained a mandatory sibling sweep and a string-truth check partway through this reconciliation, and it is the number to compare round 17 against. Four of the eleven — P5, P13, P14, P15 — are the same shape the watch list names: a predicate updated on the planner side and not on the controller side. All four are now closed, and the sweep this round found and fixed **three further sites** in that family that were never filed (the transactional "no changes were saved" handlers under P4), so they cannot become round 17's findings.
+
+**Deliberately not done, each recorded in full in the struck entry it belongs to.** Nothing recovers rows already archived before P1 — `DeletedSubnets` has no restore path and `Subnet.AzureResourceId` has no editor, for the third round running, and the owner chose the code fix over adding an admin repair action. P15's shared-helper consolidation and P12's `RelinkAzureSubnet` arm are recommendations to the owner rather than changes taken: the first is a refactor across a service/controller boundary, the second was measured to repair nothing.
+
+---
+
 ## Verdict
 
 **Five findings need a decision from you and here is what it costs.** Read this table before anything else in the file. It is the part that cannot be delegated: in each case the code change is small and measured, and the thing that is not decided is what happens to the state the defect already produced, or which of two shapes the app should take.
