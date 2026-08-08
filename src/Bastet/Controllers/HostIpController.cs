@@ -778,6 +778,28 @@ public class HostIpController(
             TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
             return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
         }
+        catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+        {
+            // Deliberately not "nothing was changed": the guarded save may have committed. See
+            // SqlSaveOutcome, and P4, which is the finding that established the distinction.
+            logger.LogError(ex, "Set allocation status outcome unknown for subnet {SubnetId}", dto.SubnetId);
+            TempData["ErrorMessage"] =
+                "BASTET could not confirm whether the allocation status was changed. "
+                + "Reload the subnet to see its current state before retrying.";
+            return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
+        }
+        catch (Exception ex)
+        {
+            // Of the eight lock-guarded write sites this was the only one with no generic handler on
+            // the path, so a DbUpdateException from the guarded save escaped the action entirely and
+            // the operator got a raw 500 instead of the modelled message every sibling produces -
+            // Create at :167, Edit at :318, and the three transactional paths in SubnetController.
+            // The catch-all is not "only there for rollback": neither Create nor Edit opens a
+            // transaction either.
+            logger.LogError(ex, "Set allocation status failed for subnet {SubnetId}", dto.SubnetId);
+            TempData["ErrorMessage"] = "Error updating allocation status. Details have been logged.";
+            return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
+        }
     }
 
     private bool HostIpExists(string ip) =>
