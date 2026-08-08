@@ -41,7 +41,7 @@ public class AzureControllerTests : IDisposable
         _mockAzureService = new MockAzureService(true, CreateTestSubscriptions(), CreateTestVNets(), CreateTestSubnets());
 
         // Create and configure the controller
-        _controller = new AzureController(_context, _mockAzureService, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+        _controller = new AzureController(_context, _mockAzureService, new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
         {
             // Setup controller context with HttpContext
             ControllerContext = new ControllerContext
@@ -289,7 +289,7 @@ public class AzureControllerTests : IDisposable
     {
         // Arrange
         int subnetId = 2;
-        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext
             {
@@ -360,7 +360,7 @@ public class AzureControllerTests : IDisposable
         Mock<IAzureService> throwingService = new();
         throwingService.Setup(s => s.GetSubscriptions()).ThrowsAsync(new Exception("boom: secret detail"));
         AzureController controller = new(
-            _context, throwingService.Object, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+            _context, throwingService.Object, new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -383,7 +383,7 @@ public class AzureControllerTests : IDisposable
     // -------------------------------------------------------------------------
 
     private AzureController ControllerWith(IAzureService service) =>
-        new(_context, service, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+        new(_context, service, new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -534,6 +534,7 @@ public class AzureControllerTests : IDisposable
             _context,
             new MockAzureService(true, CreateTestSubscriptions(), vnets, subnets),
             new AzureSubnetSnapshotService(_context),
+            new IpUtilityService(),
             NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -546,19 +547,130 @@ public class AzureControllerTests : IDisposable
         Assert.True(response.success);
         Assert.NotNull(response.subnets);
 
-        // The encompassing row survives...
-        Assert.Contains(response.subnets, s => s.Name == "snet-full");
+        // P5 changed the contract from FILTER to ANNOTATE: every Azure subnet is returned and
+        // carries its own verdict, so a row the commit would refuse is visible with the reason
+        // instead of silently absent.
+        AzureSubnetViewModel full = Assert.Single(response.subnets, s => s.Name == "snet-full");
+        AzureSubnetViewModel child = Assert.Single(response.subnets, s => s.Name == "snet-child");
 
-        // ...and N4's top-up filter is untouched: the already-imported child is still dropped.
-        Assert.DoesNotContain(response.subnets, s => s.Name == "snet-child");
+        // P14: the target already holds a child, so marking it fully allocated is refused at commit.
+        // It used to be offered as the only selectable row, whose only outcome was a rollback.
+        Assert.False(full.IsSelectable);
+        Assert.Contains("already has child subnets", full.Reason);
+
+        // The already-recorded child is no longer dropped - it says why it cannot be imported.
+        Assert.False(child.IsSelectable);
+        Assert.Contains("already uses", child.Reason);
     }
+
+    /// <summary>
+    /// P14's control: with the target EMPTY the encompassing row is selectable again, which is the
+    /// mark-fully-allocated import O6 restored. The population guard must not cost that.
+    /// </summary>
+    [Fact]
+    public async Task GetSubnets_TheEncompassingRow_StaysSelectableWhenTheTargetIsEmpty()
+    {
+        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-enc2";
+
+        List<AzureVNetViewModel> vnets =
+            [new() { ResourceId = VNetId, Name = "vnet-enc2", AddressPrefixes = ["10.172.0.0/24"] }];
+        List<AzureSubnetViewModel> subnets =
+            [new() { Name = "snet-full", AddressPrefix = "10.172.0.0/24", HasMultipleAddressSchemes = false }];
+
+        _context.Subnets.Add(new Subnet { Id = 92, Name = "empty-target", NetworkAddress = "10.172.0.0", Cidr = 24 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        JsonResult json = Assert.IsType<JsonResult>(
+            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetId, 92));
+        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
+
+        AzureSubnetViewModel full = Assert.Single(response!.subnets!, s => s.Name == "snet-full");
+        Assert.True(full.IsSelectable);
+        Assert.Null(full.Reason);
+    }
+
+    /// <summary>
+    /// P5, limb one. ValidateSubnetCreation refuses a subnet that would CONTAIN an existing Bastet
+    /// row, and this endpoint never mirrored it - so the row was offered, refused at commit, and
+    /// because the batch rolls back whole it discarded every other selection with it.
+    /// </summary>
+    [Fact]
+    public async Task GetSubnets_ARowThatWouldContainAnExistingSubnet_IsBlockedWithAReason()
+    {
+        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-wc";
+
+        List<AzureVNetViewModel> vnets =
+            [new() { ResourceId = VNetId, Name = "vnet-wc", AddressPrefixes = ["10.94.0.0/16"] }];
+        List<AzureSubnetViewModel> subnets =
+        [
+            new() { Name = "s2", AddressPrefix = "10.94.2.0/24" },   // would contain hand-2-128
+            new() { Name = "s3", AddressPrefix = "10.94.3.0/24" }    // clean, must stay selectable
+        ];
+
+        _context.Subnets.Add(new Subnet { Id = 93, Name = "target", NetworkAddress = "10.94.0.0", Cidr = 16 });
+        _context.Subnets.Add(new Subnet { Id = 94, Name = "hand-2-128", NetworkAddress = "10.94.2.128", Cidr = 25, ParentSubnetId = 93 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        JsonResult json = Assert.IsType<JsonResult>(
+            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetId, 93));
+        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
+
+        AzureSubnetViewModel s2 = Assert.Single(response!.subnets!, s => s.Name == "s2");
+        Assert.False(s2.IsSelectable);
+        Assert.Contains("hand-2-128", s2.Reason);
+
+        // The counter-test that matters: a clean row must NOT be swept up. The interim the finding
+        // offered would have emptied the list on every VNet, because every offered row is inside the
+        // target and the target's own row is always in the table.
+        AzureSubnetViewModel s3 = Assert.Single(response.subnets!, s => s.Name == "s3");
+        Assert.True(s3.IsSelectable);
+    }
+
+    /// <summary>
+    /// P5, limb two - the one the bulk annotator cannot answer. It leaves the more-specific-parent
+    /// test "to the plan" because it has no target; here the target is bound, so the test is well
+    /// defined and the commit's refusal is predictable.
+    /// </summary>
+    [Fact]
+    public async Task GetSubnets_ARowWithAMoreSpecificExistingParent_IsBlockedWithAReason()
+    {
+        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-msp";
+
+        List<AzureVNetViewModel> vnets =
+            [new() { ResourceId = VNetId, Name = "vnet-msp", AddressPrefixes = ["10.95.0.0/16"] }];
+        List<AzureSubnetViewModel> subnets =
+            [new() { Name = "s4", AddressPrefix = "10.95.4.0/24" }];
+
+        _context.Subnets.Add(new Subnet { Id = 95, Name = "target", NetworkAddress = "10.95.0.0", Cidr = 16 });
+        _context.Subnets.Add(new Subnet { Id = 96, Name = "hand-4-23", NetworkAddress = "10.95.4.0", Cidr = 23, ParentSubnetId = 95 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        JsonResult json = Assert.IsType<JsonResult>(
+            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetId, 95));
+        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
+
+        AzureSubnetViewModel s4 = Assert.Single(response!.subnets!, s => s.Name == "s4");
+        Assert.False(s4.IsSelectable);
+        Assert.Contains("hand-4-23", s4.Reason);
+    }
+
+    private AzureController ControllerWithSubnets(
+        List<AzureVNetViewModel> vnets, List<AzureSubnetViewModel> subnets) =>
+        new(_context,
+            new MockAzureService(true, CreateTestSubscriptions(), vnets, subnets),
+            new AzureSubnetSnapshotService(_context),
+            new IpUtilityService(),
+            NullLogger<AzureController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
 
     [Fact]
     public async Task BulkGetVNets_AzureReadFails_ReportsFailureNotEmptySubscription()
     {
         // A failed Azure read must never render as "no VNets found / everything already imported" -
         // the operator would wrongly conclude the subscription is fully handled.
-        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
+        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

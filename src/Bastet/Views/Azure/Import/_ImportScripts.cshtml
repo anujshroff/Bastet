@@ -116,7 +116,11 @@
         // Select all subnets checkbox
         $("#select-all-subnets").change(function() {
             let isChecked = $(this).is(":checked");
-            $(".subnet-checkbox").prop("checked", isChecked);
+            // :not(:disabled) is load-bearing now that P5 renders unimportable rows disabled rather
+            // than dropping them. jQuery's :checked matches a disabled input, so without this the
+            // master would tick rows the commit refuses, count them, and enable Import over them -
+            // the same trap the bulk wizard documents at _BulkScripts.cshtml.
+            $(".subnet-checkbox:not(:disabled)").prop("checked", isChecked).trigger("change");
             updateImportButton();
         });
         
@@ -126,7 +130,9 @@
         // event, so this cannot re-enter the master's own handler above. The `checked > 0 &&`
         // conjunct is not redundant: over an empty list 0 === 0 would tick the master.
         function syncSelectAllSubnets() {
-            let boxes = $(".subnet-checkbox");
+            // Only the rows that can actually be selected count towards "all selected", or a VNet
+            // holding one importable row and three refused ones could never tick the master.
+            let boxes = $(".subnet-checkbox:not(:disabled)");
             let checked = boxes.filter(":checked").length;
             $("#select-all-subnets")
                 .prop("checked", checked > 0 && checked === boxes.length)
@@ -322,10 +328,25 @@
                                 // nothing at all when row 0 is unchecked). The subnets.Index field below switches
                                 // the binder to explicit indices, which need not be contiguous. It enables and
                                 // disables with the row, since the handlers here toggle every hidden input in it.
+                                // P5. The server now says whether each row can be imported, using the
+                                // same rules the commit applies. A row it refuses is shown disabled
+                                // with its reason rather than dropped: dropping it explained nothing,
+                                // and offering it meant the commit rolled the whole batch back and
+                                // discarded every other selection with it.
+                                let selectable = subnet.isSelectable !== false;
+                                let reasonHtml = subnet.reason
+                                    ? `<div class="ms-4 mt-1 small text-danger">${escapeHtml(subnet.reason)}</div>`
+                                    : '';
+                                let badge = selectable
+                                    ? ''
+                                    : (subnet.statusName === "AlreadyImported"
+                                        ? '<span class="badge bg-secondary ms-1">Already imported</span>'
+                                        : '<span class="badge bg-danger ms-1">Cannot import</span>');
+
                                 let subnetHtml = `
                                     <div class="form-check mb-2 border p-2 rounded">
                                         <input class="form-check-input subnet-checkbox" type="checkbox"
-                                               id="${subnetId}">
+                                               id="${subnetId}" ${selectable ? '' : 'disabled'}>
                                         <input type="hidden" name="subnets.Index" value="${index}" disabled>
                                         <input type="hidden" name="subnets[${index}].Name" value="${escapeHtml(importName)}" disabled>
                                         <input type="hidden" name="subnets[${index}].NetworkAddress" value="${escapeHtml(networkAddress)}" disabled>
@@ -335,9 +356,10 @@
                                         <input type="hidden" name="subnets[${index}].AzureResourceId" value="${escapeHtml(subnet.resourceId || '')}" disabled>
                                         <input type="hidden" name="subnets[${index}].FullyEncompassesVNetPrefix" value="${subnet.fullyEncompassesVNetPrefix || false}" disabled>
                                         <label class="form-check-label" for="${subnetId}">
-                                            <strong>${escapeHtml(subnet.name)}</strong> ${multiSchemeBadge}<br>
+                                            <strong>${escapeHtml(subnet.name)}</strong> ${multiSchemeBadge}${badge}<br>
                                             <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>
                                         </label>
+                                        ${reasonHtml}
                                     </div>
                                 `;
                                 

@@ -1,5 +1,6 @@
 using Bastet.Data;
 using Bastet.Models.ViewModels;
+using Bastet.Services;
 using Bastet.Services.Azure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,6 +13,7 @@ namespace Bastet.Controllers
         BastetDbContext context,
         IAzureService azureService,
         IAzureSubnetSnapshotService snapshotService,
+        IIpUtilityService ipUtilityService,
         ILogger<AzureController> logger) : Controller
     {
 
@@ -162,31 +164,29 @@ namespace Bastet.Controllers
                 List<AzureSubnetViewModel> azureSubnets = await azureService.GetCompatibleSubnets(
                     vnetResourceId, subnet.NetworkAddress, subnet.Cidr);
 
-                // Offer only ranges BASTET does not already record. On a top-up the target keeps the
-                // subnets a previous import created, and re-offering them would either duplicate a
-                // row or fail the overlap check at commit - neither of which the operator asked for.
-                // Filtered server-side because the browser is not the authority on what BASTET holds.
-                HashSet<string> alreadyRecorded = new(
-                    await context.Subnets
-                        .AsNoTracking()
-                        .Select(s => s.NetworkAddress + "/" + s.Cidr)
-                        .ToListAsync(),
-                    StringComparer.OrdinalIgnoreCase);
+                // ANNOTATE, DO NOT FILTER. This used to drop every row whose exact prefix string was
+                // already recorded, which decided what the wizard offered using one of the three
+                // rules the commit actually applies. ValidateSubnetCreation also refuses a subnet
+                // that would CONTAIN an existing row, and one for which a MORE SPECIFIC parent
+                // exists - so rows this endpoint offered were refused at commit, and because
+                // BatchCreateChildSubnets rolls the whole batch back, one such row discarded every
+                // other selection with it. A dropped row also told the operator nothing.
+                List<ExistingSubnetSnapshot> existing = await context.Subnets
+                    .AsNoTracking()
+                    .Select(s => new ExistingSubnetSnapshot
+                    {
+                        Id = s.Id,
+                        Name = s.Name,
+                        NetworkAddress = s.NetworkAddress,
+                        Cidr = s.Cidr,
+                        AzureResourceId = s.AzureResourceId
+                    })
+                    .ToListAsync();
 
-                // ...except the row that encompasses the target's whole prefix. That row's address
-                // IS the target's address by definition, so the target's own row - which is always
-                // in the table - matched it every time and removed it unconditionally, leaving the
-                // wizard saying "No compatible subnets found in this Virtual Network" about a VNet
-                // holding exactly one. The whole mark-fully-allocated import became unreachable from
-                // this wizard, while the Details page went on advertising the range as free.
-                //
-                // AzureBulkImportPlanner.AnnotateSubnet, which is the same rule, short-circuits the
-                // encompassing case before its exact-match test; this is that copy catching up.
-                // {NetworkAddress, Cidr} is unique (BastetDbContext), and GetCompatibleVNets only
-                // offers a VNet whose address prefix equals the target's, so the target's own row is
-                // the only row that can ever carry this prefix.
-                azureSubnets = [.. azureSubnets.Where(a => a.FullyEncompassesVNetPrefix
-                                                           || !alreadyRecorded.Contains(a.AddressPrefix ?? string.Empty))];
+                foreach (AzureSubnetViewModel azureSubnet in azureSubnets)
+                {
+                    AnnotateImportCandidate(azureSubnet, subnet, existing);
+                }
 
                 return azureSubnets.Count == 0
                     ? Json(new
@@ -202,6 +202,112 @@ namespace Bastet.Controllers
                 logger.LogError(ex, "Failed to load compatible Azure subnets for subnet {SubnetId}", subnetId);
                 return Json(new { success = false, error = "Failed to load subnets from Azure. Details have been logged." });
             }
+        }
+
+        /// <summary>
+        /// Decides whether one Azure subnet may be imported into <paramref name="target"/>, mirroring
+        /// the rules <c>ValidateSubnetCreation</c> applies at commit.
+        /// </summary>
+        /// <remarks>
+        /// This endpoint can answer a question the bulk annotator cannot, and the difference is the
+        /// whole reason the rule is written here rather than shared verbatim: it has a BOUND TARGET.
+        /// <c>AzureBulkImportPlanner.AnnotateSubnet</c> leaves the more-specific-parent test "to the
+        /// plan" because it has no target to measure against yet; here the target is known, so the
+        /// test is well defined - an existing row blocks only when it is strictly more specific than
+        /// the target, which is exactly when the commit would refuse.
+        ///
+        /// Rows contained only by the TARGET must stay selectable. Every Azure subnet offered here is
+        /// inside the target's prefix by construction and the target's own row is always in the
+        /// table, so any test that does not exclude it empties the list on every VNet.
+        /// </remarks>
+        private void AnnotateImportCandidate(
+            AzureSubnetViewModel azureSubnet,
+            Models.Subnet target,
+            List<ExistingSubnetSnapshot> existing)
+        {
+            string[] parts = (azureSubnet.AddressPrefix ?? string.Empty).Split('/');
+
+            if (parts.Length != 2 || !int.TryParse(parts[1], out int cidr))
+            {
+                return;
+            }
+
+            string network = parts[0];
+
+            // The row covering the target's whole prefix is imported by marking the target fully
+            // allocated rather than by creating a child, so it is never "already recorded" by the
+            // target's own row - which carries that same prefix and would otherwise remove it every
+            // time. It is refused only when the target already holds children, which is what
+            // ValidateSubnetCanBeFullyAllocated enforces at commit and what the bulk screen already
+            // says out loud.
+            if (azureSubnet.FullyEncompassesVNetPrefix)
+            {
+                if (existing.Exists(e => e.Id != target.Id
+                                         && ipUtilityService.IsSubnetContainedInParent(
+                                             e.NetworkAddress, e.Cidr, target.NetworkAddress, target.Cidr)))
+                {
+                    Block(azureSubnet,
+                        $"Covers the whole VNet prefix, which would mark Bastet subnet '{target.Name}' "
+                        + "fully allocated, but it already has child subnets.");
+                }
+
+                return;
+            }
+
+            ExistingSubnetSnapshot? exact = existing.Find(e =>
+                string.Equals(e.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)
+                && e.Cidr == cidr);
+
+            if (exact is not null)
+            {
+                bool sameAzureResource = !string.IsNullOrEmpty(exact.AzureResourceId)
+                    && string.Equals(exact.AzureResourceId, azureSubnet.ResourceId, StringComparison.OrdinalIgnoreCase);
+
+                azureSubnet.Status = sameAzureResource
+                    ? BulkImportAvailability.AlreadyImported
+                    : BulkImportAvailability.Blocked;
+                azureSubnet.Reason = sameAzureResource
+                    ? $"Already imported as Bastet subnet '{exact.Name}'."
+                    : $"Bastet subnet '{exact.Name}' already uses {azureSubnet.AddressPrefix}.";
+                azureSubnet.IsSelectable = false;
+                return;
+            }
+
+            // Would contain an existing row: importing it would put a Bastet subnet above one that
+            // already exists, which the commit refuses as an invalid hierarchy.
+            ExistingSubnetSnapshot? wouldContain = existing.Find(e =>
+                ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr));
+
+            if (wouldContain is not null)
+            {
+                Block(azureSubnet,
+                    $"Would contain existing Bastet subnet '{wouldContain.Name}' "
+                    + $"({wouldContain.NetworkAddress}/{wouldContain.Cidr}), which would create an invalid hierarchy.");
+                return;
+            }
+
+            // A more specific parent exists. Well defined here because the target is known: a row
+            // that contains this range and is itself strictly inside the target would be the correct
+            // parent, and this wizard always parents to the target, so the commit refuses it.
+            ExistingSubnetSnapshot? moreSpecificParent = existing.Find(e =>
+                ipUtilityService.IsSubnetContainedInParent(network, cidr, e.NetworkAddress, e.Cidr)
+                && ipUtilityService.IsSubnetContainedInParent(
+                    e.NetworkAddress, e.Cidr, target.NetworkAddress, target.Cidr));
+
+            if (moreSpecificParent is not null)
+            {
+                Block(azureSubnet,
+                    $"A more specific Bastet parent subnet exists: '{moreSpecificParent.Name}' "
+                    + $"({moreSpecificParent.NetworkAddress}/{moreSpecificParent.Cidr}), "
+                    + "so this subnet cannot be imported into this target.");
+            }
+        }
+
+        private static void Block(AzureSubnetViewModel azureSubnet, string reason)
+        {
+            azureSubnet.Status = BulkImportAvailability.Blocked;
+            azureSubnet.Reason = reason;
+            azureSubnet.IsSelectable = false;
         }
 
         // Removed ImportSubnets action - we now submit directly to SubnetController.BatchCreate
