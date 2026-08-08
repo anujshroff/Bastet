@@ -98,7 +98,59 @@ warrants, **do the right thing and say so in the record**. Examples worth imitat
 suggested remedy would have silently dropped user data, and another's would have deleted a working
 error display.
 
-### 5. Sweep for orphans the compiler will not report
+### 5. Sweep for the same defect elsewhere — the step that stops the loop
+
+**This is the highest-value step in this file and it is not optional.** Round 15 fixed sixteen
+findings; round 16 then filed fifteen, of which **eleven were residue of those very fixes**. Almost
+all of them were this shape: the fix closed the call site the finding named and stopped there.
+
+The finding names one location. Before you commit, establish what *else* implements the same rule:
+
+- **Every arm of the conditional you just touched.** If a ternary, an `if/else if/else` or a `switch`
+  produced the wrong answer in one branch, read the others and satisfy yourself each is right. O8's
+  rename guard covered the middle arm of a three-arm flash ternary; the encompassing arm went on
+  announcing *"Successfully renamed parent subnet to 'X'"* for a rename that never happened.
+- **The sibling surface.** Bastet has **two** Azure import wizards, single-VNet and bulk. A rule that
+  is wrong in one is wrong in the other unless you can point at the difference. Two of round 16's
+  findings were "one wizard learned the rule, the other did not".
+- **Every other caller of the helper**, and every place the same question is asked *without* the
+  helper. A duplicated rule that has since diverged is a defect, not untidiness.
+- **The inverse path.** If you fixed a write, check the read that displays it. If you fixed a guard,
+  check the code that decides whether to *offer* the guarded action — O5's fix was sound and the
+  screen went on advertising a remedy the wizard refuses.
+- **The other fixes in this same round.** O6 and O12 were both correct alone and did not compose.
+
+Search for the *concept* as well as the identifier — the prefix string, the status enum member, the
+message text — because the sibling frequently does not call the same method:
+
+```
+grep -rn "<distinguishing token>" src/ --include=*.cs --include=*.cshtml --include=*.js
+```
+
+**Record the sweep in the struck entry**: what you searched for, what it returned, which sites you
+fixed, and for any site you did not fix, why. A struck entry with no sweep line is incomplete.
+
+If the sweep turns up a sibling you think should not be fixed, that is the **owner's** decision, not
+yours — put it in the struck entry as a recommendation and say what it would cost.
+
+### 6. Check the strings the fix just made true or false
+
+Four of round 16's fifteen findings were the application **stating something untrue** after a fix
+changed the behaviour underneath the message. Cheap to prevent, expensive to ship.
+
+- **Any message whose truth depends on what you changed must be re-read.** O1 and O2 added reconcile
+  reason text telling the operator to *"correct the recorded range"* — `SubnetController.Edit` refuses
+  that for every row that can carry those statuses, so the app's own advice was impossible to follow.
+- **Operator-facing text your fix *adds* must name an action that is actually reachable.** Before
+  shipping "Import it to mark that subnet fully allocated", drive that import against a target in the
+  state the message appears for and confirm it works.
+- **A success message must not outlive the action it announces.** If a fix makes a write conditional,
+  the flash announcing that write becomes conditional with it.
+
+Grep the view and controller for the strings adjacent to your change, read each against the new
+behaviour, and record which ones you checked.
+
+### 7. Sweep for orphans the compiler will not report
 
 Deleting a method routinely strands `using` directives, private constants, locals and parameters —
 and C# warns about **none** of them. This happened five separate times in round 4.
@@ -106,7 +158,7 @@ and C# warns about **none** of them. This happened five separate times in round 
 After every deletion, check what its removal just made dead. Then check the reverse: that anything
 you are about to remove as "also dead" is not live somewhere else.
 
-### 6. Verify
+### 8. Verify
 
 ```
 dotnet build --no-incremental     # 0 warnings — incremental skips the analyzers
@@ -115,18 +167,21 @@ dotnet test                       # full suite
 
 Re-run whatever rig demonstrated the defect, now against the fix.
 
-### 7. Strike the finding
+### 9. Strike the finding
 
 Replace the finding in the file with an italic paragraph recording:
 
 - what was done and **why that approach**;
 - the evidence — what was measured, not what was assumed;
 - **every place the audit's suggestion was rejected or found wrong, with the reason**;
+- **the sibling sweep from step 5** — what was searched for, what it returned, what was fixed with it,
+  and any site deliberately left alone with the reason;
+- **the strings checked in step 6**;
 - the test-count delta.
 
 This is the durable part. A later round reads these instead of a handoff.
 
-### 8. Commit
+### 10. Commit
 
 **One finding, one commit, one line, no body** — the code change **and the updated findings file
 together**, so the record of why lands with the change itself.
@@ -156,9 +211,12 @@ process.
 - **Migration `.Designer.cs` snapshots are frozen history** — never "fix" an old column width in one.
 - **The test count must never regress without an explicit, recorded reason.** Round 4 legitimately
   went 588 → 576 by deleting tests of dead code, and said so.
-- **Stay in scope.** Fix the finding in front of you. Improvements noticed along the way get
-  mentioned, not made — an unrequested refactor riding along in a fix commit is exactly the residue
-  these audits keep finding.
+- **Stay in scope — but the scope is the defect, not the line number.** An unrequested refactor riding
+  along in a fix commit is out of scope and gets mentioned, not made. **The same defect at another
+  site is never out of scope**: the other arm of the conditional, the other wizard, the sibling
+  controller action, the second implementation of the same rule. Fixing one and leaving the other is
+  not discipline — it is how a closed finding comes back next round with a new number, which is
+  exactly what eleven of round 16's fifteen findings were. See step 5; it is mandatory.
 - **No novels.** Short explanations, one-line commit messages.
 
 ## Rigs — ephemeral, never in the repo
@@ -211,13 +269,20 @@ imports at *render* time, so a green build and a green suite would not have caug
 2. **Full suite**, count reconciled against the baseline. Any drop needs a recorded reason.
 3. **Coverage re-run** if the round touched dead code, compared against the pre-round run: the deleted
    methods are gone, and nothing new went dark.
-4. **Run the real app** against real SQL Server and request every major area — subnet list, create,
+4. **Re-drive every fix in this round against the final tree.** Each was verified against the tree as
+   it stood when it was written, not against the tree the later fixes produced. Round 15's O6 and O12
+   were each correct in isolation and did not compose: O6 restored the fully-encompassing row to the
+   single-VNet wizard, O12 added the population guard elsewhere, and together they offer exactly one
+   selectable row whose only outcome is an error the other wizard greys out. Walk
+   `git log <base>..HEAD` and re-run each commit's own reproduction. **A fix that no longer
+   demonstrates its defect closed is this round's problem, not next round's finding.**
+5. **Run the real app** against real SQL Server and request every major area — subnet list, create,
    details, edit, delete, deleted-subnets, purge, host IPs, all-deleted-host-IPs, error pages, both
    Azure wizards. **Assert real content and titles, not just HTTP 200.** Confirm the security headers
    still ride on a normal response.
-5. **Read the log.** Classify every `fail:` / `warn:` line — some are expected, because a deliberate
+6. **Read the log.** Classify every `fail:` / `warn:` line — some are expected, because a deliberate
    permission-denied probe logs an error *by design*. State the difference rather than glossing it.
-6. **If Azure credentials are available**, drive both surfaces end to end against live ARM:
+7. **If Azure credentials are available**, drive both surfaces end to end against live ARM:
    subscriptions → VNet/subnet discovery → single-subnet import → bulk preview and commit → reconcile
    scan → delete commit. Include the two counter-tests that prove the reconciler **discriminates**
    rather than merely blocks:
@@ -225,13 +290,23 @@ imports at *render* time, so a green build and a green suite would not have caug
    - a genuinely deleted resource must **still be offered and deletable**.
 
    Checking only the first would let an over-blocking regression pass silently.
-7. **`git status` clean**, and no scaffolding in any commit.
+8. **`git status` clean**, and no scaffolding in any commit.
 
 ## Closing out
 
 Update the header of the findings file with the final build and test numbers, the result of the
 sweep, and a short list of what was deliberately not done. The struck entries already carry the
 reasoning.
+
+**Report the residue rate — the one number that says whether this loop is converging.** The findings
+file names, for each finding, which previous-round fix it came out of. Count them and state it plainly
+in the closing summary and in the findings file header:
+
+> Round `<N>` filed `<F>` findings, of which `<R>` were residue of round `<N-1>`'s own fixes.
+
+Round 16's was **11 of 15**, and that is why steps 5 and 6 exist. If the next round's residue is not
+materially lower, **say so rather than letting it drift** — it means these steps are not working and
+the skill needs changing again, not that the codebase is unusually buggy.
 
 **If the final sweep turned up anything needing resolution, record it in the file and commit that
 too** — a closing commit carrying the sweep's result. If the sweep was clean, the last fix commit

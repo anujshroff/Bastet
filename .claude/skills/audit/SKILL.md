@@ -172,9 +172,14 @@ that is data. Analysis only when asked for.
 | tree | dirty entry count |
 | HEAD | short sha |
 
-At launch: one line. At completion: the funnel, the severities, the headline finding, the commit sha,
-anything the teardown failed to clean, and — **always** — a reminder to revoke the service principal
-secrets. This skill asked for them; this skill reminds you to kill them.
+At launch: one line. At completion: the funnel, the severities, the headline finding, **the residue
+rate** (`<R>` of `<F>` findings were residue of round `<N-1>`'s fixes), the commit sha, anything the
+teardown failed to clean, and — **always** — a reminder to revoke the service principal secrets. This
+skill asked for them; this skill reminds you to kill them.
+
+**If the residue rate is high, say so as the headline, not as a footnote.** A round where most
+findings trace back to the last round's fixes is not a report about the codebase — it is a report
+about the fix process, and burying that is how sixteen rounds went by without anyone measuring it.
 
 ---
 
@@ -393,6 +398,18 @@ One writes `docs/AUDIT-FINDINGS-<N>.md`. A second re-checks **every** citation a
 and **fixes** what is wrong — round 7's checker corrected 5 of 130, including one stale line number
 carried over from round 6. A findings file is correct only against the HEAD it was written at.
 
+**Every finding names the previous-round fix it came out of, or says it came out of none.** One line
+in the finding: *"residue of O8"*, or nothing if it is independent. The scribe then totals them and
+opens the Verdict with the rate:
+
+> Round `<N>` filed `<F>` findings, of which `<R>` are residue of round `<N-1>`'s own fixes.
+
+Round 16's was **11 of 15** — the audit was not finding a rotten codebase, it was finding the fix
+loop's own output, and nobody had measured that in sixteen rounds. It is the single most useful number
+this round produces about *the process* rather than the software, it costs one line per finding, and a
+falling rate is the only evidence that the loop is converging. `/audit-reconcile` steps 5 and 6 exist
+to drive it down; this is how anyone can tell whether they worked.
+
 ## Phase 5 — teardown and commit (1 agent)
 
 In this order:
@@ -433,6 +450,10 @@ none of the branch conditions and reported success anyway.
 - **A concrete failure scenario** with real inputs and the wrong output.
 - **Evidence it was reproduced** — what was run, what came back.
 - **A proposed fix**, plus a cheaper interim where one exists.
+- **Attribution: which previous-round fix this is residue of**, by its id (*"residue of O8"*), or an
+  explicit *none* if it is independent of the last round. Use `git log`/`git blame` on the cited lines
+  to settle it rather than guessing. This is what the residue rate is totalled from, and it is the
+  round's only measurement of whether the fix loop is converging.
 
 Grouped by severity, numbered sequentially across the file, ordered within severity by consequence.
 
