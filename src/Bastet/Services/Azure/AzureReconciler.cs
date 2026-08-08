@@ -646,7 +646,8 @@ namespace Bastet.Services.Azure
         private static string NameList(List<AzureReconcileItem> items)
         {
             const int Max = 10;
-            string names = string.Join(", ", items.Take(Max).Select(i => $"'{i.Name}'"));
+            string names = string.Join(", ", items.Take(Max)
+                .Select(i => $"'{i.Name}' ({i.NetworkAddress}/{i.Cidr})"));
             return items.Count > Max ? $"{names} and {items.Count - Max} more" : names;
         }
 

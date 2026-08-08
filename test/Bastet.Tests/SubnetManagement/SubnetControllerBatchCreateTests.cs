@@ -809,4 +809,73 @@ public class SubnetControllerBatchCreateTests : IDisposable
         Subnet after = (await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken))!;
         Assert.Equal(VNetVa, after.AzureResourceId);
     }
+    [Fact]
+    public async Task BatchCreateChildSubnets_WhenAnotherRowAlreadyHoldsThisVNet_QualifiesTheParentName()
+    {
+        const string VNetId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/mp";
+
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 90, Name = "mp", NetworkAddress = "10.101.0.0", Cidr = 16, AzureResourceId = VNetId
+        });
+        _context.Subnets.Add(new Subnet { Id = 91, Name = "planB", NetworkAddress = "10.102.0.0", Cidr = 16 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "sub-b", NetworkAddress = "10.102.1.0", Cidr = 24, ParentSubnetId = 91 }
+        ];
+
+        await _controller.BatchCreateChildSubnets(
+            91, subnets, vnetName: "mp", vnetResourceId: VNetId, isAzureImport: true);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([91], TestContext.Current.CancellationToken))!;
+        Assert.Equal("mp (10.102.0.0-16)", parent.Name);
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_WhenNoOtherRowHoldsThisVNet_KeepsTheBareName()
+    {
+        const string VNetId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/simple";
+
+        _context.Subnets.Add(new Subnet { Id = 92, Name = "placeholder", NetworkAddress = "10.103.0.0", Cidr = 16 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "s1", NetworkAddress = "10.103.1.0", Cidr = 24, ParentSubnetId = 92 }
+        ];
+
+        await _controller.BatchCreateChildSubnets(
+            92, subnets, vnetName: "simple", vnetResourceId: VNetId, isAzureImport: true);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([92], TestContext.Current.CancellationToken))!;
+        Assert.Equal("simple", parent.Name);
+    }
+
+    [Fact]
+    public async Task BatchCreateChildSubnets_RepeatImportIntoTheAlreadyLinkedTarget_DoesNotRename()
+    {
+        const string VNetId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/again";
+
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 93, Name = "again", NetworkAddress = "10.104.0.0", Cidr = 16, AzureResourceId = VNetId
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        List<AzureImportSubnetViewModel> subnets =
+        [
+            new() { Name = "s1", NetworkAddress = "10.104.1.0", Cidr = 24, ParentSubnetId = 93 }
+        ];
+
+        await _controller.BatchCreateChildSubnets(
+            93, subnets, vnetName: "again", vnetResourceId: VNetId, isAzureImport: true);
+
+        _context.ChangeTracker.Clear();
+        Subnet parent = (await _context.Subnets.FindAsync([93], TestContext.Current.CancellationToken))!;
+        Assert.Equal("again", parent.Name);
+    }
 }

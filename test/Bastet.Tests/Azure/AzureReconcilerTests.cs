@@ -800,4 +800,22 @@ public class AzureReconcilerTests
         Assert.True(plan.CanCommit);
         Assert.Empty(plan.Warnings);
     }
+    [Fact]
+    public void AWithholdingWarning_IdentifiesEachSubnetByItsRangeNotOnlyItsName()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.113.0.0/16"])),
+            Linked(5, "app", "10.113.2.0", 24, SubnetId("vnet-a", "app")),
+            Linked(6, "app", "172.16.2.0", 24, SubnetId("vnet-b", "app")));
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [SubnetId("vnet-a", "app")] = AzureResourceConfirmation.NotVisible,
+            [SubnetId("vnet-b", "app")] = AzureResourceConfirmation.NotVisible
+        });
+
+        string warning = Assert.Single(plan.Warnings, w => w.Contains("withheld from deletion"));
+        Assert.Contains("'app' (10.113.2.0/24)", warning);
+        Assert.Contains("'app' (172.16.2.0/24)", warning);
+    }
 }

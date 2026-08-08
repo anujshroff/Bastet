@@ -139,6 +139,14 @@ public partial class SubnetController : Controller
         }
     }
 
+    private static bool HasPersistedSiblingHoldingSameVNet(
+        Models.Subnet target, string? vnetResourceId, List<Models.Subnet> persistedSubnets) =>
+        !string.IsNullOrEmpty(vnetResourceId)
+        && persistedSubnets.Any(e =>
+            e.Id != target.Id
+            && !string.IsNullOrEmpty(e.AzureResourceId)
+            && string.Equals(e.AzureResourceId, vnetResourceId, StringComparison.OrdinalIgnoreCase));
+
     private static bool HasPersistedSiblingFromSameAzureSubnet(
         AzureImportSubnetViewModel subnet,
         IReadOnlyList<Subnet> persistedSubnets) =>
@@ -284,9 +292,12 @@ public partial class SubnetController : Controller
                 if (!targetIsPopulated)
                 {
 
-                    string proposed = vnetName.Length > MaxSubnetNameLength
-                        ? vnetName[..MaxSubnetNameLength]
-                        : vnetName;
+                    string proposed = HasPersistedSiblingHoldingSameVNet(parentSubnet, vnetResourceId, treeCache)
+                        ? SubnetNaming.WithSuffix(
+                            vnetName, $" ({parentSubnet.NetworkAddress}-{parentSubnet.Cidr})", MaxSubnetNameLength)
+                        : vnetName.Length > MaxSubnetNameLength
+                            ? vnetName[..MaxSubnetNameLength]
+                            : vnetName;
 
                     parentRenamed = !string.Equals(parentSubnet.Name, proposed, StringComparison.Ordinal);
                     parentSubnet.Name = proposed;
