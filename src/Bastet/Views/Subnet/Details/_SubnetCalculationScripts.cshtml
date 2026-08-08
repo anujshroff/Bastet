@@ -1,7 +1,7 @@
 @model SubnetDetailsViewModel
 
 <script>
-    // Serialize child subnet data for JavaScript use
+
     const childSubnets = [
         @foreach (var child in Model.ChildSubnets)
         {
@@ -14,82 +14,57 @@
             </text>
         }
     ];
-    
+
     $(document).ready(function() {
-        // Initialize popovers/tooltips
+
         $('[data-bs-toggle="tooltip"]').tooltip();
-        
-        // Handle Create Subnet button click
+
         $('.create-subnet-btn').click(function() {
             const networkAddress = $(this).data('network');
             const parentId = $(this).data('parent-id');
             const parentCidr = parseInt($(this).data('parent-cidr'));
-            
-            // Set values in the modal
+
             $('#networkAddressDisplay').val(networkAddress);
             $('#originalNetworkAddress').val(networkAddress);
             $('#parentId').val(parentId);
             $('#parentCidr').val(parentCidr);
-            
-            // Calculate the optimal CIDR for this network address
+
             const optimalCidr = findOptimalCidr(networkAddress, parentCidr);
             $('#recommendedCidr').val(optimalCidr);
-            
-            // Set valid CIDR range
+
             const minCidr = Number(parentCidr) + 1;
             const maxCidr = 32;
             $('#validCidrRange').text(`${minCidr} - ${maxCidr} (recommended: ${optimalCidr})`);
-            
-            // Set attributes of CIDR input
+
             $('#cidrInput').attr('min', minCidr);
             $('#cidrInput').attr('max', maxCidr);
-            $('#cidrInput').val(optimalCidr); // Set to optimal value
-            
-            // Reset network address field to read-only state
+            $('#cidrInput').val(optimalCidr);
+
             makeNetworkAddressReadOnly();
 
-            // The modal is not destroyed on close - data-bs-dismiss only removes .show - so the
-            // classes and the message the input handler wrote survive until something clears them,
-            // and nothing did. Reopening therefore showed the previous range's failure under a
-            // freshly computed, valid CIDR, with the Create button enabled: an error saying the
-            // subnet cannot be created next to a button saying it can. Cleared before the modal is
-            // shown below, so there is no flash of the stale red state. The default string is the
-            // one in _CidrInputModal.cshtml and in the success branch, so the three stay in step.
             $('#cidrInput').removeClass('is-invalid is-valid');
             $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
-            
-            // Calculate initial subnet size
+
             updateSubnetSize(optimalCidr);
-            
-            // Show the modal
+
             const modal = new bootstrap.Modal(document.getElementById('cidrInputModal'));
             modal.show();
-            
-            // Enable Create button
+
             $('#createSubnetBtn').prop('disabled', false);
         });
-        
-        // Flag that the address was moved off the one the button carried. The field stays read-only:
-        // nothing listens to it - instrumenting jQuery.on and addEventListener before this script runs
-        // shows three bindings, none of them on this field and none delegated - so a typed value
-        // skipped the overlap check entirely while the help text below still claimed the address had
-        // been "adjusted to avoid overlaps". Nothing is lost by leaving it locked, because
-        // findCompatibleNetworkAddress searches only within the parent's boundaries and skips every
-        // child, so the value it writes is always inside the parent, aligned and clear of siblings.
+
         function markNetworkAddressAdjusted() {
             $('#networkAddressDisplay').addClass('border-warning');
             $('#networkAddressHelp').html('<span class="text-warning">This network address has been adjusted to avoid overlaps.</span>');
             $('#networkAddressHelp').removeClass('d-none');
         }
-        
-        // Restore network address field to read-only
+
         function makeNetworkAddressReadOnly() {
             $('#networkAddressDisplay').prop('readonly', true);
             $('#networkAddressDisplay').removeClass('border-warning');
             $('#networkAddressHelp').addClass('d-none');
         }
-        
-        // Handle CIDR input change
+
         $('#cidrInput').on('input', function() {
             const cidrValue = parseInt($(this).val());
             const parentCidr = parseInt($('#parentCidr').val());
@@ -97,26 +72,24 @@
             const originalNetworkAddress = $('#originalNetworkAddress').val() || networkAddress;
             const minCidr = parentCidr + 1;
             const maxCidr = 32;
-            
-            // Get the recommended CIDR for the original network address
+
             const recommendedCidr = parseInt($('#recommendedCidr').val());
-            
-            // Check if user wants a larger subnet (smaller CIDR) than recommended
+
             if (cidrValue < recommendedCidr && cidrValue >= minCidr && cidrValue <= maxCidr) {
-                // Try to find a compatible network address for this CIDR
+
                 const compatibleAddress = findCompatibleNetworkAddress(originalNetworkAddress, cidrValue);
-                
+
                 if (compatibleAddress) {
-                    // We found a compatible address, update the field
+
                     $('#networkAddressDisplay').val(compatibleAddress);
                     networkAddress = compatibleAddress;
                     markNetworkAddressAdjusted();
-                    
+
                     $(this).removeClass('is-invalid').addClass('is-valid');
                     $('#createSubnetBtn').prop('disabled', false);
                     updateSubnetSize(cidrValue);
                 } else {
-                    // No compatible address found for this CIDR
+
                     $(this).removeClass('is-valid').addClass('is-invalid');
                     $('#createSubnetBtn').prop('disabled', true);
                     $('#cidrValidationFeedback').text('No compatible network address found for this CIDR size.');
@@ -124,27 +97,21 @@
                     return;
                 }
             } else {
-                // Reset network address to original
+
                 $('#networkAddressDisplay').val(originalNetworkAddress);
                 networkAddress = originalNetworkAddress;
                 makeNetworkAddressReadOnly();
             }
-            
-            // Check if this CIDR would overlap with existing subnets
+
             const wouldOverlap = checkForOverlap(networkAddress, cidrValue);
-            
-            // Validate CIDR for basic range and overlap
+
             if (cidrValue >= minCidr && cidrValue <= maxCidr && !wouldOverlap) {
                 $(this).removeClass('is-invalid').addClass('is-valid');
                 $('#createSubnetBtn').prop('disabled', false);
                 $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
                 updateSubnetSize(cidrValue);
             } else if (isNaN(cidrValue) || cidrValue < minCidr || cidrValue > maxCidr) {
-                // Range before overlap: a CIDR that is both out of range and overlapping was
-                // reported as an overlap, which is not the objection the operator can act on.
-                // isNaN is tested explicitly because a cleared field parses to NaN and every
-                // NaN comparison is false, so the range test alone would drop it through to the
-                // overlap arm below - claiming a collision with a sibling that need not exist.
+
                 $(this).removeClass('is-valid').addClass('is-invalid');
                 $('#createSubnetBtn').prop('disabled', true);
                 $('#cidrValidationFeedback').text('Please enter a valid CIDR value within the allowed range.');
@@ -156,52 +123,42 @@
                 $('#subnetSizeDisplay').text('Invalid - Would overlap');
             }
         });
-        
-        // Handle form submission
+
         $('#createSubnetBtn').click(function() {
             const networkAddress = $('#networkAddressDisplay').val();
             const cidr = $('#cidrInput').val();
             const parentId = $('#parentId').val();
-            // Redirect to Create page with prefilled values
+
             window.location.href = `/Subnet/Create?networkAddress=${networkAddress}&cidr=${cidr}&parentId=${parentId}`;
         });
-        
-        // Function to calculate subnet size based on CIDR
+
         function updateSubnetSize(cidr) {
             const size = Math.pow(2, 32 - cidr);
-            // A /31 is a point-to-point pair and a /32 a single host: neither reserves a network or
-            // broadcast address (RFC 3021), so both are usable. Subtracting two there reported "0
-            // IP addresses" for a subnet the server, and the Create page's own copy of this
-            // calculation, both count as usable.
+
             const usableSize = cidr >= 31
                 ? (cidr === 31 ? 2 : 1)
                 : Math.max(0, size - 2);
             $('#subnetSizeDisplay').text(usableSize.toLocaleString());
         }
-        
-        // Debug log function
+
         function debugLog(message) {
             console.log(`[SUBNET DEBUG] ${message}`);
         }
-        
-        // Function to find optimal CIDR for a given network address
+
         function findOptimalCidr(networkAddress, parentCidr) {
             debugLog(`Finding optimal CIDR for ${networkAddress} with parent CIDR /${parentCidr}`);
-            
-            // Start with the smallest valid CIDR (largest subnet)
+
             let cidr = parentCidr + 1;
             const maxCidr = 32;
-            
-            // Normalize the network address to its true subnet boundary
+
             const normalizedNetworkAddress = normalizeIpToSubnetBoundary(networkAddress, cidr);
             debugLog(`Normalized network address: ${normalizedNetworkAddress}`);
-            
-            // Check each CIDR value until we find one that doesn't overlap
+
             while (cidr <= maxCidr) {
-                // For each CIDR, we need to normalize the IP to its actual subnet boundary
+
                 const cidrNormalizedAddress = normalizeIpToSubnetBoundary(networkAddress, cidr);
                 debugLog(`Testing CIDR /${cidr} with normalized address ${cidrNormalizedAddress}`);
-                
+
                 if (!checkForOverlap(cidrNormalizedAddress, cidr)) {
                     debugLog(`Found optimal CIDR: /${cidr}`);
                     return cidr;
@@ -209,32 +166,23 @@
                 debugLog(`CIDR /${cidr} would overlap, trying next`);
                 cidr++;
             }
-            
-            // If all CIDRs would overlap (unlikely), return the max
+
             debugLog(`No non-overlapping CIDR found, returning max CIDR /${maxCidr}`);
             return maxCidr;
         }
-        
-        // Function to normalize an IP address to its subnet boundary based on CIDR
+
         function normalizeIpToSubnetBoundary(ipAddress, cidr) {
             const ipNum = ipAddressToNumber(ipAddress);
-            // Create a mask based on the CIDR
-            // cidr === 0 has to be special-cased: 1 << 32 is 1 in JavaScript, so the shift yields
-        // 255.255.255.255 where the server and the Create page both yield 0.0.0.0. Four of the six
-        // copies of this expression already guard it; these two did not.
+
         const mask = cidr === 0 ? 0 : ~((1 << (32 - cidr)) - 1);
-            // Apply the mask to get the subnet boundary. This is signed for addresses at or above
-            // 128.0.0.0, which is harmless here and deliberately left alone: the value is only ever
-            // handed to numberToIpAddress, whose unsigned >>> shifts render it correctly, and is
-            // never compared numerically the way findCompatibleNetworkAddress's cursor is.
+
             const normalizedIpNum = ipNum & mask;
-            // Convert back to dotted notation
+
             return numberToIpAddress(normalizedIpNum);
         }
-        
-        // Function to convert a number back to an IP address
+
         function numberToIpAddress(num) {
-            // For IPv4
+
             return [
                 (num >>> 24) & 255,
                 (num >>> 16) & 255,
@@ -242,120 +190,94 @@
                 num & 255
             ].join('.');
         }
-        
-        // Function to check if a subnet would overlap with existing subnets
+
         function checkForOverlap(networkAddress, cidr) {
-            // Get the numeric boundaries of the subnet
+
             const { start, end } = getSubnetBoundaries(networkAddress, cidr);
-            
+
             debugLog(`Checking subnet ${networkAddress}/${cidr} with range ${numberToIpAddress(start)}-${numberToIpAddress(end)}`);
-            
-            // Check each child subnet for overlap
+
             for (const child of childSubnets) {
                 const childBoundaries = getSubnetBoundaries(child.networkAddress, child.cidr);
-                
+
                 debugLog(`  Against child subnet ${child.networkAddress}/${child.cidr} with range ${numberToIpAddress(childBoundaries.start)}-${numberToIpAddress(childBoundaries.end)}`);
-                
-                // Check for overlap (either subnet contains the other or they intersect)
-                if ((start <= childBoundaries.end && end >= childBoundaries.start) || 
+
+                if ((start <= childBoundaries.end && end >= childBoundaries.start) ||
                     (childBoundaries.start <= end && childBoundaries.end >= start)) {
                     debugLog(`  OVERLAP DETECTED!`);
                     return true;
                 }
             }
-            
+
             debugLog(`  No overlap found`);
             return false;
         }
-        
-        // Function to find a compatible network address for a given CIDR
+
         function findCompatibleNetworkAddress(startingAddress, cidr) {
             debugLog(`Finding compatible address for CIDR /${cidr} starting from ${startingAddress}`);
-            
-            // Convert the starting address to numeric form
+
             const startingNum = ipAddressToNumber(startingAddress);
-            
-            // Get the parent subnet boundaries from the form
+
             const parentCidr = parseInt($('#parentCidr').val());
             const parentId = $('#parentId').val();
-            
-            // Get parent network address
+
             const parentNetwork = childSubnets.find(s => s.id === parentId)?.networkAddress || startingAddress;
-            
-            // Calculate the parent's start and end ranges
+
             const parentBoundaries = getSubnetBoundaries(parentNetwork, parentCidr);
-            
-            // Calculate the subnet size based on CIDR
+
             const subnetSize = Math.pow(2, 32 - cidr);
-            
-            // Calculate the subnet bit boundary (we need to align to this)
-            // Guarded for symmetry with the site above. Not reachable at cidr === 0 today - the only
-        // caller constrains cidr to parentCidr + 1 or more - so this one fixes no observable output.
+
         const cidrBitMask = cidr === 0 ? 0 : ~((1 << (32 - cidr)) - 1);
-            
-            // Try each possible starting address within the parent's range.
-            // >>> 0 puts the result back in the unsigned domain: bitwise operands are coerced to
-            // signed 32-bit, so any address at or above 128.0.0.0 comes back negative, while the
-            // boundaries this is compared against below stay positive. Without it the overlap test
-            // compares a negative cursor to positive ranges, never matches, and the first aligned
-            // candidate is returned even when it sits on top of an existing child.
-            let currentStartingNum = (startingNum & cidrBitMask) >>> 0; // Align to subnet boundary
-            
+
+            let currentStartingNum = (startingNum & cidrBitMask) >>> 0;
+
             debugLog(`Parent range: ${numberToIpAddress(parentBoundaries.start)}-${numberToIpAddress(parentBoundaries.end)}`);
             debugLog(`Initial aligned address: ${numberToIpAddress(currentStartingNum)}`);
-            
-            // Check each possible starting position within parent's range
+
             while (currentStartingNum + subnetSize - 1 <= parentBoundaries.end) {
                 const potentialAddress = numberToIpAddress(currentStartingNum);
                 const potentialEnd = currentStartingNum + subnetSize - 1;
-                
+
                 debugLog(`Checking potential subnet ${potentialAddress}/${cidr} (${numberToIpAddress(currentStartingNum)}-${numberToIpAddress(potentialEnd)})`);
-                
-                // Check if this subnet would overlap with any existing child
+
                 let overlaps = false;
-                
+
                 for (const child of childSubnets) {
                     const childBoundaries = getSubnetBoundaries(child.networkAddress, child.cidr);
-                    
-                    // Check for overlap
-                    if ((currentStartingNum <= childBoundaries.end && potentialEnd >= childBoundaries.start) || 
+
+                    if ((currentStartingNum <= childBoundaries.end && potentialEnd >= childBoundaries.start) ||
                         (childBoundaries.start <= potentialEnd && childBoundaries.end >= currentStartingNum)) {
                         overlaps = true;
                         debugLog(`  Overlaps with child ${child.networkAddress}/${child.cidr}`);
                         break;
                     }
                 }
-                
+
                 if (!overlaps) {
                     debugLog(`  Found compatible address: ${potentialAddress}/${cidr}`);
                     return potentialAddress;
                 }
-                
-                // Move to the next subnet boundary
+
                 currentStartingNum += subnetSize;
             }
-            
-            // No compatible address found
+
             debugLog(`No compatible address found for CIDR /${cidr}`);
             return null;
         }
-        
-        // Function to get subnet boundaries
+
         function getSubnetBoundaries(networkAddress, cidr) {
-            // Normalize the address to ensure it's on the subnet boundary
+
             const normalizedAddress = normalizeIpToSubnetBoundary(networkAddress, cidr);
             const start = ipAddressToNumber(normalizedAddress);
-            
-            // Calculate the subnet size based on CIDR
+
             const size = Math.pow(2, 32 - cidr);
             const end = start + size - 1;
-            
+
             return { start, end };
         }
-        
-        // Helper function to convert IP address to a number for comparison
+
         function ipAddressToNumber(ip) {
-            // For IPv4
+
             const parts = ip.split('.');
             let result = 0;
             for (let i = 0; i < 4; i++) {

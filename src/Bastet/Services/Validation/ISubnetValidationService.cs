@@ -2,46 +2,15 @@ using Bastet.Models;
 
 namespace Bastet.Services.Validation;
 
-/// <summary>
-/// Defines methods for validating subnet operations
-/// </summary>
 public interface ISubnetValidationService
 {
-    /// <summary>
-    /// Validates that a subnet is properly contained within a parent subnet
-    /// </summary>
-    /// <param name="childNetwork">The child network address</param>
-    /// <param name="childCidr">The child CIDR</param>
-    /// <param name="parentNetwork">The parent network address</param>
-    /// <param name="parentCidr">The parent CIDR</param>
+
     ValidationResult ValidateSubnetContainment(string childNetwork, int childCidr, string parentNetwork, int parentCidr);
 
-    /// <summary>
-    /// Validates that a subnet has the correct format
-    /// </summary>
-    /// <param name="networkAddress">The network address</param>
-    /// <param name="cidr">The CIDR value</param>
     ValidationResult ValidateSubnetFormat(string networkAddress, int cidr);
 
-    /// <summary>
-    /// Validates that a subnet doesn't overlap with its siblings
-    /// </summary>
-    /// <param name="networkAddress">The network address</param>
-    /// <param name="cidr">The CIDR value</param>
-    /// <param name="siblings">The sibling subnets</param>
     ValidationResult ValidateSiblingOverlap(string networkAddress, int cidr, IEnumerable<Subnet> siblings);
 
-    /// <summary>
-    /// Validates a change in subnet CIDR
-    /// </summary>
-    /// <param name="subnetId">The ID of the subnet being modified</param>
-    /// <param name="networkAddress">The subnet's network address</param>
-    /// <param name="originalCidr">The original CIDR value</param>
-    /// <param name="newCidr">The new CIDR value</param>
-    /// <param name="parentSubnet">The parent subnet, if any</param>
-    /// <param name="siblings">Sibling subnets, if any</param>
-    /// <param name="children">Child subnets, if any</param>
-    /// <param name="allOtherSubnets">All other subnets in the system, for comprehensive overlap validation</param>
     ValidationResult ValidateSubnetCidrChange(
         int subnetId,
         string networkAddress,
@@ -52,10 +21,5 @@ public interface ISubnetValidationService
         IEnumerable<Subnet>? children = null,
         IEnumerable<Subnet>? allOtherSubnets = null);
 
-    /// <summary>
-    /// Validates that a parent subnet can have child subnets added (doesn't have host IPs)
-    /// </summary>
-    /// <param name="parentId">The ID of the parent subnet</param>
-    /// <param name="hostIps">The host IP assignments of the parent subnet, if any</param>
     ValidationResult ValidateParentCanHaveChildSubnets(int parentId, IEnumerable<HostIpAssignment>? hostIps = null);
 }

@@ -7,15 +7,15 @@
     <div class="card-body">
         <form asp-action="Delete" method="post">
             <input type="hidden" name="ip" value="@Model.IP" />
-            
+
             <div class="mb-3">
                 <div class="form-text mb-2">This action cannot be undone. Type <strong>approved</strong> to confirm.</div>
                 <input type="text" name="confirmation" class="form-control" placeholder="Type 'approved' here"
                        required autocomplete="off" />
             </div>
-            
+
             <div class="d-flex justify-content-between mt-4">
-                <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId" 
+                <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId"
                    class="btn btn-secondary">
                     <i class="bi bi-x-circle"></i> Cancel
                 </a>

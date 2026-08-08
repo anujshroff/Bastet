@@ -13,16 +13,6 @@ using Moq;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// The reconcile commit re-derives Azure verdicts and archives whatever is still stale. Testing set
-/// membership is not the same as testing consent: a row approved under "the Azure resource no longer
-/// exists" can still be in the plan moments later under "the prefix changed" - a different fact,
-/// reached with no direct ARM read - and the subtree was archived on an approval whose stated
-/// premise the server had itself disproved.
-///
-/// The endpoint's own docstring promises "a resource that reappeared in Azure cannot cause the wrong
-/// subnets to be archived". These tests are that promise.
-/// </summary>
 [Collection(AzureFeatureFlagCollection.Name)]
 public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
 {
@@ -61,8 +51,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
 
         Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "true");
 
-        // The import target, plus a hand-created child and a host IP carrying no Azure provenance
-        // at all - the rows an archive on a disproved premise takes with it.
         _context.Subnets.Add(new Subnet
         {
             Id = 1,
@@ -100,11 +88,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>
-    /// The VNet is back at the same ARM id (ids are path-based, so an IaC destroy/apply recreates
-    /// the same id) but with a different prefix. The row is still stale - as VNetPrefixRemoved, a
-    /// drift verdict taken off the listing with no direct ARM read - not as VNetDeleted.
-    /// </summary>
     private static MockAzureService VNetBackWithADifferentPrefix() =>
         new(true,
             vnets: [new AzureVNetViewModel { ResourceId = VNetId, Name = "vnet-a", AddressPrefixes = ["10.112.0.0/16"] }]);
@@ -129,15 +112,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         Assert.Empty(await _context.DeletedSubnets.ToListAsync(TestContext.Current.CancellationToken));
     }
 
-    // -------------------------------------------------------------------------
-    // The defect
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Approved as "the VNet no longer exists"; by commit time the server itself says it does exist
-    /// and merely changed prefix. The id is still in the plan, so the existing membership check
-    /// passes it straight through.
-    /// </summary>
     [Fact]
     public async Task ApprovedAsDeleted_ButReDerivedAsDrift_IsRefusedAndArchivesNothing()
     {
@@ -155,10 +129,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         await AssertNothingArchived();
     }
 
-    /// <summary>
-    /// Same status, different facts. Comparing the status alone would let this through, which is why
-    /// the reason is compared too.
-    /// </summary>
     [Fact]
     public async Task ApprovedWithTheSameStatusButADifferentReason_IsRefused()
     {
@@ -174,10 +144,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         _ = Assert.IsType<ConflictObjectResult>(result);
         await AssertNothingArchived();
     }
-
-    // -------------------------------------------------------------------------
-    // Mandatory: an omitted or unusable verdict is not consent
-    // -------------------------------------------------------------------------
 
     [Fact]
     public async Task ARequestNamingNoVerdictAtAll_IsRefused()
@@ -202,10 +168,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         await AssertNothingArchived();
     }
 
-    /// <summary>
-    /// A status name that parses to nothing establishes nothing, so it is a divergence rather than
-    /// "unverified" - the same rule the bulk import commit applies to an unparseable TargetType.
-    /// </summary>
     [Theory]
     [InlineData("NotAStatus")]
     [InlineData("")]
@@ -225,10 +187,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         await AssertNothingArchived();
     }
 
-    // -------------------------------------------------------------------------
-    // Counter-test - a matching verdict must still archive, or the feature is dead
-    // -------------------------------------------------------------------------
-
     [Fact]
     public async Task AVerdictThatStillMatches_ArchivesNormally()
     {
@@ -237,7 +195,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         AzureReconcileDeleteDto request = Request();
         request.Statuses = await AzureReconcileApproval.ForAsync(azure, _snapshotService, SubId, [1]);
 
-        // Sanity: the scan really did produce a verdict to approve.
         Assert.Single(request.Statuses);
         Assert.Equal(nameof(AzureReconcileStatus.VNetPrefixRemoved), request.Statuses[0].StatusName);
 
@@ -248,12 +205,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         Assert.Null(await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken));
     }
 
-    /// <summary>
-    /// O14. Statuses holds reference elements, and System.Text.Json materialises "statuses":[null]
-    /// as a one-element list containing null. Grouping over it dereferenced that element and threw
-    /// before this action's only try block, so the documented JSON API answered an HTML 500 and the
-    /// wizard rendered "Server error: 500" in place of a modelled message.
-    /// </summary>
     [Fact]
     public async Task ARequestWithANullVerdictElement_IsRefusedWithModelledJson()
     {
@@ -264,10 +215,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         await AssertNothingArchived();
     }
 
-    /// <summary>
-    /// A mixed body is malformed too, and must not archive on the strength of the valid half -
-    /// with the LINQ filter alone this returned 200 and archived the row.
-    /// </summary>
     [Fact]
     public async Task ARequestMixingANullVerdictWithAValidOne_IsRefusedAndArchivesNothing()
     {

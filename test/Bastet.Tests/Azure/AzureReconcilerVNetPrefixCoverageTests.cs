@@ -4,16 +4,6 @@ using Bastet.Services.Azure;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// O2. A VNet-level import target is judged by string membership of its recorded prefix in the
-/// VNet's current address prefixes, and VNetPrefixRemoved is deletable without any ARM confirmation.
-/// Resizing or re-carving a VNet's address space is ordinary, and when it happens the recorded range
-/// is still entirely inside what the VNet owns - so the row was offered for irreversible deletion
-/// while Azure still covered every address it records.
-///
-/// The counter-tests carry as much weight as the positives: a VNet prefix that really is gone must
-/// still be deletable, or the fix trades a silent archive for a reconciler that can never clean up.
-/// </summary>
 public class AzureReconcilerVNetPrefixCoverageTests
 {
     private const string SubId = "11111111-1111-1111-1111-111111111111";
@@ -43,11 +33,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
     private AzureReconcilePlanViewModel Build(AzureVNetInventory inventory, AzureLinkedSubnetSnapshot target) =>
         _reconciler.BuildPlan(SubId, "Test Sub", inventory, [target], []);
 
-    // -------------------------------------------------------------------------
-    // The defect
-    // -------------------------------------------------------------------------
-
-    /// <summary>Expand: 10.180.0.0/16 -> /15. The recorded range is wholly inside the new space.</summary>
     [Fact]
     public void AVNetPrefixExpandedToASuperset_IsWithheldNotOfferedForDeletion()
     {
@@ -63,11 +48,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.False(plan.CanCommit);
     }
 
-    /// <summary>
-    /// The case that defeats a containment-only guard, and the reason the test is overlap rather
-    /// than containment: 10.190.0.0/16 re-carved into two /17s whose union is byte-identical to the
-    /// original. Nothing was released, and neither /17 contains the /16.
-    /// </summary>
     [Fact]
     public void AVNetPrefixRecarvedWithIdenticalTotalCoverage_IsWithheld()
     {
@@ -79,8 +59,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.Equal(AzureReconcileStatus.VNetPrefixStillCovered, Assert.Single(plan.ReviewItems).Status);
     }
 
-    /// <summary>Shrink: 10.180.0.0/16 -> /17. Part of the recorded range really was released, but
-    /// part of it is still owned, so archiving still loses a live allocation record.</summary>
     [Fact]
     public void AVNetPrefixShrunkToASubset_IsWithheld()
     {
@@ -92,10 +70,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.Equal(AzureReconcileStatus.VNetPrefixStillCovered, Assert.Single(plan.ReviewItems).Status);
     }
 
-    /// <summary>
-    /// Re-link is not the repair here - the VNet resource id never changed - so the row must carry
-    /// no suggestion, or the button would write the id it already has.
-    /// </summary>
     [Fact]
     public void AStillCoveredVNetPrefix_OffersNoRelinkSuggestion()
     {
@@ -107,12 +81,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.True(string.IsNullOrEmpty(review.SuggestedAzureResourceId));
     }
 
-    // -------------------------------------------------------------------------
-    // Counter-tests - the reconciler must still discriminate
-    // -------------------------------------------------------------------------
-
-    /// <summary>The whole point. A prefix genuinely removed, overlapping nothing the VNet still
-    /// owns, must remain deletable.</summary>
     [Fact]
     public void AVNetPrefixThatOverlapsNothingTheVNetStillOwns_IsStillOfferedForDeletion()
     {
@@ -125,8 +93,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.Empty(plan.ReviewItems);
     }
 
-    /// <summary>A VNet with no IPv4 space left at all is absent from the inventory entirely, and
-    /// must still read as deleted rather than as covered.</summary>
     [Fact]
     public void AVNetThatIsGoneEntirely_IsStillOfferedForDeletion()
     {
@@ -137,7 +103,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.Equal(AzureReconcileStatus.VNetDeleted, Assert.Single(plan.Items).Status);
     }
 
-    /// <summary>An unchanged prefix is not drift at all and must be reported nowhere.</summary>
     [Fact]
     public void AVNetPrefixStillPresentVerbatim_IsReportedNowhere()
     {
@@ -149,10 +114,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.Empty(plan.ReviewItems);
     }
 
-    /// <summary>
-    /// Scoping check. An overlapping prefix on a DIFFERENT VNet must not rescue this row -
-    /// overlapping RFC1918 across VNets in one subscription is normal.
-    /// </summary>
     [Fact]
     public void AnOverlappingPrefixOnAnotherVNet_DoesNotWithholdTheDeletion()
     {
@@ -163,10 +124,6 @@ public class AzureReconcilerVNetPrefixCoverageTests
         Assert.Equal(AzureReconcileStatus.VNetPrefixRemoved, Assert.Single(plan.Items).Status);
     }
 
-    /// <summary>
-    /// A withheld VNet-level row must protect its subtree the way every other ReviewItems row does:
-    /// ApplyConfirmations seeds the cascade-withhold set from ReviewItems.
-    /// </summary>
     [Fact]
     public void AStillCoveredTarget_ProtectsItsDescendantsFromTheCascade()
     {

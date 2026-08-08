@@ -7,8 +7,6 @@
     <p class="mt-2">Comparing Azure against BASTET...</p>
 </div>
 
-@* Shown when the scan itself failed. No rows and no delete option are rendered in that case:
-   an unanswered question must never look like "everything was deleted". *@
 <div id="rec-scan-error" class="alert alert-danger d-none">
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
     <strong>Nothing was checked.</strong>
@@ -20,17 +18,20 @@
     </p>
 </div>
 
-@* A failed RE-LINK is a different fact from a failed scan, and reusing the panel above asserted
-   three things that are all false here: Azure was read, the scan did succeed, and rows may well
-   still be offered for deletion on this very screen. This panel says only what happened, and it
-   lives outside #rec-scan-content so the automatic re-scan that follows does not wipe it. *@
+<div id="rec-relink-success" class="alert alert-success d-none">
+    <i class="bi bi-check-circle-fill me-2"></i>
+    <strong>Re-link saved.</strong>
+    <div id="rec-relink-success-message" class="mt-1"></div>
+</div>
+
 <div id="rec-relink-error" class="alert alert-danger d-none">
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
     <strong>The re-link did not happen.</strong>
     <div id="rec-relink-error-message" class="mt-1"></div>
     <hr>
+
     <p class="mb-0">
-        Nothing was changed. The results below have been re-scanned, so they reflect Azure as it is now.
+        Nothing was changed. <span id="rec-relink-rescan-note"></span>
     </p>
 </div>
 
@@ -83,7 +84,6 @@
         </div>
     </div>
 
-    @* Drift that cannot be fixed by deleting anything, so it is listed without checkboxes. *@
     <div id="rec-review-section" class="d-none mt-4">
         <h5><i class="bi bi-eye"></i> Needs review</h5>
         <div class="alert alert-secondary">

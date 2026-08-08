@@ -1,8 +1,5 @@
 namespace Bastet.Models;
 
-/// <summary>
-/// Represents a range of IP addresses
-/// </summary>
 public class IPRange
 {
     public string StartIp { get; set; } = string.Empty;

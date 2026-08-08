@@ -11,14 +11,14 @@
             <i class="bi bi-dash"></i>
         }
     </span>
-    
+
     <div class="subnet-content">
         <a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.Id" class="text-decoration-none">
             <span class="subnet-name">@Model.Name</span>
             <span class="subnet-address">@Model.NetworkAddress/@Model.Cidr</span>
-            
+
         </a>
-        
+
         <div class="subnet-details">
             <span>Mask: @Model.SubnetMask</span> |
             <span>Usable IPs: @Model.UsableIpAddresses.ToString("N0")</span>
@@ -28,7 +28,7 @@
             }
         </div>
     </div>
-    
+
     @if (Model.ChildSubnets.Any())
     {
         <div class="subnet-children">

@@ -1,6 +1,5 @@
 @model SubnetDetailsViewModel
 
-@* Unallocated IP Ranges partial view *@
 @if (!Model.IsFullyAllocated && Model.UnallocatedRanges.Any())
 {
     <div class="card mb-4">
@@ -8,16 +7,7 @@
             <h5 class="mb-0">Unallocated IP Ranges</h5>
         </div>
         <div class="card-body">
-            @*
-                This table is BASTET's answer to "what is free?", and for an Azure-linked subnet that
-                answer is only as current as the last import. Azure can assign a range inside this
-                subnet at any time - adding a prefix to an existing Azure subnet does exactly that -
-                and nothing here would know. Azure Reconcile is what establishes it.
 
-                Deliberately a static note rather than a live check: BASTET is self-hosted and must
-                keep working with no outbound internet, so rendering this page must never depend on
-                reaching ARM.
-            *@
             @if (!string.IsNullOrEmpty(Model.AzureResourceId))
             {
                 <div class="alert alert-warning d-flex align-items-start" role="alert">
@@ -50,14 +40,11 @@
                                 <td>@range.AddressCount.ToString("N0") IP addresses</td>
                                 <td>
                                     @inject Bastet.Services.IUserContextService SubnetUserContext
-                                    @* Model.Cidr < 32 because a /32 has no room for a child at all: the
-                                       modal computes a range of 33-32, leaves Create enabled, and the
-                                       POST can only ever be refused. Gating here removes the
-                                       impossible state rather than rendering it more politely. *@
+
                                     @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.HostIpAssignments.Count == 0 && Model.Cidr < 32)
                                     {
-                                        <button type="button" class="btn btn-sm btn-success create-subnet-btn" 
-                                                data-network="@range.StartIp" 
+                                        <button type="button" class="btn btn-sm btn-success create-subnet-btn"
+                                                data-network="@range.StartIp"
                                                 data-parent-id="@Model.Id"
                                                 data-ip-version="4"
                                                 data-parent-cidr="@Model.Cidr">

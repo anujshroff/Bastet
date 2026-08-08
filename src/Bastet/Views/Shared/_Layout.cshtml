@@ -43,7 +43,6 @@
                             </ul>
                         </li>
                         @{
-                            // The Azure pages are only shown when the feature flag is enabled and the user is an admin.
                             bool bulkAzureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _enabled) && _enabled;
                         }
                         @if (bulkAzureImportEnabled && UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
@@ -61,7 +60,6 @@
                         }
                     </ul>
 
-                    
                     @if (User.Identity?.IsAuthenticated == true)
                     {
                         <ul class="navbar-nav">
@@ -93,7 +91,7 @@
 
 <footer class="border-top footer text-muted">
         <div class="container-fluid">
-            &copy; 2025-2026 Anuj Shroff - 
+            &copy; 2025-2026 Anuj Shroff -
             <a href="https://bastet.anujshroff.com" target="_blank">BASTET</a>
             (Badass Subnetting Tools for Enhanced Transmission)
             <span class="float-end">Version: @VersionService.GetVersion()</span>

@@ -2,9 +2,6 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Models.DTOs;
 
-/// <summary>
-/// DTO for updating a host IP assignment
-/// </summary>
 public class UpdateHostIpDto
 {
     [Required(ErrorMessage = "IP address is required")]

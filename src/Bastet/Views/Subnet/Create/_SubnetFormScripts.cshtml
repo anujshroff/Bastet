@@ -1,15 +1,12 @@
 <script>
-    // Function to calculate subnet mask from CIDR
+
     function calculateSubnetMask(cidr) {
         if (cidr < 0 || cidr > 32) return "Invalid CIDR";
-        
-        // Special case for CIDR 0
+
         if (cidr === 0) return "0.0.0.0";
-        
-        // Create a bit mask based on the CIDR
+
         const mask = ~((1 << (32 - cidr)) - 1);
-        
-        // Convert to IP format
+
         return [
             (mask >>> 24) & 255,
             (mask >>> 16) & 255,
@@ -17,41 +14,32 @@
             mask & 255
         ].join('.');
     }
-    
-    // Function to calculate total IP addresses from CIDR
+
     function calculateTotalIPs(cidr) {
         if (cidr < 0 || cidr > 32) return 0;
         return Math.pow(2, 32 - cidr);
     }
-    
-    // Function to calculate usable IP addresses from CIDR
+
     function calculateUsableIPs(cidr) {
         if (cidr < 0 || cidr > 32) return 0;
-        
-        // Special cases: /31 allows 2 usable addresses (RFC 3021), /32 is a single host
+
         if (cidr >= 31) {
             return cidr === 31 ? 2 : 1;
         }
-        
-        // Normal case: total IPs minus network and broadcast addresses
+
         return Math.pow(2, 32 - cidr) - 2;
     }
-    
-    // Function to update subnet information when CIDR changes
+
     function updateSubnetInfo() {
         const cidrValue = parseInt($('#Cidr').val(), 10);
-        
+
         if (!isNaN(cidrValue) && cidrValue >= 0 && cidrValue <= 32) {
-            // Computed locally. This used to GET /api/subnets/calculate-mask, a route that has never
-            // existed in this application - so every keystroke 404'd, was re-executed into a full
-            // server-rendered error page, and then fell back to exactly this call anyway.
+
             $('#subnetMaskDisplay').text(calculateSubnetMask(cidrValue));
-            
-            // Calculate and display IP counts
+
             const totalIPs = calculateTotalIPs(cidrValue);
             const usableIPs = calculateUsableIPs(cidrValue);
-            
-            // Format large numbers with commas
+
             $('#maxIpsDisplay').text(totalIPs.toLocaleString());
             $('#usableIpsDisplay').text(usableIPs.toLocaleString());
         } else {
@@ -60,20 +48,16 @@
             $('#usableIpsDisplay').text('-');
         }
     }
-    
-    // Initialize form settings
+
     function initializeForm() {
         const cidrInput = $('#Cidr');
-        
-        // Set CIDR max value
+
         cidrInput.attr('max', '32');
-        
-        // Set help text
+
         $('#cidrRangeText').text('CIDR values: 0-32');
         $('#networkAddressHelp').text('Enter the network address (e.g. 192.168.1.0)');
         $('#NetworkAddress').attr('placeholder', '192.168.1.0');
-        
-        // Update subnet info if a value exists
+
         if (cidrInput.val() !== '') {
             updateSubnetInfo();
         } else {
@@ -83,11 +67,9 @@
         }
     }
 
-    // Attach event handlers
     $(document).ready(function() {
         $('#Cidr').on('input', updateSubnetInfo);
-        
-        // Initialize form settings
+
         initializeForm();
     });
 </script>

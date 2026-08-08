@@ -7,6 +7,5 @@ public static class ApplicationRoles
     public const string Delete = "Delete";
     public const string Admin = "Admin";
 
-    // Helper collection of all roles
     public static readonly IReadOnlyCollection<string> AllRoles = [View, Edit, Delete, Admin];
 }

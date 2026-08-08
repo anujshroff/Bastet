@@ -10,19 +10,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// The Subnet Details card must not name an address the application will happily assign as the
-/// subnet's broadcast address.
-/// </summary>
-/// <remarks>
-/// Regression for round-11 K5. <c>HostIpValidationService</c> applies the network/broadcast
-/// reservation only when <c>Cidr &lt; 31</c>, so both /31 addresses and the single /32 address are
-/// legitimately assignable - and the details page was computing a broadcast address for them
-/// unconditionally. On a /31 with both addresses assigned the page stated "Usable IP Addresses 2",
-/// named one of those two the broadcast, and listed that same address as a host IP assignment
-/// directly below. On a /32 the Network Address and Broadcast Address rows printed the identical
-/// string.
-/// </remarks>
 public class SubnetDetailsBroadcastAddressTests
 {
     private static SubnetController CreateController(BastetDbContext context)
@@ -69,10 +56,6 @@ public class SubnetDetailsBroadcastAddressTests
         Assert.Equal(string.Empty, model.BroadcastAddress);
     }
 
-    /// <summary>
-    /// The guard must not reach below /31, where a broadcast address is real and is enforced -
-    /// assigning it as a host IP is refused.
-    /// </summary>
     [Theory]
     [InlineData("10.213.0.0", 30, "10.213.0.3")]
     [InlineData("10.214.0.0", 24, "10.214.0.255")]

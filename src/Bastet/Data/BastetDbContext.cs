@@ -4,9 +4,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Data;
 
-/// <summary>
-/// Entity Framework DbContext for the BASTET application
-/// </summary>
 public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserContextService? userContextService = null) : DbContext(options)
 {
     public DbSet<Subnet> Subnets { get; set; } = null!;
@@ -18,16 +15,14 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
     {
         base.OnModelCreating(modelBuilder);
 
-        // Configure Subnet entity
         modelBuilder.Entity<Subnet>(entity =>
         {
-            // Configure the self-referencing relationship
+
             entity.HasOne(s => s.ParentSubnet)
                 .WithMany(s => s.ChildSubnets)
                 .HasForeignKey(s => s.ParentSubnetId)
-                .OnDelete(DeleteBehavior.Restrict); // Prevent cascade delete
+                .OnDelete(DeleteBehavior.Restrict);
 
-            // Create indexes
             entity.HasIndex(s => new { s.NetworkAddress, s.Cidr })
                 .IsUnique();
 
@@ -35,7 +30,6 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
 
             entity.HasIndex(s => s.Name);
 
-            // Configure properties
             entity.Property(s => s.NetworkAddress)
                 .IsRequired()
                 .HasMaxLength(45);
@@ -56,20 +50,17 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
             entity.Property(s => s.AzureResourceId)
                 .HasMaxLength(500);
 
-            // Add check constraints using the new API
             entity.ToTable(t => t.HasCheckConstraint("CK_Subnet_ValidCidr", "Cidr >= 0 AND Cidr <= 32"));
         });
 
-        // Configure HostIpAssignment entity
         modelBuilder.Entity<HostIpAssignment>(entity =>
         {
-            // Configure the relationship with Subnet
+
             entity.HasOne(h => h.Subnet)
                 .WithMany(s => s.HostIpAssignments)
                 .HasForeignKey(h => h.SubnetId)
-                .OnDelete(DeleteBehavior.Cascade); // When subnet is deleted, cascade to host IPs
+                .OnDelete(DeleteBehavior.Cascade);
 
-            // Configure properties
             entity.Property(h => h.IP)
                 .IsRequired()
                 .HasMaxLength(15);
@@ -77,12 +68,10 @@ public class BastetDbContext(DbContextOptions<BastetDbContext> options, IUserCon
             entity.Property(h => h.Name)
                 .HasMaxLength(100);
 
-            // Create indexes
             entity.HasIndex(h => h.IP).IsUnique();
             entity.HasIndex(h => h.SubnetId);
         });
 
-        // Configure DeletedHostIpAssignment entity
         modelBuilder.Entity<DeletedHostIpAssignment>(entity =>
         {
             entity.Property(h => h.OriginalIP)

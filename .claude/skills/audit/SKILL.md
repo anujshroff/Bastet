@@ -80,6 +80,58 @@ unprompted, and only then does it change.
 
 ---
 
+# What Bastet is
+
+**An IPAM tool. Its job is to be the authority on which IP space is allocated and which is free, and to
+let an operator manage that space.** Every judgement resolves against that, in this order:
+
+1. **Never report allocated space as free.** The worst output the product can produce. Reporting free
+   space as allocated is second-worst.
+2. **Never destroy an allocation record on incomplete information.** Archives are irreversible.
+3. **The operator must be able to act on what they are told.** A message naming a remedy the app refuses
+   is a defect.
+
+**If a capability ships, making it work correctly is in scope.** Bastet imports Azure subnets, so
+multi-prefix subnets, top-ups and re-carves are in scope. "Feature change, not a bug fix", "the data
+model does not support it" and "out of scope" are not verdicts a round may reach — they describe work,
+not reasons to decline. Round 6 used one and it shipped the bug for four rounds.
+
+Since round 1 there have been **no intended product changes**. Everything filed is a defect against
+behaviour the product already promises, either from the original implementation or introduced by a
+previous round's fixes. There is no third category.
+
+# The round exists to reduce defects, not to produce findings
+
+**Measure the residue rate and lead with it.** Every finding names which previous-round fix it came out
+of, or none. Round 16 was 11 of 15; its re-audit was 12 of 20. That means the fix process, not the
+codebase, has been the main defect source — and a round that does not say so plainly in its first
+sentence has buried the most important thing it knows.
+
+- **Report the defect, not the instance.** A finding naming one call site when the rule is wrong at
+  three hands the reconcile step a fix that cannot close it. Name every site.
+- **A proposed fix that would introduce a new defect is worse than no proposal.** Round 16 had eight of
+  fifteen judged unsound, three of which would have shipped a new defect. That check is the most
+  valuable thing verification produces.
+- **A fix proposal must be narrow.** If closing a defect appears to need a component restructured, say
+  so explicitly and separately — a restructure smuggled into a fix is where residue comes from.
+
+# No questions, ever
+
+The round asks for **inputs it cannot infer** — credentials, scale, git identity — once, up front, in a
+single message. Nothing else.
+
+**Never ask how to fix something, and never ask the owner to choose between fixes.** Both mean the round
+has not understood the product. Where a fix implies a change to what the product does, file the finding
+with the narrowest correct fix and state the product question *inside the finding* for the owner to read
+afterwards. Do not block.
+
+# No comments in source
+
+`.cs` and `.cshtml` files carry none, by the owner's standing instruction. **Never file "this needs a
+comment", a missing-doc or stale-comment observation, and never propose a fix whose substance is a
+comment.** Refused on sight. If a rule needs explaining, the fix is a named method or a test that fails
+when it is broken.
+
 # You are the operator, not a spectator
 
 Launch the workflow, then **watch it and intervene**. Round 7's skill said to launch and say nothing,
@@ -172,9 +224,14 @@ that is data. Analysis only when asked for.
 | tree | dirty entry count |
 | HEAD | short sha |
 
-At launch: one line. At completion: the funnel, the severities, the headline finding, the commit sha,
-anything the teardown failed to clean, and — **always** — a reminder to revoke the service principal
-secrets. This skill asked for them; this skill reminds you to kill them.
+At launch: one line. At completion: the funnel, the severities, the headline finding, **the residue
+rate** (`<R>` of `<F>` findings were residue of round `<N-1>`'s fixes), the commit sha, anything the
+teardown failed to clean, and — **always** — a reminder to revoke the service principal secrets. This
+skill asked for them; this skill reminds you to kill them.
+
+**If the residue rate is high, say so as the headline, not as a footnote.** A round where most
+findings trace back to the last round's fixes is not a report about the codebase — it is a report
+about the fix process, and burying that is how sixteen rounds went by without anyone measuring it.
 
 ---
 
@@ -204,20 +261,24 @@ already has.**
 
 Both write files into the scratchpad; every later agent is handed the **paths**, never the contents.
 
-**Briefing agent** → `BRIEF.md`. Reads `docs/AUDIT-FINDINGS-*.md` highest-number-first and every commit
-since that round's HEAD.
+**Briefing agent** → `BRIEF.md`. **There will usually be no previous findings file** — `/audit-reconcile`
+deletes them once reconciled, deliberately, so a round meets the code without inherited beliefs. Brief
+from **git history** instead: `git log` since the last audit commit, and `git blame` where it matters.
+
+If a findings file does exist, it means a previous round was never reconciled. Read it, and say so in
+the brief.
 
 **If no findings file exists at all**, this is round 1: letter `A`, file `docs/AUDIT-FINDINGS-1.md`,
 no refuted table, no struck entries, no watch list. Say so explicitly in the brief so twenty finders
 do not go looking for prior context that was never written, and brief against the full history instead
 of "commits since the last round".
 
-Otherwise the brief must contain: the **round letter** (rounds 3-7 used C, D, E, F, G; take the
-next, file number = previous + 1); the **refuted table** verbatim with reasons; the **struck entries**
-(italic paragraphs starting `_D12 is fixed and committed…`, each explaining what was deliberately not
-done and why); the **watch list**; the sections "What every finding must carry" and "Constraints on
-what counts as a finding" copied from this file, because finders never see it; and a map of the
-codebase good enough to orient a worker who has never seen it.
+The brief must contain: the **round letter and number**, derived from the audit commits in `git log`
+(`Audit round <N>:` subjects) — file number = previous + 1; a summary of **what the last reconcile
+changed**, from its commit messages, so the regression beats know where to look; the sections "What
+every finding must carry" and "Constraints on what counts as a finding" copied from this file, because
+finders never see it; and — **the longest section** — a map of the codebase good enough to orient a
+worker who has never opened it, since six of the eight beats audit the whole application.
 
 Accepted and still open, never re-raised: ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
 Development-only `DevAuthHandler` bypass, `GlobalSanitizationFilter` skipping nested `System.*`
@@ -344,12 +405,26 @@ forced it to enumerate. The inventory is what Phase 5 deletes.
 
 ## Phase 2 — the beats, twice (20 agents + 1 merge)
 
+**Six of these eight beats audit the WHOLE APPLICATION. Only beats 6 and 7 are scoped to the last
+round's delta, and that is the only reason they exist.**
+
+This is the mistake to avoid, and it is easy to make because beat 6 is where the highest-value findings
+have historically come from: pointing every beat at what changed recently. Do not. An audit that only
+re-examines the last round's diff is a regression check wearing an audit's name — it cannot find the
+defect that has been in `IpUtilityService` since round 3, and after enough rounds that is where the
+remaining defects are. Beats 1-5 and 8 sweep their surface across the entire codebase and treat
+recently-changed code on exactly the same terms as everything else: neither weighted nor exempt.
+
+A beat prompt that names specific recent findings as "the focus" has been written wrong. Name the
+surface, not the diff.
+
+
 1. **Security / web** — authorization coverage, antiforgery, XSS, injection, SSRF, headers, log forging, secrets.
 2. **Logic & data integrity** — subnet/CIDR arithmetic, containment and overlap, host-IP validation, and any path that persists a state the validated path would reject.
 3. **Azure integration** — import wizards, bulk planner, reconciler. Highest stakes: the only code that *deletes* on the strength of what an external system reports. Work partial visibility hard — throttling, an empty page, a 403 on one group, a token expiring mid-enumeration, a paged response whose second page fails. Which of those does it treat as "absent, therefore delete"?
 4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
 5. **UI & client-JS** — the three wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
-6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. **The round-N-1 fixes are where the defects are** — round 7's highest-value findings were all residue of round 6's own fixes.
+6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. This beat, and only this beat, is deliberately scoped to the delta: the round-N-1 fixes are dense in defects, and round 7's highest-value findings were all residue of round 6's. That density is why it gets a deep sweep — it is not a reason to point the other beats here.
 7. **Regression tests** — do the tests added alongside those commits fail against the unfixed code? Revert the fix hunk in a scratch copy and find out.
 8. **Dead code & refactor residue** — orphans from earlier deletions.
 
@@ -393,6 +468,18 @@ One writes `docs/AUDIT-FINDINGS-<N>.md`. A second re-checks **every** citation a
 and **fixes** what is wrong — round 7's checker corrected 5 of 130, including one stale line number
 carried over from round 6. A findings file is correct only against the HEAD it was written at.
 
+**Every finding names the previous-round fix it came out of, or says it came out of none.** One line
+in the finding: *"residue of O8"*, or nothing if it is independent. The scribe then totals them and
+opens the Verdict with the rate:
+
+> Round `<N>` filed `<F>` findings, of which `<R>` are residue of round `<N-1>`'s own fixes.
+
+Round 16's was **11 of 15** — the audit was not finding a rotten codebase, it was finding the fix
+loop's own output, and nobody had measured that in sixteen rounds. It is the single most useful number
+this round produces about *the process* rather than the software, it costs one line per finding, and a
+falling rate is the only evidence that the loop is converging. `/audit-reconcile` steps 5 and 6 exist
+to drive it down; this is how anyone can tell whether they worked.
+
 ## Phase 5 — teardown and commit (1 agent)
 
 In this order:
@@ -433,31 +520,47 @@ none of the branch conditions and reported success anyway.
 - **A concrete failure scenario** with real inputs and the wrong output.
 - **Evidence it was reproduced** — what was run, what came back.
 - **A proposed fix**, plus a cheaper interim where one exists.
+- **Attribution: which previous-round fix this is residue of**, by its id (*"residue of O8"*), or an
+  explicit *none* if it is independent of the last round. Use `git log`/`git blame` on the cited lines
+  to settle it rather than guessing. This is what the residue rate is totalled from, and it is the
+  round's only measurement of whether the fix loop is converging.
 
 Grouped by severity, numbered sequentially across the file, ordered within severity by consequence.
 
 ## Output structure
 
+**The findings file is a work queue for `/audit-reconcile` and for the next round's briefing agent.
+Both are machines. Nobody reads it as a report — write it accordingly.**
+
 ```
 # Bastet — Round-<N> Audit Findings
-target branch / HEAD / test baseline / date
-
-## Verdict            — what was found, and what to read first
-## How this audit ran — beats, verification, what [x2]/[x1] mean
+branch / HEAD / test baseline / date / residue rate
 
 # Critical / High / Medium / Low / Info
-
 # Refuted — reported by a finder, killed by the verifier   (table, with reasons)
-# Watch list — not findings, but worth knowing
 ```
 
-**No clean-bill section.** Dropped deliberately: it bulked the file and fed itself back into later
-rounds. Do not reintroduce it.
+Each finding is a heading and **four fields, nothing else**:
 
-**A round that finds nothing still writes and commits the file.** Verdict section says so plainly,
-with the baseline, the agent counts, the funnel that collapsed to zero, and the refuted table — which
-is the whole content in that case, and the part worth having. A clean round is the goal, not a
-failure, and it must leave the same durable record as any other so the next one can see it happened.
+```
+## P7 — <one-line title> `[x2]`
+**Where:** src/Bastet/Services/Azure/AzureReconciler.cs:757
+**Breaks:** <real inputs, the wrong output, one short paragraph>
+**Repro:** <what was run, what came back>
+**Fix:** <the narrow change; note if a verifier judged the filed fix unsound>
+**Residue of:** P5 | none
+```
+
+**No Verdict essay, no "How this audit ran", no funnel table, no watch list.** Round 16's file reached
+181 KB and its value to either consumer would have survived at 15 KB. The one-line residue rate goes in
+the header; the human summary goes in chat, not the file.
+
+**No watch list, at all.** An item is settled into a finding or dropped. It was a graveyard: the missing
+`[SafeText]` on `EditSubnetViewModel.Name` sat there unexamined for three rounds and only became a
+finding when a beat finally drove it. If something is real, next round's finders will find it again.
+
+**A round that finds nothing still writes and commits the file** — header, empty severity sections, and
+the Refuted table, which is the whole content in that case and the part worth having.
 
 ## Constraints on what counts as a finding
 
@@ -469,53 +572,12 @@ failure, and it must leave the same durable record as any other so the next one 
 - **Migration `.Designer.cs` snapshots are frozen history.** Never report them as stale.
 - **No novels.** A finding is a citation, a scenario, a reproduction, a fix.
 
-## Scope is the owner's call, never the round's
+## Severity is graded on consequence
 
-**A round may decide whether a defect is REAL. It may never decide whether a real defect is WORTH
-FIXING, or that fixing it is "out of scope", "a feature change, not a bug fix", or "too expensive".
-That is a product decision and it belongs to the repository owner. Not to a finder, not to a verifier,
-not to the scribe, and not to you.**
-
-Round 6 broke this and it cost four rounds. It reproduced a real defect — both Azure import wizards
-silently truncate a multi-prefix Azure subnet to its first prefix, after which BASTET advertises
-Azure-assigned ranges as free space — then decided by itself that closing it "means creating several
-Bastet subnets from one Azure subnet, which is a feature change, not a bug fix, and is out of scope
-here." It demoted the finding to a watch-list line. Rounds 7-9 inherited the demotion without
-re-examining it; rounds 10-12 dropped it entirely. Round 13 rediscovered it independently and measured
-the operator-visible consequence for the first time — a *Create Subnet* button over an /24 Azure had
-already assigned. **The owner was never asked, across four rounds, whether an IPAM tool silently lying
-about free space was acceptable.** The answer, when finally put to them, was not close.
-
-The failure mode is specific and worth naming: **every one of those deferrals priced the COST of the
-fix and none of them priced the CONSEQUENCE of the defect.** Cost is visible from inside the code.
-Consequence requires running the thing and looking at what the operator sees. A round that defers on
-cost alone has not done the work that would justify deferring.
-
-Therefore:
-
-- **A reproduced defect gets filed as a finding at the severity its consequence warrants**, whatever
-  the fix costs. Fix cost belongs in the *Fix* section, never in the severity and never in the
-  decision to file.
-- **"Out of scope", "feature change not a bug fix", "too big for this round", "the data model does not
-  support it"** are not verdicts a round may reach. They are *recommendations to the owner*, and they
-  go in the finding's own text where the owner will see them — not in a watch-list line, and never as
-  a reason to lower severity or drop the finding.
-- **Severity is graded on what the software does wrong, not on how often it does it.** Rarity of the
-  trigger is one sentence in the failure scenario. It does not reduce severity. For an IPAM tool
-  specifically, *silently asserting that an allocated range is free* is a top-severity output no matter
-  how narrow the path to it, because the product's entire purpose is being the authority on that
-  question.
-- **Never use the watch list as a place to put a real defect you have decided not to fix.** The watch
-  list is for things a verifier *could not settle* — thin evidence, unproven reachability, patterns
-  worth grepping next round. A reproduced defect on the watch list is a finding that has been hidden,
-  and it will fall off within three rounds. It did.
-- **If a round believes a finding needs a scope decision, say so at the top of the Verdict**, in the
-  words "this needs a decision from you and here is what it costs" — so it is the first thing read,
-  not the last thing skimmed.
-- **The same rule binds `/audit-reconcile`.** Declining to implement a filed finding, narrowing it, or
-  substituting an interim for the real fix is the owner's call. Ask; do not decide and record the
-  decision as though it were settled.
-
-When in doubt: **file it, rate it on consequence, and let the owner say no.** A finding the owner
-declines costs one line in a table. A defect a round declines on their behalf costs four rounds and
-ships the bug.
+- **A reproduced defect is filed at the severity its consequence warrants**, whatever the fix costs. Fix
+  cost belongs in the Fix field, never in the severity and never in the decision to file.
+- **Rarity does not reduce severity.** It is one sentence in the failure scenario. For an IPAM tool,
+  *silently asserting an allocated range is free* is top-severity however narrow the path, because being
+  the authority on that question is the product's entire purpose.
+- **File it and rate it.** A finding the owner declines costs one line. A defect a round declines on
+  their behalf costs four rounds — round 6 proved that.

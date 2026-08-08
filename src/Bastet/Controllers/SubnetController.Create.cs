@@ -1,6 +1,7 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,11 +10,11 @@ namespace Bastet.Controllers;
 
 public partial class SubnetController : Controller
 {
-    // GET: Subnet/Create
+
     [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Create(string? networkAddress = null, int? cidr = null, int? parentId = null)
     {
-        // Load all potential parent subnets for dropdown
+
         List<SubnetViewModel> parentOptions = await context.Subnets
             .OrderBy(s => s.Name)
             .Select(s => new SubnetViewModel
@@ -30,24 +31,17 @@ public partial class SubnetController : Controller
             ParentSubnetOptions = parentOptions
         };
 
-        // Pre-populate values if provided (for creating from unallocated range)
         if (!string.IsNullOrEmpty(networkAddress))
         {
             viewModel.NetworkAddress = networkAddress;
         }
 
-        // Everything on this action is advisory pre-fill taken straight off the query string, so a
-        // value outside 0-32 leaves the field blank rather than being acted on. CalculateSubnetMask
-        // throws outside that range, and the [Range(0, 32)] that would have caught it lives on the
-        // POSTed view model, which this GET never reaches - so an out-of-range ?cidr= reached the
-        // calculation unguarded and returned a 500 instead of an empty form. Treated the way
-        // parentId already is: advice, not instruction.
         bool hasUsableCidr = cidr is >= 0 and <= 32;
 
         if (hasUsableCidr)
         {
             viewModel.Cidr = cidr!.Value;
-            // Calculate and set subnet mask
+
             viewModel.CalculatedSubnetMask = ipUtilityService.CalculateSubnetMask(cidr.Value);
         }
 
@@ -55,24 +49,10 @@ public partial class SubnetController : Controller
         {
             viewModel.ParentSubnetId = parentId.Value;
 
-            // Optionally generate a default name based on the parent subnet
             Subnet? parentSubnet = await context.Subnets.FindAsync(parentId.Value);
             if (parentSubnet != null && !string.IsNullOrEmpty(networkAddress) && hasUsableCidr)
             {
-                // The suffix is 10-13 characters, so any parent named 88 or more produced a
-                // pre-filled name the very next POST rejected against [StringLength(100)] - and this
-                // combination is reachable straight from the UI, since the unallocated-range button
-                // navigates here with all three values. The parent name gives way rather than the
-                // address, which is the part that makes the name mean anything.
-                // "-{cidr}" and not "/{cidr}": [SafeText] on CreateSubnetViewModel.Name forbids
-                // "/", so the slashed form the app filled in was rejected by the very next POST with
-                // "Subnet name contains invalid characters" - on every create-from-unallocated-range
-                // flow that accepted the default. Round 4's D19 fixed this string's length and D8
-                // reasoned about its CIDR while both walked past the separator.
-                // The parent's own name is not held to [SafeText] - Edit applies only [NoHtml] and
-                // [SanitizeName] - so it can carry "/", "'", ":" and the rest of the class this
-                // form forbids. Copying it in unchecked reproduced the same failure the separator
-                // above was changed to avoid: the prefilled default rejected by the very next POST.
+
                 string safeParentName = SubnetNaming.ToSafeText(parentSubnet.Name);
 
                 viewModel.Name = string.IsNullOrEmpty(safeParentName)
@@ -85,7 +65,6 @@ public partial class SubnetController : Controller
         return View(viewModel);
     }
 
-    // POST: Subnet/Create
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
@@ -99,13 +78,13 @@ public partial class SubnetController : Controller
 
         try
         {
-            // Execute validation and creation within distributed lock to prevent race conditions
+
             Subnet? result = await subnetLockingService.ExecuteWithSubnetLockAsync(async () =>
             {
-                // Validate the subnet using our helper method (now within the lock)
+
                 if (await ValidateSubnetCreation(viewModel))
                 {
-                    // Create subnet directly in the database
+
                     Subnet subnet = new()
                     {
                         Name = viewModel.Name,
@@ -137,19 +116,26 @@ public partial class SubnetController : Controller
         {
             ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
         }
+        catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+        {
+
+            logger.LogError(ex, "Subnet create outcome unknown");
+            ModelState.AddModelError("",
+                "BASTET could not confirm whether this subnet was created. "
+                + "Check the subnet list before retrying.");
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Subnet create failed");
             ModelState.AddModelError("", "Error creating subnet. Details have been logged.");
         }
 
-        // If we get here, something went wrong
         await LoadParentSubnets(viewModel);
         return View(viewModel);
     }
 
     private async Task LoadParentSubnets(CreateSubnetViewModel viewModel) =>
-        // Load all parent options
+
         viewModel.ParentSubnetOptions = await context.Subnets
             .OrderBy(s => s.Name)
             .Select(s => new SubnetViewModel

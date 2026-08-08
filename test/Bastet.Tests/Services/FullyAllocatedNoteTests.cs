@@ -2,22 +2,12 @@ using Bastet.Services;
 
 namespace Bastet.Tests.Services;
 
-/// <summary>
-/// The "fully allocated by Azure subnet ..." note. Appending it is deliberate and existing operator
-/// text must never be sacrificed for it; what was missing is idempotence, so an ordinary
-/// import - un-mark - import cycle stacked the identical sentence once per pass.
-/// </summary>
 public class FullyAllocatedNoteTests
 {
     private const int Max = 1000;
 
     private static string Note(string name) => FullyAllocatedNote.For(name);
 
-    // -------------------------------------------------------------------------
-    // Idempotence - the defect
-    // -------------------------------------------------------------------------
-
-    /// <summary>Four import/un-mark cycles must leave exactly one note, not four.</summary>
     [Fact]
     public void RepeatedAppends_LeaveExactlyOneNote()
     {
@@ -31,10 +21,6 @@ public class FullyAllocatedNoteTests
         Assert.Single(d.Split('\n'));
     }
 
-    /// <summary>
-    /// The gap the finder's own proposal had: exact equality against the current note would not
-    /// dedupe a note written before the Azure subnet was renamed, so two distinct notes accumulated.
-    /// </summary>
     [Fact]
     public void ANoteForADifferentlyNamedAzureSubnet_IsAlsoReplaced()
     {
@@ -45,11 +31,6 @@ public class FullyAllocatedNoteTests
         Assert.DoesNotContain("old-name", d);
     }
 
-    // -------------------------------------------------------------------------
-    // Operator text is never destroyed - the contract the loose-match fix would have broken
-    // -------------------------------------------------------------------------
-
-    /// <summary>Operator prose survives an append, and sits above the note.</summary>
     [Fact]
     public void OperatorText_SurvivesTheAppend()
     {
@@ -58,7 +39,6 @@ public class FullyAllocatedNoteTests
         Assert.Equal($"Prod DMZ. Owner: netops.\n{Note("sn")}", d);
     }
 
-    /// <summary>And survives repeated appends, still exactly once, still with one note.</summary>
     [Fact]
     public void OperatorText_SurvivesRepeatedAppends()
     {
@@ -71,10 +51,6 @@ public class FullyAllocatedNoteTests
         Assert.Equal($"Prod DMZ. Owner: netops.\n{Note("sn")}", d);
     }
 
-    /// <summary>
-    /// The reason the match is anchored at BOTH ends and whole-line: prose that merely resembles the
-    /// note must not be deleted. A loose shape match here would silently destroy operator text.
-    /// </summary>
     [Theory]
     [InlineData("Fully allocated by Azure subnet 'sn' which encompasses the entire address space, per ticket 42.")]
     [InlineData("Note: fully allocated by Azure subnet 'sn' which encompasses the entire address space.")]
@@ -89,21 +65,15 @@ public class FullyAllocatedNoteTests
         Assert.EndsWith(Note("sn"), appended);
     }
 
-    // -------------------------------------------------------------------------
-    // Strip, used by the un-mark path
-    // -------------------------------------------------------------------------
-
     [Fact]
     public void Strip_RemovesTheNoteAndLeavesTheRest()
         => Assert.Equal("Owner: netops.",
             FullyAllocatedNote.Strip($"Owner: netops.\n{Note("sn")}"));
 
-    /// <summary>A description that was only ever the note strips to empty, so the row can be nulled.</summary>
     [Fact]
     public void Strip_OfANoteOnlyDescription_IsEmpty()
         => Assert.Equal(string.Empty, FullyAllocatedNote.Strip(Note("sn")));
 
-    /// <summary>Several stacked notes - the state existing rows are already in - all go.</summary>
     [Fact]
     public void Strip_RemovesEveryStackedNote()
     {
@@ -120,14 +90,6 @@ public class FullyAllocatedNoteTests
     public void Strip_OfNothing_IsEmpty(string? input)
         => Assert.Equal(string.Empty, FullyAllocatedNote.Strip(input));
 
-    // -------------------------------------------------------------------------
-    // The overflow contract, unchanged
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// When the note will not fit, it is dropped and the existing text kept whole - overflowing the
-    /// column fails the insert and rolls back the entire import behind a generic error.
-    /// </summary>
     [Fact]
     public void WhenTheNoteWouldNotFit_ExistingTextIsKeptAndTheNoteDropped()
     {
@@ -138,10 +100,6 @@ public class FullyAllocatedNoteTests
         Assert.DoesNotContain("Fully allocated by Azure subnet", result);
     }
 
-    /// <summary>
-    /// Deduping frees room, so a description that had stacked notes and would previously have
-    /// overflowed can now take the note. Strictly better than the old behaviour, never worse.
-    /// </summary>
     [Fact]
     public void StrippingStaleNotes_CanFreeEnoughRoomForTheNote()
     {
@@ -157,7 +115,6 @@ public class FullyAllocatedNoteTests
         Assert.Equal(2, result.Split('\n').Length);
     }
 
-    /// <summary>A note longer than the cap on its own is truncated rather than overflowing.</summary>
     [Fact]
     public void ANoteLongerThanTheCap_IsTruncated()
     {
@@ -165,20 +122,10 @@ public class FullyAllocatedNoteTests
         Assert.Equal(Max, result.Length);
     }
 
-    /// <summary>First import onto an empty description is the note alone, exactly as before.</summary>
     [Fact]
     public void FirstImport_WritesTheNoteAlone()
         => Assert.Equal(Note("sn"), FullyAllocatedNote.Append(null, "sn", Max));
 
-    // -------------------------------------------------------------------------
-    // A note must be single-line BY CONSTRUCTION, or Strip's anchoring cannot reach it
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The defect: Strip matches whole lines anchored at both ends, so a name carrying a newline
-    /// built a note spanning two lines that no later Strip could remove. The flag could then be
-    /// cleared while the description went on asserting it, and every cycle stacked another copy.
-    /// </summary>
     [Theory]
     [InlineData("sn-A\nsn-B")]
     [InlineData("sn-A\r\nsn-B")]
@@ -191,7 +138,6 @@ public class FullyAllocatedNoteTests
         Assert.Equal(string.Empty, FullyAllocatedNote.Strip(note));
     }
 
-    /// <summary>And the stacking that followed from it: four cycles must still leave exactly one.</summary>
     [Fact]
     public void RepeatedAppendsWithALineBrokenName_StillLeaveExactlyOneNote()
     {
@@ -205,7 +151,6 @@ public class FullyAllocatedNoteTests
         Assert.Equal("Ops owns this range", FullyAllocatedNote.Strip(d));
     }
 
-    /// <summary>The name is still readable - collapsed to a space, not deleted.</summary>
     [Fact]
     public void TheNameSurvivesWithItsLineBreakCollapsedToASpace()
         => Assert.Equal(Note("sn-A sn-B"), FullyAllocatedNote.For("sn-A\nsn-B"));

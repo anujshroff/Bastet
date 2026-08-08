@@ -1,8 +1,10 @@
 @model Bastet.Models.ViewModels.AzureImportViewModel
 
 <div class="alert alert-info">
-    <i class="bi bi-info-circle"></i> 
-    Select subnets to import from Azure. Only compatible subnets are shown.
+    <i class="bi bi-info-circle"></i>
+    Select subnets to import from Azure. Subnets Bastet cannot take are greyed out with the reason:
+    <span class="badge bg-secondary">Already imported</span> was imported from this Azure resource, and
+    <span class="badge bg-danger">Cannot import</span> conflicts with something already in Bastet.
 </div>
 
 <div id="subnet-loading" class="text-center py-3">
@@ -22,9 +24,9 @@
     <input type="hidden" name="parentId" value="@Model.SubnetId" />
     <input type="hidden" id="vnet-name" name="vnetName" value="" />
     <input type="hidden" id="vnet-resource-id" name="vnetResourceId" value="" />
-    @* Tells the controller to rename/stamp the parent and redirect. Previously inferred from the Referer header. *@
+
     <input type="hidden" name="isAzureImport" value="true" />
-    
+
     <div id="subnet-selection" class="d-none">
         <div class="form-check mb-2">
             <input class="form-check-input" type="checkbox" id="select-all-subnets">
@@ -33,11 +35,11 @@
             </label>
         </div>
         <hr>
-        
+
         <div id="subnet-list" class="mb-3">
             <!-- Subnets will be added here dynamically -->
         </div>
-        
+
         <div class="d-grid gap-2">
             <button type="submit" id="import-subnets-btn" class="btn btn-success" disabled>
                 <i class="bi bi-cloud-download"></i> Import Selected Subnets

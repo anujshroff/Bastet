@@ -88,7 +88,7 @@ half-configuring the machine.
 | .NET SDK | `dotnet --version`, major matching the `TargetFramework` in the `.csproj` files | **Stop.** Name the required SDK |
 | Docker daemon **as this user** | `docker info` | **Stop.** A group-membership fix needs a re-login you cannot perform |
 | SQL Server image | `docker image inspect mcr.microsoft.com/mssql/server:2022-latest` | Pull it **here**, once |
-| Browser | chromium under `~/.cache/ms-playwright` | **Stop** if absent - phase G is worthless without it |
+| Browser | chromium under `~/.cache/ms-playwright` | **Install it here, once** (see below) - it installs unattended. **Stop** only if it demands `install-deps` and root; phase G is worthless without it and must not fail quietly |
 | Python 3 + `requests` | `python3 -c "import requests"` | Install into the rig venv |
 | **Azure CLI** | `az version` | Install **here**, once (see below). **Stop** if it cannot be installed |
 | `curl` | `curl --version` | Install |
@@ -115,18 +115,41 @@ the way through. Record the absolute path to the `az` binary. That venv's python
 
 ## The browser
 
-Playwright's chromium is normally already on disk, but **there is no Node and no `playwright` CLI**.
-Two ways to use it, and phase G needs the second:
+**Do not assume chromium is on disk.** Earlier versions of this file said it "is normally already
+cached" and told you not to run `playwright install`. On a fresh box that is simply false —
+`~/.cache/ms-playwright` did not exist at all, and following that instruction leaves phase G with no
+browser and no explanation. Check, and install if absent:
+
+```bash
+ls -d ~/.cache/ms-playwright/chromium-*/ 2>/dev/null || echo "absent - install it"
+```
+
+There is no Node and no npm, but the **python** binding ships its own CLI, so install the binding
+first and let it fetch the browser. Both steps are unattended and need no `sudo`:
+
+```bash
+<rig>/azcli/bin/pip install playwright
+<rig>/azcli/bin/playwright install chromium     # NOT install-deps, which needs root
+```
+
+If `playwright install chromium` succeeds, phase G is fully live. If it demands `install-deps` and
+root, **stop and say so plainly, naming the command a human would need to run** — do not half-configure
+the machine and do not let phase G quietly degrade into reading the JavaScript, which proves nothing.
+
+Two ways to drive it, and phase G needs the second:
 
 ```bash
 # DOM snapshot only - enough for rendering assertions
-CH=~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome
+CH=$(echo ~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome)
 "$CH" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
       --virtual-time-budget=8000 --dump-dom http://127.0.0.1:<port>/ > out.html
 
-# real interaction - install the python binding into the rig venv
-<rig>/azcli/bin/pip install playwright     # browsers already cached; do NOT run `playwright install`
+# real interaction - the python binding, from the same rig venv
+<rig>/azcli/bin/python -c "from playwright.sync_api import sync_playwright; ..."
 ```
+
+Verify **both** modes work before phase G starts, rather than discovering the binding is broken
+halfway through a wizard run.
 
 The `optimization_guide_on_device_model_installer` line on stderr is benign noise.
 

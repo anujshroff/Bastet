@@ -10,17 +10,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// O9. The "can this subnet be imported from Azure" predicate exists in two places: the authority
-/// in <c>AzureController.Import</c>, and <c>ViewBag.CanImportFromAzure</c> on the Details page,
-/// which gates the only link in the whole application that reaches <c>/Azure/Import/{id}</c>.
-/// Round 14 relaxed the authority to admit a top-up and did not touch the copy, so the two became
-/// mutually exclusive: whenever the server would accept a top-up, the button that leads to it was
-/// not rendered, and it disappeared permanently after the first successful single-VNet import.
-///
-/// No test referenced <c>CanImportFromAzure</c> at all, which is why that slipped past. These pin
-/// the two predicates as set-equivalent on every arm.
-/// </summary>
 public class SubnetDetailsAzureImportGateTests : IDisposable
 {
     public SubnetDetailsAzureImportGateTests() =>
@@ -39,7 +28,6 @@ public class SubnetDetailsAzureImportGateTests : IDisposable
     {
         IIpUtilityService ip = new IpUtilityService();
 
-        // The gate under test has an Admin conjunct, so the mock has to actually be one.
         Mock<IUserContextService> user = new();
         user.Setup(m => m.GetCurrentUsername()).Returns("test-admin");
         user.Setup(m => m.UserHasRole(ApplicationRoles.Admin)).Returns(true);
@@ -104,24 +92,18 @@ public class SubnetDetailsAzureImportGateTests : IDisposable
         return (bool)controller.ViewBag.CanImportFromAzure!;
     }
 
-    /// <summary>The steady state of the feature, and the defect: a populated Azure-linked target is
-    /// exactly what the server admits for a top-up, and the link was not rendered.</summary>
     [Fact]
     public async Task APopulatedAzureLinkedTarget_ShowsTheImportLink() =>
         Assert.True(await CanImport(hasChild: true, azureResourceId: VNetId));
 
-    /// <summary>An empty target is the ordinary first import and was never in question.</summary>
     [Fact]
     public async Task AnEmptyTarget_ShowsTheImportLink() =>
         Assert.True(await CanImport(hasChild: false, azureResourceId: null));
 
-    /// <summary>Adopting a hand-built subtree stays refused - that is what would re-stamp
-    /// AzureResourceId on rows nobody imported, and the authority refuses it too.</summary>
     [Fact]
     public async Task APopulatedTargetWithNoAzureLink_HidesTheImportLink() =>
         Assert.False(await CanImport(hasChild: true, azureResourceId: null));
 
-    /// <summary>Both remaining arms of the authority's gate, unchanged.</summary>
     [Fact]
     public async Task AFullyAllocatedTarget_HidesTheImportLink() =>
         Assert.False(await CanImport(hasChild: false, azureResourceId: VNetId, isFullyAllocated: true));

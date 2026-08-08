@@ -10,17 +10,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// "Purge All" states a count on its confirmation page and then destroys records that cannot be
-/// recovered - there is no restore path anywhere in the application. These tests pin the purge to
-/// the set the operator was actually shown, so anything archived while they were reading the page
-/// survives instead of being swept up silently.
-/// </summary>
-/// <remarks>
-/// The suite runs on SQLite, where a plain INTEGER PRIMARY KEY reuses the highest rowid once the
-/// top row is deleted. Every assertion below is therefore about rows inserted while the archive is
-/// non-empty, never about ID values surviving a purge.
-/// </remarks>
 public class PurgeAllScopeTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -79,14 +68,6 @@ public class PurgeAllScopeTests : IDisposable
         return row;
     }
 
-    // -------------------------------------------------------------------------
-    // The subnet archive
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The scenario the page's own sentence makes a promise about: it says "1 record", and one
-    /// record is what may be destroyed - even though eleven more were archived in the meantime.
-    /// </summary>
     [Fact]
     public async Task PurgeAllSubnets_DestroysOnlyWhatTheConfirmationPageCounted()
     {
@@ -98,7 +79,6 @@ public class PurgeAllScopeTests : IDisposable
         Assert.Equal(1, model.Count);
         Assert.Equal(shown.Id, model.MaxId);
 
-        // ... and now another tab archives more, after the page was rendered.
         DeletedSubnet later1 = ArchiveSubnet("big", "10.50.0.0");
         DeletedSubnet later2 = ArchiveSubnet("child", "10.50.1.0");
 
@@ -110,10 +90,6 @@ public class PurgeAllScopeTests : IDisposable
             _subnetController.TempData["SuccessMessage"]);
     }
 
-    /// <summary>
-    /// A POST carrying no scope must refuse rather than fall back to deleting everything, and
-    /// rather than binding 0 and silently reporting a successful purge of nothing.
-    /// </summary>
     [Theory]
     [InlineData(null)]
     [InlineData(0)]
@@ -132,7 +108,6 @@ public class PurgeAllScopeTests : IDisposable
         Assert.NotNull(_subnetController.TempData["ErrorMessage"]);
     }
 
-    /// <summary>The ordinary case still purges the whole archive when nothing changed underneath.</summary>
     [Fact]
     public async Task PurgeAllSubnets_WhenNothingChanged_StillPurgesEverything()
     {
@@ -149,10 +124,6 @@ public class PurgeAllScopeTests : IDisposable
         Assert.Equal("Permanently purged 2 deleted subnet record(s).",
             _subnetController.TempData["SuccessMessage"]);
     }
-
-    // -------------------------------------------------------------------------
-    // The host IP archive - same defect, same fix
-    // -------------------------------------------------------------------------
 
     [Fact]
     public async Task PurgeAllHostIps_DestroysOnlyWhatTheConfirmationPageCounted()

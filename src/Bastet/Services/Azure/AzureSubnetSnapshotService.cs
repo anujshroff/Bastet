@@ -5,13 +5,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Services.Azure
 {
-    /// <summary>
-    /// Default <see cref="IAzureSubnetSnapshotService"/>. Loads the tree once and derives the flags
-    /// and counts in memory rather than issuing a query per subnet.
-    /// </summary>
+
     public class AzureSubnetSnapshotService(BastetDbContext context) : IAzureSubnetSnapshotService
     {
-        /// <inheritdoc/>
+
         public async Task<IReadOnlyList<ExistingSubnetSnapshot>> GetExistingSubnetsAsync()
         {
             List<Subnet> all = await context.Subnets.AsNoTracking().ToListAsync();
@@ -31,7 +28,6 @@ namespace Bastet.Services.Azure
             })];
         }
 
-        /// <inheritdoc/>
         public async Task<IReadOnlyList<AzureLinkedSubnetSnapshot>> GetAzureLinkedSubnetsAsync()
         {
             List<Subnet> all = await context.Subnets.AsNoTracking().ToListAsync();
@@ -86,10 +82,6 @@ namespace Bastet.Services.Azure
                 .Distinct()
                 .ToHashSetAsync();
 
-        /// <summary>
-        /// Every subnet beneath <paramref name="subnetId"/>. Tracks visited ids so a cycle in the
-        /// data cannot spin forever.
-        /// </summary>
         private static List<Subnet> GetDescendants(int subnetId, Dictionary<int, List<Subnet>> childrenByParent)
         {
             List<Subnet> descendants = [];

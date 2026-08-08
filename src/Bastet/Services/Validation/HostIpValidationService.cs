@@ -6,13 +6,9 @@ using System.Net;
 
 namespace Bastet.Services.Validation;
 
-/// <summary>
-/// Service for validating host IP assignment operations
-/// </summary>
 public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetDbContext context) : IHostIpValidationService
 {
 
-    // Error codes
     private const string IP_OUTSIDE_SUBNET_RANGE = "IP_OUTSIDE_SUBNET_RANGE";
     private const string SUBNET_HAS_CHILDREN = "SUBNET_HAS_CHILDREN";
     private const string SUBNET_HAS_HOST_IPS = "SUBNET_HAS_HOST_IPS";
@@ -26,19 +22,16 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
     private const string NETWORK_ADDRESS_RESERVED = "NETWORK_ADDRESS_RESERVED";
     private const string BROADCAST_ADDRESS_RESERVED = "BROADCAST_ADDRESS_RESERVED";
 
-    /// <inheritdoc />
     public ValidationResult ValidateNewHostIp(string ip, int subnetId)
     {
         ValidationResult result = new();
 
-        // Validate IP format
         if (!IsValidIpFormat(ip))
         {
             result.AddError(INVALID_IP_FORMAT, "Invalid IPv4 address format");
             return result;
         }
 
-        // Get subnet
         Subnet? subnet = context.Subnets
             .Include(s => s.ChildSubnets)
             .Include(s => s.HostIpAssignments)
@@ -50,7 +43,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Validate subnet can have host IPs
         ValidationResult subnetValidation = ValidateSubnetCanContainHostIp(subnetId);
         if (!subnetValidation.IsValid)
         {
@@ -62,21 +54,15 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // A /31 has no network or broadcast address - both of its addresses are usable for a
-        // point-to-point link (RFC 3021) - and a /32 is a single host. CalculateUsableIpAddresses
-        // reports 2 and 1 for them, so reserving addresses here would advertise capacity that could
-        // never be filled: every address in such a subnet is its network address, its broadcast
-        // address, or both.
         if (subnet.Cidr < 31)
         {
-            // Check if IP is the network address
+
             if (ip == subnet.NetworkAddress)
             {
                 result.AddError(NETWORK_ADDRESS_RESERVED, "Cannot assign the network address as a host IP");
                 return result;
             }
 
-            // Check if IP is the broadcast address
             string broadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr);
             if (ip == broadcastAddress)
             {
@@ -85,7 +71,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             }
         }
 
-        // Validate IP is within subnet range
         ValidationResult ipRangeValidation = ValidateIpIsWithinSubnet(ip, subnet.NetworkAddress, subnet.Cidr);
         if (!ipRangeValidation.IsValid)
         {
@@ -97,7 +82,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Check if IP is already assigned
         if (context.HostIpAssignments.Any(h => h.IP == ip))
         {
             result.AddError(IP_ALREADY_ASSIGNED, "This IP address is already assigned");
@@ -106,12 +90,10 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         return result;
     }
 
-    /// <inheritdoc />
     public ValidationResult ValidateHostIpUpdate(string originalIp, UpdateHostIpDto dto, byte[] rowVersion)
     {
         ValidationResult result = new();
 
-        // Find the existing host IP assignment
         HostIpAssignment? hostIp = context.HostIpAssignments
             .FirstOrDefault(h => h.IP == originalIp);
 
@@ -121,7 +103,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Check for concurrency conflict
         if (!CompareRowVersions(hostIp.RowVersion, rowVersion))
         {
             result.AddError(CONCURRENCY_CONFLICT,
@@ -129,35 +110,31 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // If IP is being changed, validate it
         if (dto.IP != originalIp)
         {
-            // Validate IP format
+
             if (!IsValidIpFormat(dto.IP))
             {
                 result.AddError(INVALID_IP_FORMAT, "Invalid IPv4 address format");
                 return result;
             }
 
-            // Check if new IP is already assigned
             if (context.HostIpAssignments.Any(h => h.IP == dto.IP))
             {
                 result.AddError(IP_ALREADY_ASSIGNED, "This IP address is already assigned");
                 return result;
             }
 
-            // Validate IP is within subnet range
             Subnet? subnet = context.Subnets.Find(hostIp.SubnetId);
             if (subnet != null)
             {
-                // Check if IP is the network address
+
                 if (dto.IP == subnet.NetworkAddress)
                 {
                     result.AddError(NETWORK_ADDRESS_RESERVED, "Cannot assign the network address as a host IP");
                     return result;
                 }
 
-                // Check if IP is the broadcast address
                 string broadcastAddress = ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr);
                 if (dto.IP == broadcastAddress)
                 {
@@ -181,12 +158,10 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         return result;
     }
 
-    /// <inheritdoc />
     public ValidationResult ValidateHostIpDeletion(string ip)
     {
         ValidationResult result = new();
 
-        // Check if host IP exists
         HostIpAssignment? hostIp = context.HostIpAssignments
             .FirstOrDefault(h => h.IP == ip);
 
@@ -198,12 +173,10 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         return result;
     }
 
-    /// <inheritdoc />
     public ValidationResult ValidateSubnetCanContainHostIp(int subnetId)
     {
         ValidationResult result = new();
 
-        // Get subnet with its relationships
         Subnet? subnet = context.Subnets
             .Include(s => s.ChildSubnets)
             .FirstOrDefault(s => s.Id == subnetId);
@@ -214,7 +187,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Check if subnet has child subnets
         if (subnet.ChildSubnets.Count > 0)
         {
             result.AddError(SUBNET_HAS_CHILDREN,
@@ -222,7 +194,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Check if subnet is fully allocated
         if (subnet.IsFullyAllocated)
         {
             result.AddError(SUBNET_FULLY_ALLOCATED,
@@ -232,12 +203,10 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         return result;
     }
 
-    /// <inheritdoc />
     public ValidationResult ValidateSubnetCanBeFullyAllocated(int subnetId)
     {
         ValidationResult result = new();
 
-        // Get subnet with its relationships
         Subnet? subnet = context.Subnets
             .Include(s => s.ChildSubnets)
             .Include(s => s.HostIpAssignments)
@@ -249,7 +218,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Check if subnet has child subnets
         if (subnet.ChildSubnets.Count > 0)
         {
             result.AddError(SUBNET_HAS_CHILDREN,
@@ -257,7 +225,6 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // Check if subnet has host IP assignments
         if (subnet.HostIpAssignments.Count > 0)
         {
             result.AddError(SUBNET_HAS_HOST_IPS,
@@ -267,19 +234,16 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         return result;
     }
 
-    /// <inheritdoc />
     public ValidationResult ValidateIpIsWithinSubnet(string ip, string networkAddress, int cidr)
     {
         ValidationResult result = new();
 
-        // Validate IP format
         if (!IsValidIpFormat(ip))
         {
             result.AddError(INVALID_IP_FORMAT, "Invalid IPv4 address format");
             return result;
         }
 
-        // Check if IP is within subnet range
         if (!ipUtilityService.IsIpInSubnet(ip, networkAddress, cidr))
         {
             result.AddError(IP_OUTSIDE_SUBNET_RANGE,
@@ -289,13 +253,11 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         return result;
     }
 
-    /// <inheritdoc />
     public ValidationResult ValidateSubnetCidrChangeWithHostIps(int subnetId, string networkAddress,
                                                               int originalCidr, int newCidr)
     {
         ValidationResult result = new();
 
-        // Get subnet with its host IP assignments
         Subnet? subnet = context.Subnets
             .Include(s => s.HostIpAssignments)
             .FirstOrDefault(s => s.Id == subnetId);
@@ -306,24 +268,14 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             return result;
         }
 
-        // If subnet has no host IPs, no further validation needed
         if (subnet.HostIpAssignments.Count == 0)
         {
             return result;
         }
 
-        // If increasing CIDR (making subnet smaller), check if all host IPs still fit
         if (newCidr > originalCidr)
         {
-            // Narrowing moves the broadcast address down into what used to be ordinary host space,
-            // so an address that was legal to assign can become reserved without the operator
-            // touching it. ValidateNewHostIp refuses to assign a broadcast address, so allowing one
-            // to arrive this way would persist a state that path cannot produce: the assignment
-            // would then fail to be re-created after a delete. The network address needs no such
-            // check - a CIDR increase cannot move it, so no new collision is possible there.
-            // Only below /31: a /31 is a point-to-point pair and a /32 a single host, neither of
-            // which reserves anything (RFC 3021), yet CalculateBroadcastAddress still returns an
-            // address for them - checking those would reject a legal assignment.
+
             string? newBroadcast = newCidr < 31
                 ? ipUtilityService.CalculateBroadcastAddress(networkAddress, newCidr)
                 : null;
@@ -334,7 +286,7 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
                 {
                     result.AddError(CIDR_CHANGE_INVALID,
                         $"Cannot increase CIDR to /{newCidr} as host IP {hostIp.IP} would fall outside the subnet range");
-                    break; // One failure is enough to invalidate the change
+                    break;
                 }
 
                 if (hostIp.IP == newBroadcast)
@@ -349,16 +301,7 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
             && newCidr < 31
             && ipUtilityService.IsValidSubnet(networkAddress, newCidr))
         {
-            // The mirror of the case above. Widening cannot push a host IP out of range, and it
-            // moves the broadcast address strictly upward - past every address the old range held -
-            // so neither check above can fire on a decrease. What it can do is reinstate the network
-            // address reservation: a /31 is a point-to-point pair and a /32 a single host, neither
-            // of which reserves anything (RFC 3021), so the network address is a legal assignment
-            // there. Dropping below /31 makes that same address reserved without the operator
-            // touching it, leaving a row ValidateNewHostIp refuses to create - so it could not be
-            // re-added after a delete. The network address itself never moves when the subnet is
-            // aligned to the new CIDR, which IsValidSubnet establishes; an unaligned decrease is
-            // rejected before it reaches here.
+
             foreach (HostIpAssignment hostIp in subnet.HostIpAssignments)
             {
                 if (hostIp.IP == networkAddress)
@@ -373,10 +316,8 @@ public class HostIpValidationService(IIpUtilityService ipUtilityService, BastetD
         return result;
     }
 
-    // Helper method to validate IP format
     private static bool IsValidIpFormat(string ip) => IPAddress.TryParse(ip, out IPAddress? parsedIp) &&
                parsedIp.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
 
-    // Helper method to compare row versions
     private static bool CompareRowVersions(byte[]? current, byte[]? provided) => current != null && provided != null && current.Length == provided.Length && current.SequenceEqual(provided);
 }
