@@ -696,10 +696,17 @@ namespace Bastet.Services.Azure
         /// null. Only asked for rows already judged stale, and only within the row's own VNet.
         /// </summary>
         /// <remarks>
-        /// A row whose own recorded resource still owns the range is not stale in the first place
-        /// and never reaches here, so excluding the row's own ID cannot mask a real drift; what it
-        /// does exclude is the degenerate case of a subnet reported twice by a paged read, where
-        /// treating the row as its own evidence would withhold every genuine deletion.
+        /// The row's own resource ID is excluded from the EXACT arm only, where it is the degenerate
+        /// case of a subnet reported twice by a paged read and treating the row as its own evidence
+        /// would withhold every genuine deletion.
+        ///
+        /// It is NOT excluded from the overlap arm, and that distinction is load-bearing. The
+        /// justification for excluding it - "a row whose own resource still owns the range is not
+        /// stale in the first place" - is true only of the exact range: EvaluateSubnetLevel tests
+        /// membership of the EXACT recorded prefix, so a row can be stale while its own resource
+        /// still holds a subset or superset. Narrowing a subnet in place preserves the ARM resource
+        /// id, so the subnet still holding the range is the row's own - and excluding it offered the
+        /// row for irreversible archive while Azure held the range.
         ///
         /// EQUALITY IS NOT ENOUGH. Matching prefix strings only asks "is this exact range still
         /// assigned?", and Azure has no subnet rename - re-organising one is delete-and-recreate,
@@ -753,8 +760,14 @@ namespace Bastet.Services.Azure
                 return null;
             }
 
+            // The row's own resource is NOT excluded here, unlike the equality arm above. Narrowing
+            // a subnet in place - `az network vnet subnet update --address-prefixes` - preserves the
+            // ARM resource id, so the subnet still holding the range IS the row's own resource. Only
+            // the degenerate same-resource-same-prefix case is excluded, and the exact index above
+            // has already answered that one.
             AzureLivePrefix? overlapping = candidates.FirstOrDefault(c =>
-                !string.Equals(c.Owner.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase)
+                !(string.Equals(c.Owner.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase)
+                  && string.Equals(c.Prefix, recorded, StringComparison.OrdinalIgnoreCase))
                 && (ipUtilityService.IsSubnetContainedInParent(c.Network, c.Cidr, snapshot.NetworkAddress, snapshot.Cidr)
                     || ipUtilityService.IsSubnetContainedInParent(snapshot.NetworkAddress, snapshot.Cidr, c.Network, c.Cidr)));
 

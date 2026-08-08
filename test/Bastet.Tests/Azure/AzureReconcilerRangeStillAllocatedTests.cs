@@ -201,6 +201,47 @@ public class AzureReconcilerRangeStillAllocatedTests
     }
 
     /// <summary>
+    /// P1. The re-carve that needs no delete-and-recreate: `az network vnet subnet update
+    /// --address-prefixes` narrows a subnet IN PLACE, so the ARM resource id is preserved. O1's
+    /// overlap walk excluded every candidate carrying the row's own resource id, which is exactly
+    /// the subnet still holding the range - so the row was offered for irreversible archive with no
+    /// warning, and BASTET then advertised the ARM-held range as free space.
+    ///
+    /// The exclusion's stated justification holds only for the equality arm: EvaluateSubnetLevel
+    /// tests membership of the EXACT recorded prefix, so a row can be stale while its own resource
+    /// still holds a subset or superset of it.
+    /// </summary>
+    [Fact]
+    public void SubnetPrefixChanged_WhereTheRowsOwnAzureSubnetStillHoldsPartOfTheRange_IsWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            // same resource id as the row records, narrowed in place from /24 to /25
+            Live(VNet("vnet-a", ["10.231.0.0/16"], AzSubnet("vnet-a", "sn-a", "10.231.1.0/25"))),
+            Linked(2, "app", "10.231.1.0", 24, SubnetId("vnet-a", "sn-a")));
+
+        Assert.Empty(plan.Items);
+        AzureReconcileItem review = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.RangeStillAllocatedInAzure, review.Status);
+        Assert.Contains("10.231.1.0/25", review.Reason);
+        // an overlapping owner is never a Re-link target: it holds a DIFFERENT range
+        Assert.True(string.IsNullOrEmpty(review.SuggestedAzureResourceId));
+    }
+
+    /// <summary>
+    /// The widening direction of the same in-place edit, which must be withheld for the same reason.
+    /// </summary>
+    [Fact]
+    public void SubnetPrefixChanged_WhereTheRowsOwnAzureSubnetNowHoldsAWiderRange_IsWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.232.0.0/16"], AzSubnet("vnet-a", "sn-a", "10.232.1.0/24"))),
+            Linked(2, "app", "10.232.1.0", 25, SubnetId("vnet-a", "sn-a")));
+
+        Assert.Empty(plan.Items);
+        Assert.Equal(AzureReconcileStatus.RangeStillAllocatedInAzure, Assert.Single(plan.ReviewItems).Status);
+    }
+
+    /// <summary>
     /// O3. FindLiveOwnerOfRange accepts VNet-level statuses too, and for a VNet-level row the index
     /// lookup finds any Azure SUBNET holding that prefix inside the VNet - so the suggestion, and
     /// therefore the Re-link button, offered to stamp a SUBNET resource id onto a row whose link is
