@@ -14,10 +14,6 @@
 
             @if (!string.IsNullOrEmpty(Model.AzureResourceId))
             {
-                // Per-subnet portal pages are nearly empty — for subnet resource IDs we link to the
-                // parent VNet's /subnets list instead, which renders the useful subnet table. The
-                // subnet test is anchored on the parsed resource type, shared with the reconciler:
-                // a resource group named "subnets" would otherwise truncate a VNet's own link.
                 string portalPath = Bastet.Services.Azure.AzureResourceIdentity.ToPortalPath(Model.AzureResourceId);
                 string portalUrl = $"https://portal.azure.com/#@/resource{portalPath}";
 

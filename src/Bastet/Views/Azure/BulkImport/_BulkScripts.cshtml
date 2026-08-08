@@ -43,9 +43,6 @@
             return $("input[name='__RequestVerificationToken']").first().val();
         }
 
-        // ---------------------------------------------------------------
-        // Step 1: Subscriptions
-        // ---------------------------------------------------------------
         loadAzureSubscriptions();
 
         function loadAzureSubscriptions() {
@@ -90,9 +87,6 @@
 
         $("#bulk-subscription-select").on("change", function () {
             $("#bulk-select-subscription-btn").prop("disabled", !$(this).val());
-            // A plan belongs to the subscription it was built from, so choosing a different one
-            // re-locks the later steps rather than leaving them reachable through their pills.
-            // Step 2 belongs to it too: its tree is the previous subscription's. Re-lock it here
 
             $("#step2-tab").addClass("disabled");
             invalidatePlan();

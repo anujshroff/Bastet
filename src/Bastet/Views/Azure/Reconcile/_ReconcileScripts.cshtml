@@ -38,9 +38,6 @@
             $("#" + tabId).addClass("show active");
         }
 
-        // The scan is only valid for the subscription it ran against. Any change to that choice
-        // re-locks the later steps and drops the cached plan, so the pills cannot be used to walk
-        // back into a stale result and delete the wrong subnets.
         function invalidateScan() {
             lastPlan = null;
             $("#rec-step2-tab").addClass("disabled");
@@ -48,40 +45,23 @@
             invalidateConfirmation();
         }
 
-        // The confirm step is built from a snapshot of the review selection, so changing that
-        // selection makes everything on it - the list, the counts, the typed approval - describe a
-        // deletion the user is no longer asking for. Re-lock the step so it can only be reached
-        // again through the button that rebuilds it, rather than through its pill, which stays
-        // clickable once visited.
         function invalidateConfirmation() {
             confirmedIds = null;
             confirmedVerdicts = null;
             $("#rec-step3-tab").addClass("disabled");
             refreshDeleteButton();
 
-            // Disabling the pill is not enough when step 3 is the pane the user is looking at: it
-            // stays on screen showing a confirmation that no longer describes anything, and the
-            // typed word alone used to be enough to bring its button back. Send them back to the
-            // review step, which is where the snapshot has to be rebuilt.
             if ($("#rec-step3").hasClass("active")) {
                 activateTab("rec-step2");
             }
         }
 
-        // The delete button is only ever live when there is a confirmed snapshot to post AND the
-        // operator has typed the confirmation word. Both conditions live here so the two places that
-        // re-enable the button cannot drift apart: gating on the typed text alone left the button
-        // clickable after the snapshot had been dropped, and clicking it hit a bare `return` in the
-        // click handler - no message, no spinner, no state change. A permanently live, inert button.
         function refreshDeleteButton() {
             const hasSnapshot = Array.isArray(confirmedIds) && confirmedIds.length > 0;
             const confirmed = $("#rec-confirmation").val() === "approved";
             $("#rec-confirm-delete-btn").prop("disabled", deleting || !hasSnapshot || !confirmed);
         }
 
-        // ------------------------------------------------------------------
-        // Step 1: subscriptions
-        // ------------------------------------------------------------------
 
         function loadSubscriptions() {
             $.ajax({
@@ -134,28 +114,18 @@
         });
 
         $("#rec-scan-btn").on("click", function () {
-            // An explicit re-scan is a fresh start; the re-link panel belongs to the attempt before
-            // it. (It is deliberately NOT cleared by runScan itself, because showRelinkError calls
-            // runScan and the message has to survive that.)
             $("#rec-relink-error").addClass("d-none");
             $("#rec-relink-success").addClass("d-none");
             const selected = $("#rec-subscription-select").find("option:selected");
             selectedSubscriptionId = selected.val();
             selectedSubscriptionName = selected.attr("data-name") || "";
-            // Drop the previous plan before re-scanning, not after it returns: for the whole
-            // duration of the scan the later steps were otherwise still reachable through their
-            // pills, carrying a confirmation built from results that are being replaced.
             invalidateScan();
             activateTab("rec-step2");
             runScan();
         });
 
-        // ------------------------------------------------------------------
-        // Step 2: scan and review
-        // ------------------------------------------------------------------
 
         function runScan() {
-            // The step-1 pill stays enabled during a scan, and the subscription select's change
 
             const seq = ++scanSeq;
             $.ajax({

@@ -43,7 +43,6 @@
                             </ul>
                         </li>
                         @{
-                            // The Azure pages are only shown when the feature flag is enabled and the user is an admin.
                             bool bulkAzureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _enabled) && _enabled;
                         }
                         @if (bulkAzureImportEnabled && UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))

@@ -5,7 +5,6 @@
     bool canEdit = UserContext.UserHasRole(ApplicationRoles.Edit);
     bool canDelete = UserContext.UserHasRole(ApplicationRoles.Delete);
 
-    // Azure Import button - get Azure import eligibility from ViewBag if present
     bool canImportFromAzure = ViewBag.CanImportFromAzure == true;
 
     if (canEdit)

@@ -21,26 +21,21 @@
                 .replace(/'/g, "&#039;");
         }
 
-        // Step 1: Load Azure subscriptions
         loadAzureSubscriptions();
 
-        // Step navigation
         $("#select-subscription-btn").click(function() {
             selectedSubscriptionId = $("#subscription-select").val();
             if (selectedSubscriptionId) {
-                // Move to Step 2
                 $("#step1-tab").removeClass("active");
                 $("#step2-tab").removeClass("disabled").addClass("active");
                 $("#step1").removeClass("show active");
                 $("#step2").addClass("show active");
 
-                // Load VNets for the selected subscription
                 loadVNets(selectedSubscriptionId);
             }
         });
 
         $("#back-to-subscription-btn, #back-from-no-vnets-btn").click(function() {
-            // Move back to Step 1
             $("#step2-tab").removeClass("active");
             $("#step1-tab").addClass("active");
             $("#step2").removeClass("show active");
@@ -52,14 +47,11 @@
             selectedVNetName = $("#vnet-select option:selected").text();
 
             if (selectedVNetId) {
-                // Move to Step 3
                 $("#step2-tab").removeClass("active");
                 $("#step3-tab").removeClass("disabled").addClass("active");
                 $("#step2").removeClass("show active");
                 $("#step3").addClass("show active");
 
-                // Load subnets for the selected VNet. The identity is passed in and re-written from
-                // the response that actually populates the rows, so the two can never disagree.
                 $("#vnet-name").val(selectedVNetName);
                 $("#vnet-resource-id").val(selectedVNetId);
                 loadSubnets(selectedVNetId, selectedVNetName);
@@ -67,15 +59,12 @@
         });
 
         $("#back-to-vnet-btn, #back-from-no-subnets-btn").click(function() {
-            // Move back to Step 2
             $("#step3-tab").removeClass("active");
             $("#step2-tab").addClass("active");
             $("#step3").removeClass("show active");
             $("#step2").addClass("show active");
         });
 
-        // Re-lock later steps when an upstream selection changes, so a stale VNet/subnet list
-        // can't be reached via the step pills and committed (mirrors the Bulk/Reconcile wizards).
         function invalidateVNetStep() {
 
             $("#step2-tab, #step3-tab").addClass("disabled");
