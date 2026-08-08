@@ -517,15 +517,26 @@ public partial class SubnetController : Controller
 
             await transaction.CommitAsync();
 
-            // Add appropriate success message
-            // The encompassing branch needs no rename caveat: ValidateSubnetCanBeFullyAllocated
-            // refuses a parent that has children, so it cannot fire on a top-up and the parent was
-            // always renamed on the path that reaches it.
+            // Add appropriate success message.
+            //
+            // ValidateSubnetCanBeFullyAllocated refuses a parent that has children, so the
+            // encompassing branch cannot fire on a top-up and the rename block above did run. That
+            // does NOT mean a rename happened: parentRenamed is false whenever the row's name
+            // already equals the VNet name, which is the steady state after any earlier import of
+            // the same VNet and the natural habit of naming a placeholder row after the VNet it is
+            // about to hold. The old comment asserted "the parent was always renamed on the path
+            // that reaches it" and that second clause is what produced the false banner.
+            //
+            // parentSubnet.Name rather than vnetName in both arms: Name carries the post-write value,
+            // so a >100-character VNet name reports the string that was actually stored instead of
+            // the raw one it was truncated from.
             TempData["SuccessMessage"] = hasFullyEncompassingSubnet
-                ? $"Successfully renamed parent subnet to '{vnetName}' and marked it as fully allocated by Azure subnet '{fullyEncompassingSubnetName}'."
+                ? parentRenamed
+                    ? $"Successfully renamed parent subnet to '{parentSubnet.Name}' and marked it as fully allocated by Azure subnet '{fullyEncompassingSubnetName}'."
+                    : $"Marked '{parentSubnet.Name}' as fully allocated by Azure subnet '{fullyEncompassingSubnetName}'."
                 : !string.IsNullOrEmpty(vnetName) && isAzureImport
                     ? parentRenamed
-                        ? $"Successfully renamed parent subnet to '{vnetName}' and imported {createdSubnetIds.Count} child subnets."
+                        ? $"Successfully renamed parent subnet to '{parentSubnet.Name}' and imported {createdSubnetIds.Count} child subnets."
                         : $"Successfully imported {createdSubnetIds.Count} child subnets."
                     : (object)$"Successfully imported {createdSubnetIds.Count} subnets.";
 
