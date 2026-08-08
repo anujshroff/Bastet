@@ -391,7 +391,7 @@ public class AzureReconcilerInboundTests
 
         AzureReconcileItem item = Assert.Single(Inbound(plan));
         Assert.Contains("refused while it has host IP assignments", item.Reason);
-        Assert.DoesNotContain("Import it to mark that subnet fully allocated", item.Reason);
+        Assert.DoesNotContain("Import 'sn-enc' to mark", item.Reason);
     }
 
     [Fact]
@@ -402,7 +402,7 @@ public class AzureReconcilerInboundTests
             [Target(1, "10.63.0.0", 24, "vnet-a")]);
 
         AzureReconcileItem item = Assert.Single(Inbound(plan));
-        Assert.Contains("Import it to mark that subnet fully allocated", item.Reason);
+        Assert.Contains("Import 'sn-enc' to mark 'subnet-1' fully allocated", item.Reason);
     }
 
     [Fact]
@@ -501,7 +501,7 @@ public class AzureReconcilerInboundTests
 
         AzureReconcileItem item = Assert.Single(Inbound(plan));
         Assert.DoesNotContain("reporting that range as free space", item.Reason);
-        Assert.Contains("no BASTET subnet records as its own range", item.Reason);
+        Assert.Contains("holds exactly that range but is not marked fully allocated", item.Reason);
     }
 
     [Fact]
@@ -570,5 +570,17 @@ public class AzureReconcilerInboundTests
 
         AzureReconcileItem item = Assert.Single(Inbound(plan));
         Assert.Contains("reporting that range as free space", item.Reason);
+    }
+
+    [Fact]
+    public void AnItemNamingTheSubnetThatHoldsTheRange_DoesNotAlsoSayNoSubnetRecordsIt()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-g", ["10.134.0.0/24"], AzSubnet("vnet-g", "whole", "10.134.0.0/24"))),
+            [Target(1, "10.134.0.0", 24, "vnet-g")]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.DoesNotContain("no BASTET subnet records", item.Reason);
+        Assert.Contains("BASTET subnet 'subnet-1' holds exactly that range", item.Reason);
     }
 }

@@ -459,15 +459,13 @@ namespace Bastet.Services.Azure
                         string remedy = wholePrefixTarget is null
                             ? string.Empty
                             : wholePrefixTarget.HasHostIpAssignments
-                                ? $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Importing it would mark "
-                                  + "that subnet fully allocated, which is refused while it has host IP assignments, so "
-                                  + "remove those first."
+                                ? $" Importing '{subnet.Name}' would mark '{wholePrefixTarget.Name}' fully allocated, which "
+                                  + "is refused while it has host IP assignments, so remove those first."
                                 : wholePrefixTarget.HasChildSubnets
-                                ? $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Importing it would mark "
-                                  + "that subnet fully allocated, which is refused while it still has child subnets, so remove "
-                                  + "the children that conflict with it first."
-                                : $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Import it to mark that "
-                                  + "subnet fully allocated.";
+                                ? $" Importing '{subnet.Name}' would mark '{wholePrefixTarget.Name}' fully allocated, which "
+                                  + "is refused while it still has child subnets, so remove the children that conflict with "
+                                  + "it first."
+                                : $" Import '{subnet.Name}' to mark '{wholePrefixTarget.Name}' fully allocated.";
 
                         plan.ReviewItems.Add(new AzureReconcileItem
                         {
@@ -478,10 +476,17 @@ namespace Bastet.Services.Azure
                             Cidr = cidr,
                             AzureResourceId = subnet.ResourceId ?? string.Empty,
                             Status = AzureReconcileStatus.AzureRangeNotImported,
-                            Reason = $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}, "
-                                     + (BastetOffersAnyOf(existingSubnets, parts[0], cidr)
-                                        ? "which no BASTET subnet records. BASTET is reporting that range as free space."
-                                        : "which no BASTET subnet records as its own range.")
+                            Reason = (wholePrefixTarget is null
+                                        ? $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}, "
+                                          + (BastetOffersAnyOf(existingSubnets, parts[0], cidr)
+                                             ? "which no BASTET subnet records. BASTET is reporting that range as free space."
+                                             : "which no BASTET subnet records as its own range.")
+                                        : $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}. BASTET subnet "
+                                          + $"'{wholePrefixTarget.Name}' holds exactly that range but is not marked fully "
+                                          + "allocated, so BASTET does not record it as allocated."
+                                          + (BastetOffersAnyOf(existingSubnets, parts[0], cidr)
+                                             ? " BASTET is reporting that range as free space."
+                                             : string.Empty))
                                      + remedy,
                             IsVNetLevel = false
                         });
