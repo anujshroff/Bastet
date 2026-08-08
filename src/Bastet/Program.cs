@@ -1,4 +1,5 @@
 using Bastet.Data;
+using Bastet.Services.Data;
 using Bastet.Filters;
 using Bastet.Services;
 using Bastet.Services.Security;
@@ -328,10 +329,19 @@ if (autoMigrate)
     {
 
         BastetDbContext dbContext = scope.ServiceProvider.GetRequiredService<BastetDbContext>();
+        dbContext.Database.SetCommandTimeout(330);
         dbContext.Database.Migrate();
 
         DataProtectionDbContext dpContext = scope.ServiceProvider.GetRequiredService<DataProtectionDbContext>();
+        dpContext.Database.SetCommandTimeout(330);
         dpContext.Database.Migrate();
+    }
+    catch (SqlException ex) when (SqlSaveOutcome.IsIndeterminateErrorNumber(ex.Number))
+    {
+        throw new InvalidOperationException(
+            "Timed out waiting for another replica to finish applying migrations. "
+            + "Another replica appears to be stuck applying migrations. Startup was aborted rather than "
+            + "risking a concurrent migration.", ex);
     }
     finally
     {
