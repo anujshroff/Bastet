@@ -3,8 +3,9 @@
 <div class="alert alert-info">
     <i class="bi bi-info-circle"></i>
     Pick a subscription to check. BASTET will compare every subnet imported from that subscription against what
-    currently exists in Azure, and report the ones whose VNet or subnet has been deleted. Subnets you created by
-    hand, and subnets imported from other subscriptions, are never touched.
+    currently exists in Azure, and report the ones whose VNet or subnet has been deleted, plus Azure ranges BASTET
+    does not record. Deleting a flagged subnet archives everything beneath it, including subnets and host IP
+    assignments you created by hand or imported from another subscription.
 </div>
 
 <div id="rec-subscription-loading" class="text-center py-3 d-none">
