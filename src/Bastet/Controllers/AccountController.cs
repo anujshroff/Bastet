@@ -50,18 +50,34 @@ public class AccountController(
             ? returnUrl
             : Url.Action(nameof(SignedOut), "Account") ?? "/Account/SignedOut";
 
+        // Drop any queued TempData before the environment branch, so it happens on all three exits
+        // - including the Production OIDC branch that returns EmptyResult after the handler
+        // redirects. Clear() forces the lazy Load(), so the globally registered SaveTempDataFilter
+        // reaches the provider with an empty dictionary and the provider deletes its own cookie
+        // using its own name, path and SameSite options. Response.Cookies.Delete with a hard-coded
+        // name would emit a Set-Cookie the browser may not match.
+        //
+        // ASP.NET Core removes a TempData entry only on READ. An operator who posts an edit and does
+        // not follow the redirect - closes the tab, hits Stop, or lets the 2000ms setTimeout on the
+        // reconcile screen navigate late - leaves the entry unread, and it then rendered to whoever
+        // signed in next on that browser: a green banner naming a subnet they never touched, in the
+        // worst case asserting a completed destructive reconcile delete.
+        TempData.Clear();
+
         // No cookie loop here. It walked Request.Cookies.Keys - every cookie the BROWSER sent,
         // including ones Bastet never issued - and expired each one. Since cookies ignore port
         // (RFC 6265 gives no port isolation), any other application sharing this hostname had its
         // session cookie destroyed by an anonymous, tokenless, cross-site-navigable GET. That is a
         // write, which is exactly what this endpoint's own remarks claim it does not perform.
         //
-        // Nothing is lost by removing it. SignOutAsync on the cookie scheme below removes the auth
-        // ticket cookie AND its C1..Cn chunks through ChunkingCookieManager, which is the only
-        // cookie here that carries session state. The antiforgery and TempData cookies the loop also
-        // cleared hold none and are re-minted on the next request - the framework never deletes
-        // either at sign-out. In Development there is no cookie scheme registered at all, so the
-        // loop was dead weight there too.
+        // Removing the loop was right, but its justification was wrong about one cookie and that is
+        // what P7 measured: the TempData cookie is NOT "re-minted on the next request", it persists
+        // until read, and the loop had been the only thing deleting it. Hence the explicit
+        // TempData.Clear() above, which names only the cookie Bastet's own provider issued and never
+        // iterates Request.Cookies. SignOutAsync on the cookie scheme below removes the auth ticket
+        // cookie AND its C1..Cn chunks through ChunkingCookieManager. The antiforgery cookie holds
+        // no session state and is re-minted on the next request. In Development there is no cookie
+        // scheme registered at all, so the loop was dead weight there too.
 
         // No unconditional SignOutAsync here. Development registers a single scheme, DevAuthScheme,
         // and DevAuthHandler is not an IAuthenticationSignOutHandler - so signing out of "Cookies"
