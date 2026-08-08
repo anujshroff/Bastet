@@ -507,4 +507,66 @@ public class AzureReconcilerInboundTests
         Assert.Empty(plan.ReviewItems);
         Assert.Empty(plan.Items);
     }
+    /// <summary>
+    /// P10. O5's remedy branched only on HasChildSubnets, so a target carrying HOST IPs was told
+    /// "Import it to mark that subnet fully allocated" - and every route refuses that: the import
+    /// redirects with "Subnet must not have any host IP assignments", the Details page renders no
+    /// import link at all, and the bulk wizard blocks the prefix. HasHostIpAssignments was on the
+    /// snapshot the whole time and simply unread.
+    /// </summary>
+    [Fact]
+    public void AWholePrefixTargetWithHostIps_IsToldToRemoveThemRatherThanToImport()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.61.0.0/24"], AzSubnet("vnet-a", "sn-enc", "10.61.0.0/24"))),
+            [
+                new ExistingSubnetSnapshot
+                {
+                    Id = 1,
+                    Name = "rig-enc",
+                    NetworkAddress = "10.61.0.0",
+                    Cidr = 24,
+                    AzureResourceId = VNetId("vnet-a"),
+                    HasHostIpAssignments = true
+                }
+            ]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Contains("refused while it has host IP assignments", item.Reason);
+        Assert.DoesNotContain("Import it to mark that subnet fully allocated", item.Reason);
+    }
+
+    /// <summary>The clean target still gets the actionable remedy - the branch must not over-block.</summary>
+    [Fact]
+    public void AWholePrefixTargetWithNothingInIt_IsStillToldToImport()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.63.0.0/24"], AzSubnet("vnet-a", "sn-enc", "10.63.0.0/24"))),
+            [Target(1, "10.63.0.0", 24, "vnet-a")]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Contains("Import it to mark that subnet fully allocated", item.Reason);
+    }
+
+    /// <summary>Children still report the children blocker when there are no host IPs.</summary>
+    [Fact]
+    public void AWholePrefixTargetWithChildren_StillReportsTheChildrenBlocker()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.64.0.0/24"], AzSubnet("vnet-a", "sn-enc", "10.64.0.0/24"))),
+            [
+                new ExistingSubnetSnapshot
+                {
+                    Id = 1,
+                    Name = "rig-enc",
+                    NetworkAddress = "10.64.0.0",
+                    Cidr = 24,
+                    AzureResourceId = VNetId("vnet-a"),
+                    HasChildSubnets = true
+                }
+            ]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Contains("refused while it still has child subnets", item.Reason);
+    }
 }

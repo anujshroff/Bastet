@@ -539,9 +539,25 @@ namespace Bastet.Services.Azure
                             && string.Equals(e.NetworkAddress, parts[0], StringComparison.OrdinalIgnoreCase)
                             && e.Cidr == cidr);
 
+                        // Three-way, in the order the wizard's own gates fire. HasHostIpAssignments
+                        // is on the snapshot and was simply unread, while every downstream gate
+                        // refuses on it: AzureController.Import redirects with "Subnet must not have
+                        // any host IP assignments", ViewBag.CanImportFromAzure requires zero so the
+                        // Details page renders no import link at all, ValidateSubnetCanBeFullyAllocated
+                        // refuses, and the bulk wizard blocks the prefix outright. Saying "Import it"
+                        // in that state sends the operator to a wizard that will refuse them, which
+                        // is exactly what the remarks below say this branch exists to prevent.
+                        //
+                        // Host IPs before children only decides which blocker is NAMED when a target
+                        // has both; both are true, and the commit-time gate happens to test children
+                        // first. Only the clearing order differs, so the message stays honest.
                         string remedy = wholePrefixTarget is null
                             ? string.Empty
-                            : wholePrefixTarget.HasChildSubnets
+                            : wholePrefixTarget.HasHostIpAssignments
+                                ? $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Importing it would mark "
+                                  + "that subnet fully allocated, which is refused while it has host IP assignments, so "
+                                  + "remove those first."
+                                : wholePrefixTarget.HasChildSubnets
                                 ? $" It covers the whole of BASTET subnet '{wholePrefixTarget.Name}'. Importing it would mark "
                                   + "that subnet fully allocated, which is refused while it still has child subnets, so remove "
                                   + "the children that conflict with it first."
