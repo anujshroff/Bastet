@@ -51,11 +51,33 @@ namespace Bastet.Services.Azure
 
             Dictionary<string, List<AzureLivePrefix>> livePrefixesByVNet = new(StringComparer.OrdinalIgnoreCase);
 
+            List<AzureSubscriptionPrefix> livePrefixesInSubscription = [];
+
+            HashSet<string> recordedVNetIds = new(
+                linkedSubnets
+                    .Select(l => AzureResourceIdentity.VNetIdOf(l.AzureResourceId))
+                    .Where(v => !string.IsNullOrEmpty(v))
+                    .Select(v => v!),
+                StringComparer.OrdinalIgnoreCase);
+
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
             {
                 if (!string.IsNullOrEmpty(vnet.ResourceId))
                 {
                     liveVNets[vnet.ResourceId] = vnet;
+
+                    foreach (string vnetPrefix in vnet.Ipv4AddressPrefixes)
+                    {
+                        string[] vnetParts = vnetPrefix.Split('/');
+
+                        if (vnetParts.Length == 2 && int.TryParse(vnetParts[1], out int vnetPrefixCidr))
+                        {
+                            livePrefixesInSubscription.Add(new AzureSubscriptionPrefix(
+                                vnetPrefix, vnetParts[0], vnetPrefixCidr,
+                                new AzurePrefixOwner(vnet.ResourceId, vnet.Name, vnet.Name),
+                                vnet.ResourceId, true));
+                        }
+                    }
                 }
 
                 foreach (BulkAzureSubnetViewModel subnet in vnet.Subnets)
@@ -94,6 +116,9 @@ namespace Bastet.Services.Azure
                             }
 
                             byVNet.Add(new AzureLivePrefix(prefix, parts[0], prefixCidr, owner));
+
+                            livePrefixesInSubscription.Add(new AzureSubscriptionPrefix(
+                                prefix, parts[0], prefixCidr, owner, vnet.ResourceId, false));
                         }
                     }
                 }
@@ -134,7 +159,7 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
-                LiveRangeOwner? stillAllocated = FindLiveOwnerOfRange(snapshot, item, livePrefixOwners, livePrefixesByVNet);
+                LiveRangeOwner? stillAllocated = FindLiveOwnerOfRange(snapshot, item, livePrefixOwners, livePrefixesByVNet, livePrefixesInSubscription, liveVNets, recordedVNetIds);
 
                 if (stillAllocated is not null)
                 {
@@ -152,6 +177,12 @@ namespace Bastet.Services.Azure
                           + "subnet would make BASTET report an allocated range as free. Re-link is not offered for a VNet-level "
                           + "import, because that would link this subnet to a child of its own VNet: correct the VNet's address "
                           + "space, or delete this subnet and import the current prefix again."
+                        : stillAllocated.OwnerIsVNetAddressSpace
+                        ? $"{item.Reason} VNet '{stillAllocated.Owner.VNetName}' declares the address space "
+                          + $"{stillAllocated.LivePrefix}, which overlaps the recorded range "
+                          + $"{snapshot.NetworkAddress}/{snapshot.Cidr}, so archiving this subnet would make BASTET "
+                          + "report an allocated range as free. Re-link is not offered because that VNet is not the one "
+                          + "this subnet was imported from: delete this BASTET subnet and import the current range again."
                         : $"{item.Reason} Azure subnet '{stillAllocated.Owner.SubnetName}' in VNet "
                           + $"'{stillAllocated.Owner.VNetName}' now holds {stillAllocated.LivePrefix}, which overlaps the "
                           + $"recorded range {snapshot.NetworkAddress}/{snapshot.Cidr}, so archiving this subnet would make "
@@ -463,7 +494,10 @@ namespace Bastet.Services.Azure
 
         private sealed record AzureLivePrefix(string Prefix, string Network, int Cidr, AzurePrefixOwner Owner);
 
-        private sealed record LiveRangeOwner(AzurePrefixOwner Owner, string LivePrefix, bool Exact);
+        private sealed record AzureSubscriptionPrefix(
+            string Prefix, string Network, int Cidr, AzurePrefixOwner Owner, string VNetResourceId, bool IsVNetAddressSpace);
+
+        private sealed record LiveRangeOwner(AzurePrefixOwner Owner, string LivePrefix, bool Exact, bool OwnerIsVNetAddressSpace = false);
 
         private static string PrefixKey(string vnetResourceId, string prefix) => $"{vnetResourceId}|{prefix}";
 
@@ -471,7 +505,10 @@ namespace Bastet.Services.Azure
             AzureLinkedSubnetSnapshot snapshot,
             AzureReconcileItem item,
             Dictionary<string, List<AzurePrefixOwner>> livePrefixOwners,
-            Dictionary<string, List<AzureLivePrefix>> livePrefixesByVNet)
+            Dictionary<string, List<AzureLivePrefix>> livePrefixesByVNet,
+            List<AzureSubscriptionPrefix> livePrefixesInSubscription,
+            Dictionary<string, BulkAzureVNetViewModel> liveVNets,
+            HashSet<string> recordedVNetIds)
         {
 
             if (item.Status is not (AzureReconcileStatus.VNetDeleted
@@ -503,19 +540,42 @@ namespace Bastet.Services.Azure
                 }
             }
 
-            if (!livePrefixesByVNet.TryGetValue(vnetId, out List<AzureLivePrefix>? candidates))
+            if (livePrefixesByVNet.TryGetValue(vnetId, out List<AzureLivePrefix>? candidates))
+            {
+                AzureLivePrefix? overlapping = candidates.FirstOrDefault(c =>
+                    !(string.Equals(c.Owner.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase)
+                      && string.Equals(c.Prefix, recorded, StringComparison.OrdinalIgnoreCase))
+                    && OverlapsRange(c.Network, c.Cidr, snapshot));
+
+                if (overlapping is not null)
+                {
+                    return new LiveRangeOwner(overlapping.Owner, overlapping.Prefix, false);
+                }
+            }
+
+            if (liveVNets.ContainsKey(vnetId))
             {
                 return null;
             }
 
-            AzureLivePrefix? overlapping = candidates.FirstOrDefault(c =>
-                !(string.Equals(c.Owner.ResourceId, snapshot.AzureResourceId, StringComparison.OrdinalIgnoreCase)
-                  && string.Equals(c.Prefix, recorded, StringComparison.OrdinalIgnoreCase))
-                && (ipUtilityService.IsSubnetContainedInParent(c.Network, c.Cidr, snapshot.NetworkAddress, snapshot.Cidr)
-                    || ipUtilityService.IsSubnetContainedInParent(snapshot.NetworkAddress, snapshot.Cidr, c.Network, c.Cidr)));
+            List<AzureSubscriptionPrefix> elsewhereMatches = [.. livePrefixesInSubscription.Where(c =>
+                !string.Equals(c.VNetResourceId, vnetId, StringComparison.OrdinalIgnoreCase)
+                && !recordedVNetIds.Contains(c.VNetResourceId)
+                && OverlapsRange(c.Network, c.Cidr, snapshot))];
 
-            return overlapping is null ? null : new LiveRangeOwner(overlapping.Owner, overlapping.Prefix, false);
+            AzureSubscriptionPrefix? elsewhere =
+                elsewhereMatches.FirstOrDefault(c => !c.IsVNetAddressSpace) ?? elsewhereMatches.FirstOrDefault();
+
+            return elsewhere is null
+                ? null
+                : new LiveRangeOwner(elsewhere.Owner, elsewhere.Prefix, false, elsewhere.IsVNetAddressSpace);
         }
+
+        private bool OverlapsRange(string network, int cidr, AzureLinkedSubnetSnapshot snapshot) =>
+            (cidr == snapshot.Cidr
+             && string.Equals(network, snapshot.NetworkAddress, StringComparison.OrdinalIgnoreCase))
+            || ipUtilityService.IsSubnetContainedInParent(network, cidr, snapshot.NetworkAddress, snapshot.Cidr)
+            || ipUtilityService.IsSubnetContainedInParent(snapshot.NetworkAddress, snapshot.Cidr, network, cidr);
 
         private static string OwnerList(List<AzurePrefixOwner> owners)
         {

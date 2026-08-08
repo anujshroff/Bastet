@@ -314,4 +314,50 @@ public class AzureReconcilerRangeStillAllocatedTests
         Assert.Empty(plan.Items);
         Assert.Contains(plan.Warnings, w => w.Contains("withheld from deletion"));
     }
+    [Fact]
+    public void SubnetDeleted_ButTheRangeIsStillAssignedInADifferentVNet_IsWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-renamed", ["10.198.0.0/16"], AzSubnet("vnet-renamed", "s1", "10.198.1.0/24"))),
+            Linked(2, "app", "10.198.1.0", 24, SubnetId("vnet-doomed", "s1")));
+
+        Assert.Empty(plan.Items);
+        AzureReconcileItem review = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.RangeStillAllocatedInAzure, review.Status);
+        Assert.Contains("vnet-renamed", review.Reason);
+    }
+
+    [Fact]
+    public void VNetDeleted_ButTheAddressSpaceIsStillDeclaredByADifferentVNet_IsWithheld()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-b-renamed", ["10.199.0.0/16"])),
+            Linked(1, "target", "10.199.0.0", 16, VNetId("vnet-b-doomed")));
+
+        Assert.Empty(plan.Items);
+        Assert.Equal(AzureReconcileStatus.RangeStillAllocatedInAzure, Assert.Single(plan.ReviewItems).Status);
+    }
+
+    [Fact]
+    public void AWithheldCrossVNetRow_IsOfferedNoRelinkSuggestion()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-renamed", ["10.198.0.0/16"], AzSubnet("vnet-renamed", "s1", "10.198.1.0/24"))),
+            Linked(2, "app", "10.198.1.0", 24, SubnetId("vnet-doomed", "s1")));
+
+        AzureReconcileItem review = Assert.Single(plan.ReviewItems);
+        Assert.True(string.IsNullOrEmpty(review.SuggestedAzureResourceId));
+        Assert.True(string.IsNullOrEmpty(review.SuggestedAzureSubnetName));
+    }
+
+    [Fact]
+    public void AGenuinelyDeletedRangeNothingElseInTheSubscriptionCovers_IsStillOffered()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["10.50.0.0/16"], AzSubnet("vnet-other", "unrelated", "10.50.1.0/24"))),
+            Linked(2, "app", "10.198.1.0", 24, SubnetId("vnet-doomed", "s1")));
+
+        Assert.Single(plan.Items);
+        Assert.Empty(plan.ReviewItems);
+    }
 }
