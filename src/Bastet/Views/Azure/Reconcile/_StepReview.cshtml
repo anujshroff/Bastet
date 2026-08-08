@@ -24,13 +24,31 @@
    three things that are all false here: Azure was read, the scan did succeed, and rows may well
    still be offered for deletion on this very screen. This panel says only what happened, and it
    lives outside #rec-scan-content so the automatic re-scan that follows does not wipe it. *@
+@* P6. Re-link is the only control that writes AzureResourceId, and O16 removed its TempData
+   banner on the argument that the automatic re-scan is the feedback. Nothing checked that the
+   re-scan landed, so a re-link that COMMITTED was reported as "Nothing was checked ... Azure could
+   not be read" with no mention anywhere that the write happened. This panel is the re-link's own
+   success surface, and like its error sibling it lives outside #rec-scan-content so the re-scan
+   cannot wipe it. *@
+<div id="rec-relink-success" class="alert alert-success d-none">
+    <i class="bi bi-check-circle-fill me-2"></i>
+    <strong>Re-link saved.</strong>
+    <div id="rec-relink-success-message" class="mt-1"></div>
+</div>
+
 <div id="rec-relink-error" class="alert alert-danger d-none">
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
     <strong>The re-link did not happen.</strong>
     <div id="rec-relink-error-message" class="mt-1"></div>
     <hr>
+    @* Set from what actually happened, in BOTH directions. This sentence used to be hard-coded, so
+       when the follow-up scan also failed the panel asserted a re-scan that never ran, directly
+       above "Nothing was checked" with no results below. Writing it in one direction only would
+       simply invert the lie - after any earlier scan failure it would claim the results could not
+       be re-scanned while they demonstrably were - so runScan's two terminal handlers are the sole
+       writers and each sets it explicitly. *@
     <p class="mb-0">
-        Nothing was changed. The results below have been re-scanned, so they reflect Azure as it is now.
+        Nothing was changed. <span id="rec-relink-rescan-note"></span>
     </p>
 </div>
 

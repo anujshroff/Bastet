@@ -147,6 +147,7 @@
             // it. (It is deliberately NOT cleared by runScan itself, because showRelinkError calls
             // runScan and the message has to survive that.)
             $("#rec-relink-error").addClass("d-none");
+            $("#rec-relink-success").addClass("d-none");
             const selected = $("#rec-subscription-select").find("option:selected");
             selectedSubscriptionId = selected.val();
             selectedSubscriptionName = selected.attr("data-name") || "";
@@ -215,6 +216,11 @@
             invalidateScan();
             $("#rec-scan-error-message").text(message);
             $("#rec-scan-error").removeClass("d-none");
+            // The re-link panel's closing sentence used to be hard-coded as "The results below have
+            // been re-scanned", which is false on exactly this path. Setting it in one direction
+            // only would invert the lie instead of removing it, so both terminal handlers write it.
+            $("#rec-relink-rescan-note").text(
+                "The results below could not be re-scanned, so they may not reflect Azure as it is now.");
         }
 
         // A failed re-link is NOT a failed scan. Routing it through showScanError painted
@@ -233,6 +239,7 @@
                 btn.text(originalLabel);
             }
             $("#rec-relink-error-message").text(message);
+            $("#rec-relink-success").addClass("d-none");
             $("#rec-relink-error").removeClass("d-none");
             runScan();
         }
@@ -346,6 +353,11 @@
             // plan never renders underneath a "Nothing was checked" message left by an earlier scan.
             // Safe here because the showScanError branches above return before reaching this point.
             $("#rec-scan-error").addClass("d-none");
+            // The other direction of the re-link panel's closing sentence - see showScanError. The
+            // results below ARE current on this path, and saying so only here means an earlier scan
+            // failure cannot leave the panel asserting the opposite for ever.
+            $("#rec-relink-rescan-note").text(
+                "The results below have been re-scanned, so they reflect Azure as it is now.");
             $("#rec-scan-content").removeClass("d-none");
         }
 
@@ -420,9 +432,18 @@
                 },
                 success: function (result) {
                     if (result && result.success) {
-                        // Re-scan rather than patching the row: the repair can change other rows'
-                        // verdicts too, and a stale table is what makes an archive click wrong.
+                        // P6. Say the write happened BEFORE the re-scan, and outside #rec-scan-content
+                        // so the scan cannot wipe it. The re-scan is strictly more likely to fail than
+                        // the re-link - it makes the same ARM call plus one direct read per proposed
+                        // deletion - and when it did, a re-link that had committed was reported as
+                        // "Nothing was checked ... Azure could not be read", with nothing anywhere on
+                        // the page stating that the row had been repaired.
                         $("#rec-relink-error").addClass("d-none");
+                        $("#rec-relink-success-message").text(
+                            result.azureSubnetName
+                                ? "This subnet is now linked to Azure subnet '" + result.azureSubnetName + "'."
+                                : "This subnet is now linked to its current Azure resource.");
+                        $("#rec-relink-success").removeClass("d-none");
                         runScan();
                         return;
                     }
