@@ -57,6 +57,9 @@ public partial class SubnetController : Controller
             return this.RedirectToErrorPage(404, "The ID in the URL doesn't match the ID in the form data.");
         }
 
+        byte[]? postedRowVersion = viewModel.RowVersion;
+        bool ownWriteMayHaveLanded = false;
+
         if (ModelState.IsValid)
         {
             try
@@ -197,6 +200,7 @@ public partial class SubnetController : Controller
             }
             catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
             {
+                ownWriteMayHaveLanded = true;
 
                 logger.LogError(ex, "Subnet edit outcome unknown for subnet {SubnetId}", id);
                 ModelState.AddModelError("",
@@ -244,9 +248,20 @@ public partial class SubnetController : Controller
         viewModel.CreatedAt = origSubnet.CreatedAt;
         viewModel.LastModifiedAt = origSubnet.LastModifiedAt;
 
+        bool rowMovedUnderneath = postedRowVersion is not null
+            && origSubnet.RowVersion is not null
+            && !postedRowVersion.SequenceEqual(origSubnet.RowVersion);
+
         viewModel.RowVersion = origSubnet.RowVersion;
 
         ModelState.Remove(nameof(viewModel.RowVersion));
+
+        if (rowMovedUnderneath && !ownWriteMayHaveLanded)
+        {
+            ModelState.AddModelError("",
+                "This subnet has changed since this form was loaded. The values shown are the current "
+                + "ones; review them before saving.");
+        }
 
         if (origSubnet.ParentSubnet != null)
         {
