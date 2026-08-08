@@ -277,7 +277,34 @@
                         });
                         $prefixDiv.append($subList);
                     } else if (containedSubnets.length > 0) {
-                        $prefixDiv.append('<div class="ms-4 mt-1 text-muted small"><em>All subnets in this prefix are already imported.</em></div>');
+                        // isSelectable === false covers two different verdicts. AlreadyImported means
+                        // the row really was imported from this Azure resource; Blocked means it was
+                        // never imported and cannot be - "Would contain existing Bastet subnet ..." or
+                        // "Bastet subnet 'X' already uses ...". Asserting "already imported" over the
+                        // second is a positive false statement, and it hides the red Cannot import
+                        // badge that carries the only text saying what is actually wrong. Azure has no
+                        // subnet rename, so renaming is delete-and-recreate under a new ARM id, which
+                        // lands every previously imported subnet in the VNet on the Blocked branch.
+                        const importedCount = containedSubnets.filter(function (s) {
+                            return s.statusName === "AlreadyImported";
+                        }).length;
+                        const blockedCount = containedSubnets.length - importedCount;
+                        let hiddenMessage;
+
+                        if (blockedCount === 0) {
+                            hiddenMessage = 'All ' + importedCount + ' subnet(s) in this prefix are already imported.';
+                        } else if (importedCount === 0) {
+                            hiddenMessage = blockedCount + ' subnet(s) in this prefix cannot be imported, and are hidden. '
+                                + 'Untick "Hide unavailable" to see why.';
+                        } else {
+                            hiddenMessage = blockedCount + ' subnet(s) in this prefix cannot be imported and '
+                                + importedCount + ' are already imported, and are hidden. '
+                                + 'Untick "Hide unavailable" to see why.';
+                        }
+
+                        const $hidden = $('<div class="ms-4 mt-1 text-muted small"></div>');
+                        $hidden.append($('<em></em>').text(hiddenMessage));
+                        $prefixDiv.append($hidden);
                     } else {
                         $prefixDiv.append('<div class="ms-4 mt-1 text-muted small"><em>No IPv4 subnets in this prefix.</em></div>');
                     }
