@@ -1,4 +1,5 @@
 using Bastet.Controllers;
+using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
 using Bastet.Services.Azure;
@@ -38,7 +39,7 @@ public class MultiPrefixResourceIdCasingTests
             Row("10.20.40.0", 24, Lower),
             Row("10.20.5.0", 24, Upper),
             Row("10.20.20.0", 24, Upper)
-        ]);
+        ], []);
 
         // Every row names the range it holds. Before the fix the rows spelled with the other casing
         // fell out of the set: one kept the bare Azure name, and a later one was disambiguated by
@@ -55,7 +56,7 @@ public class MultiPrefixResourceIdCasingTests
         [
             Row("10.20.40.0", 24, Lower),
             Row("10.20.5.0", 24, Lower)
-        ]);
+        ], []);
 
         Assert.Equal("sn-multi (10.20.40.0-24)", names[0]);
         Assert.Equal("sn-multi (10.20.5.0-24)", names[1]);
@@ -95,5 +96,68 @@ public class MultiPrefixResourceIdCasingTests
 
         Assert.Contains("sn-multi (10.20.40.0-24)", names);
         Assert.Contains("sn-multi (10.20.5.0-24)", names);
+    }
+    /// <summary>
+    /// P15. ResolveImportNames decided qualification purely from the batch being posted, so a
+    /// top-up of a multi-prefix Azure subnet - which always posts exactly ONE row, because
+    /// AzureController.GetSubnets no longer offers prefixes Bastet already records - could never
+    /// trip the batch-only test. Two Bastet rows ended up with the identical Name and the identical
+    /// AzureResourceId. The bulk planner solved this with HasPersistedSiblingFromSameAzureSubnet;
+    /// this path never learned the second half.
+    /// </summary>
+    [Fact]
+    public void ResolveImportNames_QualifiesARowWhosePersistedSiblingSharesItsAzureSubnet()
+    {
+        List<Subnet> persisted =
+        [
+            new() { Id = 2, Name = "sn-multi", NetworkAddress = "10.88.20.0", Cidr = 24, AzureResourceId = Lower }
+        ];
+
+        Dictionary<int, string> names = SubnetController.ResolveImportNames(
+        [
+            Row("10.88.21.0", 24, Lower)
+        ], persisted);
+
+        Assert.Equal("sn-multi (10.88.21.0-24)", names[0]);
+    }
+
+    /// <summary>
+    /// The counter-test: an ordinary single-prefix import has no persisted sibling from the same
+    /// Azure subnet and must keep its bare name.
+    /// </summary>
+    [Fact]
+    public void ResolveImportNames_LeavesAnOrdinaryImportUnqualified()
+    {
+        List<Subnet> persisted =
+        [
+            new() { Id = 2, Name = "unrelated", NetworkAddress = "10.88.20.0", Cidr = 24, AzureResourceId = Upper + "-other" }
+        ];
+
+        Dictionary<int, string> names = SubnetController.ResolveImportNames(
+        [
+            Row("10.88.21.0", 24, Lower)
+        ], persisted);
+
+        Assert.Equal("sn-multi", names[0]);
+    }
+
+    /// <summary>
+    /// The row's own persisted record is not a sibling - re-posting the same prefix must not
+    /// qualify it against itself.
+    /// </summary>
+    [Fact]
+    public void ResolveImportNames_DoesNotTreatTheRowsOwnRecordAsASibling()
+    {
+        List<Subnet> persisted =
+        [
+            new() { Id = 2, Name = "sn-multi", NetworkAddress = "10.88.21.0", Cidr = 24, AzureResourceId = Lower }
+        ];
+
+        Dictionary<int, string> names = SubnetController.ResolveImportNames(
+        [
+            Row("10.88.21.0", 24, Lower)
+        ], persisted);
+
+        Assert.Equal("sn-multi", names[0]);
     }
 }

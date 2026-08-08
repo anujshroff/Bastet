@@ -251,7 +251,18 @@ public partial class SubnetController : Controller
     /// rules could not otherwise be asserted directly - and one of the things that must be asserted
     /// is that every name this produces satisfies the application's own [SafeText] input rules.
     /// </remarks>
-    public static Dictionary<int, string> ResolveImportNames(List<AzureImportSubnetViewModel> subnets)
+    private static bool HasPersistedSiblingFromSameAzureSubnet(
+        AzureImportSubnetViewModel subnet,
+        IReadOnlyList<Subnet> persistedSubnets) =>
+        persistedSubnets.Any(e =>
+            !string.IsNullOrEmpty(e.AzureResourceId)
+            && string.Equals(e.AzureResourceId, subnet.AzureResourceId, StringComparison.OrdinalIgnoreCase)
+            && !(e.Cidr == subnet.Cidr
+                 && string.Equals(e.NetworkAddress, subnet.NetworkAddress, StringComparison.OrdinalIgnoreCase)));
+
+    public static Dictionary<int, string> ResolveImportNames(
+        List<AzureImportSubnetViewModel> subnets,
+        IReadOnlyList<Subnet> persistedSubnets)
     {
         // new(..., comparer) and NOT a collection expression: [.. query] builds a plain
         // HashSet<string> with EqualityComparer<string>.Default, silently discarding the
@@ -280,7 +291,8 @@ public partial class SubnetController : Controller
 
             string name = subnet.Name;
             bool sharesAnAzureSubnet = !string.IsNullOrEmpty(subnet.AzureResourceId)
-                && multiPrefixResourceIds.Contains(subnet.AzureResourceId);
+                && (multiPrefixResourceIds.Contains(subnet.AzureResourceId)
+                    || HasPersistedSiblingFromSameAzureSubnet(subnet, persistedSubnets));
 
             if (sharesAnAzureSubnet || used.Contains(name))
             {
@@ -467,7 +479,7 @@ public partial class SubnetController : Controller
             if (!hasFullyEncompassingSubnet)
             {
                 // Settled before the loop so every row is named against the whole batch.
-                Dictionary<int, string> importNames = ResolveImportNames(subnets);
+                Dictionary<int, string> importNames = ResolveImportNames(subnets, treeCache);
 
                 // Create each subnet - with validation right before adding to catch overlaps
                 for (int i = 0; i < subnets.Count; i++)

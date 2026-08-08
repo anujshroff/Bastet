@@ -83,7 +83,7 @@ public class GeneratedNameSafeTextTests
             new() { Name = "sn-multi", NetworkAddress = "10.20.20.0", Cidr = 24, AzureResourceId = MultiPrefixSubnet }
         ];
 
-        Dictionary<int, string> names = SubnetController.ResolveImportNames(subnets);
+        Dictionary<int, string> names = SubnetController.ResolveImportNames(subnets, []);
 
         Assert.Equal(3, names.Count);
 
