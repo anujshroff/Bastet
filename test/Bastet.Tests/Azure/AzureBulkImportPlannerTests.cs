@@ -1352,4 +1352,62 @@ public class AzureBulkImportPlannerTests
         Assert.Equal(BulkImportAvailability.Available, ordinary.Status);
         Assert.True(ordinary.IsSelectable);
     }
+    /// <summary>
+    /// P13. O11 added two commit-side tests and mirrored only the would-contain half, on the stated
+    /// ground that the more-specific-parent test "has no well-defined answer here". It does: the
+    /// plan-side test is scoped by the VNet PREFIX, which AnnotateSubnet already holds. So the
+    /// selection screen certified a row as importable and the preview then returned a plan-wide
+    /// error that set CanCommit=false for every other VNet in the run.
+    /// </summary>
+    [Fact]
+    public void Availability_SubnetWithAMoreSpecificExistingParent_IsBlocked()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.63.0.0/16"], AzSub("vnet-a", "recarved", "10.63.1.0/25"));
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "PROD-CORE-63", "10.63.0.0", 16, azureResourceId: AzVNetId("vnet-a")),
+            Existing(2, "rig-a", "10.63.1.0", 24)
+        ];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkAzureSubnetViewModel subnet = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Blocked, subnet.Status);
+        Assert.False(subnet.IsSelectable);
+        Assert.Contains("more specific existing Bastet parent", subnet.Reason);
+        Assert.Contains("rig-a", subnet.Reason);
+    }
+
+    /// <summary>
+    /// The supernet counter-test the plan's own comment protects: an existing row ABOVE the VNet
+    /// prefix is not a more specific parent, and blocking on it would refuse ordinary imports.
+    /// </summary>
+    [Fact]
+    public void Availability_AnExistingRowAboveTheVNetPrefix_DoesNotBlock()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["172.16.5.0/24"], AzSub("vnet-a", "web", "172.16.5.0/25"));
+        List<ExistingSubnetSnapshot> existing = [Existing(1, "RFC1918 root", "172.16.0.0", 12)];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        Assert.Equal(BulkImportAvailability.Available, Assert.Single(vnet.Subnets).Status);
+    }
+
+    /// <summary>
+    /// The exact-match target must not block its own children, or every ordinary top-up breaks:
+    /// the existing parent has to be STRICTLY inside the owning VNet prefix.
+    /// </summary>
+    [Fact]
+    public void Availability_TheTargetItself_IsNotAMoreSpecificParent()
+    {
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.65.0.0/16"], AzSub("vnet-a", "web", "10.65.1.0/24"));
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "Target", "10.65.0.0", 16, azureResourceId: AzVNetId("vnet-a"))
+        ];
+
+        _planner.AnnotateAvailability([vnet], existing);
+
+        Assert.Equal(BulkImportAvailability.Available, Assert.Single(vnet.Subnets).Status);
+    }
 }

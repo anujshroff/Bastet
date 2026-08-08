@@ -349,6 +349,33 @@ namespace Bastet.Services.Azure
         /// An Azure subnet becomes a child of its prefix's target - unless it covers the whole
         /// prefix, in which case it is never created and only marks the target fully allocated.
         /// </summary>
+        private ExistingSubnetSnapshot? FindMoreSpecificParent(
+            BulkAzureSubnetViewModel subnet,
+            BulkAzureVNetViewModel vnet,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
+            string network,
+            int cidr)
+        {
+            foreach (string prefix in vnet.Ipv4AddressPrefixes)
+            {
+                if (!TryParseCidr(prefix, out string prefixNetwork, out int prefixCidr))
+                {
+                    continue;
+                }
+
+                if (!ipUtilityService.IsSubnetContainedInParent(network, cidr, prefixNetwork, prefixCidr))
+                {
+                    continue;
+                }
+
+                return existingSubnets.FirstOrDefault(e =>
+                    ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, prefixNetwork, prefixCidr)
+                    && ipUtilityService.IsSubnetContainedInParent(network, cidr, e.NetworkAddress, e.Cidr));
+            }
+
+            return null;
+        }
+
         private void AnnotateSubnet(
             BulkAzureSubnetViewModel subnet,
             BulkAzureVNetViewModel vnet,
@@ -409,13 +436,6 @@ namespace Bastet.Services.Azure
 
             if (exact is null)
             {
-                // Mirror of the would-contain half of DetectExistingBastetSubnetConflicts, so the
-                // selection screen greys the row with a reason instead of offering a run the preview
-                // then refuses. Only this half is mirrorable: the annotation pass runs per VNet with
-                // no prefix-to-target binding for a target that does not exist yet, so the
-                // more-specific-parent test has no well-defined answer here and is left to the plan.
-                // The selection UI is therefore strictly weaker than the preview, which is a large
-                // improvement on the current silence rather than a complete answer.
                 ExistingSubnetSnapshot? wouldContain = existingSubnets.FirstOrDefault(e =>
                     ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr));
 
@@ -424,6 +444,18 @@ namespace Bastet.Services.Azure
                     subnet.Status = BulkImportAvailability.Blocked;
                     subnet.Reason = $"Would contain existing Bastet subnet '{wouldContain.Name}' "
                                     + $"({wouldContain.NetworkAddress}/{wouldContain.Cidr}), which would create an invalid hierarchy.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
+                ExistingSubnetSnapshot? moreSpecificParent = FindMoreSpecificParent(subnet, vnet, existingSubnets, network, cidr);
+
+                if (moreSpecificParent is not null)
+                {
+                    subnet.Status = BulkImportAvailability.Blocked;
+                    subnet.Reason = $"Has a more specific existing Bastet parent '{moreSpecificParent.Name}' "
+                                    + $"({moreSpecificParent.NetworkAddress}/{moreSpecificParent.Cidr}), "
+                                    + "so it cannot be imported into this VNet prefix.";
                     subnet.IsSelectable = false;
                     return;
                 }
