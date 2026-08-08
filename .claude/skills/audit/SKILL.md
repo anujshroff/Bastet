@@ -80,6 +80,40 @@ unprompted, and only then does it change.
 
 ---
 
+# The master rule: do not add problems
+
+**The round exists to reduce the number of real defects in the product, permanently. Nothing else in
+this file overrides that.** A finding that is not real, a fix proposal that would break a working
+path, or a severity graded on anything but consequence all make the next round more expensive rather
+than less.
+
+Two things follow, and they are what the beats and the verifiers are actually for:
+
+- **Report the defect, not the instance.** A finding that names one call site when the same rule is
+  wrong at three others hands the reconcile step a fix that cannot close it. Where a beat can
+  establish that a rule is duplicated, the finding says so and names every site.
+- **A proposed fix that would introduce a new defect is worse than no proposal.** Round 16 had eight
+  of fifteen judged unsound, three of which would have shipped a new defect. That check is the single
+  most valuable thing verification produces — keep it.
+
+**Measure the residue rate and lead with it** (see Phase 4). Round 16's was 11 of 15. If it is not
+falling, the fix process is the problem, not the codebase, and the round says so in the Verdict.
+
+# No comments in source
+
+**Bastet source carries no comments.** `.cs` and `.cshtml` files have none, by the owner's standing
+instruction. Two consequences for a finder:
+
+- **Never file "this needs a comment", a missing-doc observation, or a stale-comment finding.** Those
+  are not runtime defects and are refused on sight.
+- **Never propose a fix whose substance is a comment.** If a rule needs explaining, the fix is a named
+  method or a test that fails when the rule is broken.
+
+Round 16's P11 is the cautionary case in the other direction: a comment asserted "the parent was
+always renamed on the path that reaches it", the guard beside it was written to match the comment
+rather than the code, and the wrong one was believed. The test that now pins it cannot be believed
+wrongly.
+
 # You are the operator, not a spectator
 
 Launch the workflow, then **watch it and intervene**. Round 7's skill said to launch and say nothing,

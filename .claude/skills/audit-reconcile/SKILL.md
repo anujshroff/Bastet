@@ -11,6 +11,45 @@ the file, and committed on its own.
 **The findings file is the durable record.** There is no separate handoff document — audits and
 reconciliation run on the same machine, and each struck entry carries what a later round needs.
 
+## The master rule: do not add problems
+
+**A round must leave the codebase with fewer defects than it found. Nothing else this file says
+overrides that.** The purpose is not to produce fixes, or findings, or a record — it is to reduce the
+number of real defects in the product, permanently.
+
+That has one blunt consequence and it is the rule most likely to be broken:
+
+- **A fix that closes one site and leaves the same defect at three others has not reduced anything.**
+  It has converted one known defect into three unknown ones, which resurface next round with new
+  numbers and cost another full cycle. Step 5 is mandatory for this reason and no other.
+- **A fix that introduces a new defect is worse than no fix.** Every change is checked for what it
+  breaks, not only for what it closes — that is what the over-blocking counter-tests are for. If a
+  fix cannot be shown not to break the working case, it does not ship.
+- **A fix whose message now says something untrue has added a problem**, even though the code is
+  correct. Step 6 exists because four of round 16's fifteen findings were exactly that.
+
+**Sixteen rounds is the evidence.** Round 16 filed fifteen findings and **eleven were residue of
+round 15's own fixes** — the audit was not finding a rotten codebase, it was finding the previous
+round's output. Measure the residue rate every round (see *Closing out*) and drive it to zero. A
+round that leaves the residue rate flat has not worked, whatever else it produced.
+
+## No comments in source
+
+**Do not write comments in `.cs` or `.cshtml` files, and do not restore ones that have been removed.**
+This is the repository owner's standing instruction and it is not negotiable inside a round.
+
+What this means in practice, because the previous version of this file leaned hard the other way:
+
+- **The code must carry its own explanation.** A guard whose reason needed a paragraph gets a named
+  method or a named local instead — `HasPersistedSiblingFromSameAzureSubnet`, `IsIndeterminate`,
+  `FindMoreSpecificParent`. If the name cannot carry it, the shape is wrong.
+- **The reasoning goes in the struck entry and the test name**, which are the durable record a later
+  round actually reads. `ARangeFullyCoveredByRowsInsideIt_IsNotReported` states the rule; a test that
+  fails when someone reverses it is a stronger guard than a comment asking them not to.
+- **A rule worth protecting gets a counter-test, not a warning comment.** Comments were being used to
+  stop future rounds undoing a fix; they did not work — round 16's P11 exists because a comment
+  asserted a false premise and the guard beside it was written to match the comment.
+
 ## Mode
 
 **Default: per-finding approval.** Explain the issue and the fix, wait for approval, then apply.
@@ -208,6 +247,8 @@ process.
 - **No literal control characters in source.** Use a named constant, e.g.
   `private const char Esc = (char)0x1B;`. Literals are invisible in diffs and get mangled through
   tool round-trips.
+- **No comments in `.cs` or `.cshtml`.** See the master rule at the top. Reasoning goes in the struck
+  entry, the method name and the test name.
 - **Migration `.Designer.cs` snapshots are frozen history** — never "fix" an old column width in one.
 - **The test count must never regress without an explicit, recorded reason.** Round 4 legitimately
   went 588 → 576 by deleting tests of dead code, and said so.
