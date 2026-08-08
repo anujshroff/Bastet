@@ -37,10 +37,56 @@ public partial class SubnetController : Controller
             Cidr = subnet.Cidr,
             Description = subnet.Description,
             ChildSubnetCount = descendantCount,
-            HostIpCount = hostIpCount
+            HostIpCount = hostIpCount,
+            ConfirmedMaxSubnetId = await MaxDescendantSubnetIdAsync(id),
+            ConfirmedMaxHostIpTicks = await MaxSubtreeHostIpTicksAsync(id)
         };
 
         return View(viewModel);
+    }
+
+    private async Task<List<int>> SubtreeSubnetIdsAsync(int subnetId)
+    {
+        List<Subnet> all = await context.Subnets.AsNoTracking().ToListAsync();
+        List<int> ids = [];
+        Queue<int> pending = new();
+        pending.Enqueue(subnetId);
+
+        while (pending.Count > 0)
+        {
+            int current = pending.Dequeue();
+
+            foreach (Subnet child in all.Where(s => s.ParentSubnetId == current))
+            {
+                if (ids.Contains(child.Id))
+                {
+                    continue;
+                }
+
+                ids.Add(child.Id);
+                pending.Enqueue(child.Id);
+            }
+        }
+
+        return ids;
+    }
+
+    private async Task<int> MaxDescendantSubnetIdAsync(int subnetId)
+    {
+        List<int> ids = await SubtreeSubnetIdsAsync(subnetId);
+        return ids.Count == 0 ? 0 : ids.Max();
+    }
+
+    private async Task<long> MaxSubtreeHostIpTicksAsync(int subnetId)
+    {
+        List<int> ids = [.. await SubtreeSubnetIdsAsync(subnetId), subnetId];
+
+        List<DateTime> created = await context.HostIpAssignments.AsNoTracking()
+            .Where(h => ids.Contains(h.SubnetId))
+            .Select(h => h.CreatedAt)
+            .ToListAsync();
+
+        return created.Count == 0 ? 0 : created.Max().Ticks;
     }
 
     private async Task<int> CountAllDescendantHostIps(int subnetId)
@@ -83,7 +129,8 @@ public partial class SubnetController : Controller
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
-    public async Task<IActionResult> DeleteConfirmed(int id, string confirmation)
+    public async Task<IActionResult> DeleteConfirmed(
+        int id, string confirmation, int? confirmedMaxSubnetId, long? confirmedMaxHostIpTicks)
     {
 
         if (confirmation != "approved")
@@ -92,10 +139,18 @@ public partial class SubnetController : Controller
             return RedirectToAction(nameof(Delete), new { id });
         }
 
+        if (confirmedMaxSubnetId is null || confirmedMaxHostIpTicks is null)
+        {
+            TempData["ErrorMessage"] =
+                "The deletion scope was missing from the form. Review the subnet and confirm again.";
+            return RedirectToAction(nameof(Delete), new { id });
+        }
+
         try
         {
 
-            return await subnetLockingService.ExecuteWithSubnetLockAsync(() => DeleteConfirmedCore(id));
+            return await subnetLockingService.ExecuteWithSubnetLockAsync(
+                () => DeleteConfirmedCore(id, confirmedMaxSubnetId.Value, confirmedMaxHostIpTicks.Value));
         }
         catch (TimeoutException)
         {
@@ -104,7 +159,8 @@ public partial class SubnetController : Controller
         }
     }
 
-    private async Task<IActionResult> DeleteConfirmedCore(int id)
+    private async Task<IActionResult> DeleteConfirmedCore(
+        int id, int confirmedMaxSubnetId, long confirmedMaxHostIpTicks)
     {
 
         Subnet? subnet = await context.Subnets
@@ -115,6 +171,15 @@ public partial class SubnetController : Controller
         if (subnet == null)
         {
             return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
+        }
+
+        if (await MaxDescendantSubnetIdAsync(id) > confirmedMaxSubnetId
+            || await MaxSubtreeHostIpTicksAsync(id) > confirmedMaxHostIpTicks)
+        {
+            TempData["ErrorMessage"] =
+                "Subnets or host IP assignments were added beneath this subnet after you reviewed it. "
+                + "Nothing was deleted. Review the current contents and confirm again.";
+            return RedirectToAction(nameof(Delete), new { id });
         }
 
         using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();

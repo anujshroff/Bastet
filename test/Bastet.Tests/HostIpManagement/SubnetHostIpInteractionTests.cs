@@ -422,7 +422,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         int initialDeletedSubnetCount = await _context.DeletedSubnets.CountAsync(TestContext.Current.CancellationToken);
         int initialDeletedHostIpCount = await _context.DeletedHostIpAssignments.CountAsync(TestContext.Current.CancellationToken);
 
-        IActionResult result = await _subnetController.DeleteConfirmed(subnetId, "approved");
+        IActionResult result = await _subnetController.DeleteConfirmed(subnetId, "approved", int.MaxValue, long.MaxValue);
 
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Index", redirectResult.ActionName);
@@ -570,5 +570,51 @@ public class SubnetHostIpInteractionTests : IDisposable
             .ValidateSubnetCidrChangeWithHostIps(108, "10.8.0.0", 30, 29);
 
         Assert.True(result.IsValid);
+    }
+    [Fact]
+    public async Task DeleteConfirmed_WhenAChildWasAddedAfterTheReview_RefusesAndArchivesNothing()
+    {
+        _context.Subnets.Add(new Subnet { Id = 700, Name = "root", NetworkAddress = "10.70.0.0", Cidr = 16 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        int reviewedMaxSubnetId = 0;
+
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 701, Name = "added-after", NetworkAddress = "10.70.1.0", Cidr = 24, ParentSubnetId = 700
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IActionResult result = await _subnetController.DeleteConfirmed(
+            700, "approved", reviewedMaxSubnetId, long.MaxValue);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.NotNull(await _context.Subnets.FindAsync([700], TestContext.Current.CancellationToken));
+        Assert.NotNull(await _context.Subnets.FindAsync([701], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task DeleteConfirmed_WhenTheSubtreeShrank_StillCommits()
+    {
+        _context.Subnets.Add(new Subnet { Id = 710, Name = "root", NetworkAddress = "10.71.0.0", Cidr = 16 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IActionResult result = await _subnetController.DeleteConfirmed(
+            710, "approved", 999, long.MaxValue);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.Null(await _context.Subnets.FindAsync([710], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task DeleteConfirmed_WithNoReviewedScope_RefusesAndArchivesNothing()
+    {
+        _context.Subnets.Add(new Subnet { Id = 720, Name = "root", NetworkAddress = "10.72.0.0", Cidr = 16 });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IActionResult result = await _subnetController.DeleteConfirmed(720, "approved", null, null);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.NotNull(await _context.Subnets.FindAsync([720], TestContext.Current.CancellationToken));
     }
 }

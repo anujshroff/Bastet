@@ -17,4 +17,8 @@ public class DeleteSubnetViewModel
 
     public int HostIpCount { get; set; }
 
+    public int ConfirmedMaxSubnetId { get; set; }
+
+    public long ConfirmedMaxHostIpTicks { get; set; }
+
 }
