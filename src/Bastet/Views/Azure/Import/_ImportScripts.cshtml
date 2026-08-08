@@ -110,6 +110,7 @@
             let isChecked = $(this).is(":checked");
 
             $(".subnet-checkbox:not(:disabled)").prop("checked", isChecked).trigger("change");
+            syncSelectAllSubnets();
             updateImportButton();
         });
 
