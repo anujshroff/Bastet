@@ -1,6 +1,7 @@
-using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Models;
 using Bastet.Services.Azure;
+using Bastet.Services.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -224,6 +225,12 @@ public partial class SubnetController : Controller
 
                     await transaction.CommitAsync();
                     return null;
+                }
+                catch (Exception ex) when (SqlSaveOutcome.IsIndeterminateTransaction(ex))
+                {
+                    logger.LogError(ex, "Azure reconcile delete outcome unknown");
+                    await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
+                    return StatusCode(500, new { success = false, error = "BASTET could not confirm whether this delete was applied. Re-run the scan to see the current state before retrying." });
                 }
                 catch (Exception ex)
                 {

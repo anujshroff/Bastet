@@ -1,6 +1,7 @@
-using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Models;
 using Bastet.Services.Azure;
+using Bastet.Services.Data;
 using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -505,6 +506,12 @@ public partial class SubnetController : Controller
                 linkedTargets = totalTargetsLinked,
                 fullyAllocatedTargets = totalTargetsMarkedFullyAllocated
             });
+        }
+        catch (Exception ex) when (SqlSaveOutcome.IsIndeterminateTransaction(ex))
+        {
+            logger.LogError(ex, "Bulk Azure import outcome unknown");
+            await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
+            return StatusCode(500, new { success = false, error = "BASTET could not confirm whether this import was applied. Reload the subnet list to see its current state before retrying." });
         }
         catch (Exception ex)
         {

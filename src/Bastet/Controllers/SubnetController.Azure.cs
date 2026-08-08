@@ -1,8 +1,9 @@
-using Bastet.Models;
 using Bastet.Models.ViewModels;
-using Bastet.Services;
+using Bastet.Models;
+using Bastet.Services.Data;
 using Bastet.Services.Security;
 using Bastet.Services.Validation;
+using Bastet.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -536,6 +537,13 @@ public partial class SubnetController : Controller
 
             // Otherwise return JSON (for API usage)
             return Ok(new { success = true, subnetIds = createdSubnetIds });
+        }
+        catch (Exception ex) when (SqlSaveOutcome.IsIndeterminateTransaction(ex))
+        {
+            logger.LogError(ex, "Batch create of child subnets under parent {ParentId} outcome unknown", parentId);
+            await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
+            const string unknown = "BASTET could not confirm whether these subnets were created. Reload the subnet to see its current state before retrying.";
+            return BatchCreateFailure(isAzureImport, parentId, unknown, StatusCode(500, unknown));
         }
         catch (Exception ex)
         {

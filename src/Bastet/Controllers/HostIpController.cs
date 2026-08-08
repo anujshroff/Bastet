@@ -3,6 +3,7 @@ using Bastet.Models;
 using Bastet.Models.DTOs;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Data;
 using Bastet.Services.Locking;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
@@ -164,6 +165,13 @@ public class HostIpController(
             {
                 ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
             }
+            catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+            {
+                logger.LogError(ex, "Host IP create outcome unknown for subnet {SubnetId}", viewModel.SubnetId);
+                ModelState.AddModelError("",
+                    "BASTET could not confirm whether this host IP was created. "
+                    + "Check the subnet's host IPs before retrying.");
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Host IP create failed for subnet {SubnetId}", viewModel.SubnetId);
@@ -314,6 +322,13 @@ public class HostIpController(
 
                 ModelState.AddModelError("", "The host IP was modified by another user. Please reload and try again.");
                 return View(viewModel);
+            }
+            catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+            {
+                logger.LogError(ex, "Host IP edit outcome unknown");
+                ModelState.AddModelError("",
+                    "BASTET could not confirm whether this change was applied. "
+                    + "Reload the host IP to see its current state before retrying.");
             }
             catch (Exception ex)
             {

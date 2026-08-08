@@ -1,5 +1,6 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
+using Bastet.Services.Data;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -227,6 +228,15 @@ public partial class SubnetController : Controller
             {
                 ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
             }
+            catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+            {
+                // The server may already have committed - see SqlSaveOutcome. Saying "error" here
+                // told an operator their change had not happened while the row carried it.
+                logger.LogError(ex, "Subnet edit outcome unknown for subnet {SubnetId}", id);
+                ModelState.AddModelError("",
+                    "BASTET could not confirm whether this change was applied. "
+                    + "Reload the subnet to see its current state before retrying.");
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Subnet edit failed for subnet {SubnetId}", id);
@@ -285,6 +295,14 @@ public partial class SubnetController : Controller
         viewModel.LastModifiedAt = origSubnet.LastModifiedAt;
         // Ensure RowVersion is updated for concurrency control
         viewModel.RowVersion = origSubnet.RowVersion;
+
+        // ...and clear the POSTED token out of ModelState, or the tag helper re-renders that one and
+        // the assignment above changes nothing on screen. Only the concurrency catch used to do
+        // this, so every other failure path redisplayed a stale token: the operator was told the
+        // save failed, clicked Save again, and got "modified by another user" - about their own
+        // write. It belongs here rather than in each catch because this block runs last on every
+        // failure path and is what actually reaches the view.
+        ModelState.Remove(nameof(viewModel.RowVersion));
 
         if (origSubnet.ParentSubnet != null)
         {

@@ -1,4 +1,5 @@
 using Bastet.Data;
+using Bastet.Services.Data;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
@@ -70,8 +71,6 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
     /// </remarks>
     private static readonly SemaphoreSlim _localGate = new(1, 1);
 
-    /// <summary>SQL Server's error number for a client-side command timeout.</summary>
-    private const int SQL_TIMEOUT_ERROR_NUMBER = -2;
 
     /// <inheritdoc />
     public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null)
@@ -217,7 +216,7 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
                 "EXEC @Result = sp_getapplock @Resource = @Resource, @LockMode = @LockMode, @LockOwner = @LockOwner, @LockTimeout = @LockTimeout",
                 parameters);
         }
-        catch (SqlException ex) when (ex.Number == SQL_TIMEOUT_ERROR_NUMBER)
+        catch (SqlException ex) when (ex.Number == SqlSaveOutcome.CommandTimeout)
         {
             // Unreachable while the command timeout above exceeds the lock timeout, but a timeout
             // imposed elsewhere (connection settings, a proxy) must still reach callers as the

@@ -1,6 +1,7 @@
 using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -136,6 +137,15 @@ public partial class SubnetController : Controller
         catch (TimeoutException)
         {
             ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
+        }
+        catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+        {
+            // No key to re-read by on a create, so the wording is all that is available here -
+            // "reload and check" rather than any claim about what the row now holds.
+            logger.LogError(ex, "Subnet create outcome unknown");
+            ModelState.AddModelError("",
+                "BASTET could not confirm whether this subnet was created. "
+                + "Check the subnet list before retrying.");
         }
         catch (Exception ex)
         {
