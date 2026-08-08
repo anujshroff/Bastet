@@ -383,12 +383,26 @@ forced it to enumerate. The inventory is what Phase 5 deletes.
 
 ## Phase 2 — the beats, twice (20 agents + 1 merge)
 
+**Six of these eight beats audit the WHOLE APPLICATION. Only beats 6 and 7 are scoped to the last
+round's delta, and that is the only reason they exist.**
+
+This is the mistake to avoid, and it is easy to make because beat 6 is where the highest-value findings
+have historically come from: pointing every beat at what changed recently. Do not. An audit that only
+re-examines the last round's diff is a regression check wearing an audit's name — it cannot find the
+defect that has been in `IpUtilityService` since round 3, and after enough rounds that is where the
+remaining defects are. Beats 1-5 and 8 sweep their surface across the entire codebase and treat
+recently-changed code on exactly the same terms as everything else: neither weighted nor exempt.
+
+A beat prompt that names specific recent findings as "the focus" has been written wrong. Name the
+surface, not the diff.
+
+
 1. **Security / web** — authorization coverage, antiforgery, XSS, injection, SSRF, headers, log forging, secrets.
 2. **Logic & data integrity** — subnet/CIDR arithmetic, containment and overlap, host-IP validation, and any path that persists a state the validated path would reject.
 3. **Azure integration** — import wizards, bulk planner, reconciler. Highest stakes: the only code that *deletes* on the strength of what an external system reports. Work partial visibility hard — throttling, an empty page, a 403 on one group, a token expiring mid-enumeration, a paged response whose second page fails. Which of those does it treat as "absent, therefore delete"?
 4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
 5. **UI & client-JS** — the three wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
-6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. **The round-N-1 fixes are where the defects are** — round 7's highest-value findings were all residue of round 6's own fixes.
+6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. This beat, and only this beat, is deliberately scoped to the delta: the round-N-1 fixes are dense in defects, and round 7's highest-value findings were all residue of round 6's. That density is why it gets a deep sweep — it is not a reason to point the other beats here.
 7. **Regression tests** — do the tests added alongside those commits fail against the unfixed code? Revert the fix hunk in a scratch copy and find out.
 8. **Dead code & refactor residue** — orphans from earlier deletions.
 
