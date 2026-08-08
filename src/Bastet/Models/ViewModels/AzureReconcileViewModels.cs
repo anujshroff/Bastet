@@ -143,8 +143,15 @@ namespace Bastet.Models.ViewModels
         /// the space released. Reported for review only and never deletable: archiving the row
         /// would remove BASTET's only record of an allocation Azure still covers.
         /// Re-link is deliberately NOT the repair, and no suggestion is set: the VNet's resource ID
-        /// never changed, so there is nothing to re-point at. The operator corrects the recorded
-        /// range to match the VNet's new address space, or removes and re-imports it.
+        /// never changed, so there is nothing to re-point at. The operator either restores the VNet's
+        /// original address prefix in Azure, or deletes this subnet and re-imports the current one.
+        /// <para>
+        /// NOT "corrects the recorded range". This status is only ever produced for a row with a
+        /// non-empty AzureResourceId, and SubnetController.Edit refuses a CIDR change on exactly that
+        /// population, unconditionally - so that remedy is impossible in 100% of instances, and
+        /// AzureResourceId has no editor anywhere in the application either. The reason string this
+        /// doc describes said it for three rounds. Keep the two in step.
+        /// </para>
         /// </summary>
         VNetPrefixStillCovered,
 

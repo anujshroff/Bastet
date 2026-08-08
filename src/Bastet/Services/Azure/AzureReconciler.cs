@@ -230,8 +230,9 @@ namespace Bastet.Services.Azure
                           + $"'{stillAllocated.Owner.VNetName}' now holds {stillAllocated.LivePrefix}, which overlaps the "
                           + $"recorded range {snapshot.NetworkAddress}/{snapshot.Cidr}, so archiving this subnet would make "
                           + "BASTET report an allocated range as free. Re-link is not offered because the live range is not "
-                          + "the recorded one: correct this subnet to match Azure, or delete it and import the current range "
-                          + "again.";
+                          + "the recorded one: either restore the Azure subnet at the recorded prefix, or delete this "
+                          + "BASTET subnet and import the current range again - its recorded range cannot be edited "
+                          + "while it is linked to Azure.";
 
                     AzureReconcileItem review = Item(snapshot, AzureReconcileStatus.RangeStillAllocatedInAzure, item.IsVNetLevel, reason);
 
@@ -829,8 +830,9 @@ namespace Bastet.Services.Azure
                         $"VNet '{vnet.Name}' no longer has the address prefix {prefix}, but its address space "
                         + $"now includes {covering}, which overlaps that range - so the space was resized or "
                         + "re-carved rather than released. Archiving this subnet would remove BASTET's only "
-                        + "record of a range Azure still covers. Correct the recorded range to match the VNet's "
-                        + "current address space, or delete this subnet and import the current prefix again.");
+                        + "record of a range Azure still covers. Either restore the VNet's original address prefix "
+                        + "in Azure, or delete this BASTET subnet and import the current prefix again - its recorded "
+                        + "range cannot be edited while it is linked to Azure.");
                 }
 
                 return Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved, true,
