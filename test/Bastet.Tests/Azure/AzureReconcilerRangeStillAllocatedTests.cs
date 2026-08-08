@@ -111,7 +111,50 @@ public class AzureReconcilerRangeStillAllocatedTests
             Linked(2, "app", "10.111.5.0", 24, SubnetId("vnet-a", "sn-a")));
 
         Assert.Contains(plan.Warnings, w =>
-            w.Contains("still assigned in Azure") && w.Contains("sn-a2"));
+            w.Contains("withheld from deletion") && w.Contains("sn-a2"));
+    }
+
+    /// <summary>
+    /// P8. The aggregate warning is built from the same list as the per-item reasons, but O1 split
+    /// the reasons into three sentences and left this one asserting the exact-match case for all of
+    /// them: "still assigned in Azure under a different resource - which is what a subnet rename
+    /// looks like". For a re-carve BOTH clauses are false, and this text sits under the heading
+    /// "Check this before deleting anything".
+    ///
+    /// The replacement has to be direction-neutral as well as cause-free: the overlap test is
+    /// bidirectional, so the live prefix can be WIDER than the recorded range, where "part of the
+    /// range is still assigned" would understate exactly as badly.
+    /// </summary>
+    [Fact]
+    public void TheWithheldWarning_AssertsNeitherARenameNorAWholeRange()
+    {
+        // Bastet records a /25; Azure re-created it as the containing /24 under a NEW id.
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.193.0.0/16"], AzSubnet("vnet-a", "sn-wide", "10.193.40.0/24"))),
+            Linked(2, "app", "10.193.40.0", 25, SubnetId("vnet-a", "sn-old")));
+
+        string warning = Assert.Single(plan.Warnings);
+
+        Assert.Contains("still overlaps the range they record", warning);
+        Assert.Contains("sn-wide", warning);
+
+        // The two assertions O1's wording made that are false here
+        Assert.DoesNotContain("what a subnet rename looks like", warning);
+        Assert.DoesNotContain("still assigned in Azure under a different resource", warning);
+    }
+
+    /// <summary>
+    /// The same sentence must also be true for a VNet-level row, where no Azure SUBNET was
+    /// re-carved at all - so naming a cause would invent one the reconciler never established.
+    /// </summary>
+    [Fact]
+    public void TheWithheldWarning_IsTrueForAVNetLevelRowToo()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.200.0.0/16"], AzSubnet("vnet-a", "sn-x", "10.194.0.0/16"))),
+            Linked(1, "target", "10.194.0.0", 16, VNetId("vnet-a")));
+
+        Assert.Contains(plan.Warnings, w => w.Contains("still overlaps the range they record"));
     }
 
     /// <summary>A VNet-level target whose prefix is still carved up in Azure is the same defect one

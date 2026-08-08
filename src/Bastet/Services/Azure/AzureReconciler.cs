@@ -272,11 +272,22 @@ namespace Bastet.Services.Azure
 
             if (rangeStillAllocated.Count > 0)
             {
+                // Direction-neutral and cause-free, deliberately. This sentence covers three shapes
+                // that O1's original wording asserted a single cause for, and it sits under the
+                // heading "Check this before deleting anything":
+                //  - a rename: a different Azure resource holds exactly the recorded range;
+                //  - a re-carve: a live resource holds part of it, or MORE than it (the overlap test
+                //    is bidirectional - Bastet can record a /25 that Azure re-created as a /24), so
+                //    "part of the range" understates it just as "the whole range" overstated it;
+                //  - a VNet-level row, where no Azure subnet was re-carved at all and naming a cause
+                //    would be inventing one the reconciler never established.
+                // What is true of all three is that the live range and the recorded range are not
+                // the same, and that archiving would report allocated space as free.
                 plan.Warnings.Add(
-                    $"{rangeStillAllocated.Count} subnet(s) were withheld from deletion because their address range is "
-                    + "still assigned in Azure under a different resource - which is what a subnet rename looks like, "
-                    + "Azure having no rename operation. Archiving them would make BASTET report an allocated range as "
-                    + $"free space: {OwnerList(rangeStillAllocated)}.");
+                    $"{rangeStillAllocated.Count} subnet(s) were withheld from deletion because a live Azure resource "
+                    + "still overlaps the range they record, so the recorded range and the live range are not the same. "
+                    + "Archiving them would make BASTET report an allocated range as free space: "
+                    + $"{OwnerList(rangeStillAllocated)}.");
             }
 
             WithholdTargetsWhoseCascadeIsBlocked(
