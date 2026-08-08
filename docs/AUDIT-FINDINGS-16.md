@@ -1,6 +1,8 @@
 # Bastet — Round-16 Audit Findings
 
-**Target branch:** `audit/round-16` · **HEAD:** `1a31228` · **Baseline:** 892 tests passing, 0 build warnings · **Date:** 2026-08-07 · **Round letter:** P (findings P1–P15)
+**Target branch:** `audit/round-16` · **HEAD:** `1a31228` · **Baseline:** 892 tests passing, 0 build warnings · **Date:** 2026-08-07 · **Round letter:** P (findings P1–P35)
+
+**Closed out 2026-08-08.** All 35 findings FIXED, 0 refuted. Final: clean rebuild 0 warnings, **959 tests passing** (892 → 959, +67). Final sweep: every major page requested against real SQL Server with rendered content asserted; no `fail:` or `crit:` lines in the log, and the only two `warn:` classes are the standing DataProtection no-XML-encryptor notice and EF's `QuerySplittingBehavior` advisory; three replicas migrated one fresh catalog concurrently without a lock timeout; both Azure surfaces driven end to end against live ARM with both discrimination counter-tests passing — a resource the credential cannot see was withheld and named by range, and a genuinely deleted Azure subnet was still offered, deleted and archived.
 
 ---
 
