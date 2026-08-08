@@ -189,8 +189,6 @@ namespace Bastet.Models.ViewModels
         public List<BulkImportPlannedChildSubnet> ChildSubnets { get; set; } = [];
 
         public List<string> Errors { get; set; } = [];
-
-        public List<string> Warnings { get; set; } = [];
     }
 
     public class BulkImportPlanViewModel
