@@ -223,7 +223,7 @@ namespace Bastet.Services.Azure
 
                 plan.Warnings.Add(
                     $"{rangeStillAllocated.Count} subnet(s) were withheld from deletion because a live Azure resource "
-                    + "still overlaps the range they record, so the recorded range and the live range are not the same. "
+                    + "still overlaps the range they record. "
                     + "Archiving them would make BASTET report an allocated range as free space: "
                     + $"{OwnerList(rangeStillAllocated)}.");
             }
@@ -479,13 +479,25 @@ namespace Bastet.Services.Azure
                             AzureResourceId = subnet.ResourceId ?? string.Empty,
                             Status = AzureReconcileStatus.AzureRangeNotImported,
                             Reason = $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}, "
-                                     + "which no BASTET subnet records. BASTET is reporting that range as free space."
+                                     + (BastetOffersAnyOf(existingSubnets, parts[0], cidr)
+                                        ? "which no BASTET subnet records. BASTET is reporting that range as free space."
+                                        : "which no BASTET subnet records as its own range.")
                                      + remedy,
                             IsVNetLevel = false
                         });
                     }
                 }
             }
+        }
+
+        private bool BastetOffersAnyOf(
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets, string network, int cidr)
+        {
+            List<Subnet> rowsInsideTheRange = [.. existingSubnets
+                .Where(e => ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr))
+                .Select(e => new Subnet { NetworkAddress = e.NetworkAddress, Cidr = e.Cidr })];
+
+            return ipUtilityService.CalculateUnallocatedRanges(network, cidr, rowsInsideTheRange).Any();
         }
 
         private bool IsRangeRecordedByBastet(

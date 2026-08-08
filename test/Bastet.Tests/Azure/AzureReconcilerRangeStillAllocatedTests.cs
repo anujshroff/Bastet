@@ -111,10 +111,10 @@ public class AzureReconcilerRangeStillAllocatedTests
     }
 
     [Fact]
-    public void TheWithheldWarning_IsTrueForAVNetLevelRowToo()
+    public void TheWithheldWarning_IsTrueForANonExactVNetLevelOverlap()
     {
         AzureReconcilePlanViewModel plan = Build(
-            Live(VNet("vnet-a", ["10.200.0.0/16"], AzSubnet("vnet-a", "sn-x", "10.194.0.0/16"))),
+            Live(VNet("vnet-a", ["10.200.0.0/16"], AzSubnet("vnet-a", "sn-x", "10.194.128.0/17"))),
             Linked(1, "target", "10.194.0.0", 16, VNetId("vnet-a")));
 
         Assert.Contains(plan.Warnings, w => w.Contains("still overlaps the range they record"));
@@ -359,5 +359,18 @@ public class AzureReconcilerRangeStillAllocatedTests
 
         Assert.Single(plan.Items);
         Assert.Empty(plan.ReviewItems);
+    }
+    [Fact]
+    public void TheWithheldWarning_IsTrueOnTheExactArmWhereTheRangesAreIdentical()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.160.0.0/16"], AzSubnet("vnet-a", "s1b", "10.160.1.0/24"))),
+            Linked(2, "app", "10.160.1.0", 24, SubnetId("vnet-a", "s1")));
+
+        string warning = Assert.Single(plan.Warnings);
+
+        Assert.Contains("still overlaps the range they record", warning);
+        Assert.DoesNotContain("are not the same", warning);
+        Assert.Equal(SubnetId("vnet-a", "s1b"), Assert.Single(plan.ReviewItems).SuggestedAzureResourceId);
     }
 }

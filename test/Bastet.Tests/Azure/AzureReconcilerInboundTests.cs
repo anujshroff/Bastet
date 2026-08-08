@@ -488,4 +488,30 @@ public class AzureReconcilerInboundTests
         AzureReconcileItem item = Assert.Single(Inbound(plan));
         Assert.Equal("10.197.0.0", item.NetworkAddress);
     }
+    [Fact]
+    public void AFullyTiledTargetIsStillReported_ButNotAsFreeSpace()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.171.0.0/24"], AzSubnet("vnet-a", "whole", "10.171.0.0/24"))),
+            [
+                Target(1, "10.171.0.0", 24, "vnet-a"),
+                Existing(2, "10.171.0.0", 25),
+                Existing(3, "10.171.0.128", 25)
+            ]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.DoesNotContain("reporting that range as free space", item.Reason);
+        Assert.Contains("no BASTET subnet records as its own range", item.Reason);
+    }
+
+    [Fact]
+    public void AChildlessWholePrefixTarget_IsStillReportedAsFreeSpace()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-b", ["10.172.0.0/24"], AzSubnet("vnet-b", "whole", "10.172.0.0/24"))),
+            [Target(1, "10.172.0.0", 24, "vnet-b")]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Contains("reporting that range as free space", item.Reason);
+    }
 }
