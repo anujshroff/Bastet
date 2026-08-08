@@ -331,7 +331,7 @@ public class AzureReconcilerInboundTests
                 Target(2, "10.20.0.0", 16, "vnet-a")
             ]);
 
-        Assert.Single(Inbound(plan));
+        Assert.Single(Inbound(plan), i => i.NetworkAddress == "10.20.20.0" && i.Cidr == 24);
     }
 
     [Fact]
@@ -424,5 +424,68 @@ public class AzureReconcilerInboundTests
 
         AzureReconcileItem item = Assert.Single(Inbound(plan));
         Assert.Contains("refused while it still has child subnets", item.Reason);
+    }
+    [Fact]
+    public void AVNetAddressPrefixNoBastetRowRecords_IsReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.196.0.0/16", "10.197.0.0/16"],
+                AzSubnet("vnet-a", "s1", "10.196.1.0/24"))),
+            [
+                Existing(1, "10.0.0.0", 8),
+                Target(2, "10.196.0.0", 16, "vnet-a"),
+                Existing(3, "10.196.1.0", 24, SubnetId("vnet-a", "s1"))
+            ]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.197.0.0", item.NetworkAddress);
+        Assert.Equal(16, item.Cidr);
+        Assert.True(item.IsVNetLevel);
+    }
+
+    [Fact]
+    public void AVNetAddressPrefixAnImportedRowRecordsExactly_IsNotReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.196.0.0/16"], AzSubnet("vnet-a", "s1", "10.196.1.0/24"))),
+            [
+                Target(1, "10.196.0.0", 16, "vnet-a"),
+                Existing(2, "10.196.1.0", 24, SubnetId("vnet-a", "s1"))
+            ]);
+
+        Assert.Empty(Inbound(plan));
+    }
+
+    [Fact]
+    public void AnEmptyVNetImportedAtVNetLevel_IsNotReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-empty", ["10.105.0.0/16"])),
+            [Target(1, "10.105.0.0", 16, "vnet-empty")]);
+
+        Assert.Empty(Inbound(plan));
+    }
+
+    [Fact]
+    public void AVNetPrefixAddedAfterImport_IsReported()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.196.0.0/16", "10.198.0.0/16"])),
+            [Target(1, "10.196.0.0", 16, "vnet-a")]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.198.0.0", item.NetworkAddress);
+    }
+
+    [Fact]
+    public void ASubnetRangeInsideAnAlreadyReportedVNetPrefix_IsNotReportedTwice()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.196.0.0/16", "10.197.0.0/16"],
+                AzSubnet("vnet-a", "inner", "10.197.5.0/24"))),
+            [Target(1, "10.196.0.0", 16, "vnet-a")]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.197.0.0", item.NetworkAddress);
     }
 }

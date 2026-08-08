@@ -382,6 +382,46 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
+                List<(string Network, int Cidr)> reportedVNetPrefixes = [];
+
+                foreach (string vnetPrefix in vnet.Ipv4AddressPrefixes)
+                {
+                    string[] vnetParts = vnetPrefix.Split('/');
+
+                    if (vnetParts.Length != 2 || !int.TryParse(vnetParts[1], out int vnetCidr))
+                    {
+                        continue;
+                    }
+
+                    if (existingSubnets.Any(e =>
+                            string.Equals(e.NetworkAddress, vnetParts[0], StringComparison.OrdinalIgnoreCase)
+                            && e.Cidr == vnetCidr)
+                        || IsRangeRecordedByBastet(existingSubnets, vnetParts[0], vnetCidr))
+                    {
+                        continue;
+                    }
+
+                    if (!reported.Add($"{vnet.ResourceId}|{vnetPrefix}"))
+                    {
+                        continue;
+                    }
+
+                    reportedVNetPrefixes.Add((vnetParts[0], vnetCidr));
+
+                    plan.ReviewItems.Add(new AzureReconcileItem
+                    {
+                        SubnetId = 0,
+                        Name = vnet.Name,
+                        NetworkAddress = vnetParts[0],
+                        Cidr = vnetCidr,
+                        AzureResourceId = vnet.ResourceId ?? string.Empty,
+                        Status = AzureReconcileStatus.AzureRangeNotImported,
+                        Reason = $"VNet '{vnet.Name}' declares the address space {vnetPrefix}, "
+                                 + "which no BASTET subnet records. BASTET is reporting that range as free space.",
+                        IsVNetLevel = true
+                    });
+                }
+
                 foreach (BulkAzureSubnetViewModel subnet in vnet.Subnets)
                 {
                     foreach (string prefix in Ipv4PrefixesOf(subnet))
@@ -394,6 +434,13 @@ namespace Bastet.Services.Azure
                         }
 
                         if (!reported.Add($"{subnet.ResourceId}|{prefix}"))
+                        {
+                            continue;
+                        }
+
+                        if (reportedVNetPrefixes.Any(p =>
+                                (p.Cidr == cidr && string.Equals(p.Network, parts[0], StringComparison.OrdinalIgnoreCase))
+                                || ipUtilityService.IsSubnetContainedInParent(parts[0], cidr, p.Network, p.Cidr)))
                         {
                             continue;
                         }
