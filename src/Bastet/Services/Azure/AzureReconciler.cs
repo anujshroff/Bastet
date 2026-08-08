@@ -417,7 +417,10 @@ namespace Bastet.Services.Azure
                         AzureResourceId = vnet.ResourceId ?? string.Empty,
                         Status = AzureReconcileStatus.AzureRangeNotImported,
                         Reason = $"VNet '{vnet.Name}' declares the address space {vnetPrefix}, "
-                                 + "which no BASTET subnet records. BASTET is reporting that range as free space.",
+                                 + "which no BASTET subnet records."
+                                 + (BastetOffersAnyOf(existingSubnets, vnetParts[0], vnetCidr)
+                                    ? " BASTET is reporting that range as free space."
+                                    : string.Empty),
                         IsVNetLevel = true
                     });
                 }
@@ -478,9 +481,7 @@ namespace Bastet.Services.Azure
                             Status = AzureReconcileStatus.AzureRangeNotImported,
                             Reason = (wholePrefixTarget is null
                                         ? $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}, "
-                                          + (BastetOffersAnyOf(existingSubnets, parts[0], cidr)
-                                             ? "which no BASTET subnet records. BASTET is reporting that range as free space."
-                                             : "which no BASTET subnet records as its own range.")
+                                          + WhatBastetRecordsOf(existingSubnets, parts[0], cidr)
                                         : $"Azure subnet '{subnet.Name}' in VNet '{vnet.Name}' owns {prefix}. BASTET subnet "
                                           + $"'{wholePrefixTarget.Name}' holds exactly that range but is not marked fully "
                                           + "allocated, so BASTET does not record it as allocated."
@@ -495,9 +496,28 @@ namespace Bastet.Services.Azure
             }
         }
 
+        private bool AnyRowContains(
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets, string network, int cidr) =>
+            existingSubnets.Any(e =>
+                (e.Cidr == cidr && string.Equals(e.NetworkAddress, network, StringComparison.OrdinalIgnoreCase))
+                || ipUtilityService.IsSubnetContainedInParent(network, cidr, e.NetworkAddress, e.Cidr));
+
+        private string WhatBastetRecordsOf(
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets, string network, int cidr) =>
+            !AnyRowContains(existingSubnets, network, cidr)
+                ? "which no BASTET subnet records."
+                : BastetOffersAnyOf(existingSubnets, network, cidr)
+                    ? "which no BASTET subnet records. BASTET is reporting that range as free space."
+                    : "which no BASTET subnet records as its own range.";
+
         private bool BastetOffersAnyOf(
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets, string network, int cidr)
         {
+            if (!AnyRowContains(existingSubnets, network, cidr))
+            {
+                return false;
+            }
+
             List<Subnet> rowsInsideTheRange = [.. existingSubnets
                 .Where(e => ipUtilityService.IsSubnetContainedInParent(e.NetworkAddress, e.Cidr, network, cidr))
                 .Select(e => new Subnet { NetworkAddress = e.NetworkAddress, Cidr = e.Cidr })];

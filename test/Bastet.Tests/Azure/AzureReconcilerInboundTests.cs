@@ -321,6 +321,42 @@ public class AzureReconcilerInboundTests
     }
 
     [Fact]
+    public void ARangeNoBastetSubnetContains_IsNotDescribedAsFreeSpace()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.20.0.0/16"], AzSubnet("vnet-a", "sn-outside", "172.16.5.0/24"))),
+            [Target(1, "10.20.0.0", 16, "vnet-a")]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.DoesNotContain("free space", item.Reason);
+        Assert.EndsWith("which no BASTET subnet records.", item.Reason);
+    }
+
+    [Fact]
+    public void AVNetPrefixNoBastetSubnetContains_IsNotDescribedAsFreeSpace()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.101.0.0/16", "10.102.0.0/16"])),
+            [Target(1, "10.101.0.0", 16, "vnet-a")]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.102.0.0", item.NetworkAddress);
+        Assert.DoesNotContain("free space", item.Reason);
+    }
+
+    [Fact]
+    public void AVNetPrefixInsideAHandHeldSupernet_IsStillDescribedAsFreeSpace()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.101.0.0/16", "10.102.0.0/16"])),
+            [Target(1, "10.101.0.0", 16, "vnet-a"), Existing(2, "10.0.0.0", 8)]);
+
+        AzureReconcileItem item = Assert.Single(Inbound(plan));
+        Assert.Equal("10.102.0.0", item.NetworkAddress);
+        Assert.Contains("reporting that range as free space", item.Reason);
+    }
+
+    [Fact]
     public void AMultiPrefixVNet_ScopesTheContainmentTestToThePrefixHoldingTheRange()
     {
         AzureReconcilePlanViewModel plan = Build(
