@@ -613,4 +613,51 @@ public class AzureControllerTests : IDisposable
         public List<AzureSubnetViewModel>? subnets { get; set; }
     }
 #pragma warning restore IDE1006
+    [Fact]
+    public async Task GetSubnets_WhenTheTargetIsLinkedToADifferentVNet_BlocksEveryRow()
+    {
+        const string VNetA = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/va";
+        const string VNetB = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vb";
+
+        List<AzureVNetViewModel> vnets = [new() { ResourceId = VNetB, Name = "vb", AddressPrefixes = ["10.191.0.0/16"] }];
+        List<AzureSubnetViewModel> subnets = [new() { Name = "b1", AddressPrefix = "10.191.2.0/24" }];
+
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 80, Name = "linked-to-va", NetworkAddress = "10.191.0.0", Cidr = 16, AzureResourceId = VNetA
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        JsonResult json = Assert.IsType<JsonResult>(
+            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetB, 80));
+        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
+
+        AzureSubnetViewModel row = Assert.Single(response!.subnets!);
+        Assert.False(row.IsSelectable);
+        Assert.Contains("already linked", row.Reason);
+        Assert.Contains("delete the Bastet subnet and import it again", row.Reason);
+    }
+
+    [Fact]
+    public async Task GetSubnets_ASameVNetTopUp_IsStillOffered()
+    {
+        const string VNetA = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/va2";
+
+        List<AzureVNetViewModel> vnets = [new() { ResourceId = VNetA, Name = "va2", AddressPrefixes = ["10.192.0.0/16"] }];
+        List<AzureSubnetViewModel> subnets = [new() { Name = "a1", AddressPrefix = "10.192.2.0/24" }];
+
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 81, Name = "linked-to-va2", NetworkAddress = "10.192.0.0", Cidr = 16, AzureResourceId = VNetA
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        JsonResult json = Assert.IsType<JsonResult>(
+            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetA, 81));
+        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
+
+        AzureSubnetViewModel row = Assert.Single(response!.subnets!);
+        Assert.True(row.IsSelectable);
+        Assert.Null(row.Reason);
+    }
 }

@@ -160,8 +160,21 @@ namespace Bastet.Controllers
                     })
                     .ToListAsync();
 
+                bool targetLinkedElsewhere = !string.IsNullOrEmpty(vnetResourceId)
+                    && !string.IsNullOrEmpty(subnet.AzureResourceId)
+                    && !string.Equals(subnet.AzureResourceId, vnetResourceId, StringComparison.OrdinalIgnoreCase);
+
                 foreach (AzureSubnetViewModel azureSubnet in azureSubnets)
                 {
+                    if (targetLinkedElsewhere)
+                    {
+                        Block(azureSubnet,
+                            $"Bastet subnet '{subnet.Name}' ({subnet.NetworkAddress}/{subnet.Cidr}) is already linked to "
+                            + $"Azure VNet '{subnet.AzureResourceId}' and cannot be re-linked to '{vnetResourceId}' by an "
+                            + "import. If the VNet was renamed or moved, delete the Bastet subnet and import it again.");
+                        continue;
+                    }
+
                     AnnotateImportCandidate(azureSubnet, subnet, existing);
                 }
 
