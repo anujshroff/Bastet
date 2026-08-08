@@ -5,15 +5,6 @@ using Bastet.Services.Security;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// N6 one level up the tree. BuildPlanItem runs once per selected VNet address prefix and TargetName
-/// returned the sanitised VNet name and nothing else, so a VNet with two address prefixes persisted
-/// two top-level Bastet subnets with the identical name and the identical VNet resource id,
-/// distinguishable only by network address.
-///
-/// Unlike N6 this fires on EVERY multi-address-space VNet import, not only on a subnet that spans
-/// two prefixes - one click of "Select all", no crafted payload.
-/// </summary>
 public class AzureBulkImportTargetNameTests
 {
     private const string VNetA = "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-a";
@@ -41,7 +32,6 @@ public class AzureBulkImportTargetNameTests
     private static List<string?> TargetNames(BulkImportPlanViewModel plan) =>
         [.. plan.Items.Select(i => i.AutoCreateTargetName)];
 
-    /// <summary>The defect, as persisted in the audit's own reproduction.</summary>
     [Fact]
     public void AVNetWithTwoAddressPrefixes_NamesEachTargetForTheRangeItHolds()
     {
@@ -58,7 +48,6 @@ public class AzureBulkImportTargetNameTests
         Assert.Distinct(names);
     }
 
-    /// <summary>A VNet contributing one prefix keeps the bare name it has always had.</summary>
     [Fact]
     public void AVNetContributingASinglePrefix_KeepsItsBareName()
     {
@@ -67,10 +56,6 @@ public class AzureBulkImportTargetNameTests
         Assert.Equal("vnet-a", Assert.Single(TargetNames(plan)));
     }
 
-    /// <summary>
-    /// Two different VNets that happen to be selected together are not the same VNet, so neither is
-    /// qualified - the grouping is by resource id, not by how many prefixes the commit carries.
-    /// </summary>
     [Fact]
     public void TwoDifferentVNetsEachContributingOnePrefix_AreBothLeftBare()
     {
@@ -85,10 +70,6 @@ public class AzureBulkImportTargetNameTests
         Assert.Contains("vnet-b", names);
     }
 
-    /// <summary>
-    /// The same prefix listed twice is one prefix, not two - a duplicated selection must not trigger
-    /// qualification. (The overlap check refuses the commit; the naming must not misreport either.)
-    /// </summary>
     [Fact]
     public void TheSamePrefixSelectedTwice_IsNotTreatedAsTwoPrefixes()
     {
@@ -100,10 +81,6 @@ public class AzureBulkImportTargetNameTests
         Assert.All(TargetNames(plan), n => Assert.Equal("vnet-a", n));
     }
 
-    /// <summary>
-    /// The ExactMatch branch adopts an existing row and names nothing, so a matched target is never
-    /// renamed by this - the qualification applies only to targets the import creates.
-    /// </summary>
     [Fact]
     public void AnExactMatchTargetIsNotRenamedByTheQualification()
     {
@@ -124,7 +101,6 @@ public class AzureBulkImportTargetNameTests
         Assert.False(matched.WillRename);
     }
 
-    /// <summary>Generated target names must satisfy the app's own input rules, same as child names.</summary>
     [Fact]
     public void TheQualifiedTargetNameSatisfiesTheAppsOwnInputRules()
     {

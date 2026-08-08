@@ -1,8 +1,5 @@
 namespace Bastet.Models;
 
-/// <summary>
-/// Base entity containing common audit fields
-/// </summary>
 public abstract class BaseEntity
 {
     public DateTime CreatedAt { get; set; }

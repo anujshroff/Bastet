@@ -2,9 +2,6 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Services.Security;
 
-/// <summary>
-/// Validation attribute that ensures input contains no HTML tags
-/// </summary>
 public class NoHtmlAttribute : ValidationAttribute
 {
     protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
@@ -20,7 +17,6 @@ public class NoHtmlAttribute : ValidationAttribute
             return new ValidationResult("Input sanitization service not available");
         }
 
-        // Check if the stripped version is different from original
         string stripped = sanitizationService.StripHtml(stringValue);
         return stripped != stringValue.Trim()
             ? new ValidationResult(ErrorMessage ?? "HTML tags are not allowed in this field")
@@ -28,9 +24,6 @@ public class NoHtmlAttribute : ValidationAttribute
     }
 }
 
-/// <summary>
-/// Validation attribute for safe text that only allows alphanumeric and basic punctuation
-/// </summary>
 public class SafeTextAttribute : ValidationAttribute
 {
     protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
@@ -49,9 +42,6 @@ public class SafeTextAttribute : ValidationAttribute
     }
 }
 
-/// <summary>
-/// Validation attribute for network-related inputs (IP addresses, hostnames, etc.)
-/// </summary>
 public class NetworkInputAttribute : ValidationAttribute
 {
     public bool RequireValidIp { get; set; } = false;
@@ -69,7 +59,6 @@ public class NetworkInputAttribute : ValidationAttribute
             return new ValidationResult("Input sanitization service not available");
         }
 
-        // If IP validation is required, validate as IP address
         if (RequireValidIp)
         {
             if (!sanitizationService.IsValidIpAddress(stringValue))
@@ -79,7 +68,7 @@ public class NetworkInputAttribute : ValidationAttribute
         }
         else
         {
-            // Just ensure it's safe for network input
+
             string sanitized = sanitizationService.SanitizeNetworkInput(stringValue);
             if (sanitized != stringValue.Trim())
             {
@@ -91,9 +80,6 @@ public class NetworkInputAttribute : ValidationAttribute
     }
 }
 
-/// <summary>
-/// Validation attribute specifically for tags (comma-separated values)
-/// </summary>
 public class TagsAttribute : ValidationAttribute
 {
     public int MaxTags { get; set; } = 10;
@@ -112,7 +98,6 @@ public class TagsAttribute : ValidationAttribute
             return new ValidationResult("Input sanitization service not available");
         }
 
-        // Parse tags and validate
         string[] tags = [.. stringValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(tag => tag.Trim())
             .Where(tag => !string.IsNullOrWhiteSpace(tag))];

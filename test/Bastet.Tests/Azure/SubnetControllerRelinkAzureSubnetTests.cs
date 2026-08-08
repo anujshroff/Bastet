@@ -13,15 +13,6 @@ using Moq;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// The repair path for a subnet whose Azure range moved under a new resource ID. Before it existed
-/// such a row could only be archived, which made BASTET advertise a range Azure had already
-/// assigned as free space.
-///
-/// The guard that matters most: the caller supplies no resource ID at all. The server re-scans and
-/// re-derives the link, so a stale browser view or a crafted post cannot point a Bastet subnet at an
-/// arbitrary Azure resource.
-/// </summary>
 [Collection(AzureFeatureFlagCollection.Name)]
 public class SubnetControllerRelinkAzureSubnetTests : IDisposable
 {
@@ -62,7 +53,6 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
 
         Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "true");
 
-        // A Bastet subnet linked to sn-a, which Azure no longer has.
         _context.Subnets.Add(new Subnet
         {
             Id = 1,
@@ -83,7 +73,6 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>Azure as it is after the rename: sn-a is gone, sn-a2 carries the same /24.</summary>
     private static MockAzureService AzureAfterRename() =>
         new(true,
             vnets:
@@ -95,7 +84,6 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
                 new AzureSubnetViewModel { ResourceId = NewSubnetId, Name = "sn-a2", AddressPrefix = "10.111.5.0/24" }
             ]);
 
-    /// <summary>Azure where the range is genuinely gone - nothing holds 10.111.5.0/24 any more.</summary>
     private static MockAzureService AzureAfterGenuineDeletion() =>
         new(true,
             vnets:
@@ -115,10 +103,6 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
     private async Task<string?> LinkOf(int id) =>
         (await _context.Subnets.FindAsync([id], TestContext.Current.CancellationToken))?.AzureResourceId;
 
-    // -------------------------------------------------------------------------
-    // The repair itself
-    // -------------------------------------------------------------------------
-
     [Fact]
     public async Task ARangeThatMovedToANewAzureSubnet_IsRelinkedToIt()
     {
@@ -134,19 +118,11 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
         MockAzureService azure = AzureAfterRename();
 
         _ = Assert.IsType<OkObjectResult>(await Relink(1, azure));
-        // Now linked correctly, so the row is no longer reported at all.
+
         _ = Assert.IsType<ConflictObjectResult>(await Relink(1, azure));
         Assert.Equal(NewSubnetId, await LinkOf(1));
     }
 
-    // -------------------------------------------------------------------------
-    // Guards - the endpoint must never write a link Azure does not justify
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The counter-test to the repair: a genuinely deleted range has no new owner, so there is
-    /// nothing to re-link to and the row must be left exactly as it is - still deletable.
-    /// </summary>
     [Fact]
     public async Task ARangeThatIsGenuinelyGone_IsNotRelinked()
     {
@@ -156,7 +132,6 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
         Assert.Equal(OldSubnetId, await LinkOf(1));
     }
 
-    /// <summary>A subnet that is perfectly healthy is not a repair candidate.</summary>
     [Fact]
     public async Task ASubnetWhoseLinkIsStillLive_IsRefused()
     {
@@ -168,10 +143,6 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
         Assert.Equal(OldSubnetId, await LinkOf(1));
     }
 
-    /// <summary>
-    /// Fail closed. A scan that could not read Azure establishes nothing, so it must not be the
-    /// basis for rewriting a link any more than for deleting a row.
-    /// </summary>
     [Fact]
     public async Task WhenAzureCannotBeRead_NothingIsChanged()
     {
@@ -209,11 +180,6 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
         Assert.Equal(OldSubnetId, await LinkOf(1));
     }
 
-    /// <summary>
-    /// The point of deriving the link server-side: the range that moved decides what the row links
-    /// to, and the client has no say in it. A different subnet in the same VNet holding a different
-    /// range is never a candidate, so no request shape can select it.
-    /// </summary>
     [Fact]
     public async Task TheNewLinkIsDerivedFromAzure_NotFromAnythingTheCallerSupplied()
     {
@@ -227,7 +193,15 @@ public class SubnetControllerRelinkAzureSubnetTests : IDisposable
 
         _ = Assert.IsType<OkObjectResult>(await Relink(1, azure));
 
-        // The subnet holding THIS row's range, never the other one.
         Assert.Equal(NewSubnetId, await LinkOf(1));
+    }
+
+    [Fact]
+    public async Task ASuccessfulRelink_WritesNoTempDataMessage()
+    {
+        IActionResult result = await Relink(1, AzureAfterRename());
+
+        _ = Assert.IsType<OkObjectResult>(result);
+        Assert.False(_controller.TempData.ContainsKey("SuccessMessage"));
     }
 }

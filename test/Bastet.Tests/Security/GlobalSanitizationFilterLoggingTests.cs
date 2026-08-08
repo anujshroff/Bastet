@@ -10,13 +10,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Bastet.Tests.Security;
 
-/// <summary>
-/// The filter logs the value as it arrived, which is the point - an operator wants to see what
-/// changed - so that value must not be able to write extra lines into the log.
-/// </summary>
 public class GlobalSanitizationFilterLoggingTests
 {
-    /// <summary>Captures formatted log messages so the rendered text can be asserted on.</summary>
+
     private sealed class CapturingLoggerProvider : ILoggerProvider
     {
         public List<string> Messages { get; } = [];
@@ -50,8 +46,6 @@ public class GlobalSanitizationFilterLoggingTests
             new InputSanitizationService(),
             factory.CreateLogger<GlobalSanitizationFilter>());
 
-        // The trailing space is what makes sanitization change the value and so triggers the log line;
-        // the newline is the part that would forge a second entry.
         CreateSubnetViewModel viewModel = new()
         {
             Name = "subnet-a\nwarn: Bastet: admin login from 1.2.3.4 ",

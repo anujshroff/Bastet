@@ -2,9 +2,6 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Models.DTOs;
 
-/// <summary>
-/// DTO for updating a subnet's allocation status
-/// </summary>
 public class SubnetAllocationDto
 {
     [Required]

@@ -48,19 +48,19 @@
                         <div class="tab-pane fade show active" id="step1" role="tabpanel" aria-labelledby="step1-tab">
                             @await Html.PartialAsync("Import/_SubscriptionSelection", Model)
                         </div>
-                        
+
                         <!-- Step 2: VNet Selection -->
                         <div class="tab-pane fade" id="step2" role="tabpanel" aria-labelledby="step2-tab">
                             @await Html.PartialAsync("Import/_VNetSelection", Model)
                         </div>
-                        
+
                         <!-- Step 3: Subnet Selection -->
                         <div class="tab-pane fade" id="step3" role="tabpanel" aria-labelledby="step3-tab">
                             @await Html.PartialAsync("Import/_SubnetList", Model)
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="card-footer">
                     <a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId" class="btn btn-outline-secondary">
                         <i class="bi bi-arrow-left"></i> Back to Subnet

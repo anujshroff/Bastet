@@ -1,8 +1,5 @@
 namespace Bastet.Models.ViewModels;
 
-/// <summary>
-/// View model for displaying a list of deleted host IP assignments
-/// </summary>
 public class DeletedHostIpListViewModel
 {
     public List<DeletedHostIpViewModel> DeletedHostIps { get; set; } = [];
@@ -13,9 +10,6 @@ public class DeletedHostIpListViewModel
     public int Cidr { get; set; }
 }
 
-/// <summary>
-/// View model for a deleted host IP assignment
-/// </summary>
 public class DeletedHostIpViewModel
 {
     public int Id { get; set; }

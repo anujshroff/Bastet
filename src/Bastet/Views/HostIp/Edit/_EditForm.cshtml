@@ -11,17 +11,17 @@
                 <input asp-for="IP" class="form-control" readonly />
                 <span asp-validation-for="IP" class="text-danger"></span>
             </div>
-            
+
             <div class="mb-3">
                 <label asp-for="Name" class="form-label"></label>
                 <input asp-for="Name" class="form-control" />
                 <span asp-validation-for="Name" class="text-danger"></span>
                 <div class="form-text">Optional descriptive name for this host IP.</div>
             </div>
-            
+
             <input type="hidden" asp-for="SubnetId" />
             <input type="hidden" asp-for="RowVersion" />
-            
+
             <div class="d-flex justify-content-between mt-4">
                 <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId" class="btn btn-outline-secondary">
                     <i class="bi bi-x-circle"></i> Cancel

@@ -4,7 +4,6 @@
     ViewData["Title"] = "Subnet Hierarchy";
 }
 
-@* Where a completed delete lands: the cascade counts are reported here or nowhere. *@
 @await Html.PartialAsync("_TempDataAlerts")
 
 <div class="mb-4">
@@ -21,7 +20,7 @@
         </div>
     </div>
     <p class="lead">View and manage your network subnets</p>
-    
+
     <div class="d-flex justify-content-between align-items-center mt-3">
         <div class="btn-group">
             <button id="expand-all" class="btn btn-sm btn-outline-primary">
@@ -52,6 +51,6 @@ else
 
 @section Scripts {
     <script>
-        // Additional page-specific JavaScript can go here
+
     </script>
 }

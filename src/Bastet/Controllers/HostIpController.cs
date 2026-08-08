@@ -3,6 +3,7 @@ using Bastet.Models;
 using Bastet.Models.DTOs;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
+using Bastet.Services.Data;
 using Bastet.Services.Locking;
 using Bastet.Services.Validation;
 using Microsoft.AspNetCore.Authorization;
@@ -12,11 +13,6 @@ using System.Net;
 
 namespace Bastet.Controllers;
 
-/// <summary>
-/// Baseline authorization for every action. Individual actions apply stricter policies on top;
-/// because the role policies are cumulative (View is satisfied by Edit, Delete or Admin), this
-/// baseline never rejects anyone the action itself would allow.
-/// </summary>
 [Authorize(Policy = "RequireViewRole")]
 public class HostIpController(
     BastetDbContext context,
@@ -27,13 +23,12 @@ public class HostIpController(
     ILogger<HostIpController> logger) : Controller
 {
 
-    // GET: HostIp/Index/5 (5 is the subnetId)
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> Index(int subnetId)
     {
         Subnet? subnet = await context.Subnets
             .Include(s => s.HostIpAssignments)
-            .Include(s => s.ChildSubnets) // Loaded for the guard below; without it that check is dead
+            .Include(s => s.ChildSubnets)
             .FirstOrDefaultAsync(s => s.Id == subnetId);
 
         if (subnet == null)
@@ -41,14 +36,12 @@ public class HostIpController(
             return NotFound();
         }
 
-        // Check if subnet can have host IPs
         if (subnet.ChildSubnets.Count > 0 || subnet.IsFullyAllocated)
         {
             TempData["ErrorMessage"] = "This subnet cannot have host IP assignments because it has child subnets or is fully allocated.";
             return RedirectToAction("Details", "Subnet", new { id = subnetId });
         }
 
-        // Order host IPs by address
         List<HostIpViewModel> hostIps = [.. subnet.HostIpAssignments
             .OrderBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[0])
             .ThenBy(h => IPAddress.Parse(h.IP).GetAddressBytes()[1])
@@ -72,7 +65,6 @@ public class HostIpController(
         return View(hostIps);
     }
 
-    // GET: HostIp/Create/5 (5 is the subnetId)
     [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Create(int subnetId)
     {
@@ -82,19 +74,14 @@ public class HostIpController(
             return NotFound();
         }
 
-        // Check if subnet can have host IPs
         ValidationResult validationResult = hostIpValidationService.ValidateSubnetCanContainHostIp(subnetId);
         if (!validationResult.IsValid)
         {
-            // Carried in TempData, not ModelState: a redirect starts a new request and ModelState
-            // does not survive it, so the errors were being collected and then thrown away. Subnet
-            // Details reads only TempData, so the page simply reloaded with nothing to say - while
-            // the structurally identical guard on Index ten lines above reported itself properly.
+
             TempData["ErrorMessage"] = string.Join(" ", validationResult.Errors.Select(e => e.Message));
             return RedirectToAction("Details", "Subnet", new { id = subnetId });
         }
 
-        // Create the view model
         CreateHostIpViewModel viewModel = new()
         {
             SubnetId = subnetId,
@@ -107,7 +94,6 @@ public class HostIpController(
         return View(viewModel);
     }
 
-    // POST: HostIp/Create
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
@@ -117,11 +103,10 @@ public class HostIpController(
         {
             try
             {
-                // Validate and write under the global subnet lock, so this host IP cannot land in
-                // a subnet that a concurrent delete/edit is archiving or reshaping.
+
                 return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
                 {
-                    // Validate host IP assignment
+
                     ValidationResult validationResult = hostIpValidationService.ValidateNewHostIp(viewModel.IP, viewModel.SubnetId);
                     if (!validationResult.IsValid)
                     {
@@ -130,7 +115,6 @@ public class HostIpController(
                             ModelState.AddModelError("", error.Message);
                         }
 
-                        // Refresh subnet info for display
                         Subnet? subnet = await context.Subnets.FindAsync(viewModel.SubnetId);
                         if (subnet != null)
                         {
@@ -143,7 +127,6 @@ public class HostIpController(
                         return View(viewModel);
                     }
 
-                    // Create host IP assignment
                     HostIpAssignment hostIp = new()
                     {
                         IP = viewModel.IP,
@@ -164,6 +147,13 @@ public class HostIpController(
             {
                 ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
             }
+            catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+            {
+                logger.LogError(ex, "Host IP create outcome unknown for subnet {SubnetId}", viewModel.SubnetId);
+                ModelState.AddModelError("",
+                    "BASTET could not confirm whether this host IP was created. "
+                    + "Check the subnet's host IPs before retrying.");
+            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Host IP create failed for subnet {SubnetId}", viewModel.SubnetId);
@@ -171,8 +161,6 @@ public class HostIpController(
             }
         }
 
-        // If we get here, something went wrong
-        // Refresh subnet info for display
         Subnet? subnetForError = await context.Subnets.FindAsync(viewModel.SubnetId);
         if (subnetForError != null)
         {
@@ -185,7 +173,6 @@ public class HostIpController(
         return View(viewModel);
     }
 
-    // GET: HostIp/Edit/{ip}
     [Authorize(Policy = "RequireEditRole")]
     public async Task<IActionResult> Edit(string ip)
     {
@@ -212,7 +199,6 @@ public class HostIpController(
         return View(viewModel);
     }
 
-    // POST: HostIp/Edit/{ip}
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
@@ -229,7 +215,7 @@ public class HostIpController(
             {
                 return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
                 {
-                    // Validate host IP update
+
                     ValidationResult validationResult = hostIpValidationService.ValidateHostIpUpdate(
                         ip,
                         new UpdateHostIpDto
@@ -242,25 +228,24 @@ public class HostIpController(
 
                     if (!validationResult.IsValid)
                     {
-                        // Check if this is a concurrency conflict
+
                         bool isConcurrencyConflict = validationResult.Errors.Any(e => e.Code == "CONCURRENCY_CONFLICT");
 
                         if (isConcurrencyConflict)
                         {
-                            // Handle concurrency conflict - reload current data and show user-friendly message
+
                             HostIpAssignment? currentHostIp = await context.HostIpAssignments
                                 .Include(h => h.Subnet)
                                 .FirstOrDefaultAsync(h => h.IP == ip);
 
                             if (currentHostIp != null)
                             {
-                                // Update the view model with current database values for concurrency control
+
                                 viewModel.RowVersion = currentHostIp.RowVersion ?? [];
                                 viewModel.SubnetInfo = $"{currentHostIp.Subnet.Name} ({currentHostIp.Subnet.NetworkAddress}/{currentHostIp.Subnet.Cidr})";
                                 viewModel.CreatedAt = currentHostIp.CreatedAt;
                                 viewModel.LastModifiedAt = currentHostIp.LastModifiedAt;
 
-                                // Clear the RowVersion from ModelState so the form field uses the updated model value
                                 ModelState.Remove(nameof(viewModel.RowVersion));
                             }
 
@@ -271,7 +256,7 @@ public class HostIpController(
                         }
                         else
                         {
-                            // Handle other validation errors normally
+
                             foreach (ValidationError error in validationResult.Errors)
                             {
                                 ModelState.AddModelError("", error.Message);
@@ -281,7 +266,6 @@ public class HostIpController(
                         return View(viewModel);
                     }
 
-                    // Find and update the host IP
                     HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
                     if (hostIp == null)
                     {
@@ -306,7 +290,7 @@ public class HostIpController(
             }
             catch (DbUpdateConcurrencyException)
             {
-                // Handle concurrency conflict
+
                 if (!HostIpExists(ip))
                 {
                     return NotFound();
@@ -314,6 +298,13 @@ public class HostIpController(
 
                 ModelState.AddModelError("", "The host IP was modified by another user. Please reload and try again.");
                 return View(viewModel);
+            }
+            catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+            {
+                logger.LogError(ex, "Host IP edit outcome unknown");
+                ModelState.AddModelError("",
+                    "BASTET could not confirm whether this change was applied. "
+                    + "Reload the host IP to see its current state before retrying.");
             }
             catch (Exception ex)
             {
@@ -325,7 +316,6 @@ public class HostIpController(
         return View(viewModel);
     }
 
-    // GET: HostIp/Delete/{ip}
     [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> Delete(string ip)
     {
@@ -351,7 +341,6 @@ public class HostIpController(
         return View(viewModel);
     }
 
-    // POST: HostIp/Delete/{ip}
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
@@ -367,7 +356,7 @@ public class HostIpController(
         {
             return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
             {
-                // Validate host IP deletion
+
                 ValidationResult validationResult = hostIpValidationService.ValidateHostIpDeletion(ip);
                 if (!validationResult.IsValid)
                 {
@@ -379,12 +368,11 @@ public class HostIpController(
                     return RedirectToAction(nameof(Delete), new { ip });
                 }
 
-                // Begin a transaction to ensure data consistency
                 using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
                 try
                 {
-                    // Get the host IP assignment
+
                     HostIpAssignment? hostIp = await context.HostIpAssignments.FindAsync(ip);
                     if (hostIp == null)
                     {
@@ -393,7 +381,6 @@ public class HostIpController(
 
                     int subnetId = hostIp.SubnetId;
 
-                    // Create record in DeletedHostIpAssignments
                     DeletedHostIpAssignment deletedHostIp = new()
                     {
                         OriginalIP = hostIp.IP,
@@ -409,11 +396,9 @@ public class HostIpController(
 
                     context.DeletedHostIpAssignments.Add(deletedHostIp);
 
-                    // Remove the host IP assignment
                     context.HostIpAssignments.Remove(hostIp);
                     await context.SaveChangesAsync();
 
-                    // Commit the transaction
                     await transaction.CommitAsync();
 
                     TempData["SuccessMessage"] = $"Host IP {ip} was deleted successfully.";
@@ -421,7 +406,7 @@ public class HostIpController(
                 }
                 catch (Exception ex)
                 {
-                    // Log before rolling back - see TransactionCleanup.RollbackQuietlyAsync.
+
                     logger.LogError(ex, "Host IP delete failed");
                     await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
                     TempData["ErrorMessage"] = "Error deleting host IP. Details have been logged.";
@@ -436,21 +421,18 @@ public class HostIpController(
         }
     }
 
-    // GET: HostIp/AllHostIps
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> AllHostIps(int page = 1)
     {
-        // Validate page
+
         page = Math.Max(1, page);
         int pageSize = 50;
 
-        // Get all subnets with host IP assignments
         List<Subnet> allSubnetsWithHostIps = await context.Subnets
             .Include(s => s.HostIpAssignments)
             .Where(s => s.HostIpAssignments.Count > 0)
             .ToListAsync();
 
-        // Flatten all host IPs into a single list
         List<(HostIpAssignment HostIp, Subnet Subnet)> allHostIps = [];
         foreach (Subnet? subnet in allSubnetsWithHostIps)
         {
@@ -460,7 +442,6 @@ public class HostIpController(
             }
         }
 
-        // Order by subnet name then IP address
         List<(HostIpAssignment HostIp, Subnet Subnet)> orderedHostIps = [.. allHostIps
             .OrderBy(h => h.Subnet.Name)
             .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[0])
@@ -468,20 +449,11 @@ public class HostIpController(
             .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[2])
             .ThenBy(h => IPAddress.Parse(h.HostIp.IP).GetAddressBytes()[3])];
 
-        // Get total count
         int totalCount = orderedHostIps.Count;
 
-        // Clamp to the range that actually exists, now that the total is known. Flooring alone left
-        // an over-range page rendering an inverted "Showing 51-40 of 40" banner over an empty table,
-        // and a page number large enough to overflow (page-1)*pageSize in int made Skip see a negative
-        // count - which it treats as zero, so the request was served page 1's rows while still
-        // reporting itself as page 45000000. Clamping first means the label, the rows and the pager all
-        // derive from the same value and cannot disagree, and post-clamp the multiplication cannot
-        // overflow. Math.Clamp is safe because Math.Max guarantees totalPages >= 1.
         int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
         page = Math.Clamp(page, 1, totalPages);
 
-        // Apply pagination
         List<AllHostIpItemViewModel> pagedHostIps = [.. orderedHostIps
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -499,7 +471,6 @@ public class HostIpController(
                 ModifiedBy = h.HostIp.ModifiedBy
             })];
 
-        // Create the view model
         AllHostIpsViewModel viewModel = new()
         {
             HostIps = pagedHostIps,
@@ -511,38 +482,29 @@ public class HostIpController(
         return View(viewModel);
     }
 
-    // GET: HostIp/AllDeletedHostIps
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> AllDeletedHostIps(int page = 1)
     {
-        // Validate page
+
         page = Math.Max(1, page);
         int pageSize = 50;
 
-        // Get all deleted host IPs
         List<DeletedHostIpAssignment> deletedHostIps = await context.DeletedHostIpAssignments
             .OrderByDescending(h => h.DeletedAt)
             .ToListAsync();
 
-        // Get total count
         int totalCount = deletedHostIps.Count;
 
-        // Clamp to the range that exists - see AllHostIps for why flooring alone is not enough. This
-        // listing is the more reachable of the two: its own pager emits ?page=2, and a concurrent purge
-        // can shrink the archive before that link is followed.
         int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / pageSize));
         page = Math.Clamp(page, 1, totalPages);
 
-        // Get all subnet information (including deleted subnets)
         List<Subnet> allSubnets = await context.Subnets.ToListAsync();
         List<DeletedSubnet> allDeletedSubnets = await context.DeletedSubnets.ToListAsync();
 
-        // Apply pagination
         List<DeletedHostIpAssignment> pagedDeletedHostIps = [.. deletedHostIps
             .Skip((page - 1) * pageSize)
             .Take(pageSize)];
 
-        // Build view models with subnet information where available
         List<AllDeletedHostIpItemViewModel> viewModels = [];
 
         foreach (DeletedHostIpAssignment? deletedHostIp in pagedDeletedHostIps)
@@ -561,16 +523,15 @@ public class HostIpController(
                 DeletedBy = deletedHostIp.DeletedBy
             };
 
-            // Try to find subnet information
             Subnet? subnet = allSubnets.FirstOrDefault(s => s.Id == deletedHostIp.OriginalSubnetId);
             if (subnet != null)
             {
-                // Subnet still exists
+
                 viewModel.SubnetName = subnet.Name;
             }
             else
             {
-                // Check if it's in deleted subnets
+
                 DeletedSubnet? deletedSubnet = allDeletedSubnets.FirstOrDefault(s => s.OriginalId == deletedHostIp.OriginalSubnetId);
                 if (deletedSubnet != null)
                 {
@@ -578,7 +539,7 @@ public class HostIpController(
                 }
                 else
                 {
-                    // No information available
+
                     viewModel.SubnetName = "Unknown";
                 }
             }
@@ -586,7 +547,6 @@ public class HostIpController(
             viewModels.Add(viewModel);
         }
 
-        // Create the view model
         AllDeletedHostIpsViewModel allDeletedHostIpsViewModel = new()
         {
             DeletedHostIps = viewModels,
@@ -598,12 +558,10 @@ public class HostIpController(
         return View(allDeletedHostIpsViewModel);
     }
 
-    // GET: HostIp/PurgeAllDeletedHostIps
     [Authorize(Policy = "RequireAdminRole")]
     public async Task<IActionResult> PurgeAllDeletedHostIps()
     {
-        // Bound first, then count inside it - see PurgeAllDeletedSubnets for why the other order lets
-        // the purge destroy records the confirmation page never counted.
+
         int maxId = await context.DeletedHostIpAssignments.MaxAsync(d => (int?)d.Id) ?? 0;
         int count = await context.DeletedHostIpAssignments.CountAsync(d => d.Id <= maxId);
         if (count == 0)
@@ -615,7 +573,6 @@ public class HostIpController(
         return View(new PurgeAllDeletedHostIpsViewModel { Count = count, MaxId = maxId });
     }
 
-    // POST: HostIp/PurgeAllDeletedHostIps
     [HttpPost, ActionName("PurgeAllDeletedHostIps")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireAdminRole")]
@@ -627,7 +584,6 @@ public class HostIpController(
             return RedirectToAction(nameof(PurgeAllDeletedHostIps));
         }
 
-        // Same bound as the subnet archive, for the same reason - see the comment there.
         if (confirmedMaxId is null or <= 0)
         {
             TempData["ErrorMessage"] =
@@ -643,7 +599,6 @@ public class HostIpController(
         return RedirectToAction(nameof(AllDeletedHostIps));
     }
 
-    // GET: HostIp/DeletedHostIps/{subnetId}
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> DeletedHostIps(int subnetId)
     {
@@ -653,13 +608,11 @@ public class HostIpController(
             return NotFound();
         }
 
-        // Get deleted host IPs for this subnet
         List<DeletedHostIpAssignment> deletedHostIps = await context.DeletedHostIpAssignments
             .Where(h => h.OriginalSubnetId == subnetId)
             .OrderByDescending(h => h.DeletedAt)
             .ToListAsync();
 
-        // Map to view models
         List<DeletedHostIpViewModel> viewModels = [.. deletedHostIps.Select(d => new DeletedHostIpViewModel
         {
             Id = d.Id,
@@ -674,7 +627,6 @@ public class HostIpController(
             ModifiedBy = d.ModifiedBy
         })];
 
-        // Create the list view model
         DeletedHostIpListViewModel model = new()
         {
             DeletedHostIps = viewModels,
@@ -688,7 +640,6 @@ public class HostIpController(
         return View(model);
     }
 
-    // Post: HostIp/SetAllocationStatus
     [HttpPost]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireEditRole")]
@@ -701,11 +652,10 @@ public class HostIpController(
 
         try
         {
-            // IsFullyAllocated gates child-subnet creation, so flipping it must not race the
-            // creates/imports that validate against it.
+
             return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
             {
-                // Find the subnet
+
                 Subnet? subnet = await context.Subnets
                     .Include(s => s.ChildSubnets)
                     .Include(s => s.HostIpAssignments)
@@ -716,7 +666,6 @@ public class HostIpController(
                     return NotFound();
                 }
 
-                // If we're trying to mark as fully allocated, validate
                 if (dto.IsFullyAllocated)
                 {
                     ValidationResult validationResult = hostIpValidationService.ValidateSubnetCanBeFullyAllocated(dto.SubnetId);
@@ -731,13 +680,8 @@ public class HostIpController(
                     }
                 }
 
-                // Update the subnet
                 subnet.IsFullyAllocated = dto.IsFullyAllocated;
 
-                // Clearing the flag must also clear the note an Azure import wrote, or the
-                // description goes on asserting "fully allocated by Azure subnet ..." about a row
-                // that is no longer fully allocated. Only the note is removed; operator-authored
-                // text is left exactly as it is.
                 if (!dto.IsFullyAllocated && !string.IsNullOrEmpty(subnet.Description))
                 {
                     string stripped = FullyAllocatedNote.Strip(subnet.Description);
@@ -761,6 +705,22 @@ public class HostIpController(
         catch (TimeoutException)
         {
             TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
+            return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
+        }
+        catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
+        {
+
+            logger.LogError(ex, "Set allocation status outcome unknown for subnet {SubnetId}", dto.SubnetId);
+            TempData["ErrorMessage"] =
+                "BASTET could not confirm whether the allocation status was changed. "
+                + "Reload the subnet to see its current state before retrying.";
+            return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
+        }
+        catch (Exception ex)
+        {
+
+            logger.LogError(ex, "Set allocation status failed for subnet {SubnetId}", dto.SubnetId);
+            TempData["ErrorMessage"] = "Error updating allocation status. Details have been logged.";
             return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
         }
     }

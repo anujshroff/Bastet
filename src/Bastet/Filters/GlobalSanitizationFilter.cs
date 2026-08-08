@@ -5,20 +5,16 @@ using System.Reflection;
 
 namespace Bastet.Filters;
 
-/// <summary>
-/// Global action filter that automatically sanitizes input based on property attributes
-/// </summary>
 public class GlobalSanitizationFilter(
     IInputSanitizationService sanitizationService,
     ILogger<GlobalSanitizationFilter> logger) : IAsyncActionFilter
 {
 
-    // Cache for reflection results to improve performance
     private static readonly ConcurrentDictionary<Type, PropertySanitizationInfo[]> _typeCache = new();
 
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        // Process each action argument
+
         foreach (KeyValuePair<string, object?> argument in context.ActionArguments)
         {
             if (argument.Value != null)
@@ -27,7 +23,6 @@ public class GlobalSanitizationFilter(
             }
         }
 
-        // Continue with the action execution
         await next();
     }
 
@@ -40,13 +35,11 @@ public class GlobalSanitizationFilter(
 
         Type type = obj.GetType();
 
-        // Skip primitive types and strings (handled by property sanitization)
         if (type.IsPrimitive || type == typeof(string) || type == typeof(decimal))
         {
             return;
         }
 
-        // Handle collections
         if (obj is System.Collections.IEnumerable enumerable and not string)
         {
             foreach (object? item in enumerable)
@@ -60,10 +53,8 @@ public class GlobalSanitizationFilter(
             return;
         }
 
-        // Get or create cached property info for this type
         PropertySanitizationInfo[] properties = _typeCache.GetOrAdd(type, t => GetSanitizableProperties(t));
 
-        // Apply sanitization to each property
         foreach (PropertySanitizationInfo propInfo in properties)
         {
             try
@@ -75,11 +66,6 @@ public class GlobalSanitizationFilter(
                     {
                         propInfo.Property.SetValue(obj, sanitizedValue);
 
-                        // The original value is logged as it arrived, and sanitization does not remove
-                        // interior line breaks - so without stripping them here a crafted value would
-                        // write extra lines into the log an operator is reading to diagnose something.
-                        // Guarded because this runs for every sanitized property on every request,
-                        // while Debug logging is off by default: no point building the strings then.
                         if (logger.IsEnabled(LogLevel.Debug))
                         {
                             logger.LogDebug(
@@ -102,16 +88,14 @@ public class GlobalSanitizationFilter(
             }
         }
 
-        // Recursively sanitize nested objects
         foreach (PropertyInfo prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            // Skip properties with sanitization attributes (already handled)
+
             if (properties.Any(p => p.Property == prop))
             {
                 continue;
             }
 
-            // Skip indexers
             if (prop.GetIndexParameters().Length > 0)
             {
                 continue;
@@ -119,7 +103,6 @@ public class GlobalSanitizationFilter(
 
             Type propType = prop.PropertyType;
 
-            // Skip primitive types, strings, and system types
             if (propType.IsPrimitive ||
                 propType == typeof(string) ||
                 propType == typeof(decimal) ||
@@ -148,10 +131,6 @@ public class GlobalSanitizationFilter(
         }
     }
 
-    /// <summary>
-    /// Makes a request-supplied value safe to log: line breaks stripped first so the length limit
-    /// applies to what is actually written, then shortened to keep one property from filling the log.
-    /// </summary>
     private static string TruncateForLog(string? value)
     {
         const int maxLoggedLength = 50;
@@ -168,13 +147,11 @@ public class GlobalSanitizationFilter(
 
         foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            // Property must be a string and have a setter
+
             if (property.PropertyType != typeof(string) || !property.CanWrite)
             {
                 continue;
             }
-
-            // Check for sanitization attributes
 
             if (property
                 .GetCustomAttributes(typeof(SanitizationAttribute), true)

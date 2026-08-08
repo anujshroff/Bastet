@@ -2,81 +2,27 @@ using Bastet.Models.ViewModels;
 
 namespace Bastet.Services.Azure
 {
-    /// <summary>
-    /// Service for interacting with the Azure API to import VNets and subnets
-    /// </summary>
+
     public interface IAzureService
     {
-        /// <summary>
-        /// Checks if the Azure credential is valid and can authenticate with Azure
-        /// </summary>
-        /// <returns>True if the credential is valid, false otherwise</returns>
+
         Task<bool> IsCredentialValid();
 
-        /// <summary>
-        /// Gets all available Azure subscriptions
-        /// </summary>
-        /// <returns>List of Azure subscriptions</returns>
         Task<List<AzureSubscriptionViewModel>> GetSubscriptions();
 
-        /// <summary>
-        /// Gets Azure VNets in a subscription that match the specified network address and CIDR
-        /// </summary>
-        /// <param name="subscriptionId">The Azure subscription ID</param>
-        /// <param name="networkAddress">The network address to match</param>
-        /// <param name="cidr">The CIDR to match</param>
-        /// <returns>List of matching Azure VNets</returns>
         Task<List<AzureVNetViewModel>> GetCompatibleVNets(
             string subscriptionId,
             string networkAddress,
             int cidr);
 
-        /// <summary>
-        /// Gets Azure subnets from a VNet that would be valid children of the specified subnet
-        /// </summary>
-        /// <param name="vnetResourceId">The Azure VNet resource ID</param>
-        /// <param name="networkAddress">The parent subnet network address</param>
-        /// <param name="cidr">The parent subnet CIDR</param>
-        /// <returns>List of compatible Azure subnets</returns>
         Task<List<AzureSubnetViewModel>> GetCompatibleSubnets(
             string vnetResourceId,
             string networkAddress,
             int cidr);
 
-        /// <summary>
-        /// Gets every VNet in a subscription with its IPv4 prefixes and IPv4 subnets, reporting
-        /// whether the call actually succeeded instead of collapsing every failure to an empty list.
-        /// IPv6 prefixes/subnets are filtered out. Subnets that have only IPv6 prefixes are excluded;
-        /// subnets that have both IPv4 and IPv6 prefixes return only their IPv4 prefix.
-        /// </summary>
-        /// <remarks>
-        /// Callers that treat "absent from Azure" as a reason to change Bastet data must use this
-        /// overload. An empty list means "this subscription has no VNets" only when
-        /// <see cref="AzureVNetInventory.Success"/> is true; otherwise it means the question was
-        /// never answered, and acting on it would delete subnets because Azure happened to be
-        /// unreachable.
-        /// </remarks>
-        /// <param name="subscriptionId">The Azure subscription ID</param>
         Task<AzureVNetInventory> GetVNetInventory(string subscriptionId);
 
-        /// <summary>
-        /// Reads each resource ID directly and reports what Azure said about it individually.
-        /// </summary>
-        /// <remarks>
-        /// Absence from <see cref="GetVNetInventory"/> is not evidence of deletion: ARM list
-        /// operations are RBAC-filtered, so a credential that has lost access to a resource group
-        /// receives HTTP 200 with those resources missing rather than a 403, and every one of them
-        /// then looks deleted. A direct read distinguishes the two - 404 for gone, 403 for not
-        /// visible - so anything about to be archived because it was missing from a list must be
-        /// confirmed here first. IDs that cannot be checked come back as
-        /// <see cref="AzureResourceConfirmation.Unknown"/> rather than throwing, so one bad entry
-        /// cannot abort the whole reconcile.
-        /// </remarks>
-        /// <param name="resourceIds">VNet or Azure-subnet resource IDs to check.</param>
-        /// <returns>One entry per distinct ID supplied.</returns>
         Task<IReadOnlyDictionary<string, AzureResourceConfirmation>> ConfirmResourcesAsync(
             IEnumerable<string> resourceIds);
     }
 }
-
-

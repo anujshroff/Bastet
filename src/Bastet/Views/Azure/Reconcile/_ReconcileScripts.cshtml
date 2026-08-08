@@ -7,21 +7,12 @@
         let selectedSubscriptionId = "";
         let selectedSubscriptionName = "";
         let lastPlan = null;
-        let scanSeq = 0;          // bumped per scan so a superseded response can be told apart
-        // The exact subnets the confirm step was built from. The deletion posts these rather than
-        // whatever the review checkboxes hold at click time, so it can only ever delete what the
-        // confirmation screen listed.
+        let scanSeq = 0;
+
         let confirmedIds = null;
-        // The verdict each confirmed row was shown under. Sent with the delete so the server
-        // can refuse a batch whose reasons have changed since the operator read them.
+
         let confirmedVerdicts = null;
-        // True while a delete POST is in flight. Without it, anything that calls
-        // refreshDeleteButton re-arms the button mid-delete - one keystroke plus Backspace in the
-        // confirmation box is enough - and the second POST's ARM re-scan starts before the first
-        // request's transaction archives the rows, so it misses the 409, finds every id already
-        // gone, and returns 200 with zero counters. That response lands last, so its TempData
-        // banner overwrites the true one and the operator reads "deleted 0 stale subnet(s)" after a
-        // delete that archived two.
+
         let deleting = false;
 
         function getAntiForgeryToken() {
@@ -47,9 +38,6 @@
             $("#" + tabId).addClass("show active");
         }
 
-        // The scan is only valid for the subscription it ran against. Any change to that choice
-        // re-locks the later steps and drops the cached plan, so the pills cannot be used to walk
-        // back into a stale result and delete the wrong subnets.
         function invalidateScan() {
             lastPlan = null;
             $("#rec-step2-tab").addClass("disabled");
@@ -57,40 +45,23 @@
             invalidateConfirmation();
         }
 
-        // The confirm step is built from a snapshot of the review selection, so changing that
-        // selection makes everything on it - the list, the counts, the typed approval - describe a
-        // deletion the user is no longer asking for. Re-lock the step so it can only be reached
-        // again through the button that rebuilds it, rather than through its pill, which stays
-        // clickable once visited.
         function invalidateConfirmation() {
             confirmedIds = null;
             confirmedVerdicts = null;
             $("#rec-step3-tab").addClass("disabled");
             refreshDeleteButton();
 
-            // Disabling the pill is not enough when step 3 is the pane the user is looking at: it
-            // stays on screen showing a confirmation that no longer describes anything, and the
-            // typed word alone used to be enough to bring its button back. Send them back to the
-            // review step, which is where the snapshot has to be rebuilt.
             if ($("#rec-step3").hasClass("active")) {
                 activateTab("rec-step2");
             }
         }
 
-        // The delete button is only ever live when there is a confirmed snapshot to post AND the
-        // operator has typed the confirmation word. Both conditions live here so the two places that
-        // re-enable the button cannot drift apart: gating on the typed text alone left the button
-        // clickable after the snapshot had been dropped, and clicking it hit a bare `return` in the
-        // click handler - no message, no spinner, no state change. A permanently live, inert button.
         function refreshDeleteButton() {
             const hasSnapshot = Array.isArray(confirmedIds) && confirmedIds.length > 0;
             const confirmed = $("#rec-confirmation").val() === "approved";
             $("#rec-confirm-delete-btn").prop("disabled", deleting || !hasSnapshot || !confirmed);
         }
 
-        // ------------------------------------------------------------------
-        // Step 1: subscriptions
-        // ------------------------------------------------------------------
 
         function loadSubscriptions() {
             $.ajax({
@@ -143,27 +114,19 @@
         });
 
         $("#rec-scan-btn").on("click", function () {
+            $("#rec-relink-error").addClass("d-none");
+            $("#rec-relink-success").addClass("d-none");
             const selected = $("#rec-subscription-select").find("option:selected");
             selectedSubscriptionId = selected.val();
             selectedSubscriptionName = selected.attr("data-name") || "";
-            // Drop the previous plan before re-scanning, not after it returns: for the whole
-            // duration of the scan the later steps were otherwise still reachable through their
-            // pills, carrying a confirmation built from results that are being replaced.
             invalidateScan();
             activateTab("rec-step2");
             runScan();
         });
 
-        // ------------------------------------------------------------------
-        // Step 2: scan and review
-        // ------------------------------------------------------------------
 
         function runScan() {
-            // The step-1 pill stays enabled during a scan, and the subscription select's change
-            // handler re-enables the scan button, so two scans really can be in flight. Whichever
-            // response arrives last would otherwise win: a superseded plan can paint its stale-subnet
-            // table and its "nothing to clean up" banner over a newer scan's failure panel, and the
-            // archive is reachable from that screen. Same guard the import and bulk wizards carry.
+
             const seq = ++scanSeq;
             $.ajax({
                 url: "@Url.Action("ReconcileScan", "Azure")",
@@ -178,8 +141,7 @@
                     $("#rec-scan-content").addClass("d-none");
                 },
                 complete: function () {
-                    // jQuery always runs complete, so a superseded request would otherwise hide the
-                    // spinner of one still in flight.
+
                     if (seq !== scanSeq) {
                         return;
                     }
@@ -196,9 +158,7 @@
                     renderPlan(result.plan);
                 },
                 error: function (xhr, status, error) {
-                    // Without this a superseded request that fails paints its error over a current,
-                    // valid plan - and leaves an enabled button that does nothing, because
-                    // showScanError nulls lastPlan.
+
                     if (seq !== scanSeq) {
                         return;
                     }
@@ -211,6 +171,19 @@
             invalidateScan();
             $("#rec-scan-error-message").text(message);
             $("#rec-scan-error").removeClass("d-none");
+
+            $("#rec-relink-rescan-note").text(
+                "The results below could not be re-scanned, so they may not reflect Azure as it is now.");
+        }
+
+        function showRelinkError(btn, originalLabel, message) {
+            if (btn && originalLabel) {
+                btn.text(originalLabel);
+            }
+            $("#rec-relink-error-message").text(message);
+            $("#rec-relink-success").addClass("d-none");
+            $("#rec-relink-error").removeClass("d-none");
+            runScan();
         }
 
         function statusLabel(statusName) {
@@ -220,6 +193,7 @@
                 case "SubnetDeleted": return { text: "Subnet deleted", css: "bg-danger" };
                 case "SubnetPrefixChanged": return { text: "Prefix changed", css: "bg-warning text-dark" };
                 case "FullyAllocatingSubnetDeleted": return { text: "Fully allocated", css: "bg-secondary" };
+                case "VNetPrefixStillCovered": return { text: "Address space changed", css: "bg-secondary" };
                 default: return { text: statusName || "Unknown", css: "bg-secondary" };
             }
         }
@@ -238,7 +212,6 @@
         function renderPlan(plan) {
             lastPlan = plan;
 
-            // A scan that did not succeed offers nothing, whatever else it says.
             if (!plan.scanSucceeded) {
                 showScanError((plan.globalErrors || []).join(" ") || "Azure could not be read.");
                 return;
@@ -255,8 +228,7 @@
             $("#rec-scan-warnings").toggleClass("d-none", warnings.length === 0);
 
             const items = plan.items || [];
-            // Declared here rather than below because the "nothing to clean up" banner is gated on
-            // it as well as on items.
+
             const reviewItems = plan.reviewItems || [];
             const rows = $("#rec-stale-rows").empty();
 
@@ -282,12 +254,6 @@
 
             $("#rec-stale-section").toggleClass("d-none", items.length === 0);
 
-            // "Everything still exists in Azure. There is nothing to clean up." is a statement of
-            // fact, so it may only appear when the scan actually established that. Rows withheld
-            // because Azure could not be asked produce a warning and no items, and subnets needing
-            // review produce reviewItems and no items - in both cases there is something to report,
-            // and claiming a clean bill over the top of it is the same fail-open assertion in prose
-            // that the deletion path is careful never to make.
             const nothingToReport = items.length === 0 && warnings.length === 0 && reviewItems.length === 0;
             $("#rec-nothing-stale").toggleClass("d-none", !nothingToReport);
 
@@ -298,8 +264,6 @@
                 tr.append($("<td></td>").html("<code>" + escapeHtml(item.networkAddress) + "/" + escapeHtml(item.cidr) + "</code>"));
                 tr.append($("<td></td>").text(item.reason));
 
-                // Only a range that moved to another Azure subnet has a repair; every other review
-                // status needs a human decision the application cannot make.
                 const action = $("<td></td>");
                 if (item.suggestedAzureResourceId) {
                     action.append($('<button type="button" class="btn btn-sm btn-outline-primary rec-relink-btn"></button>')
@@ -311,16 +275,15 @@
             });
             $("#rec-review-section").toggleClass("d-none", reviewItems.length === 0);
 
-            // Clear indeterminate too: a re-scan rebuilds the rows, and the dash would otherwise
-            // survive onto a selection that is now empty.
             $("#rec-select-all").prop("checked", false).prop("indeterminate", false);
             updateGoConfirmBtn();
-            // A re-scan clears the selection, so anything already confirmed refers to the old plan.
+
             invalidateConfirmation();
-            // Defence in depth: clear the failure panel where the content is revealed, so a valid
-            // plan never renders underneath a "Nothing was checked" message left by an earlier scan.
-            // Safe here because the showScanError branches above return before reaching this point.
+
             $("#rec-scan-error").addClass("d-none");
+
+            $("#rec-relink-rescan-note").text(
+                "The results below have been re-scanned, so they reflect Azure as it is now.");
             $("#rec-scan-content").removeClass("d-none");
         }
 
@@ -329,13 +292,10 @@
         }
 
         function updateGoConfirmBtn() {
-            $("#rec-go-confirm-btn").prop("disabled", selectedIds().length === 0);
+
+            $("#rec-go-confirm-btn").prop("disabled", !lastPlan || selectedIds().length === 0);
         }
 
-        // Same staleness the import wizard had: nothing recomputed the master from the rows, so
-        // it kept asserting "all selected" over an emptied selection and the next click on it
-        // selected nothing. .prop() fires no change event, so this cannot re-enter the master's
-        // own handler. The `checked > 0 &&` conjunct guards the empty-list case.
         function syncRecSelectAll() {
             let boxes = $(".rec-item-checkbox");
             let checked = boxes.filter(":checked").length;
@@ -356,10 +316,6 @@
             invalidateConfirmation();
         });
 
-        // Repairs the Azure link of a row whose range moved to another Azure subnet. Delegated
-        // because the review rows are rebuilt on every scan. The server re-derives which Azure
-        // subnet to link to, so nothing but the row id is sent, and a re-scan follows so the
-        // screen never keeps showing a verdict that has just been acted on.
         let relinking = false;
         $("#rec-review-rows").on("click", ".rec-relink-btn", function () {
             if (relinking) {
@@ -368,6 +324,8 @@
 
             const btn = $(this);
             const subnetId = btn.data("subnet-id");
+
+            const originalLabel = btn.text();
 
             $.ajax({
                 url: "@Url.Action("RelinkAzureSubnet", "Subnet")",
@@ -383,23 +341,28 @@
                 },
                 success: function (result) {
                     if (result && result.success) {
-                        // Re-scan rather than patching the row: the repair can change other rows'
-                        // verdicts too, and a stale table is what makes an archive click wrong.
+
+                        $("#rec-relink-error").addClass("d-none");
+                        $("#rec-relink-success-message").text(
+                            result.azureSubnetName
+                                ? "This subnet is now linked to Azure subnet '" + result.azureSubnetName + "'."
+                                : "This subnet is now linked to its current Azure resource.");
+                        $("#rec-relink-success").removeClass("d-none");
                         runScan();
                         return;
                     }
-                    showScanError((result && result.error) || "The re-link failed.");
+
+                    showRelinkError(btn, originalLabel, (result && result.error) || "The re-link failed.");
                 },
                 error: function (xhr) {
                     let message = "The re-link failed.";
                     if (xhr && xhr.responseJSON && xhr.responseJSON.error) {
                         message = xhr.responseJSON.error;
                     }
-                    showScanError(message);
+                    showRelinkError(btn, originalLabel, message);
                 },
                 complete: function () {
-                    // Re-enable unconditionally: a failed re-link must stay retryable, and runScan
-                    // rebuilds these rows from scratch on the success path anyway.
+
                     relinking = false;
                     $(".rec-relink-btn").prop("disabled", false);
                 }
@@ -410,10 +373,6 @@
             activateTab("rec-step1");
         });
 
-        // ------------------------------------------------------------------
-        // Step 3: confirm and delete
-        // ------------------------------------------------------------------
-
         $("#rec-go-confirm-btn").on("click", function () {
             const ids = selectedIds();
             if (ids.length === 0 || !lastPlan) {
@@ -422,25 +381,17 @@
 
             const chosen = (lastPlan.items || []).filter(function (i) { return ids.indexOf(i.subnetId) !== -1; });
 
-            // The deletion is submitted for every selected id; the server dedupes by subtree.
             confirmedIds = chosen.map(function (i) { return i.subnetId; });
-            // Snapshotted here, beside confirmedIds, so both describe the same reviewed plan.
+
             confirmedVerdicts = chosen.map(function (i) {
                 return { subnetId: i.subnetId, statusName: i.statusName, reason: i.reason || "" };
             });
 
-            // The counts are subtree-inclusive, so an item selected together with one of its
-            // ancestors is already inside the ancestor's numbers - same rule the server applies
-            // when it archives. Sum only items no other chosen item covers.
             const covered = {};
             chosen.forEach(function (i) {
                 (i.descendantSubnetIds || []).forEach(function (id) { covered[id] = true; });
             });
 
-            // What the server will actually report as deleted. A selected subnet that is also a
-            // descendant of another selected subnet is archived as part of that ancestor's subtree,
-            // not as a target of its own. Counting it here as well as in the cascade below
-            // announced more subnets than exist - and disagreed with the result message afterwards.
             const targets = chosen.filter(function (i) { return !covered[i.subnetId]; });
 
             $("#rec-confirm-count").text(targets.length);
@@ -461,10 +412,6 @@
                 $("#rec-confirm-cascade").addClass("d-none");
             }
 
-            // The reason is carried through to this screen deliberately. Step 2 prints it beside the
-            // checkbox, but this is the last screen before the archive and it used to show only the
-            // status label - so a row whose own reason says the Azure resource still exists was
-            // confirmed under a heading saying it did not.
             const list = $("#rec-confirm-list").empty();
             targets.forEach(function (i) {
                 const li = $('<li class="list-group-item"></li>')
@@ -490,8 +437,7 @@
         });
 
         $("#rec-confirm-delete-btn").on("click", function () {
-            // Post the confirmed snapshot, not the live checkboxes: those can have moved on since
-            // the confirmation screen was built.
+
             const ids = confirmedIds || [];
             if (ids.length === 0) {
                 return;
@@ -516,10 +462,7 @@
                     $("#rec-commit-error").addClass("d-none");
                 },
                 complete: function () {
-                    // complete runs after success/error, so clearing the flag here still leaves a
-                    // genuinely failed delete retryable: showCommitError's own refreshDeleteButton
-                    // call re-enables the button once this flag is down. On success the button is
-                    // already .d-none'd, so the re-enable is unreachable by a click.
+
                     deleting = false;
                     $("#rec-commit-progress").addClass("d-none");
                     refreshDeleteButton();
@@ -557,19 +500,12 @@
                 list.append($("<li></li>").text(e));
             });
 
-            // The 409 carries no globalErrors - the reason a row was withheld travels in warnings,
-            // and without this the operator sees only "no longer reported as deleted", which reads
-            // like a stale browser view rather than "Azure would not confirm it" or "the credential
-            // lost access". Re-running the scan shows the same text, but only while the condition
-            // persists: a throttle that has cleared by then explains nothing.
             (payload.warnings || []).forEach(function (w) {
                 list.append($("<li></li>").text(w));
             });
 
             $("#rec-commit-error").removeClass("d-none");
-            // Let the user retry: the commit is transactional, so nothing was partially applied.
-            // Still snapshot-aware - a failure that invalidated the snapshot must not leave a live
-            // button behind.
+
             refreshDeleteButton();
         }
 

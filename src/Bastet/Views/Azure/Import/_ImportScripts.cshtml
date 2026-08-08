@@ -2,18 +2,13 @@
 
 <script>
     $(document).ready(function() {
-        // Variables to store Azure resource information
+
         let selectedSubscriptionId = "";
         let selectedVNetId = "";
         let selectedVNetName = "";
 
-        // Bumped on every loadSubnets call so a response that has been superseded can be told from
-        // the current one. /Azure/GetSubnets reads Azure per VNet, so two picks in quick succession
-        // can answer out of order, and the rows painted last would then describe a different VNet
-        // from the one the hidden identity fields name.
         let subnetSeq = 0;
 
-        // Escape Azure-derived strings before putting them in HTML (matches the Bulk/Reconcile wizards).
         function escapeHtml(s) {
             if (s === null || s === undefined) {
                 return "";
@@ -25,75 +20,63 @@
                 .replace(/"/g, "&quot;")
                 .replace(/'/g, "&#039;");
         }
-        
-        // Step 1: Load Azure subscriptions
+
         loadAzureSubscriptions();
-        
-        // Step navigation
+
         $("#select-subscription-btn").click(function() {
             selectedSubscriptionId = $("#subscription-select").val();
             if (selectedSubscriptionId) {
-                // Move to Step 2
                 $("#step1-tab").removeClass("active");
                 $("#step2-tab").removeClass("disabled").addClass("active");
                 $("#step1").removeClass("show active");
                 $("#step2").addClass("show active");
-                
-                // Load VNets for the selected subscription
+
                 loadVNets(selectedSubscriptionId);
             }
         });
-        
+
         $("#back-to-subscription-btn, #back-from-no-vnets-btn").click(function() {
-            // Move back to Step 1
             $("#step2-tab").removeClass("active");
             $("#step1-tab").addClass("active");
             $("#step2").removeClass("show active");
             $("#step1").addClass("show active");
         });
-        
+
         $("#select-vnet-btn").click(function() {
             selectedVNetId = $("#vnet-select").val();
             selectedVNetName = $("#vnet-select option:selected").text();
 
             if (selectedVNetId) {
-                // Move to Step 3
                 $("#step2-tab").removeClass("active");
                 $("#step3-tab").removeClass("disabled").addClass("active");
                 $("#step2").removeClass("show active");
                 $("#step3").addClass("show active");
 
-                // Load subnets for the selected VNet. The identity is passed in and re-written from
-                // the response that actually populates the rows, so the two can never disagree.
                 $("#vnet-name").val(selectedVNetName);
                 $("#vnet-resource-id").val(selectedVNetId);
                 loadSubnets(selectedVNetId, selectedVNetName);
             }
         });
-        
+
         $("#back-to-vnet-btn, #back-from-no-subnets-btn").click(function() {
-            // Move back to Step 2
             $("#step3-tab").removeClass("active");
             $("#step2-tab").addClass("active");
             $("#step3").removeClass("show active");
             $("#step2").addClass("show active");
         });
-        
-        // Re-lock later steps when an upstream selection changes, so a stale VNet/subnet list
-        // can't be reached via the step pills and committed (mirrors the Bulk/Reconcile wizards).
+
         function invalidateVNetStep() {
-            // Changing the subscription invalidates both the VNet and Subnet steps.
+
             $("#step2-tab, #step3-tab").addClass("disabled");
             $("#import-subnets-btn").prop("disabled", true);
         }
 
         function invalidateSubnetStep() {
-            // Changing the VNet invalidates the Subnet step.
+
             $("#step3-tab").addClass("disabled");
             $("#import-subnets-btn").prop("disabled", true);
         }
 
-        // Subscription dropdown change handler
         $("#subscription-select").change(function() {
             invalidateVNetStep();
             if ($(this).val()) {
@@ -103,7 +86,6 @@
             }
         });
 
-        // VNet dropdown change handler
         $("#vnet-select").change(function() {
             invalidateSubnetStep();
             if ($(this).val()) {
@@ -112,36 +94,29 @@
                 $("#select-vnet-btn").prop("disabled", true);
             }
         });
-        
-        // Select all subnets checkbox
+
         $("#select-all-subnets").change(function() {
             let isChecked = $(this).is(":checked");
-            $(".subnet-checkbox").prop("checked", isChecked);
+
+            $(".subnet-checkbox:not(:disabled)").prop("checked", isChecked).trigger("change");
+            syncSelectAllSubnets();
             updateImportButton();
         });
-        
-        // Nothing recomputed the master from the rows, so unticking rows left it asserting
-        // "all selected" over a partial - or empty - list, and the operator's next click on
-        // Select All unticked everything instead of selecting it. .prop() fires no change
-        // event, so this cannot re-enter the master's own handler above. The `checked > 0 &&`
-        // conjunct is not redundant: over an empty list 0 === 0 would tick the master.
+
         function syncSelectAllSubnets() {
-            let boxes = $(".subnet-checkbox");
+
+            let boxes = $(".subnet-checkbox:not(:disabled)");
             let checked = boxes.filter(":checked").length;
             $("#select-all-subnets")
                 .prop("checked", checked > 0 && checked === boxes.length)
                 .prop("indeterminate", checked > 0 && checked < boxes.length);
         }
 
-        // Update import button state when subnet checkboxes change
         $(document).on("change", ".subnet-checkbox", function() {
             syncSelectAllSubnets();
             updateImportButton();
         });
-        
-        // AJAX Functions
-        
-        // Load Azure Subscriptions
+
         function loadAzureSubscriptions() {
             $.ajax({
                 url: '@Url.Action("GetSubscriptions", "Azure")',
@@ -156,25 +131,24 @@
                 success: function(result) {
                     if (result.success) {
                         if (result.subscriptions && result.subscriptions.length > 0) {
-                            // Clear and populate subscription dropdown
+
                             let $dropdown = $("#subscription-select");
                             $dropdown.empty();
                             $dropdown.append('<option value="" disabled selected>-- Select a subscription --</option>');
-                            
+
                             $.each(result.subscriptions, function(index, subscription) {
                                 $dropdown.append($('<option></option>')
                                     .attr('value', subscription.subscriptionId)
                                     .text(subscription.displayName + ' (' + subscription.subscriptionId + ')'));
                             });
-                            
-                            // Show subscription selection UI
+
                             $("#subscription-selection").removeClass("d-none");
                         } else {
-                            // No subscriptions found
+
                             $("#no-subscriptions").removeClass("d-none");
                         }
                     } else {
-                        // Error loading subscriptions
+
                         $("#subscription-error-message").text(result.error || "Failed to load subscriptions");
                         $("#subscription-error").removeClass("d-none");
                     }
@@ -188,13 +162,12 @@
                 }
             });
         }
-        
-        // Load VNets for selected subscription
+
         function loadVNets(subscriptionId) {
             $.ajax({
                 url: '@Url.Action("GetVNets", "Azure")',
                 type: "GET",
-                data: { 
+                data: {
                     subscriptionId: subscriptionId,
                     subnetId: @Model.SubnetId
                 },
@@ -204,38 +177,30 @@
                     $("#vnet-selection").addClass("d-none");
                     $("#vnet-error").addClass("d-none");
                     $("#no-vnets").addClass("d-none");
-                    // The success branch empties the dropdown and re-appends the placeholder, which
-                    // resets the select's value without firing `change` - and the change handler is
-                    // the only thing that touches this button's disabled state. Re-entering step 2
-                    // therefore left "Next: Select Subnets" fully saturated and clickable over a
-                    // placeholder, and clicking it fell through the `if (selectedVNetId)` guard: no
-                    // request, no step change, no message. Same placement and reason as
-                    // loadSubnets' beforeSend below, so the wizard has one rule rather than two
-                    // that disagree, and it also covers the error and no-vnets branches.
+
                     $("#select-vnet-btn").prop("disabled", true);
                 },
                 success: function(result) {
                     if (result.success) {
                         if (result.vnets && result.vnets.length > 0) {
-                            // Clear and populate VNet dropdown
+
                             let $dropdown = $("#vnet-select");
                             $dropdown.empty();
                             $dropdown.append('<option value="" disabled selected>-- Select a Virtual Network --</option>');
-                            
+
                             $.each(result.vnets, function(index, vnet) {
                                 $dropdown.append($('<option></option>')
                                     .attr('value', vnet.resourceId)
                                     .text(vnet.name));
                             });
-                            
-                            // Show VNet selection UI
+
                             $("#vnet-selection").removeClass("d-none");
                         } else {
-                            // No compatible VNets found
+
                             $("#no-vnets").removeClass("d-none");
                         }
                     } else {
-                        // Error loading VNets
+
                         $("#vnet-error-message").text(result.error || "Failed to load Virtual Networks");
                         $("#vnet-error").removeClass("d-none");
                     }
@@ -249,14 +214,13 @@
                 }
             });
         }
-        
-        // Load Subnets for selected VNet
+
         function loadSubnets(vnetResourceId, vnetName) {
             const seq = ++subnetSeq;
             $.ajax({
                 url: '@Url.Action("GetSubnets", "Azure")',
                 type: "GET",
-                data: { 
+                data: {
                     vnetResourceId: vnetResourceId,
                     subnetId: @Model.SubnetId
                 },
@@ -267,65 +231,49 @@
                     $("#subnet-error").addClass("d-none");
                     $("#no-subnets").addClass("d-none");
 
-                    // Rebuilding the rows cannot reach either of these: #select-all-subnets lives
-                    // outside #subnet-list, so $list.empty() misses it, and nothing recomputed the
-                    // button. Coming back to this step with the same VNet still chosen fires no
-                    // `change` on #vnet-select, so invalidateSubnetStep() never runs either - which
-                    // left the master checkbox ticked and Import enabled over a freshly unticked
-                    // list, and made the operator's first click on Select All untick everything
-                    // instead of selecting it. Resetting here rather than beside $list.empty()
-                    // also covers the no-subnets and error branches.
-                    // indeterminate is a second piece of master state and survives the rebuild
-                    // just like `checked` does, so clearing only `checked` would leave the master
-                    // rendering a dash over a freshly emptied list.
                     $("#select-all-subnets").prop("checked", false).prop("indeterminate", false);
                     $("#import-subnets-btn").prop("disabled", true);
                 },
                 success: function(result) {
-                    // A superseded response must not paint: its rows belong to a VNet the operator
-                    // has already moved off, and they would be submitted under the current VNet's
-                    // identity.
+
                     if (seq !== subnetSeq) {
                         return;
                     }
 
-                    // The identity comes from the response that populated the rows, not from the
-                    // click that started it.
                     $("#vnet-name").val(vnetName);
                     $("#vnet-resource-id").val(vnetResourceId);
 
                     if (result.success) {
                         if (result.subnets && result.subnets.length > 0) {
-                            // Clear and populate subnet list
+
                             let $list = $("#subnet-list");
                             $list.empty();
-                            
+
                             $.each(result.subnets, function(index, subnet) {
                                 let subnetId = "subnet-" + index;
-                                let multiSchemeBadge = subnet.hasMultipleAddressSchemes ? 
+                                let multiSchemeBadge = subnet.hasMultipleAddressSchemes ?
                                     '<span class="badge bg-info ms-2">IPv4/IPv6</span>' : '';
-                                    
-                                // Create subnet HTML using the format expected by SubnetController.BatchCreate
+
                                 let addressParts = subnet.addressPrefix.split('/');
                                 let networkAddress = addressParts[0];
                                 let cidr = addressParts[1];
-                                
-                                // Subnet.Name holds 100 characters, past Azure's own 80-character limit - but
-                                // trim to it anyway so that if Azure ever allows longer names this degrades the
-                                // way the bulk import does (truncate) rather than failing model binding. The
-                                // label below still shows the full Azure name.
+
                                 let importName = String(subnet.name || "").substring(0, 100);
 
-                                // Unchecked rows stay disabled and are never submitted, so the subnets[i] sequence
-                                // has gaps. The model binder walks subnets[0], subnets[1], ... and stops at the
-                                // first missing index, silently dropping every selection after it (and binding
-                                // nothing at all when row 0 is unchecked). The subnets.Index field below switches
-                                // the binder to explicit indices, which need not be contiguous. It enables and
-                                // disables with the row, since the handlers here toggle every hidden input in it.
+                                let selectable = subnet.isSelectable !== false;
+                                let reasonHtml = subnet.reason
+                                    ? `<div class="ms-4 mt-1 small text-danger">${escapeHtml(subnet.reason)}</div>`
+                                    : '';
+                                let badge = selectable
+                                    ? ''
+                                    : (subnet.statusName === "AlreadyImported"
+                                        ? '<span class="badge bg-secondary ms-1">Already imported</span>'
+                                        : '<span class="badge bg-danger ms-1">Cannot import</span>');
+
                                 let subnetHtml = `
                                     <div class="form-check mb-2 border p-2 rounded">
                                         <input class="form-check-input subnet-checkbox" type="checkbox"
-                                               id="${subnetId}">
+                                               id="${subnetId}" ${selectable ? '' : 'disabled'}>
                                         <input type="hidden" name="subnets.Index" value="${index}" disabled>
                                         <input type="hidden" name="subnets[${index}].Name" value="${escapeHtml(importName)}" disabled>
                                         <input type="hidden" name="subnets[${index}].NetworkAddress" value="${escapeHtml(networkAddress)}" disabled>
@@ -335,40 +283,36 @@
                                         <input type="hidden" name="subnets[${index}].AzureResourceId" value="${escapeHtml(subnet.resourceId || '')}" disabled>
                                         <input type="hidden" name="subnets[${index}].FullyEncompassesVNetPrefix" value="${subnet.fullyEncompassesVNetPrefix || false}" disabled>
                                         <label class="form-check-label" for="${subnetId}">
-                                            <strong>${escapeHtml(subnet.name)}</strong> ${multiSchemeBadge}<br>
+                                            <strong>${escapeHtml(subnet.name)}</strong> ${multiSchemeBadge}${badge}<br>
                                             <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>
                                         </label>
+                                        ${reasonHtml}
                                     </div>
                                 `;
-                                
+
                                 $list.append(subnetHtml);
                             });
-                            
-                            // Enable/disable associated hidden fields when checkbox changes
+
                             $(".subnet-checkbox").change(function() {
                                 let isChecked = $(this).is(":checked");
                                 $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", !isChecked);
                             });
-                            
-                            // Recompute from the rows that actually exist now, the same pairing the
-                            // reconcile wizard runs after every rebuild (_ReconcileScripts.cshtml).
+
                             updateImportButton();
 
-                            // Show subnet selection UI
                             $("#subnet-selection").removeClass("d-none");
                         } else {
-                            // No compatible subnets found
+
                             $("#no-subnets").removeClass("d-none");
                         }
                     } else {
-                        // Error loading subnets
+
                         $("#subnet-error-message").text(result.error || "Failed to load subnets");
                         $("#subnet-error").removeClass("d-none");
                     }
                 },
                 error: function(xhr, status, error) {
-                    // A superseded request failing at the transport would otherwise paint its error
-                    // over the current VNet's correctly rendered rows.
+
                     if (seq !== subnetSeq) {
                         return;
                     }
@@ -376,8 +320,7 @@
                     $("#subnet-error").removeClass("d-none");
                 },
                 complete: function() {
-                    // jQuery always runs complete, so without this a superseded request hides the
-                    // spinner of one that is still in flight.
+
                     if (seq !== subnetSeq) {
                         return;
                     }
@@ -385,58 +328,42 @@
                 }
             });
         }
-        
-        // Enable/disable import button based on subnet selection
+
         function updateImportButton() {
             let anyChecked = $(".subnet-checkbox:checked").length > 0;
             $("#import-subnets-btn").prop("disabled", !anyChecked);
         }
-        
-        // Add form submit handler to ensure VNet name is passed correctly
+
         let importSubmitting = false;
         $("#import-form").submit(function(e) {
-            // Block a second submit (double-click / Enter) while the first is in flight.
+
             if (importSubmitting) {
                 e.preventDefault();
                 return false;
             }
 
-            // Make sure we have at least one subnet selected
             if ($(".subnet-checkbox:checked").length === 0) {
                 alert("Please select at least one subnet to import");
                 e.preventDefault();
                 return false;
             }
 
-            // Ensure the hidden vnetName field is populated
             if (!$("#vnet-name").val()) {
                 $("#vnet-name").val(selectedVNetName);
             }
 
-            // The disabled attribute decides which rows are posted, and "Select All" flips the
-            // checkboxes with .prop(), which fires no change event - so a row unticked that way keeps
-            // the enabled inputs an earlier individual tick gave it. Disable every row first, then
-            // enable only what is checked right now, so the payload is a function of the current
-            // checkbox state rather than of the order the user clicked things in. Scoped to
-            // #subnet-list so the vnetName / vnetResourceId fields outside it are left alone.
             $("#subnet-list input[type=hidden]").prop("disabled", true);
             $(".subnet-checkbox:checked").each(function() {
                 $(this).closest(".form-check").find("input[type=hidden]").prop("disabled", false);
             });
 
-            // Lock the button so a double-click can't POST the import twice.
             importSubmitting = true;
             $("#import-subnets-btn").prop("disabled", true)
                 .html('<span class="spinner-border spinner-border-sm"></span> Importing...');
 
-            // Allow form submission to continue
             return true;
         });
 
-        // Coming Back to this page restores it from the bfcache exactly as it was left - which is
-        // mid-submit, with the button disabled and still reading "Importing...", and importSubmitting
-        // still true so a retry is blocked outright. Reset that state on restore so returning here
-        // leaves a usable wizard rather than one that needs a manual reload.
         $(window).on("pageshow", function (event) {
             if (!event.originalEvent || !event.originalEvent.persisted) {
                 return;

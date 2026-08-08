@@ -2,12 +2,14 @@
 
 <form asp-action="Delete" method="post">
     <input type="hidden" asp-for="Id" />
-    
+    <input type="hidden" name="confirmedMaxSubnetId" value="@Model.ConfirmedMaxSubnetId" />
+    <input type="hidden" name="confirmedMaxHostIpTicks" value="@Model.ConfirmedMaxHostIpTicks" />
+
     <div class="mb-4">
         <label for="confirmation" class="form-label fw-bold">Type "approved" to confirm deletion:</label>
         <input type="text" class="form-control form-control-lg" id="confirmation" name="confirmation" required autocomplete="off" />
     </div>
-    
+
     <div class="mb-4">
         <button type="submit" class="btn btn-danger btn-lg">
             <i class="bi bi-trash"></i> Delete Subnet

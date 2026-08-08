@@ -3,13 +3,6 @@ using Bastet.Services.Security;
 
 namespace Bastet.Tests.Services;
 
-/// <summary>
-/// <see cref="SubnetNaming.ToSafeText"/> carries its own copy of the SafeText character class,
-/// because resolving <see cref="IInputSanitizationService"/> into the naming helper would mean an
-/// extra constructor parameter on the controller its eight partials share. A second copy of a
-/// character class is a drift risk, so these pin the two together directly rather than trusting
-/// the two regex literals to be read side by side.
-/// </summary>
 public class SubnetNamingSafeTextTests
 {
     private readonly InputSanitizationService _sanitizer = new();
@@ -23,7 +16,6 @@ public class SubnetNamingSafeTextTests
         {
             char ch = (char)c;
 
-            // Padded so the trim in ToSafeText cannot be mistaken for the character being dropped.
             string probe = $"a{ch}a";
             bool acceptedByRule = _sanitizer.IsSafeText(probe);
             bool keptByFilter = SubnetNaming.ToSafeText(probe) == probe;
@@ -59,7 +51,7 @@ public class SubnetNamingSafeTextTests
     [Fact]
     public void ToSafeText_OnlyEverShortens()
     {
-        // D19/F9's length arithmetic in WithSuffix assumes the base name never grows.
+
         foreach (string sample in new[] { "Prod/Web", "a", "", "!!!", new string('x', 200) })
         {
             Assert.True(SubnetNaming.ToSafeText(sample).Length <= sample.Length);

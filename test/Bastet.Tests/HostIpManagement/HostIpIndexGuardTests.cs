@@ -10,11 +10,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.HostIpManagement;
 
-/// <summary>
-/// A subnet holds either child subnets or host IPs, never both, so the host-IP list has to turn away
-/// a subnet that has children. The check needs ChildSubnets loaded: the collection defaults to empty
-/// and there is no lazy loading, so without the Include it silently never fires.
-/// </summary>
 public class HostIpIndexGuardTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -58,8 +53,7 @@ public class HostIpIndexGuardTests : IDisposable
     [Fact]
     public async Task Index_SubnetWithChildSubnets_RedirectsWithExplanation()
     {
-        // Mirrors a fresh request: nothing this test tracked is visible to the controller, so the
-        // navigation collection is only populated if the query asks for it.
+
         _context.ChangeTracker.Clear();
 
         IActionResult result = await _controller.Index(1);
@@ -93,16 +87,6 @@ public class HostIpIndexGuardTests : IDisposable
         Assert.Equal(3, view.ViewData["SubnetId"]);
     }
 
-    // -------------------------------------------------------------------------
-    // The same guard on Create. A redirect starts a new request, so anything put in ModelState is
-    // gone by the time Details renders - and Details reads only TempData.
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The reachable route is the one the tag helper emits: GET /HostIp/Create?subnetId=1. A
-    /// hand-typed /HostIp/Create/1 binds id, leaves subnetId at 0 and returns NotFound before the
-    /// guard is ever reached.
-    /// </summary>
     [Fact]
     public async Task Create_SubnetWithChildSubnets_RedirectsWithExplanation()
     {

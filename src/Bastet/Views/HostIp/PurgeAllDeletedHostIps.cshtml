@@ -22,7 +22,6 @@
 <form asp-action="PurgeAllDeletedHostIps" method="post">
     @Html.AntiForgeryToken()
 
-    @* Bounds the purge to the records this page counted - see the subnet twin. *@
     <input type="hidden" name="confirmedMaxId" value="@Model.MaxId" />
 
     <div class="mb-4">

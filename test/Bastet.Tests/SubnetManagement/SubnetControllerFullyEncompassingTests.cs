@@ -12,9 +12,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-/// <summary>
-/// Tests for the behavior of subnets that fully encompass a VNet's address prefix
-/// </summary>
 [Collection(Bastet.Tests.Azure.AzureFeatureFlagCollection.Name)]
 public class SubnetControllerFullyEncompassingTests : IDisposable
 {
@@ -27,11 +24,9 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
 
     public SubnetControllerFullyEncompassingTests()
     {
-        // These tests drive the Azure import path, which is now behind the feature flag the
-        // other eleven Azure write paths were always behind.
+
         Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "true");
 
-        // Use SQLite in-memory database for tests
         DbContextOptions<BastetDbContext> options = new DbContextOptionsBuilder<BastetDbContext>()
             .UseSqlite("DataSource=:memory:")
             .Options;
@@ -40,13 +35,11 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         _context.Database.OpenConnection();
         _context.Database.EnsureCreated();
 
-        // Set up services
         _userContextService = ControllerTestHelper.CreateMockUserContextService();
         _ipUtilityService = new IpUtilityService();
         _validationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
 
-        // Create and configure the controller
         _controller = new SubnetController(
             _context,
             _ipUtilityService,
@@ -58,16 +51,13 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         );
         ControllerTestHelper.SetupController(_controller);
 
-        // Setup controller context with HttpContext
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext()
         };
 
-        // Add Referer header for testing (simulating request from Azure Import)
         _controller.HttpContext.Request.Headers.Referer = "https://localhost/Azure/Import/1";
 
-        // Set up test data
         SeedTestData();
     }
 
@@ -81,9 +71,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
 
     private void SeedTestData()
     {
-        // Create a hierarchy of test subnets
 
-        // Root subnet - no parent
         Subnet rootSubnet = new()
         {
             Id = 1,
@@ -95,7 +83,6 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         };
         _context.Subnets.Add(rootSubnet);
 
-        // Parent subnet - for import testing
         Subnet parentSubnet = new()
         {
             Id = 2,
@@ -108,15 +95,9 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         };
         _context.Subnets.Add(parentSubnet);
 
-        // Save all changes
         _context.SaveChanges();
     }
 
-    /// <summary>
-    /// The Azure import wizard posts as a full-page form, so its failures redirect to the parent's
-    /// Details page carrying the reason in TempData rather than returning a raw error body the
-    /// browser would render in place of the wizard. Asserts both halves.
-    /// </summary>
     private void AssertImportFailureRedirect(IActionResult result, int parentId)
     {
         RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
@@ -129,44 +110,38 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
     [Fact]
     public async Task BatchCreate_SubnetFullyEncompassesVNetPrefix_MarksParentAsFullyAllocated()
     {
-        // Arrange
-        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+
+        int parentId = 2;
         string vnetName = "Azure-VNet-1";
 
-        // Create a subnet that fully encompasses the VNet's address prefix
         List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
                 Name = "Default",
                 NetworkAddress = "10.11.0.0",
-                Cidr = 24, // Same as parent subnet's CIDR
+                Cidr = 24,
                 Description = "Default subnet",
                 Tags = "azure",
                 ParentSubnetId = parentId,
-                FullyEncompassesVNetPrefix = true // This is the key flag
+                FullyEncompassesVNetPrefix = true
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName, isAzureImport: true);
 
-        // Assert - the controller redirects when the caller declares this is an Azure import
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Details", redirectResult.ActionName);
         Assert.Equal(parentId, redirectResult.RouteValues?["id"]);
 
-        // Verify parent subnet was renamed and marked as fully allocated
         Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.Equal(vnetName, parentSubnet.Name);
         Assert.True(parentSubnet.IsFullyAllocated);
 
-        // Verify description contains information about the encompassing subnet
         Assert.Contains("Default", parentSubnet.Description);
         Assert.Contains("fully allocated", parentSubnet.Description?.ToLower());
 
-        // Verify no child subnets were created
         int childSubnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .CountAsync(TestContext.Current.CancellationToken);
@@ -176,11 +151,8 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
     [Fact]
     public async Task BatchCreate_FullyEncompassing_NearFullDescription_KeepsItAndStillMarksAllocated()
     {
-        // The appended note is ~100 characters. Against a description already near the column limit
-        // the combined value used to overflow, failing the insert and rolling the whole import back
-        // behind a generic 500. The existing text is the user's, so it is kept and the note - which
-        // only repeats what IsFullyAllocated records - is the part that gives way.
-        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+
+        int parentId = 2;
         string existingDescription = new('d', 990);
         Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
         parent.Description = existingDescription;
@@ -212,8 +184,8 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
     [Fact]
     public async Task BatchCreate_FullyEncompassing_DescriptionWithRoom_GetsTheNoteAppended()
     {
-        // With room to spare the note is still added, after the existing text.
-        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+
+        int parentId = 2;
         Subnet parent = (await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken))!;
         parent.Description = "Original description";
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -245,10 +217,8 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
     [Fact]
     public async Task BatchCreate_FullyEncompassing_ParentHasChildren_IsRejectedAndParentUntouched()
     {
-        // An encompassing entry is never created, so it skips the creation checks - but it still
-        // marks the parent fully allocated, which SetAllocationStatus forbids for a parent that has
-        // children. Marking it anyway leaves a state the rest of the app treats as impossible.
-        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+
+        int parentId = 2;
         _context.Subnets.Add(new Subnet
         {
             Id = 3,
@@ -287,9 +257,8 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
     [Fact]
     public async Task BatchCreate_FullyEncompassing_PrefixDoesNotCoverParent_IsRejectedAndParentUntouched()
     {
-        // "Fully encompasses" has to mean the parent's own prefix. Any other range says nothing about
-        // whether the parent is fully allocated.
-        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+
+        int parentId = 2;
         List<AzureImportSubnetViewModel> subnets =
         [
             new()
@@ -313,43 +282,30 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         Assert.Equal("Parent Subnet", parent.Name);
     }
 
-    /// <summary>
-    /// An encompassing entry and ordinary children cannot both be honoured: the encompassing entry
-    /// renames the parent and marks it fully allocated, and the creation loop is skipped wholesale
-    /// when one is present. This test previously asserted that outcome - parent flagged, zero
-    /// children created, success reported - which is the defect, not the contract. The two
-    /// submitted /25s were discarded silently and could never be added afterwards, because a
-    /// fully-allocated parent refuses children.
-    ///
-    /// The combination cannot arise from Azure or the wizard (subnets within a VNet may not
-    /// overlap), so reaching it means a crafted or corrupted post. Refusing it is the same answer
-    /// the bulk planner already gives for the same shape.
-    /// </summary>
     [Fact]
     public async Task BatchCreate_EncompassingEntryWithSiblings_IsRefusedAndWritesNothing()
     {
-        // Arrange
-        int parentId = 2; // Parent Subnet (10.11.0.0/24)
+
+        int parentId = 2;
         string vnetName = "Azure-VNet-2";
 
-        // Create a mix of subnets, including one that fully encompasses the VNet prefix
         List<AzureImportSubnetViewModel> subnets =
         [
             new()
             {
                 Name = "Default",
                 NetworkAddress = "10.11.0.0",
-                Cidr = 24, // Same as parent subnet's CIDR
+                Cidr = 24,
                 Description = "Default subnet",
                 Tags = "azure",
                 ParentSubnetId = parentId,
-                FullyEncompassesVNetPrefix = true // This one fully encompasses the VNet prefix
+                FullyEncompassesVNetPrefix = true
             },
             new()
             {
                 Name = "Subnet1",
                 NetworkAddress = "10.11.0.0",
-                Cidr = 25, // This one would be a valid child subnet
+                Cidr = 25,
                 Description = "Regular subnet 1",
                 Tags = "azure",
                 ParentSubnetId = parentId,
@@ -359,7 +315,7 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
             {
                 Name = "Subnet2",
                 NetworkAddress = "10.11.0.128",
-                Cidr = 25, // This one would be a valid child subnet
+                Cidr = 25,
                 Description = "Regular subnet 2",
                 Tags = "azure",
                 ParentSubnetId = parentId,
@@ -367,30 +323,22 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
             }
         ];
 
-        // Act
         IActionResult result = await _controller.BatchCreateChildSubnets(parentId, subnets, vnetName, isAzureImport: true);
 
-        // Assert - the whole post is refused, with a message rather than a silent partial success.
         AssertImportFailureRedirect(result, parentId);
 
         _context.ChangeTracker.Clear();
 
-        // The parent is untouched: not renamed, not flagged.
         Subnet? parentSubnet = await _context.Subnets.FindAsync([parentId], TestContext.Current.CancellationToken);
         Assert.NotNull(parentSubnet);
         Assert.NotEqual(vnetName, parentSubnet.Name);
         Assert.False(parentSubnet.IsFullyAllocated);
 
-        // And nothing was created - the /25s are not silently dropped, they are refused with the post.
         int childSubnetCount = await _context.Subnets
             .Where(s => s.ParentSubnetId == parentId && s.Id != parentId)
             .CountAsync(TestContext.Current.CancellationToken);
         Assert.Equal(0, childSubnetCount);
     }
-
-    // -------------------------------------------------------------------------
-    // A fully-encompassing entry outside an Azure import writes nothing at all
-    // -------------------------------------------------------------------------
 
     private static List<AzureImportSubnetViewModel> EncompassingEntry(int parentId) =>
     [
@@ -404,13 +352,6 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         }
     ];
 
-    /// <summary>
-    /// Such an entry is never created as a child - it exists to rename the parent and mark it fully
-    /// allocated, and both writes sit behind the Azure-import guard. With isAzureImport omitted (its
-    /// default, and a documented calling convention for using this as a plain batch-create API) both
-    /// halves were skipped, the transaction committed nothing, and the success message still claimed
-    /// a rename. It must be refused instead.
-    /// </summary>
     [Fact]
     public async Task BatchCreate_FullyEncompassing_WithoutAzureImportFlag_IsRejected()
     {
@@ -429,7 +370,6 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         Assert.False(parent.IsFullyAllocated);
     }
 
-    /// <summary>The same holds when the import flag is set but no VNet name came with it.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -447,10 +387,6 @@ public class SubnetControllerFullyEncompassingTests : IDisposable
         Assert.False(parent.IsFullyAllocated);
     }
 
-    /// <summary>
-    /// Ordinary children must still be importable as a plain batch create, so the new guard has to
-    /// key on the encompassing flag rather than on isAzureImport alone.
-    /// </summary>
     [Fact]
     public async Task BatchCreate_OrdinaryChildren_WithoutAzureImportFlag_StillWorks()
     {

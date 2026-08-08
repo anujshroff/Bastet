@@ -8,19 +8,19 @@
         <dl class="row">
             <dt class="col-sm-4">Network Address</dt>
             <dd class="col-sm-8"><strong>@Model.NetworkAddress</strong> (read-only)</dd>
-            
+
             <dt class="col-sm-4">Subnet Mask</dt>
             <dd class="col-sm-8">@Model.SubnetMask</dd>
-            
+
             @if (Model.ParentSubnetInfo != null)
             {
                 <dt class="col-sm-4">Parent Subnet</dt>
                 <dd class="col-sm-8">@Model.ParentSubnetInfo</dd>
             }
-            
+
             <dt class="col-sm-4">Created</dt>
             <dd class="col-sm-8">@Model.CreatedAt.ToString("g")</dd>
-            
+
             @if (Model.LastModifiedAt.HasValue)
             {
                 <dt class="col-sm-4">Last Modified</dt>

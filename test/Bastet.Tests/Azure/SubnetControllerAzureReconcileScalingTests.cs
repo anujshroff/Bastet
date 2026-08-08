@@ -15,10 +15,6 @@ using System.Data.Common;
 
 namespace Bastet.Tests.Azure;
 
-/// <summary>
-/// Counts unfiltered reads of the Subnets table - the ones with no WHERE clause, which materialise
-/// the entire table however few rows the caller actually wants.
-/// </summary>
 internal sealed class WholeTableSubnetReadCounter : DbCommandInterceptor
 {
     private int _count;
@@ -51,30 +47,6 @@ internal sealed class WholeTableSubnetReadCounter : DbCommandInterceptor
     }
 }
 
-/// <summary>
-/// The reconcile bulk delete archives every selected subtree inside the global write lock, so its
-/// cost while holding that lock is what decides whether an unrelated user's write is merely delayed
-/// or actually refused.
-/// </summary>
-/// <remarks>
-/// Regression for round-10 J1. The archive path read the whole Subnets table twice per selected
-/// target - once in the loop and once inside <c>ArchiveSubnetSubtreeAsync</c> - so a request cost
-/// O(targets x table). With 200 targets against 66,000 subnets it held
-/// <c>Bastet:SubnetOperations</c> for ~57 s and a concurrent <c>POST /Subnet/Create</c> from a second
-/// process was refused after 30.3 s with the app's high-concurrency message.
-/// <para>
-/// The pin is deliberately a comparison rather than a fixed number: what must stay true is that the
-/// count does not grow with the number of targets. Asserting an exact count would fail on unrelated
-/// query changes while still permitting the defect to come back.
-/// </para>
-/// <para>
-/// The subtrees here are nested and carry host IPs on purpose. The cache threaded through the
-/// archive path must be a tracking read, and a flat, leaf-only workload cannot detect that: the
-/// per-subnet host-IP <c>Include</c> tracks a fresh instance of every descendant, so removing a
-/// detached duplicate throws "another instance with the same key value is already being tracked" -
-/// but only once a target actually has descendants.
-/// </para>
-/// </remarks>
 [Collection(AzureFeatureFlagCollection.Name)]
 public class SubnetControllerAzureReconcileScalingTests : IDisposable
 {
@@ -91,10 +63,6 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
 
     private sealed record Outcome(int WholeTableReads, int SubnetsArchived, int HostIpsArchived, int SubnetsRemaining);
 
-    /// <summary>
-    /// Archives <paramref name="targetCount"/> stale VNet-linked subtrees, each a root with a child,
-    /// a grandchild and one host IP, alongside 200 unrelated subnets that are never selected.
-    /// </summary>
     private static async Task<Outcome> ArchiveStaleTargetsAsync(int targetCount)
     {
         WholeTableSubnetReadCounter counter = new();
@@ -168,8 +136,6 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
             });
         }
 
-        // Never selected and never archived - present so that an unfiltered read is materially more
-        // expensive than a targeted one, which is the whole point of the defect.
         for (int pad = 0; pad < 200; pad++)
         {
             context.Subnets.Add(new Subnet
@@ -199,8 +165,6 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
             new AzureReconciler(new IpUtilityService()),
             snapshots);
 
-        // An empty-but-successful Azure inventory means every VNet really is gone, so all of them
-        // are archived. Asserted here so a failure inside the loop is not read as a scaling result.
         Assert.IsType<OkObjectResult>(result);
 
         Outcome outcome = new(
@@ -219,10 +183,8 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
         Outcome two = await ArchiveStaleTargetsAsync(2);
         Outcome eight = await ArchiveStaleTargetsAsync(8);
 
-        // Before the fix this was 1 + 2 per target: 5 reads for two targets and 17 for eight.
         Assert.Equal(two.WholeTableReads, eight.WholeTableReads);
 
-        // And the extra targets really were archived, so the counts above compare like with like.
         Assert.Equal(6, two.SubnetsArchived);
         Assert.Equal(24, eight.SubnetsArchived);
     }
@@ -232,11 +194,9 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
     {
         Outcome outcome = await ArchiveStaleTargetsAsync(8);
 
-        // Root, child and grandchild for each of the eight targets.
         Assert.Equal(24, outcome.SubnetsArchived);
         Assert.Equal(8, outcome.HostIpsArchived);
 
-        // The 200 unrelated subnets are untouched.
         Assert.Equal(200, outcome.SubnetsRemaining);
     }
 }

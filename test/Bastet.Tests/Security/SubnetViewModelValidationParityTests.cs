@@ -4,22 +4,9 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Tests.Security;
 
-/// <summary>
-/// Create and Edit write the same three columns, so they must refuse the same input.
-///
-/// Where they disagree the damage is silent rather than loud: GlobalSanitizationFilter runs after
-/// model binding and validation, so a value Edit's model accepts is rewritten by the sanitizer
-/// afterwards and stored in its mangled form with a success message. StripHtml can empty a value
-/// outright, which defeats [Required]; SanitizeTags drops over-long tags and everything past the
-/// tenth. Create rejects all of it up front because it carries the validators.
-/// </summary>
 public class SubnetViewModelValidationParityTests
 {
-    /// <summary>
-    /// [NoHtml], [SafeText] and [Tags] all resolve IInputSanitizationService from the validation
-    /// context. Without one they fail with "Input sanitization service not available", which would
-    /// make every assertion below pass for entirely the wrong reason.
-    /// </summary>
+
     private sealed class SanitizationServiceProvider : IServiceProvider
     {
         private readonly InputSanitizationService _service = new();
@@ -39,13 +26,6 @@ public class SubnetViewModelValidationParityTests
         return results;
     }
 
-    /// <summary>
-    /// Validates one property in isolation. [NoHtml] and [Tags] both return a ValidationResult with
-    /// no member names, so a whole-object validation cannot say which property failed - matching on
-    /// MemberNames silently never hits. Setting MemberName on the context makes the attribution
-    /// exact, and the value passed is read from the property by reflection so the two cannot
-    /// disagree.
-    /// </summary>
     private static void AssertRejects(object model, string member, string expectedMessageFragment)
     {
         object? value = model.GetType().GetProperty(member)!.GetValue(model);
@@ -60,12 +40,6 @@ public class SubnetViewModelValidationParityTests
         Assert.Contains(results, r => r.ErrorMessage is not null && r.ErrorMessage.Contains(expectedMessageFragment));
     }
 
-    // Name -------------------------------------------------------------------
-
-    /// <summary>
-    /// The worst case: StripHtml reduces this to the empty string, so [Required] passes on the
-    /// submitted value and the row is stored with no name at all.
-    /// </summary>
     [Theory]
     [InlineData("<b></b>")]
     [InlineData("Site <HQ>")]
@@ -82,12 +56,6 @@ public class SubnetViewModelValidationParityTests
             "HTML tags are not allowed");
     }
 
-    // Description ------------------------------------------------------------
-
-    /// <summary>
-    /// StripHtml's `&lt;[^&gt;]*&gt;` eats everything between the two comparison operators, so this
-    /// stores as "temp  3".
-    /// </summary>
     [Fact]
     public void MarkupInDescription_RejectedByBoth()
     {
@@ -104,9 +72,6 @@ public class SubnetViewModelValidationParityTests
             "HTML tags are not allowed");
     }
 
-    // Tags -------------------------------------------------------------------
-
-    /// <summary>A single over-long tag is dropped outright by SanitizeTags' length filter.</summary>
     [Fact]
     public void OverlongTag_RejectedByBoth()
     {
@@ -123,7 +88,6 @@ public class SubnetViewModelValidationParityTests
             "50 characters or less");
     }
 
-    /// <summary>Everything past the tenth tag is discarded by SanitizeTags' Take(10).</summary>
     [Fact]
     public void TooManyTags_RejectedByBoth()
     {
@@ -140,14 +104,6 @@ public class SubnetViewModelValidationParityTests
             "Maximum 10 tags allowed");
     }
 
-    // Parity in the other direction ------------------------------------------
-
-    /// <summary>
-    /// The guard against over-correcting: ordinary values both models are supposed to accept must
-    /// still pass. One tag sits exactly on the 50-character limit and there are exactly ten of them,
-    /// so both [Tags] boundaries are touched while staying inside the 255-character [StringLength]
-    /// that governs the field as a whole.
-    /// </summary>
     [Fact]
     public void OrdinaryValues_AcceptedByBoth()
     {
