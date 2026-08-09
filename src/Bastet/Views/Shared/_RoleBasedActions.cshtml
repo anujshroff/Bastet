@@ -5,8 +5,6 @@
     bool canEdit = UserContext.UserHasRole(ApplicationRoles.Edit);
     bool canDelete = UserContext.UserHasRole(ApplicationRoles.Delete);
 
-    bool canImportFromAzure = ViewBag.CanImportFromAzure == true;
-
     if (canEdit)
     {
         <a asp-action="Edit" asp-route-id="@ViewBag.EntityId" class="btn btn-primary">
@@ -19,15 +17,6 @@
         <a asp-action="Delete" asp-route-id="@ViewBag.EntityId" class="btn btn-danger ms-2">
             <i class="bi bi-trash"></i> Delete
         </a>
-    }
-
-    if (canImportFromAzure)
-    {
-        <a asp-controller="Azure" asp-action="Import" asp-route-id="@ViewBag.EntityId"
-           class="btn btn-info ms-2">
-            <i class="bi bi-cloud-download"></i> Subnet Azure Import
-        </a>
-
     }
 
     <a asp-action="Index" class="btn btn-outline-secondary ms-2">Back to List</a>

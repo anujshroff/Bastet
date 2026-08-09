@@ -48,8 +48,7 @@ public partial class SubnetController : Controller
 
         AzureVNetInventory inventory = await azureService.GetVNetInventory(request.SubscriptionId);
         IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-        IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
-        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked, existing);
+        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked);
 
         if (!plan.ScanSucceeded || plan.GlobalErrors.Count > 0)
         {
@@ -75,6 +74,25 @@ public partial class SubnetController : Controller
         List<int> verdictChanged = [.. request.SubnetIds
             .Where(stillStale.ContainsKey)
             .Where(id => !VerdictMatchesApproval(stillStale[id], approved.GetValueOrDefault(id)))];
+
+        Dictionary<int, AzureReconcileItem> held = plan.ReviewItems
+            .Where(i => i.Status == AzureReconcileStatus.HeldByManualContent)
+            .ToDictionary(i => i.SubnetId);
+
+        List<int> heldIds = [.. noLongerStale.Where(held.ContainsKey)];
+
+        if (heldIds.Count > 0)
+        {
+            return Conflict(new
+            {
+                success = false,
+                error = $"{heldIds.Count} of the selected subnet(s) hold subnets or host IP assignments that were "
+                        + "created here rather than imported from Azure, so nothing was deleted. "
+                        + string.Join(" ", heldIds.Select(id => held[id].Reason)),
+                subnetIds = heldIds,
+                warnings = plan.Warnings
+            });
+        }
 
         if (noLongerStale.Count > 0)
         {
@@ -205,106 +223,5 @@ public partial class SubnetController : Controller
         return Enum.TryParse(approvedVerdict.StatusName, ignoreCase: true, out AzureReconcileStatus approvedStatus)
                && approvedStatus == current.Status
                && string.Equals(approvedVerdict.Reason, current.Reason, StringComparison.Ordinal);
-    }
-
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    [Authorize(Policy = "RequireAdminRole")]
-    public async Task<IActionResult> RelinkAzureSubnet(
-        [FromBody] AzureRelinkDto request,
-        [FromServices] IAzureService azureService,
-        [FromServices] IAzureReconciler reconciler,
-        [FromServices] IAzureSubnetSnapshotService snapshotService)
-    {
-        if (!AzureController.IsAzureImportEnabled())
-        {
-            return StatusCode(403, new { success = false, error = "Azure Import feature is not enabled" });
-        }
-
-        if (request is null)
-        {
-            return BadRequest(new { success = false, error = "No request was provided." });
-        }
-
-        AzureVNetInventory inventory = await azureService.GetVNetInventory(request.SubscriptionId);
-        IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-        IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
-        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked, existing);
-
-        if (!plan.ScanSucceeded || plan.GlobalErrors.Count > 0)
-        {
-            return BadRequest(new
-            {
-                success = false,
-                error = "Azure could not be re-checked, so nothing was changed.",
-                globalErrors = plan.GlobalErrors
-            });
-        }
-
-        AzureReconcileItem? target = plan.ReviewItems.FirstOrDefault(i =>
-            i.SubnetId == request.SubnetId
-            && i.Status == AzureReconcileStatus.RangeStillAllocatedInAzure
-            && !string.IsNullOrEmpty(i.SuggestedAzureResourceId));
-
-        if (target is null)
-        {
-            return Conflict(new
-            {
-                success = false,
-                error = "This subnet is no longer reported as holding a range that moved to another Azure subnet. "
-                        + "Nothing was changed. Re-run the scan and review the results."
-            });
-        }
-
-        try
-        {
-            IActionResult? failure = await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult?>(async () =>
-            {
-                Subnet? subnet = await context.Subnets.FindAsync(request.SubnetId);
-
-                if (subnet is null)
-                {
-                    return NotFound(new { success = false, error = "That subnet no longer exists." });
-                }
-
-                if (!string.Equals(subnet.AzureResourceId, target.AzureResourceId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return Conflict(new
-                    {
-                        success = false,
-                        error = "This subnet's Azure link changed while the scan was being reviewed. Nothing was changed."
-                    });
-                }
-
-                subnet.AzureResourceId = target.SuggestedAzureResourceId;
-                await context.SaveChangesAsync();
-                return null;
-            });
-
-            if (failure is not null)
-            {
-                return failure;
-            }
-        }
-        catch (TimeoutException)
-        {
-            return StatusCode(503, new
-            {
-                success = false,
-                error = "The operation timed out because another subnet operation is in progress. Nothing was changed. Please try again."
-            });
-        }
-
-        logger.LogInformation(
-            "Azure reconcile: re-linked subnet {SubnetId} to {AzureResourceId}",
-            request.SubnetId, target.SuggestedAzureResourceId);
-
-        return Ok(new
-        {
-            success = true,
-            subnetId = request.SubnetId,
-            azureResourceId = target.SuggestedAzureResourceId,
-            azureSubnetName = target.SuggestedAzureSubnetName
-        });
     }
 }

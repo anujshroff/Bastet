@@ -36,7 +36,7 @@ public class AzureControllerTests : IDisposable
 
         _mockAzureService = new MockAzureService(true, CreateTestSubscriptions(), CreateTestVNets(), CreateTestSubnets());
 
-        _controller = new AzureController(_context, _mockAzureService, new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
+        _controller = new AzureController(_mockAzureService, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
         {
 
             ControllerContext = new ControllerContext
@@ -163,115 +163,15 @@ public class AzureControllerTests : IDisposable
         ];
 
     private static List<AzureSubnetViewModel> CreateTestSubnets() => [
-            new() { Name = "subnet1", AddressPrefix = "10.0.0.0/24", HasMultipleAddressSchemes = false },
-            new() { Name = "subnet2", AddressPrefix = "10.0.1.0/24", HasMultipleAddressSchemes = false }
+            new() { Name = "subnet1", AddressPrefix = "10.0.0.0/24" },
+            new() { Name = "subnet2", AddressPrefix = "10.0.1.0/24" }
         ];
 
-    [Fact]
-    public async Task Import_GET_ValidSubnet_ReturnsImportViewModel()
-    {
 
-        int subnetId = 2;
 
-        IActionResult result = await _controller.Import(subnetId);
 
-        ViewResult viewResult = Assert.IsType<ViewResult>(result);
-        AzureImportViewModel model = Assert.IsType<AzureImportViewModel>(viewResult.Model);
 
-        Assert.Equal(subnetId, model.SubnetId);
-        Assert.Equal("Parent Subnet", model.SubnetName);
-        Assert.Equal("10.0.0.0", model.NetworkAddress);
-        Assert.Equal(16, model.Cidr);
-    }
 
-    [Fact]
-    public async Task Import_GET_SubnetWithChildren_RedirectsToDetails()
-    {
-
-        int subnetId = 3;
-
-        IActionResult result = await _controller.Import(subnetId);
-
-        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
-        Assert.Equal("Details", redirectResult.ActionName);
-        Assert.Equal("Subnet", redirectResult.ControllerName);
-
-        string? errorMessage = _controller.TempData["ErrorMessage"]?.ToString();
-        Assert.NotNull(errorMessage);
-        Assert.Contains("child subnets", errorMessage);
-    }
-
-    [Fact]
-    public async Task Import_GET_SubnetWithHostIps_RedirectsToDetails()
-    {
-
-        int subnetId = 5;
-
-        IActionResult result = await _controller.Import(subnetId);
-
-        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
-        Assert.Equal("Details", redirectResult.ActionName);
-        Assert.Equal("Subnet", redirectResult.ControllerName);
-
-        string? errorMessage = _controller.TempData["ErrorMessage"]?.ToString();
-        Assert.NotNull(errorMessage);
-        Assert.Contains("host IP", errorMessage);
-    }
-
-    [Fact]
-    public async Task Import_GET_NonExistentSubnet_RedirectsToNotFoundError()
-    {
-
-        int nonExistentId = 999;
-
-        IActionResult result = await _controller.Import(nonExistentId);
-
-        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
-        Assert.Equal("HttpStatusCodeHandler", redirectResult.ActionName);
-        Assert.Equal("Error", redirectResult.ControllerName);
-
-        object? statusCode = redirectResult.RouteValues?["statusCode"];
-        Assert.NotNull(statusCode);
-        Assert.Equal(404, statusCode);
-    }
-
-    [Fact]
-    public async Task Import_GET_FeatureFlagDisabled_RedirectsToForbiddenError()
-    {
-
-        Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "false");
-
-        IActionResult result = await _controller.Import(2);
-
-        RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
-        Assert.Equal("HttpStatusCodeHandler", redirectResult.ActionName);
-        Assert.Equal("Error", redirectResult.ControllerName);
-
-        object? statusCode = redirectResult.RouteValues?["statusCode"];
-        Assert.NotNull(statusCode);
-        Assert.Equal(403, statusCode);
-    }
-
-    [Fact]
-    public async Task Import_GET_InvalidAzureCredentials_AddsModelError()
-    {
-
-        int subnetId = 2;
-        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
-        {
-            ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext()
-            }
-        };
-
-        IActionResult result = await controller.Import(subnetId);
-
-        ViewResult viewResult = Assert.IsType<ViewResult>(result);
-        Assert.False(controller.ModelState.IsValid);
-        Assert.True(controller.ModelState.ErrorCount > 0);
-        Assert.Contains(controller.ModelState.Values, v => v.Errors.Any(e => e.ErrorMessage.Contains("authenticate")));
-    }
 
     [Fact]
     public async Task GetSubscriptions_WithValidCredentials_ReturnsSubscriptions()
@@ -319,7 +219,7 @@ public class AzureControllerTests : IDisposable
         Mock<IAzureService> throwingService = new();
         throwingService.Setup(s => s.GetSubscriptions()).ThrowsAsync(new Exception("boom: secret detail"));
         AzureController controller = new(
-            _context, throwingService.Object, new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
+            throwingService.Object, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -338,7 +238,7 @@ public class AzureControllerTests : IDisposable
     }
 
     private AzureController ControllerWith(IAzureService service) =>
-        new(_context, service, new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
+        new(service, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -351,215 +251,19 @@ public class AzureControllerTests : IDisposable
         return parsed;
     }
 
-    [Fact]
-    public async Task GetVNets_WhenAzureThrows_ReportsFailureRatherThanNoVNets()
-    {
-        Mock<IAzureService> throwing = new();
-        throwing.Setup(s => s.GetCompatibleVNets(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
-            .ThrowsAsync(new Exception("429 throttled: secret detail"));
 
-        JsonResponse response = Parse(await ControllerWith(throwing.Object).GetVNets("sub-1", 2));
 
-        Assert.False(response.success);
-        Assert.NotNull(response.error);
-        Assert.DoesNotContain("secret", response.error);
-    }
 
-    [Fact]
-    public async Task GetSubnets_WhenAzureThrows_ReportsFailureRatherThanNoSubnets()
-    {
-        Mock<IAzureService> throwing = new();
-        throwing.Setup(s => s.GetCompatibleSubnets(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
-            .ThrowsAsync(new Exception("403 AuthorizationFailed: secret detail"));
 
-        JsonResponse response = Parse(await ControllerWith(throwing.Object).GetSubnets("/vnet/id", 2));
 
-        Assert.False(response.success);
-        Assert.NotNull(response.error);
-        Assert.DoesNotContain("secret", response.error);
-    }
 
-    [Fact]
-    public async Task GetVNets_WhenAzureGenuinelyHasNone_IsStillSuccess()
-    {
-        Mock<IAzureService> empty = new();
-        empty.Setup(s => s.GetCompatibleVNets(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
-            .ReturnsAsync([]);
 
-        JsonResponse response = Parse(await ControllerWith(empty.Object).GetVNets("sub-1", 2));
 
-        Assert.True(response.success);
-    }
-
-    [Fact]
-    public async Task GetVNets_WithValidParams_ReturnsVNets()
-    {
-
-        string subscriptionId = "sub-1";
-        int subnetId = 2;
-
-        IActionResult result = await _controller.GetVNets(subscriptionId, subnetId);
-
-        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
-        Assert.NotNull(jsonResult.Value);
-
-        string json = JsonSerializer.Serialize(jsonResult.Value);
-        JsonResponse? resultObj = JsonSerializer.Deserialize<JsonResponse>(json);
-
-        Assert.NotNull(resultObj);
-        Assert.True(resultObj.success);
-        Assert.Equal(1, resultObj.vnets?.Count);
-        Assert.Equal("vnet1", resultObj.vnets?[0].Name);
-    }
-
-    [Fact]
-    public async Task GetSubnets_WithValidParams_ReturnsSubnets()
-    {
-
-        string vnetResourceId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet1";
-        int subnetId = 2;
-
-        IActionResult result = await _controller.GetSubnets(vnetResourceId, subnetId);
-
-        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
-        Assert.NotNull(jsonResult.Value);
-
-        string json = JsonSerializer.Serialize(jsonResult.Value);
-        JsonResponse? resultObj = JsonSerializer.Deserialize<JsonResponse>(json);
-
-        Assert.NotNull(resultObj);
-        Assert.True(resultObj.success);
-        Assert.NotNull(resultObj.subnets);
-        Assert.Equal(2, resultObj.subnets.Count);
-        Assert.Contains(resultObj.subnets, s => s.Name == "subnet1");
-        Assert.Contains(resultObj.subnets, s => s.Name == "subnet2");
-    }
-
-    [Fact]
-    public async Task GetSubnets_TheRowEncompassingTheTargetPrefix_SurvivesTheAlreadyRecordedFilter()
-    {
-        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-enc";
-
-        List<AzureVNetViewModel> vnets =
-            [new() { ResourceId = VNetId, Name = "vnet-enc", AddressPrefixes = ["10.171.0.0/24"] }];
-
-        List<AzureSubnetViewModel> subnets =
-        [
-            new() { Name = "snet-full", AddressPrefix = "10.171.0.0/24", HasMultipleAddressSchemes = false },
-            new() { Name = "snet-child", AddressPrefix = "10.171.0.0/25", HasMultipleAddressSchemes = false }
-        ];
-
-        _context.Subnets.Add(new Subnet { Id = 90, Name = "target", NetworkAddress = "10.171.0.0", Cidr = 24 });
-        _context.Subnets.Add(new Subnet { Id = 91, Name = "child", NetworkAddress = "10.171.0.0", Cidr = 25, ParentSubnetId = 90 });
-        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        AzureController controller = new(
-            _context,
-            new MockAzureService(true, CreateTestSubscriptions(), vnets, subnets),
-            new AzureSubnetSnapshotService(_context),
-            new IpUtilityService(),
-            NullLogger<AzureController>.Instance)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
-        };
-
-        JsonResult json = Assert.IsType<JsonResult>(await controller.GetSubnets(VNetId, 90));
-        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
-
-        Assert.NotNull(response);
-        Assert.True(response.success);
-        Assert.NotNull(response.subnets);
-
-        AzureSubnetViewModel full = Assert.Single(response.subnets, s => s.Name == "snet-full");
-        AzureSubnetViewModel child = Assert.Single(response.subnets, s => s.Name == "snet-child");
-
-        Assert.False(full.IsSelectable);
-        Assert.Contains("already has child subnets", full.Reason);
-
-        Assert.False(child.IsSelectable);
-        Assert.Contains("already uses", child.Reason);
-    }
-
-    [Fact]
-    public async Task GetSubnets_TheEncompassingRow_StaysSelectableWhenTheTargetIsEmpty()
-    {
-        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-enc2";
-
-        List<AzureVNetViewModel> vnets =
-            [new() { ResourceId = VNetId, Name = "vnet-enc2", AddressPrefixes = ["10.172.0.0/24"] }];
-        List<AzureSubnetViewModel> subnets =
-            [new() { Name = "snet-full", AddressPrefix = "10.172.0.0/24", HasMultipleAddressSchemes = false }];
-
-        _context.Subnets.Add(new Subnet { Id = 92, Name = "empty-target", NetworkAddress = "10.172.0.0", Cidr = 24 });
-        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        JsonResult json = Assert.IsType<JsonResult>(
-            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetId, 92));
-        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
-
-        AzureSubnetViewModel full = Assert.Single(response!.subnets!, s => s.Name == "snet-full");
-        Assert.True(full.IsSelectable);
-        Assert.Null(full.Reason);
-    }
-
-    [Fact]
-    public async Task GetSubnets_ARowThatWouldContainAnExistingSubnet_IsBlockedWithAReason()
-    {
-        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-wc";
-
-        List<AzureVNetViewModel> vnets =
-            [new() { ResourceId = VNetId, Name = "vnet-wc", AddressPrefixes = ["10.94.0.0/16"] }];
-        List<AzureSubnetViewModel> subnets =
-        [
-            new() { Name = "s2", AddressPrefix = "10.94.2.0/24" },
-            new() { Name = "s3", AddressPrefix = "10.94.3.0/24" }
-        ];
-
-        _context.Subnets.Add(new Subnet { Id = 93, Name = "target", NetworkAddress = "10.94.0.0", Cidr = 16 });
-        _context.Subnets.Add(new Subnet { Id = 94, Name = "hand-2-128", NetworkAddress = "10.94.2.128", Cidr = 25, ParentSubnetId = 93 });
-        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        JsonResult json = Assert.IsType<JsonResult>(
-            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetId, 93));
-        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
-
-        AzureSubnetViewModel s2 = Assert.Single(response!.subnets!, s => s.Name == "s2");
-        Assert.False(s2.IsSelectable);
-        Assert.Contains("hand-2-128", s2.Reason);
-
-        AzureSubnetViewModel s3 = Assert.Single(response.subnets!, s => s.Name == "s3");
-        Assert.True(s3.IsSelectable);
-    }
-
-    [Fact]
-    public async Task GetSubnets_ARowWithAMoreSpecificExistingParent_IsBlockedWithAReason()
-    {
-        const string VNetId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet-msp";
-
-        List<AzureVNetViewModel> vnets =
-            [new() { ResourceId = VNetId, Name = "vnet-msp", AddressPrefixes = ["10.95.0.0/16"] }];
-        List<AzureSubnetViewModel> subnets =
-            [new() { Name = "s4", AddressPrefix = "10.95.4.0/24" }];
-
-        _context.Subnets.Add(new Subnet { Id = 95, Name = "target", NetworkAddress = "10.95.0.0", Cidr = 16 });
-        _context.Subnets.Add(new Subnet { Id = 96, Name = "hand-4-23", NetworkAddress = "10.95.4.0", Cidr = 23, ParentSubnetId = 95 });
-        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        JsonResult json = Assert.IsType<JsonResult>(
-            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetId, 95));
-        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
-
-        AzureSubnetViewModel s4 = Assert.Single(response!.subnets!, s => s.Name == "s4");
-        Assert.False(s4.IsSelectable);
-        Assert.Contains("hand-4-23", s4.Reason);
-    }
 
     private AzureController ControllerWithSubnets(
         List<AzureVNetViewModel> vnets, List<AzureSubnetViewModel> subnets) =>
-        new(_context,
-            new MockAzureService(true, CreateTestSubscriptions(), vnets, subnets),
+        new(new MockAzureService(true, CreateTestSubscriptions(), vnets, subnets),
             new AzureSubnetSnapshotService(_context),
-            new IpUtilityService(),
             NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -569,7 +273,7 @@ public class AzureControllerTests : IDisposable
     public async Task BulkGetVNets_AzureReadFails_ReportsFailureNotEmptySubscription()
     {
 
-        AzureController controller = new(_context, new MockAzureService(false), new AzureSubnetSnapshotService(_context), new IpUtilityService(), NullLogger<AzureController>.Instance)
+        AzureController controller = new(new MockAzureService(false), new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -613,51 +317,5 @@ public class AzureControllerTests : IDisposable
         public List<AzureSubnetViewModel>? subnets { get; set; }
     }
 #pragma warning restore IDE1006
-    [Fact]
-    public async Task GetSubnets_WhenTheTargetIsLinkedToADifferentVNet_BlocksEveryRow()
-    {
-        const string VNetA = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/va";
-        const string VNetB = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vb";
 
-        List<AzureVNetViewModel> vnets = [new() { ResourceId = VNetB, Name = "vb", AddressPrefixes = ["10.191.0.0/16"] }];
-        List<AzureSubnetViewModel> subnets = [new() { Name = "b1", AddressPrefix = "10.191.2.0/24" }];
-
-        _context.Subnets.Add(new Subnet
-        {
-            Id = 80, Name = "linked-to-va", NetworkAddress = "10.191.0.0", Cidr = 16, AzureResourceId = VNetA
-        });
-        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        JsonResult json = Assert.IsType<JsonResult>(
-            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetB, 80));
-        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
-
-        AzureSubnetViewModel row = Assert.Single(response!.subnets!);
-        Assert.False(row.IsSelectable);
-        Assert.Contains("already linked", row.Reason);
-        Assert.Contains("delete the Bastet subnet and import it again", row.Reason);
-    }
-
-    [Fact]
-    public async Task GetSubnets_ASameVNetTopUp_IsStillOffered()
-    {
-        const string VNetA = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/va2";
-
-        List<AzureVNetViewModel> vnets = [new() { ResourceId = VNetA, Name = "va2", AddressPrefixes = ["10.192.0.0/16"] }];
-        List<AzureSubnetViewModel> subnets = [new() { Name = "a1", AddressPrefix = "10.192.2.0/24" }];
-
-        _context.Subnets.Add(new Subnet
-        {
-            Id = 81, Name = "linked-to-va2", NetworkAddress = "10.192.0.0", Cidr = 16, AzureResourceId = VNetA
-        });
-        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        JsonResult json = Assert.IsType<JsonResult>(
-            await ControllerWithSubnets(vnets, subnets).GetSubnets(VNetA, 81));
-        JsonResponse? response = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(json.Value));
-
-        AzureSubnetViewModel row = Assert.Single(response!.subnets!);
-        Assert.True(row.IsSelectable);
-        Assert.Null(row.Reason);
-    }
 }
