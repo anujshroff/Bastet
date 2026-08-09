@@ -568,6 +568,14 @@ the browser actually sent against what was persisted.**
   exactly how a linkable row came to be hidden behind a control labelled "only show what would change".
   Drive it by comparing the visible set against `isSelectable` from the same scan, not against a
   hand-written list of expected VNet names.
+- **The delete-then-import loop, driven end to end.** Import a VNet with a subnet, re-range the VNet in
+  Azure while the subnet stays live, then scan: the parent **must be offered for deletion** carrying the
+  "no longer has the address prefix" reason, not swallowed into a warning because it has a healthy
+  child. Delete it, assert both rows land in DeletedSubnets, re-import, and assert the row comes back at
+  Azure's **current** range with its child beneath it. A scan that reports nothing here is a failure -
+  the row is pinned at a range Azure does not have and no operator action clears it. Pair it with a
+  manual-content case in the same run, which must still be withheld, since re-import cannot restore a
+  hand-made subnet.
 - **Validation parity across write paths.** Take one field and drive the same value through every path
   that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
   directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused

@@ -38,7 +38,6 @@ namespace Bastet.Services.Azure
             Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
 
-            HashSet<int> liveLinked = [];
             HashSet<int> notCovered = [];
             List<AzureReconcileItem> heldByManualContent = [];
 
@@ -88,7 +87,6 @@ namespace Bastet.Services.Azure
 
                 if (item is null)
                 {
-                    liveLinked.Add(snapshot.Id);
                     continue;
                 }
 
@@ -113,10 +111,6 @@ namespace Bastet.Services.Azure
                     + "host IP assignments that were created here rather than imported from Azure: "
                     + $"{NameList(heldByManualContent)}.");
             }
-
-            WithholdTargetsWhoseCascadeIsBlocked(
-                plan, liveLinked,
-                "archiving them would also archive Azure-linked subnet(s) beneath them that still exist in Azure");
 
             WithholdTargetsWhoseCascadeIsBlocked(
                 plan, notCovered,

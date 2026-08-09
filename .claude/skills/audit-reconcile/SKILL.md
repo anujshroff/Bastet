@@ -104,6 +104,13 @@ added. It has already shipped once: "Only show what would change" tested `status
 and so hid every linkable row, i.e. hid exactly the work it promised to show. **Prefer deleting the
 duplicate over extending it.**
 
+**A live Azure-linked descendant is not a reason to withhold.** It is Azure content, and deleting the
+row archives it rather than destroying it — the operator then re-imports and gets it back under the
+corrected range, which is the whole point of the delete-then-import loop. Withholding on that ground
+buys nothing and costs the report: the range change is never mentioned, so the operator is never told
+why the row was flagged and Bastet goes on asserting a range Azure does not have. **Manual content
+remains the one refusal**, precisely because re-import cannot restore it.
+
 **The import wizard must not offer work that is not work.** A VNet prefix already linked to its Bastet
 subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
 there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.

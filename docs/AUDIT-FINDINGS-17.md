@@ -22,11 +22,11 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 **Fix:** Same feature as Q22 - fix together. At :495 guard the refusal with what it protects: `if (exact.IsFullyAllocated && p.Subnets.Any(s => !s.FullyEncompasses))`. Do not delete WouldRenameTarget/isRenameOnly - renames must stay offered.
 **Residue of:** 23233f2 (Mass Claude Audit Mess Cleanup #167)
 
-## Q10 - Reconcile destroys the finding, not just the delete: a linked row's range change is never reported `[x1]`
+## Q10 - FIXED - Reconcile destroyed the finding, not just the delete: a linked row's range change was never reported `[x1]`
 **Where:** src/Bastet/Services/Azure/AzureReconciler.cs:245-266 (`plan.Items.RemoveAll(blocked.Contains)` at :263), reached from :117, :121, :126 and :223
 **Breaks:** Reconcile exists to report linked resources that are gone and linked resources whose range changed. When a row has any descendant the scan proved healthy, WithholdTargetsWhoseCascadeIsBlocked deletes the whole item and leaves one warning saying only that it was withheld from deletion - no status, no reason, no remedy. The item's own true text ("VNet 'X' still exists but no longer has the address prefix 10.200.0.0/16. Delete it here if you want to, then use the Azure import wizard...") is thrown away. Bastet keeps asserting the stale range and every rescan repeats the contentless warning. Withholding the delete is defensible; withholding the report is not.
 **Repro:** Import a VNet 10.200.0.0/16 with subnet 10.200.1.0/24 linked; re-range the VNet in Azure to 10.200.0.0/15. Scan returns `items: []` and one warning naming the row. "no longer has the address prefix" appears nowhere. Higher consequence: delete the VNet in Azure entirely and the VNetDeleted item is produced and destroyed, so the operator is never told the VNet is gone.
-**Fix:** In that helper, move each blocked item into `plan.ReviewItems` with Status and Reason preserved, as the HeldByManualContent path at :95-104 already does. Append a factual sentence naming what blocks the cascade. Deletion stays blocked - `stillStale` is built from `plan.Items` only.
+**Fix applied:** the owner's call was that the row should be offered, not merely explained - re-import is what brings it back at the corrected range. The live-linked withhold is deleted outright rather than diverted to ReviewItems, because a live Azure-linked descendant is Azure content that re-import restores. The other two withholds stay: a different-subscription descendant was never checked by the scan (rule 2), and manual content is the one refusal re-import cannot undo.
 **Residue of:** a8f669b (Audit 8 Cleanup #152)
 
 # Medium
