@@ -19,6 +19,85 @@ let an operator manage that space.** Every judgement call resolves against that,
 3. **The operator must be able to act on what they are told.** A message naming a remedy the app
    refuses is a defect, not a cosmetic issue.
 
+**One flat, routable space.** Bastet manages a single IP space in which everything is routable against
+everything else, so the same range must never be allocated twice — preventing that collision is the
+product's reason to exist. Two consequences that decide fixes:
+
+- **"Still allocated" is a question about the whole managed space, never about provenance.** If any live
+  resource holds a range, that range is in use, whichever VNet, subscription or import it came from, and
+  archiving Bastet's only record of it reports an in-use range as free. Overlapping Azure VNets are not
+  a case to defend — inside Bastet's model that overlap *is* the collision, not a legitimate
+  configuration, so never soften a fix to accommodate it.
+- **How the space is carved up is the operator's choice, and only theirs** — by hand, by Azure import,
+  or both. Neither origin is privileged: a rule that holds for a manually created subnet holds
+  identically for an imported one, and vice versa. When sweeping for the same defect elsewhere, the
+  manual path and the import path are always siblings of each other.
+- **One Azure range is one Bastet row.** A VNet with a single address prefix whose single subnet covers
+  that whole prefix is **one** row, not a VNet parent plus a byte-identical child. The import marks that
+  row fully allocated instead of creating the duplicate. Never fix in a direction that produces the
+  second row: a parent and child with the same CIDR *are* the collision the product exists to prevent.
+
+**Azure is the source of truth for the rows imported from it.** A subnet carrying an Azure resource id
+is a *record of* an Azure resource. **Deleted in Azure means deleted in Bastet; re-ranged in Azure means
+Bastet says so.** The **only** legitimate reason to refuse is **manual content in that hierarchy — a
+hand-added child subnet, or a host IP** — operator-owned data Azure does not know about, which must
+never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
+must not be applied as filed.
+
+**The import wizard must not offer work that is not work.** A VNet prefix already linked to its Bastet
+subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
+there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.
+Two things still count as work and must stay offered: **linking a target that is not yet linked**, and
+**renaming** when the operator has asked for renames. "Only show what would change" hides exactly the rows that
+would change nothing, which is only correct while those four cases are classified correctly.
+
+**Reconcile does exactly two things. A fix that grows it past them is not a fix.**
+
+1. **Report Azure resources that are gone**, so the operator can choose to delete the Bastet row.
+2. **Report Azure resources whose range changed**, so the operator can choose to delete the Bastet row.
+
+Everything it is *not* has been tried and removed; do not restore any of it under a new name:
+
+- **It never edits a row** — not the range, not the name, not the Azure link. There is no re-link.
+- **It never re-adds anything.** After deleting a row whose range changed, the operator goes back
+  through the **bulk import wizard**. Any message reconcile shows about a changed range must point
+  there; naming any other remedy breaks rule 3, because reconcile cannot create subnets.
+- **It never hunts for un-imported Azure space** — that is the import wizard's job, and rows reconcile
+  reports that way cannot be acted on from the reconcile screen.
+- **It decides on the linked resource alone.** Never widen a fix to consult other VNets, other
+  subscriptions, or what else Bastet records.
+
+**The resource id is the only join key, and that is why the refusal list is one item long.** Reconcile
+asks Azure one question: *does the resource this row names still exist, and does it still hold this
+range?* Both are answered by looking up `AzureResourceId`. The address range is never a lookup key — it
+is only compared against **that same resource's own** current prefixes. Gone means delete. Manual
+content is the single exception precisely because it is the one thing the resource id cannot tell you
+about: Azure has no record of a hand-added child subnet or a host IP, so acting on Azure's word would
+destroy data Azure never knew existed.
+
+**A fix that reasons about a range rather than a resource id is wrong by construction.** "The range
+showed up in another VNet", "another subscription still holds it", "the prefix is still covered after
+the re-carve" — each answers a question reconcile does not ask, by matching ranges across resources.
+That is the exact shape of every withhold that has had to be removed from this reconciler. If a filed
+fix needs cross-resource range matching, do not apply it; record that the finding misdiagnosed the
+defect.
+
+When a finding proposes a new status, guard or withhold path in the reconciler, the first question is
+whether the mechanism it extends should exist at all. **Prefer the fix that deletes machinery.**
+
+**Reconcile and the bulk import wizard are clients of the IPAM, not privileged writers.** Every change they
+make — delete, edit, add — goes through the same validation a manual operation goes through. They must
+not write to the database directly to bypass a check, and no fix may give them their own copy of a rule
+that lets them persist a state the validated path would reject. Where Azure's state cannot be
+represented without breaking a validation rule, report the conflict to the operator; never widen the
+Azure path to write it anyway.
+
+**Rule 1 is symmetric.** "Never report allocated space as free" has a twin: **never pin an allocation
+record Azure says is gone.** A withheld deletion is not a safe default — it leaves Bastet asserting that
+free space is allocated, indefinitely, with no operator action that clears it. Before applying any fix
+that refuses, guards or withholds, say which half it serves and check it does not simply trade one half
+for the other.
+
 **If a capability ships, making it work correctly is in scope.** Bastet imports Azure subnets, so it
 supports multi-prefix subnets, top-ups and re-carves. "That would be a feature change", "the data model
 does not support it" and "out of scope" are not available. They describe work, not reasons to decline.
@@ -27,23 +106,35 @@ does not support it" and "out of scope" are not available. They describe work, n
 
 **A round must leave fewer defects than it found.** Nothing else here overrides that.
 
-The evidence, and it is damning: round 16 fixed fifteen findings and the re-audit of its own output
-found twenty, **twelve of them residue of those fifteen fixes**. The round before was 11 of 15. The fix
-process, not the codebase, is the main source of defects.
+The evidence, and it is damning: re-auditing a completed round has repeatedly found *more* defects
+than the round fixed, the large majority of them residue of those very fixes. The fix process, not the
+codebase, is the main source of defects.
 
-Three rules follow, all derived from what actually went wrong:
+Four rules follow, all derived from what actually went wrong:
 
-- **A fix commit may not restructure.** Round 16's two structural rewrites — replacing `AccountsFor`
-  with a new predicate, and converting an endpoint from filtering to annotating — produced **seven of
-  the twelve** residue findings between them. If the correct fix needs a component reshaped, do the
-  narrow correct fix now and file the restructure as its own item. A one-finding commit that rewrites a
+- **A fix commit may not restructure.** Two structural rewrites in a single round — swapping a core
+  predicate for a new one, and converting an endpoint from filtering to annotating — produced more than
+  half that round's residue between them. If the correct fix needs a component reshaped, do the narrow
+  correct fix now and file the restructure as its own item. A one-finding commit that rewrites a
   component is not a fix, it is an unreviewed refactor with a bug report stapled to it.
-- **A green suite is not verification of a fix.** It was green for all twelve. Re-run the finding's own
-  reproduction against the fix, and re-run the reproductions of every fix already made this round.
-- **Do not override a verifier's correction on your own reasoning.** Round 16's P18 exists because the
-  verifier said to put `ModelState.Remove` in the concurrency catch, and a "better placement" was chosen
-  instead — which refreshed the concurrency token on every failure path and silently defeated optimistic
-  concurrency. If a correction looks wrong, reproduce why before departing from it.
+- **A green suite is not verification of a fix.** It has been green for every residue finding ever
+  filed. Re-run the finding's own reproduction against the fix, and re-run the reproductions of every
+  fix already made this round.
+- **A fix that adds a guard, refusal, withhold, status or special case is a design change, not a bug
+  fix.** Before writing it, name the sentence in *What Bastet is* it serves. If you cannot, the finding
+  has misdiagnosed the defect — stop and record that instead of implementing it. Four consecutive
+  rounds each added a withhold nobody had asked for, each closing a real-looking failure scenario, and
+  together they more than quadrupled the size of `AzureReconciler.cs`. Every one passed a green suite.
+- **When a finding proposes extending a mechanism a previous round added, audit the mechanism first.**
+  `git log -S` the identifying string and read the commit that introduced it. A fix already in the tree
+  reads as settled design and is not — it is one previous round's opinion, and extending it compounds
+  the error instead of ending it. The correct outcome may be to remove it, which is a product decision:
+  record it in the findings file and stop, do not implement either direction on your own authority.
+- **Do not override a verifier's correction on your own reasoning.** A past round shipped a defect
+  exactly this way: the verifier said to put `ModelState.Remove` in the concurrency catch, a "better
+  placement" was chosen instead, and it refreshed the concurrency token on every failure path —
+  silently defeating optimistic concurrency. If a correction looks wrong, reproduce why before
+  departing from it.
 
 ## No questions
 
@@ -127,8 +218,8 @@ that closes the reproduced defect. Take it, and file the restructure as its own 
 The finding names one location. Before committing, establish what else implements the same rule:
 
 - **Every arm of the conditional you touched.**
-- **The sibling surface.** Bastet has two Azure import wizards; a rule wrong in one is wrong in the
-  other unless you can point at the difference.
+- **The sibling surface.** The manual path and the Azure path are siblings of each other: a rule
+  wrong in `SubnetController.Create` is usually wrong in the bulk import commit, and vice versa.
 - **Every other caller**, and every place the same question is asked without the helper.
 - **The inverse path.** Fixed a write? Check the read that displays it. Fixed a guard? Check what decides
   whether to offer the guarded action.
@@ -145,7 +236,7 @@ Any message whose truth depends on what you changed must be re-read. Operator-fa
 must name an action that is actually reachable — drive it. A success message must not outlive the action
 it announces.
 
-This is not cosmetic. It generated four of round 16's findings and several of the re-audit's.
+This is not cosmetic. Stale operator-facing text is one of the most reliable sources of residue.
 
 ### 6. Sweep for orphans the compiler will not report
 
@@ -175,7 +266,7 @@ _Verified: <what was run, what came back>._
 _Not done: <anything deliberately left, and why> — omit this line if nothing._
 ```
 
-**No essays.** Round 16's struck entries ran to thousands of words that nobody read. The file is a work
+**No essays.** Struck entries have run to thousands of words that nobody read. The file is a work
 queue, not a report.
 
 ### 9. Commit
@@ -197,13 +288,29 @@ In approval mode the user commits. In auto mode, commit directly. **Never push.*
   internet. Plain-HTTP and air-gapped deployments must keep working.
 - **No comments in `.cs` or `.cshtml`, and do not restore removed ones.** The code carries its own
   explanation through named methods; the reasoning goes in the entry and the test name. A rule worth
-  protecting gets a counter-test, not a warning comment — comments did not work, and round 16's P11
-  exists because a guard was written to match a comment that was false.
+  protecting gets a counter-test, not a warning comment — comments did not work, and one round shipped
+  a guard written to match a comment that was already false.
 - **No literal control characters in source.** Use `private const char Esc = (char)0x1B;`.
 - **Migration `.Designer.cs` snapshots are frozen history.**
 - **The test count must never regress without a recorded reason.**
 - **Scope is the defect, not the line number.** An unrequested refactor is out of scope. The same defect
   at another site never is.
+
+## A sudden RZ1021 storm means the build server, not your markup
+
+If `dotnet build` starts reporting `RZ1021: Markup in a code block must start with a tag ... Do not
+use unclosed tags like "<br>"` across `.cshtml` files **you did not touch**, and the cited lines hold
+ordinary valid Razor (`<partial ... />` inside `@if {}`, `<text>` inside `@foreach`), the Razor source
+generator in the long-running Roslyn build server has gone bad. The markup is fine.
+
+```bash
+dotnet build-server shutdown
+```
+
+Then rebuild. **Do not "fix" the views to satisfy it** - you would be rewriting valid Razor to work
+around a stale compiler process, and the change would be pure noise in the diff. Confirm the diagnosis
+in seconds by building a throwaway `dotnet new mvc` with the same construct: if the fresh template
+fails too, it is the toolchain, not the repository.
 
 ## Rigs — ephemeral, never in the repo
 
@@ -245,15 +352,15 @@ property, renaming a partial. Razor resolves at render time.
 1. **Clean rebuild** — delete `bin`/`obj`, `dotnet build --no-incremental`. 0 warnings.
 2. **Full suite**, reconciled against the baseline.
 3. **Re-drive every fix in this round against the final tree.** Each was verified against the tree as it
-   stood when written, not the one later fixes produced. Round 15's O6 and O12 were each correct alone
-   and did not compose.
+   stood when written, not the one later fixes produced. Two fixes in one past round were each correct
+   in isolation and did not compose.
 4. **Run the real app** against real SQL Server and request every major area — subnet list, create,
-   details, edit, delete, deleted-subnets, purge, host IPs, all-deleted-host-IPs, error pages, all three
-   Azure wizards. **Assert rendered content, not HTTP 200.** Confirm security headers ride on a normal
+   details, edit, delete, deleted-subnets, purge, host IPs, all-deleted-host-IPs, error pages, and both
+   Azure wizards - bulk import and reconcile. **Assert rendered content, not HTTP 200.** Confirm security headers ride on a normal
    response.
 5. **Read the log.** Classify every `fail:` / `warn:`. Some are expected — a deliberate permission-denied
    probe logs an error by design. State the difference.
-6. **With Azure credentials**, drive both surfaces end to end: subscriptions → discovery → single import
+6. **With Azure credentials**, drive both surfaces end to end: subscriptions → discovery
    → bulk preview and commit → reconcile scan → delete commit. Include the two counter-tests:
    - a resource the credential *cannot see* must be **withheld**, with a warning naming it;
    - a genuinely deleted resource must **still be offered and deletable**.
@@ -270,9 +377,8 @@ previous-round fix it came from. Count them:
 
 > Round `<N>` filed `<F>` findings, of which `<R>` were residue of round `<N-1>`'s own fixes.
 
-Round 16: 11 of 15. Its re-audit: 12 of 20. **If it is not falling, say so plainly as the headline** —
-it means these steps are not working and the skill needs changing again, not that the codebase is
-unusually buggy.
+**If it is not falling, say so plainly as the headline** — it means these steps are not working and the
+skill needs changing again, not that the codebase is unusually buggy.
 
 Then report the clean-up owed: revoke credentials, remove containers, delete cloud test resources.
 
@@ -287,11 +393,11 @@ git commit -m "Remove reconciled audit findings"
 ```
 
 **The files poison the next round.** They are handed to twenty finders as briefing, and what they teach
-is what to believe and what not to look at. Round 6 wrote down a wrong decision — that a reproduced
-defect was "a feature change, out of scope" — and rounds 7, 8 and 9 inherited it without re-examining,
-rounds 10-12 dropped it, and round 13 rediscovered the same live defect independently. Four rounds lost
-to a sentence in a file. The struck entries are worse: they encode one round's reasoning as settled
-fact, and the next round trusts it instead of looking.
+is what to believe and what not to look at. One round wrote down a wrong decision — that a reproduced
+defect was "a feature change, out of scope" — and three successive rounds inherited it without
+re-examining, until a later round rediscovered the same live defect independently. Four rounds lost to
+a sentence in a file. The struck entries are worse: they encode one round's reasoning as settled fact,
+and the next round trusts it instead of looking.
 
 A round should meet the code as it is, with no inherited beliefs. Everything durable is already in git:
 

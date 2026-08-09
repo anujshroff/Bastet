@@ -174,27 +174,4 @@ public class SubnetNetworkAddressCanonicalizationTests : IDisposable
         Assert.True(await _context.Subnets.AnyAsync(s => s.NetworkAddress == "10.1.0.0" && s.Cidr == 16, TestContext.Current.CancellationToken));
     }
 
-    [Fact]
-    public async Task BatchCreateChildSubnets_WithNonCanonicalAddress_IsRejectedAndStoresNothing()
-    {
-        ResetTracking();
-        int subnetCountBefore = await _context.Subnets.CountAsync(TestContext.Current.CancellationToken);
-
-        List<AzureImportSubnetViewModel> subnets =
-        [
-            new()
-            {
-
-                Name = "Imported Alias",
-                NetworkAddress = "10.0.0x0B.0",
-                Cidr = 24,
-                ParentSubnetId = 2
-            }
-        ];
-
-        IActionResult result = await _controller.BatchCreateChildSubnets(2, subnets);
-
-        Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal(subnetCountBefore, await _context.Subnets.CountAsync(TestContext.Current.CancellationToken));
-    }
 }

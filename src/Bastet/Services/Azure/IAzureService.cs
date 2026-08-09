@@ -10,16 +10,6 @@ namespace Bastet.Services.Azure
 
         Task<List<AzureSubscriptionViewModel>> GetSubscriptions();
 
-        Task<List<AzureVNetViewModel>> GetCompatibleVNets(
-            string subscriptionId,
-            string networkAddress,
-            int cidr);
-
-        Task<List<AzureSubnetViewModel>> GetCompatibleSubnets(
-            string vnetResourceId,
-            string networkAddress,
-            int cidr);
-
         Task<AzureVNetInventory> GetVNetInventory(string subscriptionId);
 
         Task<IReadOnlyDictionary<string, AzureResourceConfirmation>> ConfirmResourcesAsync(

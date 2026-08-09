@@ -141,6 +141,12 @@
             });
         }
 
+        function isRenameOnly(prefixInfo, renameOn) {
+            return renameOn === true
+                && prefixInfo.statusName === "AlreadyImported"
+                && prefixInfo.wouldRenameTarget === true;
+        }
+
         function availabilityBadge(statusName) {
             switch (statusName) {
                 case "Available": return "";
@@ -155,9 +161,20 @@
             return reason ? `<div class="small text-muted ms-4">${escapeHtml(reason)}</div>` : "";
         }
 
+        function prefixHasWork(prefixInfo, containedSubnets, renameOn) {
+            if (containedSubnets.some(function (s) { return s.isSelectable; })) {
+                return true;
+            }
+            if (prefixInfo.statusName === "Available") {
+                return true;
+            }
+            return isRenameOnly(prefixInfo, renameOn);
+        }
+
         function renderVNetTree() {
             const $tree = $("#bulk-vnet-tree").empty();
             const hideImported = $("#bulk-hide-imported").is(":checked");
+            const renameOn = $("#bulk-rename-matched").is(":checked");
 
             let suppressedPrefixes = 0;
 
@@ -168,8 +185,11 @@
 
                 $.each(vnet.prefixes, function (pIdx, prefixInfo) {
                     const prefix = prefixInfo.addressPrefix;
+                    const contained = vnet.subnets.filter(function (s) {
+                        return prefixContainsCidr(prefix, s.addressPrefix);
+                    });
 
-                    if (hideImported && !prefixInfo.isSelectable) {
+                    if (hideImported && !prefixHasWork(prefixInfo, contained, renameOn)) {
                         suppressedPrefixes++;
                         return;
                     }
@@ -177,20 +197,26 @@
 
                     const prefixId = `bulk-prefix-${vIdx}-${pIdx}`;
                     const $prefixDiv = $('<div class="form-check border-bottom pb-2 mb-2"></div>');
+                    const renameOnly = isRenameOnly(prefixInfo, renameOn);
                     const $prefixCheckbox = $('<input type="checkbox" class="form-check-input bulk-prefix-checkbox">')
                         .attr('id', prefixId)
                         .attr('data-vnet-idx', vIdx)
                         .attr('data-prefix', prefix)
-                        .prop('disabled', !prefixInfo.isSelectable);
+                        .prop('disabled', !prefixInfo.isSelectable && !renameOnly);
                     const $prefixLabel = $('<label class="form-check-label"></label>')
                         .attr('for', prefixId)
                         .html(`<strong>${escapeHtml(vnet.name)}</strong> <span class="badge bg-secondary">${escapeHtml(prefix)}</span>`
-                            + availabilityBadge(prefixInfo.statusName));
+                            + (renameOnly
+                                ? '<span class="badge bg-info ms-1">Rename only</span>'
+                                : availabilityBadge(prefixInfo.statusName)));
 
                     $prefixDiv.append($prefixCheckbox).append($prefixLabel);
-                    $prefixDiv.append(reasonHtml(prefixInfo.reason));
+                    $prefixDiv.append(reasonHtml(renameOnly
+                        ? "Everything in this prefix is already imported. The only change would be renaming the "
+                          + "Bastet subnet to match the VNet name."
+                        : prefixInfo.reason));
 
-                    const containedSubnets = vnet.subnets.filter(function (s) { return prefixContainsCidr(prefix, s.addressPrefix); });
+                    const containedSubnets = contained;
                     const shownSubnets = hideImported
                         ? containedSubnets.filter(function (s) { return s.isSelectable; })
                         : containedSubnets;
@@ -242,11 +268,11 @@
                             hiddenMessage = 'All ' + importedCount + ' subnet(s) in this prefix are already imported.';
                         } else if (importedCount === 0) {
                             hiddenMessage = blockedCount + ' subnet(s) in this prefix cannot be imported, and are hidden. '
-                                + 'Untick "Hide unavailable" to see why.';
+                                + 'Untick "Only show what would change" to see why.';
                         } else {
                             hiddenMessage = blockedCount + ' subnet(s) in this prefix cannot be imported and '
                                 + importedCount + ' are already imported, and are hidden. '
-                                + 'Untick "Hide unavailable" to see why.';
+                                + 'Untick "Only show what would change" to see why.';
                         }
 
                         const $hidden = $('<div class="ms-4 mt-1 text-muted small"></div>');
@@ -271,8 +297,9 @@
 
                 const $empty = $('<div class="alert alert-info mb-0"></div>');
                 $empty.append($('<span></span>').text(
-                    suppressedPrefixes + ' VNet prefix(es) in this subscription cannot be selected, '
-                    + 'and are hidden. Untick "Hide unavailable" to see why.'));
+                    'Nothing here would change anything. ' + suppressedPrefixes + ' VNet prefix(es) are '
+                    + 'either already imported or cannot be imported, so they are hidden. '
+                    + 'Untick "Only show what would change" to see them and why.'));
                 $tree.append($empty);
             }
 
@@ -303,7 +330,10 @@
             invalidatePlan();
         }
 
-        $("#bulk-rename-matched").on("change", invalidatePlan);
+        $("#bulk-rename-matched").on("change", function () {
+            invalidatePlan();
+            renderVNetTree();
+        });
 
         $("#bulk-select-all-btn").on("click", function () {
 

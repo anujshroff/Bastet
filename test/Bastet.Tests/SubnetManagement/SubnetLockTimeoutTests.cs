@@ -34,22 +34,6 @@ public class SubnetLockTimeoutTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    [Fact]
-    public async Task BatchCreateChildSubnets_LockTimesOut_Returns503()
-    {
-        SubnetController controller = new(_context, _ipUtilityService,
-            new SubnetValidationService(_ipUtilityService), new HostIpValidationService(_ipUtilityService, _context),
-            ControllerTestHelper.CreateMockUserContextService(), new AlwaysTimingOutLockService(),
-            NullLogger<SubnetController>.Instance);
-        ControllerTestHelper.SetupController(controller);
-
-        IActionResult result = await controller.BatchCreateChildSubnets(1,
-            [new AzureImportSubnetViewModel { Name = "S", NetworkAddress = "10.0.1.0", Cidr = 24 }]);
-
-        ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(503, objectResult.StatusCode);
-        Assert.Contains("timed out", objectResult.Value?.ToString());
-    }
 
     [Fact]
     public async Task HostIpCreate_LockTimesOut_ReturnsViewWithFriendlyError()

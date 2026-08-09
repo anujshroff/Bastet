@@ -1,6 +1,6 @@
 ---
 name: e2e
-description: Run a full end-to-end verification pass over Bastet against a live rig - real SQL Server, the real application, a real browser and a live Azure subscription. Covers Azure discovery, both import wizards, the reconciler, ARM failure modes, the client-side wizard state machines, core IPAM behaviour, authorization and locking. Use when asked to "run the e2e tests", "test everything end to end", "verify the whole app works", or after a round of fixes when a green unit suite is not enough. Pass "auto" to run straight through. To find new defects use /audit; to fix an existing findings file use /audit-reconcile.
+description: Run a full end-to-end verification pass over Bastet against a live rig - real SQL Server, the real application, a real browser and a live Azure subscription. Covers Azure discovery, the bulk import wizard, the reconciler, ARM failure modes, the client-side wizard state machines, core IPAM behaviour, authorization and locking. Use when asked to "run the e2e tests", "test everything end to end", "verify the whole app works", or after a round of fixes when a green unit suite is not enough. Pass "auto" to run straight through. To find new defects use /audit; to fix an existing findings file use /audit-reconcile.
 ---
 
 # Run a full end-to-end pass
@@ -12,6 +12,44 @@ and tears everything down with the teardown **verified by enumeration rather tha
 Nothing this skill produces enters the repository. Scripts, rigs, scratch copies and logs all live in
 the scratchpad and die with the machine. The only durable artefact is the report in the conversation.
 
+## What Bastet is — how every pass/fail is decided
+
+**An IPAM tool. Its job is to be the authority on which IP space is allocated and which is free.**
+Never report allocated space as free (the worst output it can produce); never destroy an allocation
+record on incomplete information; and the operator must be able to act on what they are told.
+
+**One flat, routable space.** Bastet manages a single IP space in which everything is routable against
+everything else, so the same range must never be allocated twice — preventing that collision is the
+product's reason to exist. Two consequences when classifying a result:
+
+- **"Still allocated" is a question about the whole managed space, never about provenance.** If any
+  live resource holds a range, that range is in use, whichever VNet, subscription or import it came
+  from. Overlapping Azure VNets are not a case to defend — inside Bastet's model that overlap *is* the
+  collision, so never pass a result on the grounds that the duplicate lived in a different VNet.
+- **How the space is carved up is the operator's choice, and only theirs** — by hand, by Azure import,
+  or both. Neither origin is privileged, so a scenario that must hold for a manually created subnet
+  must hold identically for an imported one. Cover both paths, not just the import wizard.
+- **One Azure range is one Bastet row.** A VNet with a single address prefix whose single subnet covers
+  that whole prefix imports as **one** row, marked fully allocated — not a VNet parent plus a
+  byte-identical child. Two rows with the same CIDR is a failure, not a pass.
+
+**Reconcile does exactly two things**, and a run that expects more of it is asserting behaviour the
+product deliberately does not have:
+
+1. reports Azure resources that are **gone**, so the operator can choose to delete the Bastet row;
+2. reports Azure resources whose **range changed**, so the operator can choose to delete the Bastet row.
+
+It never edits a row, never re-links, never re-adds, and never reports un-imported Azure space. After
+deleting a row whose range changed, the operator re-imports through the **bulk import wizard** — so a
+changed-range message that does not point there is a defect.
+
+**It joins on the Azure resource id and nothing else.** Gone from Azure means deletable here. The only
+refusal is **manual content in the hierarchy: a hand-added child subnet, or a host IP** — the one thing
+a resource id cannot tell you about, since Azure has no record of it. So a result where a row is
+withheld because its **range** turned up somewhere else — another VNet, another subscription, a prefix
+still "covered" after a re-carve — is a **FAIL**, not a cautious pass. Phase C's counter-assertions
+exist to catch exactly that.
+
 ## Mode
 
 **Default:** run each phase and report as you go.
@@ -20,9 +58,9 @@ missing credential, or a result that cannot be classified without a decision.
 
 **State which mode is active before the first phase.**
 
-## All nine phases run. There is no partial pass.
+## All eight phases run. There is no partial pass.
 
-**A run that has not executed A through I is not an e2e pass and must not be reported as one.**
+**A run that has not executed A through H is not an e2e pass and must not be reported as one.**
 
 The only legitimate reasons a phase does not run are a **missing prerequisite**, a **missing
 credential**, or a **rig that cannot be built**. Each of those stops the whole run and is reported as
@@ -30,11 +68,11 @@ a **stop**, naming the blocker — not as a result with a gap in it. Running low
 context is **not** one of them; neither is a phase being expensive.
 
 If you genuinely cannot finish, say so **before** the phase table and call it an incomplete run in
-the first line. Never present seven phases as a pass and disclose the missing two underneath, and
+the first line. Never present six phases as a pass and disclose the missing two underneath, and
 never let *"an explicit statement of what was not covered"* become permission to skip: that clause
 exists for a blocked prerequisite, not for work you chose not to do.
 
-The expensive phases are **F, G and I** — they need scratch builds and a browser. They are the ones
+The expensive phases are **E, F and H** — they need scratch builds and a browser. They are the ones
 most coupled to the code that deletes on external evidence, so they are the last things to drop and
 the first things to prepare. See *The rig*: their builds are made up front, not when the phase runs.
 
@@ -88,7 +126,7 @@ half-configuring the machine.
 | .NET SDK | `dotnet --version`, major matching the `TargetFramework` in the `.csproj` files | **Stop.** Name the required SDK |
 | Docker daemon **as this user** | `docker info` | **Stop.** A group-membership fix needs a re-login you cannot perform |
 | SQL Server image | `docker image inspect mcr.microsoft.com/mssql/server:2022-latest` | Pull it **here**, once |
-| Browser | chromium under `~/.cache/ms-playwright` | **Install it here, once** (see below) - it installs unattended. **Stop** only if it demands `install-deps` and root; phase G is worthless without it and must not fail quietly |
+| Browser | chromium under `~/.cache/ms-playwright` | **Install it here, once** (see below) - it installs unattended. **Stop** only if it demands `install-deps` and root; phase F is worthless without it and must not fail quietly |
 | Python 3 + `requests` | `python3 -c "import requests"` | Install into the rig venv |
 | **Azure CLI** | `az version` | Install **here**, once (see below). **Stop** if it cannot be installed |
 | `curl` | `curl --version` | Install |
@@ -117,7 +155,7 @@ the way through. Record the absolute path to the `az` binary. That venv's python
 
 **Do not assume chromium is on disk.** Earlier versions of this file said it "is normally already
 cached" and told you not to run `playwright install`. On a fresh box that is simply false —
-`~/.cache/ms-playwright` did not exist at all, and following that instruction leaves phase G with no
+`~/.cache/ms-playwright` did not exist at all, and following that instruction leaves phase F with no
 browser and no explanation. Check, and install if absent:
 
 ```bash
@@ -132,11 +170,11 @@ first and let it fetch the browser. Both steps are unattended and need no `sudo`
 <rig>/azcli/bin/playwright install chromium     # NOT install-deps, which needs root
 ```
 
-If `playwright install chromium` succeeds, phase G is fully live. If it demands `install-deps` and
+If `playwright install chromium` succeeds, phase F is fully live. If it demands `install-deps` and
 root, **stop and say so plainly, naming the command a human would need to run** — do not half-configure
-the machine and do not let phase G quietly degrade into reading the JavaScript, which proves nothing.
+the machine and do not let phase F quietly degrade into reading the JavaScript, which proves nothing.
 
-Two ways to drive it, and phase G needs the second:
+Two ways to drive it, and phase F needs the second:
 
 ```bash
 # DOM snapshot only - enough for rendering assertions
@@ -148,7 +186,7 @@ CH=$(echo ~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome)
 <rig>/azcli/bin/python -c "from playwright.sync_api import sync_playwright; ..."
 ```
 
-Verify **both** modes work before phase G starts, rather than discovering the binding is broken
+Verify **both** modes work before phase F starts, rather than discovering the binding is broken
 halfway through a wizard run.
 
 The `optimization_guide_on_device_model_installer` line on stderr is benign noise.
@@ -171,6 +209,12 @@ The `optimization_guide_on_device_model_installer` line on stderr is benign nois
 3. Prove the matrix both ways, for reads and writes: each principal 200 on its own group and **403** on
    the other. Record the observed matrix.
 4. If the matrix does not reproduce, **stop and name the failing leg.**
+
+**`BASTET_AUTO_MIGRATE=true` or nothing works, and the symptom points at Azure.** The application
+does not create its own database. Without auto-migrate every Azure endpoint returns *"The reconcile
+scan failed. Details have been logged."* - a generic message that reads exactly like a credential or
+ARM problem, while the log underneath says `Cannot open database ... The login failed`. Set it when
+starting the app, and when an Azure call fails, **read the log before touching the credentials.**
 
 **`AZURE_TOKEN_CREDENTIALS` must be unset** when driving the application. The launch profiles set it to
 `dev`, which excludes `EnvironmentCredential` and produces a credential failure that reads exactly like
@@ -197,15 +241,15 @@ Then:
 
 ## Build all THREE trees here, before any phase runs
 
-Phases F and I each need a modified build. Building them when the phase arrives puts the two most
+Phases E and H each need a modified build. Building them when the phase arrives puts the two most
 expensive setups at the end of the run, which is exactly when they get dropped. Build them now, while
 there is budget, and assert each compiles **0 warnings** before starting phase A:
 
 | tree | what it is | used by |
 |---|---|---|
-| **real** | the working tree, unmodified | A-E, G, H, and I's antiforgery/header/locking half |
-| **fault** | `git archive HEAD` copy + a fault-injecting decorator over `IAzureService`, registered only when `BASTET_E2E_FAULT` is set, plus an `ArmClientOptions.Transport` seam if mechanism (a) is wanted | F |
-| **roles** | `git archive HEAD` copy whose `DevAuthHandler` issues the role set named by `BASTET_E2E_ROLES` (`View`, `Edit`, `Delete`, `Admin`, or `none`) rather than Admin unconditionally | I's role-separation half |
+| **real** | the working tree, unmodified | A-D, F, G, and H's antiforgery/header/locking half |
+| **fault** | `git archive HEAD` copy + a fault-injecting decorator over `IAzureService`, registered only when `BASTET_E2E_FAULT` is set, plus an `ArmClientOptions.Transport` seam if mechanism (a) is wanted | E |
+| **roles** | `git archive HEAD` copy whose `DevAuthHandler` issues the role set named by `BASTET_E2E_ROLES` (`View`, `Edit`, `Delete`, `Admin`, or `none`) rather than Admin unconditionally | H's role-separation half |
 
 Both modified trees live **under the rig directory**, never in the real tree, and both gate their
 behaviour on an environment variable so the same binary still runs unmodified when it is unset.
@@ -213,7 +257,7 @@ behaviour on an environment variable so the same binary still runs unmodified wh
 The fault decorator is the cheap mechanism (b): it substitutes `IAzureService` to drive the decision
 layer. Point it at `GetVNetInventory` (return `Success=false` with a distinct `ErrorMessage` per mode)
 and at `ConfirmResourcesAsync` (return `Unknown` / `NotVisible` for every id). That covers every case
-in phase F's table except the ones that need the real ARM-walking code, which is mechanism (a).
+in phase E's table except the ones that need the real ARM-walking code, which is mechanism (a).
 
 ## Fixture matrix
 
@@ -253,7 +297,12 @@ phases A-D vacuous while appearing to pass.
   until phase B has imported something, so build it at the start of **phase D**. Built up front it is
   just another overlapping pair, which `overlap-a`/`overlap-b` already cover.
 - **hostip** - an empty VNet, imported in phase D to create an **empty** target, which then has a host
-  IP added to it. See the D5 note below for why it must be empty.
+  IP added to it. See the host-IP refusal note in phase D for why the target must be empty.
+- **manual-child** and **manual-hostip** - the two fixtures that produce `HeldByManualContent`, and
+  they are **BASTET-side, not Azure-side**. Import a VNet in phase B, then in Bastet add a child subnet
+  by hand under an imported row (one fixture) and a host IP under another (the other fixture), then
+  delete both VNets in Azure. Only after both halves exist does the status appear. Building them as
+  Azure fixtures produces nothing: the whole point is content Azure has no record of.
 
 ## ARM serializes writes against a single VNet
 
@@ -288,8 +337,8 @@ anywhere; the 3-prefix subnet emitting three rows **each carrying the complete p
 appearing under each; the two overlapping VNets both discovered with distinct resource ids for
 identically-prefixed subnets; `/29` and end-of-range subnets discovered; the empty VNet offered with
 its prefix and no subnets; the ten-subnet VNet returning all ten; the delegated subnet treated
-ordinarily; **every prefix and every subnet selectable on a clean tree**; and both wizards' discovery
-endpoints agreeing, including the single-VNet wizard returning IPv4 only for a dual-stack VNet.
+ordinarily; **every prefix and every subnet selectable on a clean tree**; and the bulk discovery
+endpoint returning IPv4 only for a dual-stack VNet.
 
 ## B - Bulk import
 
@@ -309,16 +358,15 @@ Azure does not hold still **is**.
 
 Mutate Azure to produce all of them at once, then scan and assert each:
 
-| status | how to produce it |
-|---|---|
-| `SubnetDeleted` | delete a subnet whose range nothing else holds - must be **deletable** |
-| `RangeStillAllocatedInAzure` | delete and recreate a subnet under a new name, same prefix (Azure has no rename) - must be **withheld**, name the new owner, and warn |
-| `SubnetPrefixChanged` | move a subnet's prefix |
-| `VNetDeleted` | delete a VNet outright |
-| `VNetPrefixRemoved` | drop one address prefix from a two-space VNet - **vacate it first**, see below |
-| `FullyAllocatingSubnetDeleted` | delete the subnet that marked a target fully allocated - review only |
-| `AzureRangeNotImported` | add a prefix to an already-imported subnet - inbound, **never deletable** |
-| `UnrecognisedResourceId` | a row whose `AzureResourceId` is not a parseable ARM id |
+| status | how to produce it | expected |
+|---|---|---|
+| `SubnetDeleted` | delete an imported Azure subnet | **deletable** |
+| `SubnetPrefixChanged` | move a subnet's prefix | **deletable**, reason names the new prefix and the import wizard |
+| `VNetDeleted` | delete a VNet outright | **deletable** |
+| `VNetPrefixRemoved` | drop one address prefix from a two-space VNet - **vacate it first**, see below | **deletable**, reason points at the import wizard |
+| `HeldByManualContent` | add a child subnet **by hand** under an imported row, then delete it in Azure | **review only**, never deletable, warned |
+| `HeldByManualContent` | add a **host IP** to an imported row, then delete it in Azure | **review only**, never deletable, warned |
+| `UnrecognisedResourceId` | a row whose `AzureResourceId` is not a parseable ARM id | **review only** |
 
 > **Read the result of every mutation, and verify the state it was supposed to produce.** ARM refuses
 > to remove a VNet address prefix while a subnet still occupies it - `NetcfgSubnetRangeOutsideVnet` -
@@ -327,20 +375,38 @@ Mutate Azure to produce all of them at once, then scan and assert each:
 > reports a missing verdict as though the application had failed to emit it. Assert the mutation
 > landed (`az network vnet show`) before scanning.
 
-Plus: the inbound report fires **exactly once** for an n-prefix subnet - the inventory emits one row
-per prefix each carrying the whole list, so a naive walk reports it n times; a resource the credential
-cannot see is withheld **and named in a warning**; and the containment case - a coarser Bastet subnet
-legitimately covering an Azure range must **not** be reported.
+**Four counter-assertions, each guarding against a regression that has actually shipped:**
 
-## D - Repair, refuse, commit
+- **Delete-and-recreate under a new name, same prefix** (Azure has no rename). The old row **must
+  still be deletable** — the range turning up under another Azure subnet is not a reason to withhold.
+  Four consecutive audit rounds widened a withhold path here that should never have existed.
+- **A range held by a second, overlapping VNet.** Still deletable. That overlap is the collision
+  Bastet exists to prevent, not a configuration to defend.
+- **An Azure range no Bastet row records** — add a subnet in Azure and do not import it. Reconcile
+  must report **nothing**: no item, no review row, no warning. Finding it is the import wizard's job.
+- **An Azure-imported descendant with no manual content.** The parent is still deletable and takes the
+  descendant with it. Only *manual* content holds.
 
-**Re-link:** the renamed subnet is offered, the re-link succeeds and points at the new Azure subnet,
-the row then reports nowhere, and a second attempt is refused.
+Plus: a resource the credential cannot see is withheld **and named in a warning**, while a genuinely
+deleted one is **still offered and deletable**. Checking only the first lets an over-blocking
+regression pass.
+
+## D - Refuse, top-up, commit
+
+**Reconcile has no repair path.** Assert the absence positively: the reconcile page contains **no
+re-link control**, `POST /Subnet/RelinkAzureSubnet` returns **404**, and a changed-range row's reason
+names the **import wizard**. Then drive the actual remedy end to end: delete the changed row, re-import
+the current range through the bulk import wizard, and confirm the row comes back with the new range and
+reconcile then reports nothing.
 
 **Top-up:** a populated target linked to *this* VNet is selectable with the top-up wording;
 already-imported ranges are marked `AlreadyImported` and not offered again; only the genuinely-new
-range is offered; the commit adds exactly that one and leaves the existing children untouched; and the
-inbound report for that range disappears afterwards.
+range is offered; the commit adds exactly that one and leaves the existing children untouched.
+
+**The collapse case, followed through:** phase B asserted the `encompass` VNet imports as **one** row
+marked fully allocated. Here, add the query that would catch the regression directly - no two undeleted
+subnets share a `NetworkAddress`/`Cidr` pair - and confirm reconcile reports that row nowhere while
+Azure is unchanged.
 
 **Refusals** - each is a way the top-up allowance could have gone wrong:
 
@@ -360,20 +426,14 @@ inbound report for that range disappears afterwards.
 > **before** looking at the annotation.
 
 **Delete consent:** no verdict, wrong verdict, and missing typed confirmation each refused; the correct
-verdict archiving; and in that same commit the invisible-resource row and the unparseable-id row
-**still not archived**. Then a cascade that actually carries host IPs (`hostIpsArchived > 0`), the
-cascade guard withholding an ancestor whose descendant is protected, and the archived range only then
-being reported free.
+verdict archiving; and in that same commit the invisible-resource row, the unparseable-id row and the
+manual-content row **still not archived**. Then the cascade guard withholding an ancestor whose
+descendant is protected, and the archived range only then being reported free.
 
-## E - Single-VNet wizard
+**No host IP is ever archived by reconcile.** A host IP anywhere in the hierarchy holds the whole
+subtree, so `hostIpsArchived` must be **0** on every reconcile commit in the run.
 
-Its own import path end to end: discovery, batch create, server-side name resolution producing
-prefix-qualified names for a multi-prefix subnet, no generated name containing `/`, and an idempotent
-re-import. Also the dual-mode `BatchCreateChildSubnets` - HTML redirect when `isAzureImport`, JSON
-otherwise - and its **conditional** feature-flag gate, which applies only when the request writes
-Azure state.
-
-## F - ARM failure modes
+## E - ARM failure modes
 
 Runs against the **fault** tree, which was already built during the rig phase - see *Build all THREE
 trees here*. Do not build it now; if it is missing, the rig step was skipped and the run is invalid.
@@ -401,7 +461,7 @@ produce the "Azure reported no VNets at all" warning rather than a silent mass d
 > `SubnetDeleted` item to withhold - create one by deleting an imported VNet in Azure if not. On the
 > first attempt both modes passed against zero absence rows and had to be re-run.
 
-## G - Browser-driven wizards
+## F - Browser-driven wizards
 
 Drive the real pages in headless chromium. Reading the JavaScript proves nothing here - **assert what
 the browser actually sent against what was persisted.**
@@ -410,14 +470,39 @@ the browser actually sent against what was persisted.**
   re-locking steps 3-4 on any selection change; Select All not submitting rows the server marked
   un-importable (jQuery `:checked` matches disabled inputs - `:not(:disabled)` is load-bearing); going
   back and changing an earlier step; the `previewSeq` out-of-order guard; double-commit.
+- **Every badge, with the filter OFF.** All rows show, so every label must be true. Build one scan
+  carrying all five and assert the badge, the reason **and** the checkbox's `disabled` state together -
+  a truthful label on an unusable control is still a defect:
+
+  | row | badge | selectable |
+  |---|---|---|
+  | a prefix Bastet does not record | *(no badge)* — "Will create a new Bastet subnet" | yes |
+  | linked, with a subnet still addable | Will update existing | yes |
+  | linked, everything recorded | Already imported | no |
+  | matched a hand-made subnet holding host IPs / children | Cannot import, reason naming which | no |
+  | linked, childless, name differs, **rename on** | Rename only | **yes** |
+
+- **The rename toggle re-renders the tree whether or not the filter is on.** It changes the badge and
+  the checkbox, not just visibility. Assert `Rename only` appears with the filter **off** too, or a
+  regression that gates the re-render on the filter passes unnoticed.
+- **`WouldRenameTarget` must agree with `WillRename` in the plan**, or a row promises a rename the
+  commit will not perform. Drive both: annotate and preview the same selection and compare the flags.
+  **A target with child subnets renames like any other** — that case was once excluded, so cover it
+  explicitly: rename it by hand, tick it with rename on, commit, and assert the target took the VNet
+  name **and every child survived untouched**.
+- **"Only show what would change"** (`#bulk-hide-imported`): with it **on**, nothing that would do no work may
+  remain visible. Build all four cases in one scan and assert each: a VNet prefix whose every Azure
+  subnet is already recorded is **hidden** and labelled `AlreadyImported`; a collapsed fully-allocated
+  target imported from *this* VNet is **hidden** (`AlreadyImported`, not `Blocked`); a prefix with one
+  un-imported subnet **stays visible**; and an exact-match target that is **not yet linked** stays
+  visible, because importing it links it and that is work. Then flip `#bulk-rename-matched` **without
+  re-scanning**: a row whose only difference is its name must appear when rename is on and vanish when
+  it is off. The counter-test matters most - if nothing is ever hidden, or everything is, the filter
+  is not being exercised.
 - **Reconcile** (`_ReconcileScripts.cshtml`, 3-step): scan; checkbox select-all and the indeterminate
-  state; the per-row **Re-link** button and its in-flight guard; the typed `approved` confirmation; the
+  state; the review table rendering status and reason with **no action column**; the typed `approved` confirmation; the
   `deleting` flag preventing a second POST; and that the commit posts `confirmedIds` /
   `confirmedVerdicts` from the confirmation snapshot rather than live checkbox state.
-- **Single import** (`_ImportScripts.cshtml`, 3-step, classic form POST): the disable/re-enable of
-  hidden inputs so the payload matches the checkboxes; `subnets.Index` explicit indexing (the binder
-  stops at the first missing index otherwise); `importSubmitting` double-submit guard; the `pageshow`
-  bfcache reset.
 - **Subnet details** (`_SubnetCalculationScripts.cshtml`): the CIDR modal's overlap detection and
   network-address adjustment against rendered siblings.
 
@@ -427,15 +512,23 @@ Practical notes, all learned the hard way:
   `#bulk-select-subscription-btn`, `#bulk-select-all-btn`, `#bulk-go-preview-btn`,
   `#bulk-go-commit-btn`, `#bulk-confirm-commit-btn`; and `#rec-subscription-select`, `#rec-scan-btn`,
   `#rec-select-all`, `#rec-go-confirm-btn`, `#rec-confirmation`, `#rec-confirm-delete-btn`,
-  `.rec-item-checkbox`, `.rec-relink-btn`.
+  `.rec-item-checkbox`.
 - **`<option>` elements are never "visible" to Playwright.** Wait with `state="attached"`, or the
   wizard appears never to load when it has loaded fine.
+- **The subnet listing is a TREE of anchors, not a table.** There is no `<tr>` per subnet, so
+  `closest('tr')` returns null and every "find the row for this CIDR" lookup silently yields nothing.
+  Match on the anchor itself - its text carries name and CIDR together, and its href ends in the id:
+
+  ```js
+  [...document.querySelectorAll('a[href*="/Subnet/Details/"]')]
+      .find(a => a.innerText.includes('10.211.2.0/24')).href.split('/').pop()
+  ```
 - **Capture what was SENT.** Attach a request listener and read the POST bodies; asserting on the DOM
   cannot distinguish "ticked" from "submitted", which is the entire point of this phase.
-- **The reconcile half needs drift to exist.** Delete an imported VNet and rename a subnet in Azure
-  first, or there are no stale rows to select and no Re-link button to press.
+- **The reconcile half needs drift to exist.** Delete an imported VNet and move a subnet's prefix in
+  Azure first, or there are no stale rows to select and nothing to confirm.
 
-## H - Core IPAM behaviour
+## G - Core IPAM behaviour
 
 > **Use address space DISJOINT from the Azure fixture matrix.** The matrix imports `172.16.0.0/12`,
 > `10.10.x`, `10.100-10.170.x` and `10.120/10.130`, so a "top-level" subnet created in any of those
@@ -465,7 +558,7 @@ Every non-Azure action driven as a request, not asserted in a unit test:
   or broadcast address, a host IP on a subnet that has children (refused)
 - every page asserted on **rendered content and title**, never a bare HTTP 200
 
-## I - Authorization, antiforgery, headers, locking
+## H - Authorization, antiforgery, headers, locking
 
 Sweep **every controller action** against its declared policy - `RequireViewRole`, `RequireEditRole`,
 `RequireDeleteRole`, `RequireAdminRole`, the authenticated fallback, and the `[AllowAnonymous]`
@@ -491,6 +584,22 @@ cannot reach - including that a second replica's write is refused honestly rathe
 
 # Rules that decide whether the report is true
 
+## A sudden RZ1021 storm means the build server, not your markup
+
+If `dotnet build` starts reporting `RZ1021: Markup in a code block must start with a tag ... Do not
+use unclosed tags like "<br>"` across `.cshtml` files **you did not touch**, and the cited lines hold
+ordinary valid Razor (`<partial ... />` inside `@if {}`, `<text>` inside `@foreach`), the Razor source
+generator in the long-running Roslyn build server has gone bad. The markup is fine.
+
+```bash
+dotnet build-server shutdown
+```
+
+Then rebuild. **Do not "fix" the views to satisfy it** - you would be rewriting valid Razor to work
+around a stale compiler process, and the change would be pure noise in the diff. Confirm the diagnosis
+in seconds by building a throwaway `dotnet new mvc` with the same construct: if the fresh template
+fails too, it is the toolchain, not the repository.
+
 ## Triage every failure as fixture-invalid before calling it a defect
 
 A failing check has two possible causes and they are not equally likely. **Prove the fixture exists in
@@ -512,7 +621,8 @@ It passes identically when the behaviour is correct and when the fixture never e
 assertion is paired, in the same run and against the same scan, with a comparable case that *is*
 present, reported or offered.
 
-- "the covered range is not reported inbound" → **and** an uncovered range in the same VNet **is**
+- "the un-imported Azure range is not reported by reconcile" → **and** the same range **is** offered by
+  the bulk import wizard, so the absence is reconcile's scope and not a broken fixture
 - "the invisible resource is not offered for deletion" → **and** a genuinely deleted one still **is**
 - "nothing is offered while ARM is faulted" → **and** the unfaulted scan had absence rows to withhold
 - "the disabled row was not submitted" → **and** the enabled rows were
@@ -595,7 +705,7 @@ Then the phase table, with a **run** column, so an unrun phase cannot be written
 |---|---|---|---|
 | A discovery | yes | 22/22 | 0 |
 | ... | | | |
-| F ARM failure modes | yes | 20/20 | 0 |
+| E ARM failure modes | yes | 20/20 | 0 |
 
 A phase that did not run says **no** and gives the blocker. Any `no` in that column means the run is
 **incomplete**, and the first line of the report says so.

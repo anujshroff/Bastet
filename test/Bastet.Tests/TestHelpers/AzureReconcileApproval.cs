@@ -14,7 +14,7 @@ public static class AzureReconcileApproval
     {
         AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
         IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-        AzureReconcilePlanViewModel plan = new AzureReconciler(new IpUtilityService()).BuildPlan(subscriptionId, null, inventory, linked, []);
+        AzureReconcilePlanViewModel plan = new AzureReconciler().BuildPlan(subscriptionId, null, inventory, linked);
 
         HashSet<int> wanted = [.. subnetIds];
 

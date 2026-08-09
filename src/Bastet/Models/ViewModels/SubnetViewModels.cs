@@ -47,8 +47,6 @@ public class CreateSubnetViewModel
 public class AzureImportSubnetViewModel : CreateSubnetViewModel
 {
 
-    public bool FullyEncompassesVNetPrefix { get; set; }
-
     public string? AzureResourceId { get; set; }
 }
 

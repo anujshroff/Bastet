@@ -47,73 +47,6 @@ public class MockAzureService : IAzureService
 
     public Task<List<AzureSubscriptionViewModel>> GetSubscriptions() => Task.FromResult(_subscriptions);
 
-    public Task<List<AzureVNetViewModel>> GetCompatibleVNets(
-        string subscriptionId,
-        string networkAddress,
-        int cidr)
-    {
-
-        List<AzureVNetViewModel> filteredVnets = [.. _vnets.Where(v => v.AddressPrefixes.Any(p => IsAddressCompatible(p, networkAddress, cidr)))];
-
-        return Task.FromResult(filteredVnets);
-    }
-
-    public Task<List<AzureSubnetViewModel>> GetCompatibleSubnets(
-        string vnetResourceId,
-        string networkAddress,
-        int cidr)
-    {
-
-        AzureVNetViewModel? vnet = _vnets.FirstOrDefault(v => v.ResourceId == vnetResourceId);
-        List<string> vnetAddressPrefixes = vnet?.AddressPrefixes ?? [];
-
-        List<AzureSubnetViewModel> filteredSubnets = [];
-
-        foreach (AzureSubnetViewModel subnet in _subnets)
-        {
-
-            bool fullyEncompassesVNetPrefix = vnetAddressPrefixes.Any(prefix =>
-                string.Equals(prefix, subnet.AddressPrefix, StringComparison.OrdinalIgnoreCase));
-
-            string[] subnetParts = subnet.AddressPrefix.Split('/');
-            string subnetNetworkAddress = subnetParts.Length > 0 ? subnetParts[0] : string.Empty;
-            int subnetCidr = subnetParts.Length > 1 && int.TryParse(subnetParts[1], out int cidrValue) ? cidrValue : 0;
-
-            if (fullyEncompassesVNetPrefix &&
-                string.Equals(subnetNetworkAddress, networkAddress, StringComparison.OrdinalIgnoreCase) &&
-                subnetCidr == cidr)
-            {
-
-                filteredSubnets.Add(new AzureSubnetViewModel
-                {
-                    ResourceId = subnet.ResourceId,
-                    Name = subnet.Name,
-                    AddressPrefix = subnet.AddressPrefix,
-                    HasMultipleAddressSchemes = subnet.HasMultipleAddressSchemes,
-                    FullyEncompassesVNetPrefix = true
-                });
-            }
-            else
-            {
-
-                if (IsSubnetWithinParent(subnet.AddressPrefix, networkAddress, cidr))
-                {
-
-                    filteredSubnets.Add(new AzureSubnetViewModel
-                    {
-                        ResourceId = subnet.ResourceId,
-                        Name = subnet.Name,
-                        AddressPrefix = subnet.AddressPrefix,
-                        HasMultipleAddressSchemes = subnet.HasMultipleAddressSchemes,
-                        FullyEncompassesVNetPrefix = false
-                    });
-                }
-            }
-        }
-
-        return Task.FromResult(filteredSubnets);
-    }
-
     public Task<AzureVNetInventory> GetVNetInventory(string subscriptionId)
     {
         if (!_credentialValid)
@@ -196,42 +129,6 @@ public class MockAzureService : IAzureService
         }
 
         return Task.FromResult<IReadOnlyDictionary<string, AzureResourceConfirmation>>(result);
-    }
-
-    private bool IsAddressCompatible(string addressPrefix, string parentAddress, int parentCidr)
-
-    {
-        if (string.IsNullOrEmpty(addressPrefix))
-        {
-            return false;
-        }
-
-        string[] parts = addressPrefix.Split('/');
-        if (parts.Length != 2 || !int.TryParse(parts[1], out int addressCidr))
-        {
-            return false;
-        }
-
-        string vnetAddress = parts[0];
-
-        if (vnetAddress == "10.0.0.0" && addressCidr == 16 &&
-            parentAddress == "10.0.0.0" && parentCidr == 16)
-        {
-            return true;
-        }
-
-        if (addressCidr < parentCidr)
-        {
-
-            return _ipUtilityService.IsSubnetContainedInParent(
-                parentAddress, parentCidr, vnetAddress, addressCidr);
-        }
-        else
-        {
-
-            return _ipUtilityService.IsSubnetContainedInParent(
-                vnetAddress, addressCidr, parentAddress, parentCidr);
-        }
     }
 
     private bool IsSubnetWithinParent(string subnetPrefix, string parentAddress, int parentCidr)

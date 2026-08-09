@@ -14,27 +14,6 @@ namespace Bastet.Services.Azure
         public static bool IsAzureVNet(string? resourceId) =>
             IsResourceType(resourceId, VNetResourceType);
 
-        public static string? VNetIdOf(string? resourceId)
-        {
-            if (string.IsNullOrWhiteSpace(resourceId)
-                || !ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? id)
-                || id is null)
-            {
-                return null;
-            }
-
-            string type = id.ResourceType.ToString();
-
-            if (string.Equals(type, VNetResourceType, StringComparison.OrdinalIgnoreCase))
-            {
-                return id.ToString();
-            }
-
-            return string.Equals(type, SubnetResourceType, StringComparison.OrdinalIgnoreCase)
-                ? id.Parent?.ToString()
-                : null;
-        }
-
         private static bool IsResourceType(string? resourceId, string resourceType) =>
             !string.IsNullOrWhiteSpace(resourceId)
             && ResourceIdentifier.TryParse(resourceId, out ResourceIdentifier? id)

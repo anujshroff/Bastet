@@ -38,6 +38,8 @@ namespace Bastet.Models.ViewModels
 
         public string AddressPrefix { get; set; } = string.Empty;
 
+        public bool WouldRenameTarget { get; set; }
+
         public BulkImportAvailability Status { get; set; } = BulkImportAvailability.Available;
 
         public string StatusName => Status.ToString();

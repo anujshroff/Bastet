@@ -285,7 +285,6 @@ public partial class SubnetController : Controller
                         Description = null,
                         Tags = null,
                         ParentSubnetId = item.AutoCreateParentSubnetId,
-                        FullyEncompassesVNetPrefix = false,
                         AzureResourceId = sanitizedVNetResourceId
                     };
 
@@ -359,7 +358,6 @@ public partial class SubnetController : Controller
                         Description = null,
                         Tags = null,
                         ParentSubnetId = targetSubnet.Id,
-                        FullyEncompassesVNetPrefix = false,
                         AzureResourceId = sanitizedChildResourceId
                     };
 

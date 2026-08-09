@@ -65,6 +65,7 @@ namespace Bastet.Services.Azure
                     IsFullyAllocated = subnet.IsFullyAllocated,
                     DescendantCount = descendants.Count,
                     HostIpCount = hostIps,
+                    ManualDescendantCount = descendants.Count(d => string.IsNullOrEmpty(d.AzureResourceId)),
                     DescendantSubnetIds = [.. descendants.Select(d => d.Id)]
                 });
             }
