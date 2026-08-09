@@ -151,6 +151,13 @@ Debian's `venv` ships without `ensurepip`, so `python -m ensurepip` fails and th
 the way through. Record the absolute path to the `az` binary. That venv's python also carries
 `requests`, which is what the drivers use.
 
+**`python3 -m venv` prints a loud failure here and still leaves a usable tree.** It ends with
+*"The virtual environment was not created successfully because ensurepip is not available … apt install
+python3.13-venv"* and a non-zero exit - but `bin/python` exists, and `get-pip.py` then completes the
+job. Do **not** treat that message as a stop, and do **not** put `set -e` ahead of it or the whole
+toolchain step aborts on a venv that is actually fine. Install `beautifulsoup4` and `lxml` into the
+same venv while you are there: the form-harvesting rule needs a real HTML parser.
+
 ## The browser
 
 **Do not assume chromium is on disk.** Earlier versions of this file said it "is normally already
@@ -332,7 +339,9 @@ so a failure names the behaviour rather than a mismatched string.
 
 Every VNet in the visible group discovered and the hidden one absent; the dual-stack VNet offering
 only its IPv4 prefix and its dual-stack subnet appearing exactly once carrying only IPv4 with no `:`
-anywhere; the 3-prefix subnet emitting three rows **each carrying the complete prefix list**; the
+in any **address field** (scan the prefix lists, not the raw JSON - its own key/value separators are
+`:` and a naive substring test fails against correct output); the 3-prefix subnet emitting three rows
+**each carrying the complete prefix list**; the
 5-prefix subnet emitting five; the two-address-space VNet offering both and its spanning subnet
 appearing under each; the two overlapping VNets both discovered with distinct resource ids for
 identically-prefixed subnets; `/29` and end-of-range subnets discovered; the empty VNet offered with
@@ -455,6 +464,14 @@ empty-but-successful subscription.
 the operator is told which fact was missing.** An empty subscription that really is empty must still
 produce the "Azure reported no VNets at all" warning rather than a silent mass deletion.
 
+> **A transport fault can land at either stage, so do NOT require `scanSucceeded == false`.** The
+> fixture matrix is small enough to list in a single ARM page, so a transport gate keyed on "the second
+> call to a `virtualNetworks` URI" fires on the per-resource **confirmation** calls, not on the listing.
+> The scan then succeeds, `globalErrors` is empty, and every absence row is withheld with the reason in
+> **`warnings`** - which is correct fail-closed behaviour. Assert the invariant (`items == 0`, and the
+> operator told) against `globalErrors` **or** `warnings`, and report which stage faulted. Demanding a
+> failed scan reports two defects that are not there.
+
 > **The confirmation-fault modes are vacuous unless absence rows exist.** "Nothing was offered for
 > deletion" proves nothing when nothing was deletable to begin with. Before running the throttled- or
 > denied-confirmation modes, run an unfaulted scan and assert there is at least one `VNetDeleted` or
@@ -527,6 +544,35 @@ Practical notes, all learned the hard way:
   cannot distinguish "ticked" from "submitted", which is the entire point of this phase.
 - **The reconcile half needs drift to exist.** Delete an imported VNet and move a subnet's prefix in
   Azure first, or there are no stale rows to select and nothing to confirm.
+- **The reconcile half also needs a REVIEW row**, or "the review table renders status and reason with
+  no action column" asserts against an empty table and cannot fail. Stale rows are not review rows:
+  add one Bastet-side (a subnet whose `AzureResourceId` is unparseable is the cheapest).
+- **`vnets`, `lastSelection` and `lastPlan` are closure-scoped `let`s, not on `window`.**
+  `page.evaluate("() => vnets…")` dies with `ReferenceError: vnets is not defined`. Read the same data
+  off the wire instead - a `page.on("response")` handler that keeps the `BulkImportPreview` JSON, or a
+  page-side `fetch('/Azure/BulkGetVNets?subscriptionId=…')` for the annotation.
+- **Use the ASYNC Playwright API.** Forcing the `previewSeq` out-of-order race means holding response
+  #1 while response #2 completes; in the sync API a `time.sleep` inside a route handler blocks the
+  driver loop and the responses still arrive in order, so the guard is never exercised. With
+  `async_playwright`, `await asyncio.sleep(4)` in the handler for the first request lets the second
+  overtake it. Fulfil the held one with a distinctive marker in `globalErrors` and assert the marker
+  never renders.
+- **A guard that disables its own button cannot be tested with `page.click`.** Playwright auto-waits
+  for "visible and enabled", so the second click of a double-commit test times out after 30s (the
+  guard worked - the test crashed). Dispatch both clicks synchronously in one evaluate,
+  `b.click(); b.click();`, so the JS `committing` / `deleting` flag is the only thing that can stop
+  the second POST.
+- **Check select-all with a real click, not `el.checked = true`.** After one row is ticked the box is
+  `indeterminate`, and setting `.checked` then firing `change` makes the handler read it as unchecked
+  and clear every row. `locator("#rec-select-all").check()` behaves like a user and works.
+- **To test the confirmation snapshot, untick WITHOUT firing `change`.** The delegated handler calls
+  `invalidateConfirmation()`, which discards `confirmedIds` - so a change event destroys the very state
+  under test. Set `.checked = false` directly; that is exactly "live state diverged from what was
+  confirmed". The step-2 checkboxes are also in a hidden tab pane by then, so `uncheck()` fails on
+  visibility anyway.
+- **The commit handlers navigate on success.** A `page.goto` issued straight after a commit races that
+  redirect and dies with `net::ERR_ABORTED`. Wait a few seconds, then `goto` with
+  `wait_until="domcontentloaded"` and one retry.
 
 ## G - Core IPAM behaviour
 
@@ -535,6 +581,12 @@ Practical notes, all learned the hard way:
 > ranges is correctly refused with *"This subnet must be a child of ..."*. One such collision failed
 > the first create, left the child id empty, and turned every later URL into `?subnetId=` - fourteen
 > failures from one bad address. `100.64.0.0/10` is unused by the matrix and works.
+
+> **The network address must actually BE the network address for its CIDR.** `100.70.0.0/12` is not -
+> the network of a `/12` containing it is `100.64.0.0` - so the create is correctly refused, the id
+> comes back `None`, and the phase dies on the first `int(...)` rather than reporting a check. Use
+> `100.64.0.0/10` for phase G and `100.70.0.0/16` for phase H, which are both genuine boundaries and
+> do not collide with each other or with the Azure matrix.
 
 > **Submit forms by HARVESTING the rendered fields, never by hand-listing them.** Edit carries a
 > `RowVersion` concurrency token and an `OriginalCidr` pair; a POST missing them redisplays the form
@@ -579,6 +631,22 @@ handler so headers survive `Response.Clear()`); `X-Frame-Options: DENY` present 
 `'none'`; the global `ResponseCache: NoStore`; `BASTET_AZURE_IMPORT` gating every Azure endpoint; and
 concurrent writes contending on the **real** `sp_getapplock` against SQL Server, which the SQLite suite
 cannot reach - including that a second replica's write is refused honestly rather than silently lost.
+
+> **Make the contention deterministic: hold the lock from a THIRD session.** Racing two app writes and
+> hoping they collide is the check that once passed with every write completing in 0.05s. Instead hold
+> it yourself from `sqlcmd` -
+> `EXEC sp_getapplock @Resource='Bastet:SubnetOperations', @LockMode='Exclusive', @LockOwner='Session',
+> @LockTimeout=60000; WAITFOR DELAY '00:00:10';` - and drive a write from each of **two app replicas on
+> the same catalog**. Both must wait out the hold and both must persist. Time an uncontended write
+> first as the positive control (~0.2s against ~8s proves the wait was contention, not slowness). Then
+> hold it past the app's **30 s** `DEFAULT_TIMEOUT_MS` and assert the write is refused **and persisted
+> nothing** - a 302 there would mean it claimed success.
+>
+> **Killing the holder does not release the lock immediately.** The server-side session lingers well
+> after `docker exec` dies - 18 s in one run - so a "writes succeed again" control timed straight after
+> the kill measures the tail of the old lock and fails against correct behaviour. Poll
+> `SELECT APPLOCK_TEST('public','Bastet:SubnetOperations','Exclusive','Session')` until it returns `1`,
+> then start timing.
 
 ---
 
@@ -645,10 +713,41 @@ looks exactly like a defect, and three separate ones did:
   purges and the reconcile commit. It is not `delete` and not `confirm`.
 - **`SetAllocationStatus` lives on `HostIpController`**, not `SubnetController`, and binds
   `SubnetAllocationDto { SubnetId, IsFullyAllocated }`.
+- **The subnet delete form carries its own scope bounds** - `confirmedMaxSubnetId` and
+  `confirmedMaxHostIpTicks`. A hand-built delete POST that sends only `Id` and `confirmation` returns
+  **302 and archives nothing**, which reads exactly like a broken delete path. Harvest the form.
 
 Harvest forms with a real HTML parser over `input`/`textarea`/`select`, not a regex: a regex that
 assumes `name` precedes `value` silently drops `RowVersion`, and the POST then redisplays the form as
 **HTTP 200 with the row unchanged** - indistinguishable from a rejected edit.
+
+**Harvest the antiforgery token from a page that actually renders one.** `/Subnet` and `/Subnet/Details`
+do not; `/Subnet/Create`, `/Azure/BulkImport` and `/Azure/Reconcile` do. A token lookup that returns
+empty makes every state-changing POST come back **400 with an HTML body**, which is indistinguishable
+from the antiforgery or feature-gate refusal you were trying to measure.
+
+## Database schema facts the checks depend on
+
+Assert against the real schema, not the one you would have designed. Each of these produced a
+`sqlcmd` `Msg 207 (invalid column name)` mid-phase, which surfaces as a `ValueError` in the driver
+rather than as a failed check:
+
+- **There is no `IsDeleted` column.** Deletion is a move, not a flag: rows go to **`DeletedSubnets`**
+  and **`DeletedHostIpAssignments`**. `SELECT ... FROM Subnets` already sees only live rows, and
+  "was it archived rather than silently dropped" is a count against the archive table.
+- **The archive's IP column is `OriginalIP`**, not `IP`. `DeletedSubnets` keeps `NetworkAddress`/`Cidr`
+  but renames the identity columns to `OriginalId` / `OriginalParentId`.
+- **`Subnets`** is `Id, Name, NetworkAddress, Cidr, Description, Tags, ParentSubnetId, RowVersion,
+  CreatedAt, LastModifiedAt, CreatedBy, ModifiedBy, IsFullyAllocated, AzureResourceId`.
+- **The fully-allocated note is a whole LINE, not a fragment.** `FullyAllocatedNote.Strip` splits on
+  `\n` and drops lines that both start with `Fully allocated by Azure subnet '` and end with
+  `' which encompasses the entire address space.` A fixture that puts the note on the same line as
+  other text is **correctly** left alone - and reporting that as a failure to clear the note is a
+  fabrication. Build the fixture with a real newline.
+- **Counting rendered rows: count DISTINCT values, and exclude the subnet's own network address.**
+  Each host-IP row renders its IP more than once, and the parent's `x.y.z.0` matches the same regex,
+  so a naive `len(re.findall(...))` reports 100 or 51 rows on a 50-row page and the pagination check
+  fails against correct behaviour.
 
 ## Restart the application after any rebuild before measuring
 
@@ -667,6 +766,17 @@ the new build.
   archives absence rows leaves the next one with nothing to select, and a phase that assumes an import
   an earlier one never performed reports a refusal that never happened. Both occurred. If a phase needs
   drift, it creates that drift itself and asserts the precondition before asserting the behaviour.
+- **One AZURE FIXTURE SET per destructive phase, too - a private prefix, not the shared matrix.**
+  Phases C, D and F delete VNets, move subnet prefixes and drop address spaces. Run them against the
+  base matrix and they consume the fixtures A and B depend on, so nothing can be re-run without
+  rebuilding Azure. Give each its own prefix (`<run>c-`, `<run>d-`, `<run>f-`) built at the start of
+  the phase, append every id to the same inventory file, and leave the base matrix untouched. This is
+  also what makes a phase **re-runnable**: a failed driver is fixed and re-run by dropping its catalog
+  and rebuilding only its own prefix.
+- **Re-running a phase means resetting BOTH sides.** Drop the catalog
+  (`ALTER DATABASE … SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE …`), **restart the app so
+  auto-migrate recreates it**, and restore any Azure fixture the previous attempt mutated. A re-run
+  against a half-mutated Azure reports refusals and absences that belong to the last attempt.
 - Write **nothing** into the repository working tree - no scratch files, no logs, no PID files. One
   untracked file makes the tree dirty and invalidates the closing assertion.
 - Scratch copies of the repo live under the rig directory and are modified freely; the real tree is
