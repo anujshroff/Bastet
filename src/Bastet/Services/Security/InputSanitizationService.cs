@@ -11,7 +11,7 @@ public partial class InputSanitizationService : IInputSanitizationService
     [GeneratedRegex(@"^[a-zA-Z0-9\s\-_.,!?@#$%&()+=]*$", RegexOptions.Compiled)]
     private static partial Regex SafeTextPattern();
 
-    [GeneratedRegex(@"<[^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"</?[A-Za-z][^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex HtmlTagPattern();
 
     [GeneratedRegex(@"javascript:|vbscript:|onload|onerror|onclick|onmouseover|onkeydown|onkeyup|onchange|onsubmit|data:", RegexOptions.Compiled | RegexOptions.IgnoreCase)]

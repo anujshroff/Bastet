@@ -89,14 +89,14 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 
 # Low
 
-## Q11 - The Create form refuses a subnet name the Edit form stores `[x2]`
+## Q11 - FIXED - The Create form refused a subnet name the Edit form stores `[x2]`
 **Where:** src/Bastet/Models/ViewModels/SubnetViewModels.cs:11 (`[SafeText]` on Create only); src/Bastet/Models/ViewModels/EditSubnetViewModel.cs:23 (no counterpart); src/Bastet/Services/Security/InputSanitizationService.cs:11
 **Breaks:** SafeTextPattern is `^[a-zA-Z0-9\s\-_.,!?@#$%&()+=]*$`, so `/`, `:`, `;`, quotes, brackets and every non-ASCII letter are refused by Create and accepted by Edit. Rename a subnet to "core/edge (site A)" and it saves; create its sibling "core/edge (site B)" and it is refused with "Subnet name contains invalid characters" while the tree displays a name holding that character, put there by the app. Not a security defect - `[NoHtml]` is on both forms and names render encoded at every sink.
 **Repro:** Create refuses `Prod: DC1`, `Zürich core`, `core/edge (site B)`; Edit accepts all three on an existing row.
 **Fix:** Delete `[SafeText]` from CreateSubnetViewModel.Name so both write paths agree on `[Required][StringLength][NoHtml][SanitizeName]`. Adding it to Edit instead would make every already-stored non-conforming row uneditable, since Edit gates the save on ModelState and prefills Name from the row. Add the parity assertion so a future divergence fails the build. Do this in one commit with Q18.
 **Residue of:** 8cefc64 (Audit 5 Cleanup #142)
 
-## Q18 - NoHtml rejects ordinary operator text as "HTML tags" `[x2]`
+## Q18 - FIXED - NoHtml rejected ordinary operator text as "HTML tags" `[x2]`
 **Where:** src/Bastet/Services/Security/InputSanitizationService.cs:14 (`HtmlTagPattern` = `<[^>]*>`); src/Bastet/Services/Security/ValidationAttributes.cs:21-23; test/Bastet.Tests/Security/SubnetViewModelValidationParityTests.cs:62
 **Breaks:** Any `<` followed later by any `>` is treated as a tag, so "HQ <-> DR" and "temp < 5 and load > 3" are refused with "HTML tags are not allowed", a cause the operator cannot find or remove. The rule is order-dependent: "reserve if load > 50% and temp < 5" is accepted, same characters reversed. It is not what makes the app safe - markup in a name renders fully encoded at every sink.
 **Repro:** Description `temp < 5 and load > 3` -> refused. Description `reserve if load > 50% and temp < 5` -> 302, stored verbatim.

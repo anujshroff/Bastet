@@ -83,6 +83,20 @@ while its clean siblings still import and the operator's own subnets are left un
 So the correct outcome for a hand-built tree that partly overlaps Azure is **partial adoption**, never
 a whole-prefix refusal.
 
+**Every write path for a field must accept and refuse exactly the same input.** Create, Edit, the bulk
+import commit and any API caller are siblings: a rule on one and not the others produces a tree the app
+itself populated but its own form will not re-enter. Check the attribute sets side by side, not the
+error messages — the divergence that shipped was `[SafeText]` on the Create view model and not the Edit
+one, so an operator could rename a subnet to `core/edge (site B)` and then be refused when creating its
+sibling.
+
+**A validation rule that refuses ordinary operator text is a defect, not caution.** Output encoding is
+what makes the app safe — Razor encodes at every sink and the wizard's client escapes before it builds
+HTML — so an input filter is a usability rule wearing a security badge. `<[^>]*>` treated "temp < 5 and
+load > 3" as a tag while accepting the same words with the comparisons reversed. When tightening one,
+prove the change against a corpus of real markup **and** real operator text, and assert both directions:
+that markup is still refused, and that ordinary text is accepted by every write path.
+
 **The wizard's client must not re-derive a decision the planner already made.** `IsSelectable` is the
 planner's answer to "does ticking this do anything?" - so any client-side filter, badge or gate that
 re-answers it by enumerating status names is a second implementation that drifts the moment a status is

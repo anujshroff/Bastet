@@ -568,6 +568,13 @@ the browser actually sent against what was persisted.**
   exactly how a linkable row came to be hidden behind a control labelled "only show what would change".
   Drive it by comparing the visible set against `isSelectable` from the same scan, not against a
   hand-written list of expected VNet names.
+- **Validation parity across write paths.** Take one field and drive the same value through every path
+  that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
+  directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused
+  everywhere, and ordinary operator text (`core/edge (site B)`, `Prod: DC1`, `Zürich core`,
+  `HQ <-> DR`, `temp < 5 and load > 3`) accepted everywhere and stored verbatim. Then read the stored
+  value back off a rendered page and assert it is HTML-encoded — that, not the input filter, is what
+  makes the app safe, so a run that only checks the filter has tested the wrong thing.
 - **Reconcile** (`_ReconcileScripts.cshtml`, 3-step): scan; checkbox select-all and the indeterminate
   state; the review table rendering status and reason with **no action column**; the typed `approved` confirmation; the
   `deleting` flag preventing a second POST; and that the commit posts `confirmedIds` /
