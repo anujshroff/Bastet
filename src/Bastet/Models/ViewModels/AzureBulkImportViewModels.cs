@@ -89,6 +89,8 @@ namespace Bastet.Models.ViewModels
 
         public string AddressPrefix { get; set; } = string.Empty;
 
+        public List<string> VNetIpv4AddressPrefixes { get; set; } = [];
+
         public List<BulkImportSelectedSubnetDto> Subnets { get; set; } = [];
 
         public BulkImportExpectedTargetDto? Expected { get; set; }

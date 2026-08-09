@@ -15,11 +15,17 @@ public class AzureBulkImportTargetNameTests
 
     private static BulkImportSelectedVNetPrefixDto Prefix(
         string vnetName, string vnetResourceId, string prefix, params BulkImportSelectedSubnetDto[] subs) =>
+        Prefix(vnetName, vnetResourceId, prefix, [prefix], subs);
+
+    private static BulkImportSelectedVNetPrefixDto Prefix(
+        string vnetName, string vnetResourceId, string prefix,
+        IReadOnlyList<string> vnetPrefixes, params BulkImportSelectedSubnetDto[] subs) =>
         new()
         {
             VNetName = vnetName,
             VNetResourceId = vnetResourceId,
             AddressPrefix = prefix,
+            VNetIpv4AddressPrefixes = [.. vnetPrefixes],
             Subnets = [.. subs]
         };
 
@@ -37,8 +43,8 @@ public class AzureBulkImportTargetNameTests
     {
         BulkImportPlanViewModel plan = Plan(
             [],
-            Prefix("vnet-a", VNetA, "10.71.0.0/16"),
-            Prefix("vnet-a", VNetA, "10.72.0.0/16"));
+            Prefix("vnet-a", VNetA, "10.71.0.0/16", ["10.71.0.0/16", "10.72.0.0/16"]),
+            Prefix("vnet-a", VNetA, "10.72.0.0/16", ["10.71.0.0/16", "10.72.0.0/16"]));
 
         List<string?> names = TargetNames(plan);
 
@@ -112,5 +118,63 @@ public class AzureBulkImportTargetNameTests
         IInputSanitizationService sanitizer = new InputSanitizationService();
 
         Assert.All(TargetNames(plan), n => Assert.True(sanitizer.IsSafeText(n!)));
+    }
+
+    [Fact]
+    public void ATwoPrefixVNetImportedOnePrefixAtATime_StillQualifiesBothNames()
+    {
+        BulkImportPlanViewModel first = Plan(
+            [],
+            Prefix("vnet-a", VNetA, "10.71.0.0/16", ["10.71.0.0/16", "10.72.0.0/16"]));
+
+        BulkImportPlanViewModel second = Plan(
+            [],
+            Prefix("vnet-a", VNetA, "10.72.0.0/16", ["10.71.0.0/16", "10.72.0.0/16"]));
+
+        Assert.Equal("vnet-a (10.71.0.0-16)", Assert.Single(TargetNames(first)));
+        Assert.Equal("vnet-a (10.72.0.0-16)", Assert.Single(TargetNames(second)));
+    }
+
+    [Fact]
+    public void ASinglePrefixVNet_KeepsItsBareName_EvenAloneInTheSelection()
+    {
+        BulkImportPlanViewModel plan = Plan(
+            [], Prefix("vnet-a", VNetA, "10.71.0.0/16", ["10.71.0.0/16"]));
+
+        Assert.Equal("vnet-a", Assert.Single(TargetNames(plan)));
+    }
+
+    [Fact]
+    public void TheAnnotationAndThePlanAgreeOnTheName_ForAMultiPrefixVNet()
+    {
+        BulkAzureVNetViewModel vnet = new()
+        {
+            ResourceId = VNetA,
+            Name = "vnet-a",
+            Ipv4AddressPrefixes = ["10.71.0.0/16", "10.72.0.0/16"]
+        };
+        ExistingSubnetSnapshot row = new()
+        {
+            Id = 1,
+            Name = "vnet-a (10.71.0.0-16)",
+            NetworkAddress = "10.71.0.0",
+            Cidr = 16,
+            AzureResourceId = VNetA
+        };
+
+        _planner.AnnotateAvailability([vnet], [row]);
+        BulkAzurePrefixViewModel annotated = vnet.Prefixes.Single(p => p.AddressPrefix == "10.71.0.0/16");
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            new BulkImportSelectionDto
+            {
+                SubscriptionId = "sub-1",
+                RenameMatchedBastetSubnets = true,
+                VNetPrefixes = [Prefix("vnet-a", VNetA, "10.71.0.0/16", ["10.71.0.0/16", "10.72.0.0/16"])]
+            },
+            [row]);
+
+        Assert.False(annotated.WouldRenameTarget);
+        Assert.False(Assert.Single(plan.Items).WillRename);
     }
 }

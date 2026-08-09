@@ -21,11 +21,17 @@ public class AzureBulkImportPlannerTests
 
     private static BulkImportSelectedVNetPrefixDto Pref(
         string vnetName, string prefix, params BulkImportSelectedSubnetDto[] subs) =>
+        PrefOfVNet(vnetName, prefix, [prefix], subs);
+
+    private static BulkImportSelectedVNetPrefixDto PrefOfVNet(
+        string vnetName, string prefix, IReadOnlyList<string> vnetPrefixes,
+        params BulkImportSelectedSubnetDto[] subs) =>
         new()
         {
             VNetName = vnetName,
             VNetResourceId = $"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/{vnetName}",
             AddressPrefix = prefix,
+            VNetIpv4AddressPrefixes = [.. vnetPrefixes],
             Subnets = [.. subs]
         };
 
@@ -317,8 +323,8 @@ public class AzureBulkImportPlannerTests
     {
 
         BulkImportSelectionDto sel = Sel(false,
-            Pref("vnet-multi", "10.0.0.0/16", Sub("a", "10.0.1.0/24")),
-            Pref("vnet-multi", "10.1.0.0/16", Sub("b", "10.1.1.0/24")));
+            PrefOfVNet("vnet-multi", "10.0.0.0/16", ["10.0.0.0/16", "10.1.0.0/16"], Sub("a", "10.0.1.0/24")),
+            PrefOfVNet("vnet-multi", "10.1.0.0/16", ["10.0.0.0/16", "10.1.0.0/16"], Sub("b", "10.1.1.0/24")));
 
         List<ExistingSubnetSnapshot> existing = [];
 

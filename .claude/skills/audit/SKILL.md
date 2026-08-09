@@ -188,6 +188,15 @@ added. It has already shipped once: "Only show what would change" tested `status
 and so hid every linkable row, i.e. hid exactly the work it promised to show. **Prefer deleting the
 duplicate over extending it.**
 
+The same rule holds **inside** the server. When one decision has two implementations they drift, and
+the drift is invisible until the two are compared: the wizard's target naming qualified a name when
+the *selection* held more than one prefix of a VNet, while the annotation qualified when the *VNet*
+did — so importing a two-prefix VNet one prefix at a time produced two rows with the same name and
+disjoint ranges, and the annotation then offered a rename that would undo the qualifier. **A finding
+that two code paths answer one question differently is a finding about the duplication, not about
+which answer is right.** Fix it by deleting an implementation, and prefer the input that describes the
+thing being named over the input that describes how the operator happened to click.
+
 **A live Azure-linked descendant is not a reason to withhold.** It is Azure content, and deleting the
 row archives it rather than destroying it — the operator then re-imports and gets it back under the
 corrected range, which is the whole point of the delete-then-import loop. Withholding on that ground

@@ -576,6 +576,12 @@ the browser actually sent against what was persisted.**
   the row is pinned at a range Azure does not have and no operator action clears it. Pair it with a
   manual-content case in the same run, which must still be withheld, since re-import cannot restore a
   hand-made subnet.
+- **A multi-prefix VNet, imported one prefix at a time.** Import each prefix of a two-prefix VNet in a
+  separate pass, then read the rows back: the two targets must carry distinguishable names, and must
+  match what importing both at once produces. Two top-level rows with the same name and disjoint ranges
+  is a failure. Then turn the rename switch on and assert neither prefix is offered a rename - an offer
+  here means the annotation and the commit disagree about the name, and taking it strips the qualifier
+  and recreates the duplicate.
 - **Validation parity across write paths.** Take one field and drive the same value through every path
   that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
   directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused

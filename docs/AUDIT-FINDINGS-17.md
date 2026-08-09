@@ -59,7 +59,7 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 **Fix applied:** DeleteSubnetViewModel carries RowVersion, the confirmation form posts it, and DeleteConfirmedCore refuses inside the subnet lock when the loaded RowVersion is non-null and the posted one is null or differs. Guarding on the loaded value keeps SQLite working, where [Timestamp] has no value generator. The subtree checks stay - RowVersion does not move when a descendant is inserted.
 **Residue of:** d18327e (Audit 16 Cleanup #165)
 
-## Q12 - Two disagreeing implementations of the multi-prefix naming rule `[x2]`
+## Q12 - FIXED - Two disagreeing implementations of the multi-prefix naming rule `[x2]`
 **Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:134-141 (multiPrefixVNetIds, built from the selection); :803-814 (TargetName); :403-412 (ProposedTargetName, keyed off `vnet.Ipv4AddressPrefixes.Count > 1`); :213-214
 **Breaks:** TargetName qualifies a name when the *selection* holds more than one prefix of that VNet; ProposedTargetName qualifies when the *VNet* has more than one. Importing a two-prefix VNet one prefix at a time therefore creates two top-level rows both named `rig-multi` - disjoint ranges, indistinguishable in the tree. Importing both at once gives the qualified names. Same VNet, same end state, different names depending only on how many boxes were ticked. Conversely, on a correctly qualified row the annotation sets WouldRenameTarget and the wizard promises a rename BuildPlan does not perform (renamedTargets 0).
 **Repro:** Import 10.30.0.0/16 alone, then 172.16.0.0/20 alone, from the same two-prefix VNet -> two rows named `rig-multi`. Both in one selection -> `rig-multi (10.30.0.0-16)` and `rig-multi (172.16.0.0-20)`.
