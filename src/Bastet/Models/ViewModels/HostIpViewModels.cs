@@ -23,7 +23,6 @@ public class CreateHostIpViewModel
 
     [StringLength(100, ErrorMessage = "Name cannot exceed 100 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in host names")]
-    [SafeText(ErrorMessage = "Host name contains invalid characters")]
     [SanitizeName]
     [Display(Name = "Host Name (Optional)")]
     public string? Name { get; set; }
@@ -44,7 +43,6 @@ public class EditHostIpViewModel
 
     [StringLength(100, ErrorMessage = "Name cannot exceed 100 characters")]
     [NoHtml(ErrorMessage = "HTML tags are not allowed in host names")]
-    [SafeText(ErrorMessage = "Host name contains invalid characters")]
     [SanitizeName]
     [Display(Name = "Host Name (Optional)")]
     public string? Name { get; set; }
