@@ -168,13 +168,13 @@
         }
 
         function prefixHasWork(prefixInfo, containedSubnets, renameOn) {
+            if (prefixInfo.isSelectable) {
+                return true;
+            }
             if (containedSubnets.some(function (s) { return s.isSelectable; })) {
                 return true;
             }
             if (containedSubnets.some(function (s) { return isSubnetRenameOnly(s, renameOn); })) {
-                return true;
-            }
-            if (prefixInfo.statusName === "Available") {
                 return true;
             }
             return isRenameOnly(prefixInfo, renameOn);

@@ -9,7 +9,7 @@ be added?) and reconcile (can this be deleted?).** Findings that argued Bastet s
 space it never imported are struck; see the bottom of this file.
 
 20 findings were filed (Q22 was found by the owner during review, not by the round). 2 are fixed
-(Q3, Q13, Q16, Q22), 14 stand, 2 more are flagged as edge cases for the owner to accept or drop, and
+(Q3, Q13, Q14, Q16, Q22), 13 stand, 2 more are flagged as edge cases for the owner to accept or drop, and
 Q1 plus 6 others were struck as invalid - see the bottom of this file.
 
 # Critical
@@ -81,7 +81,7 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 **Fix applied:** deleted the branch at :216-220 and the error at :485-489. The per-subnet detectors (:263-268, :356-378, :707-731, :752-763) already refuse every overlapping and containment shape, and ValidateSubnetCreation still runs at commit. Four tests pin the removed behaviour: AzureBulkImportTopUpTests.cs:73 and AzureBulkImportPlannerTests.cs:156/:732/:977. Do NOT touch AzureBulkImportTopUpTests:114 - different guard.
 **Residue of:** 8afa2df (Audit 14 Cleanup #160)
 
-## Q14 - "Only show what would change" hides WillUpdateExisting, suppressing the work of linking an existing Bastet row `[x1]`
+## Q14 - FIXED - "Only show what would change" hid WillUpdateExisting, suppressing the work of linking an existing Bastet row `[x1]`
 **Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:164-172 (prefixHasWork), :192, :296-304 (the empty-state banner); src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:241-247
 **Breaks:** prefixHasWork returns true only for a contained selectable subnet, `statusName === "Available"`, or rename-only. A prefix whose exact-match Bastet row is not yet linked comes back WillUpdateExisting with IsSelectable true - selecting it writes the VNet resource id onto the row - but with no selectable contained subnets it is hidden by the filter. When it is the only survivor the banner asserts the hidden prefixes are "either already imported or cannot be imported", both false. The row then never gets an AzureResourceId, so reconcile can never track that VNet.
 **Repro:** Hand-create a Bastet row matching an Azure VNet prefix exactly, AzureResourceId null. Wizard shows "Will update existing"; tick the filter and it vanishes.

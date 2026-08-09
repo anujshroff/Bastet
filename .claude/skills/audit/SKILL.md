@@ -167,6 +167,13 @@ while its clean siblings still import and the operator's own subnets are left un
 So the correct outcome for a hand-built tree that partly overlaps Azure is **partial adoption**, never
 a whole-prefix refusal.
 
+**The wizard's client must not re-derive a decision the planner already made.** `IsSelectable` is the
+planner's answer to "does ticking this do anything?" - so any client-side filter, badge or gate that
+re-answers it by enumerating status names is a second implementation that drifts the moment a status is
+added. It has already shipped once: "Only show what would change" tested `statusName === "Available"`
+and so hid every linkable row, i.e. hid exactly the work it promised to show. **Prefer deleting the
+duplicate over extending it.**
+
 **The import wizard must not offer work that is not work.** A VNet prefix already linked to its Bastet
 subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
 there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.

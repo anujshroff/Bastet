@@ -556,10 +556,18 @@ the browser actually sent against what was persisted.**
   subnet is already recorded is **hidden** and labelled `AlreadyImported`; a collapsed fully-allocated
   target imported from *this* VNet is **hidden** (`AlreadyImported`, not `Blocked`); a prefix with one
   un-imported subnet **stays visible**; and an exact-match target that is **not yet linked** stays
-  visible, because importing it links it and that is work. Then flip `#bulk-rename-matched` **without
+  visible, because importing it links it and that is work - **including one whose Bastet row already has
+  children**, which is adoption and is also work. Then flip `#bulk-rename-matched` **without
   re-scanning**: a row whose only difference is its name must appear when rename is on and vanish when
   it is off. The counter-test matters most - if nothing is ever hidden, or everything is, the filter
   is not being exercised.
+
+  **Assert the rule, not just the cases.** The filter must keep every prefix the planner marked
+  `IsSelectable`, plus the rename-only rows the client itself enables - and nothing else. A filter that
+  decides visibility by listing status names silently mis-files the next status anyone adds, which is
+  exactly how a linkable row came to be hidden behind a control labelled "only show what would change".
+  Drive it by comparing the visible set against `isSelectable` from the same scan, not against a
+  hand-written list of expected VNet names.
 - **Reconcile** (`_ReconcileScripts.cshtml`, 3-step): scan; checkbox select-all and the indeterminate
   state; the review table rendering status and reason with **no action column**; the typed `approved` confirmation; the
   `deleting` flag preventing a second POST; and that the commit posts `confirmedIds` /

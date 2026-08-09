@@ -287,4 +287,26 @@ public class AzureBulkImportZeroWorkTests
         Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
         Assert.Contains("either already recorded or cannot be imported", prefix.Reason);
     }
+
+    [Fact]
+    public void AnUnlinkedExactMatch_IsSelectable_SoTheFilterCannotHideIt()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-a", ["10.80.0.0/16"]);
+        BulkAzurePrefixViewModel prefix = Annotate(vnet, Row(1, "legacy-core", "10.80.0.0", 16));
+
+        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
+        Assert.True(prefix.IsSelectable);
+    }
+
+    [Fact]
+    public void AFullyRecordedPrefix_IsNotSelectable_SoTheFilterHidesIt()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-a", ["10.85.0.0/16"], Sub("vnet-a", "s1", "10.85.1.0/24"));
+        BulkAzurePrefixViewModel prefix = Annotate(vnet,
+            Row(1, "vnet-a", "10.85.0.0", 16, VNetId("vnet-a"), hasChildren: true),
+            Row(2, "s1", "10.85.1.0", 24, SubnetId("vnet-a", "s1")));
+
+        Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+    }
 }
