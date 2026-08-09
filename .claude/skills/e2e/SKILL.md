@@ -18,6 +18,18 @@ the scratchpad and die with the machine. The only durable artefact is the report
 Never report allocated space as free (the worst output it can produce); never destroy an allocation
 record on incomplete information; and the operator must be able to act on what they are told.
 
+**Rule 0, which overrides those: Bastet is the authority, and it answers from its own records.** Free
+means free *according to Bastet*. **Azure is not authoritative in Bastet at all** — it is a source you
+import *from*, which is why the import wizard exists. Until a range is imported it does not exist as
+far as Bastet is concerned, and a phase must never fail because Bastet showed un-imported Azure space
+as free. That is the product working.
+
+**Azure state and Bastet state are compared in exactly two places, and nowhere else:** the bulk import
+wizard, which asks *can this be added?*, and reconcile, which asks *can this be deleted?* Every other
+screen — the subnet tree, Details, unallocated ranges, host IPs, search — answers from Bastet alone.
+**Never write an assertion that has any other surface consult Azure**, and never fail one because it
+did not.
+
 **One flat, routable space.** Bastet manages a single IP space in which everything is routable against
 everything else, so the same range must never be allocated twice — preventing that collision is the
 product's reason to exist. Two consequences when classifying a result:

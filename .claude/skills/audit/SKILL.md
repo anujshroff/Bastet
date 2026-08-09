@@ -91,6 +91,44 @@ let an operator manage that space.** Every judgement resolves against that, in t
 3. **The operator must be able to act on what they are told.** A message naming a remedy the app refuses
    is a defect.
 
+**Rule 0, which overrides all three: Bastet is the authority, and it answers from its own records.**
+Free means free *according to Bastet*. **Azure is not authoritative in Bastet at all** — it is a source
+you import *from*. That is the whole reason the import wizard exists: Azure space becomes real to
+Bastet by being imported, and until it is imported it does not exist as far as Bastet is concerned.
+Reconcile does not change this — it *reports* that a linked Azure resource is gone or re-ranged so the
+**operator** can decide. Azure never decides anything.
+
+**Azure state and Bastet state are compared in exactly two places, and nowhere else:**
+
+| surface | the only question it asks |
+|---|---|
+| the bulk import wizard | **can this be added?** |
+| reconcile | **can this be deleted?** |
+
+That is the entire Azure/Bastet arithmetic in the product. Every other screen — the subnet tree,
+Details, unallocated ranges, host IPs, search — answers from Bastet's records alone and must never
+consult Azure. **A finding that brings Azure state into any surface outside those two is out of bounds
+by construction**, whatever it claims to have found. Check which surface a candidate is really about
+before you write it up; three of round 17's struck findings were reasoning about Azure on the Details
+page.
+
+So this whole shape of finding is **invalid and must never be filed**:
+
+> "Bastet shows 10.20.9.32 as free, but an Azure subnet Bastet never imported holds it."
+
+That is not a defect. It is the product working. Rule 1 governs Bastet's *own* records disagreeing
+with each other or with a resource Bastet is linked to — nothing else. A finding that needs Bastet to
+know about un-imported Azure space to be a defect **is not a defect**, however good the failure
+scenario reads. Round 17 filed four of these and every one was struck by the owner on sight.
+
+Corollaries, each of which also killed a round-17 finding:
+
+- A wizard filter that hides a row which **cannot be imported** is correct — ticking it would change
+  nothing, which is exactly what the filter means.
+- Reconcile returning a clean scan over a partially imported subscription is correct.
+- "The operator might allocate over Azure space" is not a consequence you may escalate on. They ran
+  the import wizard or they did not.
+
 **One flat, routable space.** Bastet manages a single IP space in which everything is routable against
 everything else, so the same range must never be allocated twice — preventing that collision is the
 product's reason to exist. Two consequences that decide findings:
@@ -108,9 +146,12 @@ product's reason to exist. Two consequences that decide findings:
   row fully allocated instead of creating the duplicate. A parent and child with the same CIDR *are* the
   collision the product exists to prevent, and the second row tracks no free space, so it buys nothing.
 
-**Azure is the source of truth for the rows imported from it.** A subnet carrying an Azure resource id
-is a *record of* an Azure resource. **Deleted in Azure means deleted in Bastet; re-ranged in Azure means
-Bastet says so.** The **only** legitimate reason to refuse is **manual content in that hierarchy — a
+**A row carrying an Azure resource id is a record the operator asked Bastet to keep in step with Azure.**
+Azure is still not authoritative — Bastet is — but for *that row* the operator has said "track this", so
+when Azure no longer has the resource, or no longer holds the recorded range, **reconcile must say so
+and offer the delete**. It reports; the operator decides; nothing is ever removed on Azure's word alone.
+Silently withholding the report is its own defect: it leaves Bastet asserting an allocation the operator
+was never told to reconsider. The **only** legitimate reason to refuse is **manual content in that hierarchy — a
 hand-added child subnet, or a host IP** — because that is operator-owned data Azure does not know about
 and must never be destroyed silently. Nothing else qualifies. The range turning up in another VNet does
 not; a prefix still "covered" after a re-carve does not. A finding that proposes withholding on any
@@ -696,3 +737,22 @@ the Refuted table, which is the whole content in that case and the part worth ha
   the authority on that question is the product's entire purpose.
 - **File it and rate it.** A finding the owner declines costs one line. A defect a round declines on
   their behalf has cost four rounds before.
+
+**But grade honestly, and stop stacking.** Round 17 filed ten High and zero Critical, and the owner
+downgraded or struck most of the Highs in minutes. The inflation came from one habit: attaching a
+Rule-1 consequence to a finding whose actual defect is a string. Guard against it:
+
+- **Grade the defect you can reproduce, not the worst thing downstream of it.** A wrong message is a
+  wrong message. If the only harm you can demonstrate is that the sentence is untrue, it is **Low**.
+- **If the fix is one string, the severity is Low.** No exceptions. Write the string fix and move on.
+- **A contradiction the operator can see on the same screen is Low**, not High. Round 17 filed as High
+  a message contradicted by the row rendered directly beneath it.
+- **Same defect class, same severity.** Three findings that are all "the app names a remedy it does not
+  offer" cannot be graded High, High and Low. Sort by class before you grade.
+- **Critical means an operator loses or double-allocates real address space with no signal.** If no
+  finding reaches that bar, the round has zero Critical, and that is a fine result to report.
+
+**And stop writing essays.** Four fields. A Fix field is one to three sentences: the change, and a
+named alternative if the obvious fix is unsound. Round 17's file was 82 KB for 21 findings — the Fix
+fields alone averaged 1.2 KB each and the owner read none of them. Under 25 KB for a full round, or
+the round has confused volume with rigour.

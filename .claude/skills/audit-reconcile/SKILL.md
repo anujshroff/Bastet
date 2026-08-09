@@ -19,6 +19,31 @@ let an operator manage that space.** Every judgement call resolves against that,
 3. **The operator must be able to act on what they are told.** A message naming a remedy the app
    refuses is a defect, not a cosmetic issue.
 
+**Rule 0, which overrides all three: Bastet is the authority, and it answers from its own records.**
+Free means free *according to Bastet*. **Azure is not authoritative in Bastet at all** — it is a source
+you import *from*, which is exactly why the import wizard exists. Until a range is imported it does not
+exist as far as Bastet is concerned.
+
+So a finding of this shape is **invalid, and the job is to strike it, never to implement it**:
+
+> "Bastet shows 10.20.9.32 as free, but an Azure subnet Bastet never imported holds it."
+
+If a finding needs Bastet to know about un-imported Azure space to be a defect, it is not a defect.
+Record it as struck with that reason and write no code. Same for a wizard filter hiding a row that
+cannot be imported (correct — ticking it would change nothing), and for reconcile returning a clean
+scan over a partially imported subscription (also correct). Round 17 filed four of these and the owner
+struck every one.
+
+**Azure state and Bastet state are compared in exactly two places, and nowhere else:** the bulk import
+wizard, which asks *can this be added?*, and reconcile, which asks *can this be deleted?* That is the
+whole Azure/Bastet arithmetic in the product. Every other screen — the subnet tree, Details,
+unallocated ranges, host IPs, search — answers from Bastet's records alone and must never consult
+Azure. **A fix that would make any other surface aware of Azure is out of bounds**, and a finding that
+asks for one gets struck rather than implemented.
+
+**If the whole of a finding is that a string is untrue, fix the string and nothing else** — no new
+status, no new guard, no new branch behind it.
+
 **One flat, routable space.** Bastet manages a single IP space in which everything is routable against
 everything else, so the same range must never be allocated twice — preventing that collision is the
 product's reason to exist. Two consequences that decide fixes:
@@ -37,9 +62,12 @@ product's reason to exist. Two consequences that decide fixes:
   row fully allocated instead of creating the duplicate. Never fix in a direction that produces the
   second row: a parent and child with the same CIDR *are* the collision the product exists to prevent.
 
-**Azure is the source of truth for the rows imported from it.** A subnet carrying an Azure resource id
-is a *record of* an Azure resource. **Deleted in Azure means deleted in Bastet; re-ranged in Azure means
-Bastet says so.** The **only** legitimate reason to refuse is **manual content in that hierarchy — a
+**A row carrying an Azure resource id is a record the operator asked Bastet to keep in step with Azure.**
+Azure is still not authoritative — Bastet is — but for *that row* the operator said "track this", so when
+Azure no longer has the resource, or no longer holds the recorded range, **reconcile must say so and
+offer the delete**. It reports; the operator decides; nothing is removed on Azure's word alone. Silently
+withholding the report is its own defect — it leaves Bastet asserting an allocation the operator was
+never told to reconsider. The **only** legitimate reason to refuse is **manual content in that hierarchy — a
 hand-added child subnet, or a host IP** — operator-owned data Azure does not know about, which must
 never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
 must not be applied as filed.

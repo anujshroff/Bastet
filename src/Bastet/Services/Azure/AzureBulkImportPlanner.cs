@@ -234,8 +234,11 @@ namespace Bastet.Services.Azure
                 if (isTopUp && !AnySubnetCanBeAdded(vnet, network, cidr))
                 {
                     return AlreadyImported(result,
-                        $"Already imported as Bastet subnet '{exact.Name}'. Every Azure subnet in this prefix is "
-                        + "already recorded, so there is nothing to add.");
+                        AnySubnetCannotBeImported(vnet, network, cidr)
+                            ? $"Already imported as Bastet subnet '{exact.Name}'. Every Azure subnet in this prefix is "
+                              + "either already recorded or cannot be imported, so there is nothing to add."
+                            : $"Already imported as Bastet subnet '{exact.Name}'. Every Azure subnet in this prefix is "
+                              + "already recorded, so there is nothing to add.");
                 }
 
                 result.Status = BulkImportAvailability.WillUpdateExisting;
@@ -393,12 +396,19 @@ namespace Bastet.Services.Azure
             subnet.IsSelectable = false;
         }
 
-        private bool AnySubnetCanBeAdded(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
-            vnet.Subnets.Any(s =>
-                s.IsSelectable
-                && TryParseCidr(s.AddressPrefix, out string n, out int c)
+        private IEnumerable<BulkAzureSubnetViewModel> SubnetsWithinPrefix(
+            BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
+            vnet.Subnets.Where(s =>
+                TryParseCidr(s.AddressPrefix, out string n, out int c)
                 && ((c == prefixCidr && string.Equals(n, prefixNetwork, StringComparison.OrdinalIgnoreCase))
                     || ipUtilityService.IsSubnetContainedInParent(n, c, prefixNetwork, prefixCidr)));
+
+        private bool AnySubnetCanBeAdded(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
+            SubnetsWithinPrefix(vnet, prefixNetwork, prefixCidr).Any(s => s.IsSelectable);
+
+        private bool AnySubnetCannotBeImported(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
+            SubnetsWithinPrefix(vnet, prefixNetwork, prefixCidr)
+                .Any(s => s.Status == BulkImportAvailability.Blocked);
 
         private string ProposedTargetName(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr)
         {
