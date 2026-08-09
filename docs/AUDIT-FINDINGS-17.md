@@ -8,9 +8,9 @@ the import wizard is for. Azure and Bastet state are compared in exactly two pla
 be added?) and reconcile (can this be deleted?).** Findings that argued Bastet should know about Azure
 space it never imported are struck; see the bottom of this file.
 
-16 findings were filed (Q22 was found by the owner during review, not by the round). 3 are fixed
-(Q1, Q3, Q22), 13 stand, 5 were struck as invalid, and 2 more are flagged as edge cases for the owner
-to accept or drop.
+20 findings were filed (Q22 was found by the owner during review, not by the round). 2 are fixed
+(Q3, Q13, Q22), 15 stand, 2 more are flagged as edge cases for the owner to accept or drop, and
+Q1 plus 6 others were struck as invalid - see the bottom of this file.
 
 # Critical
 
@@ -71,7 +71,7 @@ to accept or drop.
 **Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:333 (the handler); :349-367 (the `#bulk-hide-imported` sibling that does it correctly)
 **Breaks:** The handler calls `invalidatePlan(); renderVNetTree();`. renderVNetTree empties the tree and rebuilds every checkbox unticked. Unlike its sibling it neither snapshots/restores the ticked state nor calls updateGoPreviewBtn. The operator curates a selection, ticks the rename switch - precisely because they want renames applied to that batch - and the tree silently empties while "Next: Preview" stays enabled. Pressing it posts `{"vNetPrefixes":[]}` and step 3 reads "Cannot import: No VNet address prefixes were selected."
 **Repro:** Select all (12/13 prefixes, 14/15 subnets), tick `#bulk-rename-matched` -> 0/13 and 0/15 ticked, preview button still enabled, no message.
-**Fix:** Extract the snapshot / renderVNetTree / restore / updateGoPreviewBtn sequence at :350-366 into one named function and call it from both handlers.
+**Fix applied:** the handler now calls `updateGoPreviewBtn()` after re-rendering, so the button tracks the actual selection. The selection is still cleared by the toggle, but visibly - empty tree, disabled button - rather than silently posting nothing. Preserving it across the re-render, as `#bulk-hide-imported` does, was considered and deliberately not done: the owner chose the smaller fix.
 **Residue of:** none
 
 ## Q16 - Wizard blocks linking a not-yet-linked target purely because it has children `[x1]`

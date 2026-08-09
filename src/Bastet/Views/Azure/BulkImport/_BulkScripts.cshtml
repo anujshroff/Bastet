@@ -350,8 +350,8 @@
         }
 
         $("#bulk-rename-matched").on("change", function () {
-            invalidatePlan();
             renderVNetTree();
+            updateGoPreviewBtn();
         });
 
         $("#bulk-select-all-btn").on("click", function () {
