@@ -508,12 +508,29 @@ the browser actually sent against what was persisted.**
   | a prefix Bastet does not record | *(no badge)* — "Will create a new Bastet subnet" | yes |
   | linked, with a subnet still addable | Will update existing | yes |
   | linked, everything recorded | Already imported | no |
-  | matched a hand-made subnet holding host IPs / children | Cannot import, reason naming which | no |
+  | matched a hand-made subnet holding host IPs | Cannot import, reason naming which | no |
+  | matched a hand-made subnet **with children**, unlinked | Will update existing | **yes** — adoption |
   | linked, childless, name differs, **rename on** | Rename only | **yes** |
   | linked and **fully allocated**, name differs, **rename on** | Rename only | **yes** |
   | already-imported **child subnet**, name drifted, **rename on** | Rename only | **yes** |
   | unlinked row on the same range, **rename on** | Cannot import | no |
 
+- **Adopting a hand-built tree that partly overlaps Azure.** Build a Bastet /16 by hand with two
+  hand-made children, one of which overlaps an Azure subnet in the matching VNet, and drive the whole
+  thing: the prefix must be selectable, the clean Azure subnet must import, the overlapping one must
+  stay `Cannot import` **naming the Bastet row in the way**, and committing must link the parent while
+  leaving both hand-made rows present and still unlinked. Then POST the overlapping subnet directly,
+  bypassing the disabled checkbox, and assert the preview refuses with a global error and the commit
+  writes nothing. A whole-prefix refusal here is a regression, not a safeguard.
+- **Every toggle must re-derive the preview button.** Select all, then flip each toggle in turn and
+  assert the button's `disabled` state matches what is actually ticked. A re-render that rebuilds the
+  checkboxes unticked while the button stays enabled posts an empty selection and answers
+  "No VNet address prefixes were selected" — assert the count of ticked boxes and the button together,
+  because either alone passes.
+- **The already-imported wording must match what is underneath it.** A prefix whose contained Azure
+  subnets are all recorded says "already recorded"; one where any contained subnet is refused says
+  "either already recorded or cannot be imported". Assert the two separately in one scan, or the
+  wording drifts back to claiming completeness over a row rendered directly beneath it saying otherwise.
 - **The rename toggle re-renders the tree whether or not the filter is on.** It changes the badge and
   the checkbox, not just visibility. Assert `Rename only` appears with the filter **off** too, or a
   regression that gates the re-render on the filter passes unnoticed.

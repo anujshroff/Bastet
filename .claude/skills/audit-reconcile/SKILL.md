@@ -72,6 +72,17 @@ hand-added child subnet, or a host IP** — operator-owned data Azure does not k
 never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
 must not be applied as filed.
 
+**A row the operator built by hand can be adopted by the VNet it matches.** Linking a not-yet-linked
+target is real work and stays offered **whether or not that row already has children** — the operator
+may well have carved the space by hand first and now want Bastet to track it against Azure. Having
+children is not a conflict, and refusing on it keys on *provenance*, which is never a reason: the
+identical shape with the link already present is advertised as "Will add any missing subnets".
+The refusals that remain are the real conflicts, and they are decided **per subnet, not per prefix**:
+an Azure subnet that would contain, or be contained by, an existing Bastet row is refused by name,
+while its clean siblings still import and the operator's own subnets are left untouched and unlinked.
+So the correct outcome for a hand-built tree that partly overlaps Azure is **partial adoption**, never
+a whole-prefix refusal.
+
 **The import wizard must not offer work that is not work.** A VNet prefix already linked to its Bastet
 subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
 there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.
