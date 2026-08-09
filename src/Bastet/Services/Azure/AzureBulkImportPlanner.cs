@@ -213,11 +213,6 @@ namespace Bastet.Services.Azure
                 result.WouldRenameTarget = !string.Equals(
                     exact.Name, ProposedTargetName(vnet, network, cidr), StringComparison.Ordinal);
 
-                if (exact.HasChildSubnets && !isTopUp)
-                {
-                    return Blocked(result,
-                        $"Bastet subnet '{exact.Name}' already has child subnets and is not linked to this VNet. Already imported?");
-                }
                 if (exact.HasHostIpAssignments)
                 {
                     return Blocked(result, $"Bastet subnet '{exact.Name}' already has host IP assignments.");
@@ -509,11 +504,6 @@ namespace Bastet.Services.Azure
                 item.ExistingTargetSubnetId = exact.Id;
                 item.ExistingTargetSubnetName = exact.Name;
 
-                if (exact.HasChildSubnets && !IsSameVNet(exact, p.Source.VNetResourceId))
-                {
-                    item.Errors.Add(
-                        $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) already has child subnets and is not linked to this VNet.");
-                }
                 if (exact.HasHostIpAssignments)
                 {
                     item.Errors.Add(

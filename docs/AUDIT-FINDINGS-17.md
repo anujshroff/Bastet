@@ -9,7 +9,7 @@ be added?) and reconcile (can this be deleted?).** Findings that argued Bastet s
 space it never imported are struck; see the bottom of this file.
 
 20 findings were filed (Q22 was found by the owner during review, not by the round). 2 are fixed
-(Q3, Q13, Q22), 15 stand, 2 more are flagged as edge cases for the owner to accept or drop, and
+(Q3, Q13, Q16, Q22), 14 stand, 2 more are flagged as edge cases for the owner to accept or drop, and
 Q1 plus 6 others were struck as invalid - see the bottom of this file.
 
 # Critical
@@ -74,11 +74,11 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 **Fix applied:** the handler now calls `updateGoPreviewBtn()` after re-rendering, so the button tracks the actual selection. The selection is still cleared by the toggle, but visibly - empty tree, disabled button - rather than silently posting nothing. Preserving it across the re-render, as `#bulk-hide-imported` does, was considered and deliberately not done: the owner chose the smaller fix.
 **Residue of:** none
 
-## Q16 - Wizard blocks linking a not-yet-linked target purely because it has children `[x1]`
+## Q16 - FIXED - Wizard blocked linking a not-yet-linked target purely because it had children `[x1]`
 **Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:216-220; :485-489 (the same rule as a per-item commit error)
 **Breaks:** The refusal keys on whether the row is already linked to *this* VNet, not on any conflict. A hand-created Bastet row with any child cannot be linked to its Azure VNet - "already has child subnets and is not linked to this VNet. Already imported?" - a false diagnosis naming no remedy; the only escape is deleting the operator's own subnet. The identical state with the link already present is advertised: "Will add any missing subnets to existing Bastet subnet 'X'."
 **Repro:** Hand-create 172.16.0.0/20 with a non-overlapping child, then try to import the matching Azure VNet prefix -> Blocked. Delete the child -> the byte-identical selection commits.
-**Fix:** Delete the branch at :216-220 and the error at :485-489. The per-subnet detectors (:263-268, :356-378, :707-731, :752-763) already refuse every overlapping and containment shape, and ValidateSubnetCreation still runs at commit. Four tests pin the removed behaviour: AzureBulkImportTopUpTests.cs:73 and AzureBulkImportPlannerTests.cs:156/:732/:977. Do NOT touch AzureBulkImportTopUpTests:114 - different guard.
+**Fix applied:** deleted the branch at :216-220 and the error at :485-489. The per-subnet detectors (:263-268, :356-378, :707-731, :752-763) already refuse every overlapping and containment shape, and ValidateSubnetCreation still runs at commit. Four tests pin the removed behaviour: AzureBulkImportTopUpTests.cs:73 and AzureBulkImportPlannerTests.cs:156/:732/:977. Do NOT touch AzureBulkImportTopUpTests:114 - different guard.
 **Residue of:** 8afa2df (Audit 14 Cleanup #160)
 
 ## Q14 - "Only show what would change" hides WillUpdateExisting, suppressing the work of linking an existing Bastet row `[x1]`
