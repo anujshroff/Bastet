@@ -510,6 +510,9 @@ the browser actually sent against what was persisted.**
   | linked, everything recorded | Already imported | no |
   | matched a hand-made subnet holding host IPs / children | Cannot import, reason naming which | no |
   | linked, childless, name differs, **rename on** | Rename only | **yes** |
+  | linked and **fully allocated**, name differs, **rename on** | Rename only | **yes** |
+  | already-imported **child subnet**, name drifted, **rename on** | Rename only | **yes** |
+  | unlinked row on the same range, **rename on** | Cannot import | no |
 
 - **The rename toggle re-renders the tree whether or not the filter is on.** It changes the badge and
   the checkbox, not just visibility. Assert `Rename only` appears with the filter **off** too, or a
@@ -519,6 +522,18 @@ the browser actually sent against what was persisted.**
   **A target with child subnets renames like any other** — that case was once excluded, so cover it
   explicitly: rename it by hand, tick it with rename on, commit, and assert the target took the VNet
   name **and every child survived untouched**.
+- **Child subnets rename too, and the assertion is the database, not the banner.** Rename two imported
+  children by hand, tick them with rename on, commit, then **read the rows back** and assert the names
+  actually changed. A counter incremented over an untracked entity reports "renamed 2" while writing
+  nothing, so a pass that only reads the success message proves nothing. Assert the preview says
+  *Rename to* rather than *Create* for those rows, and that `createdChildSubnets` is 0.
+- **The rename gate is the Azure link.** Cover both refusals in the same run: a row on the matching
+  range with **no** `AzureResourceId`, and one linked to a **different** Azure resource. Both must stay
+  `Cannot import`, must never be renamed, and must keep the "already exists in Bastet" global error.
+- **A rename-only selection must be submittable on its own.** Tick only child subnets, leaving the
+  prefix checkbox unticked, and assert the preview button enables and the payload still carries the
+  parent prefix — the selection is built from prefix checkboxes, so a child-only selection is exactly
+  the case that silently posts nothing.
 - **"Only show what would change"** (`#bulk-hide-imported`): with it **on**, nothing that would do no work may
   remain visible. Build all four cases in one scan and assert each: a VNet prefix whose every Azure
   subnet is already recorded is **hidden** and labelled `AlreadyImported`; a collapsed fully-allocated

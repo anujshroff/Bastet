@@ -31,8 +31,8 @@ So a finding of this shape is **invalid, and the job is to strike it, never to i
 If a finding needs Bastet to know about un-imported Azure space to be a defect, it is not a defect.
 Record it as struck with that reason and write no code. Same for a wizard filter hiding a row that
 cannot be imported (correct — ticking it would change nothing), and for reconcile returning a clean
-scan over a partially imported subscription (also correct). Round 17 filed four of these and the owner
-struck every one.
+scan over a partially imported subscription (also correct). Rounds have filed these repeatedly and the
+owner has struck every one.
 
 **Azure state and Bastet state are compared in exactly two places, and nowhere else:** the bulk import
 wizard, which asks *can this be added?*, and reconcile, which asks *can this be deleted?* That is the
@@ -76,7 +76,21 @@ must not be applied as filed.
 subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
 there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.
 Two things still count as work and must stay offered: **linking a target that is not yet linked**, and
-**renaming** when the operator has asked for renames. "Only show what would change" hides exactly the rows that
+**renaming** when the operator has asked for renames.
+
+**Renaming is gated on the Azure link, and on nothing else.** When the operator asks for renames, the
+wizard offers a rename for **both** the VNet target row **and** every already-imported child subnet
+whose Bastet name has drifted from its Azure name — the control says "subnets" and must mean it, since
+nothing else in the product can bring a drifted child name back into step. The single condition is that
+the row **already carries the Azure resource id** it is being renamed to match:
+
+- linked, and the name differs → offer the rename, and perform it
+- **not** linked, or linked to a different Azure resource → **"cannot import" stands, and no rename is
+  ever performed** — the range matching is not enough, because an unlinked row is operator-owned data
+  that this Azure resource has no claim on
+- fully allocated makes no difference to a rename *on its own*: a rename creates nothing inside the
+  target, so a linked fully-allocated row is renameable. It stays refused the moment the same selection
+  would also create a subnet inside it, which is a real conflict. "Only show what would change" hides exactly the rows that
 would change nothing, which is only correct while those four cases are classified correctly.
 
 **Reconcile does exactly two things. A fix that grows it past them is not a fix.**

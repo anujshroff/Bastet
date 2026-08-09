@@ -393,8 +393,25 @@ namespace Bastet.Services.Azure
             subnet.Reason = sameAzureResource
                 ? $"Already imported as Bastet subnet '{exact.Name}'."
                 : $"Bastet subnet '{exact.Name}' already uses {subnet.AddressPrefix}.";
+            subnet.WouldRenameSubnet = sameAzureResource
+                && !string.Equals(exact.Name, ProposedChildName(subnet), StringComparison.Ordinal);
             subnet.IsSelectable = false;
         }
+
+        private static ExistingSubnetSnapshot? LinkedRowForSameAzureSubnet(
+            ParsedSubnetSelection sub, IReadOnlyList<ExistingSubnetSnapshot> existingSubnets) =>
+            string.IsNullOrEmpty(sub.Source.AzureResourceId)
+                ? null
+                : existingSubnets.FirstOrDefault(e =>
+                    e.Cidr == sub.Cidr
+                    && string.Equals(e.NetworkAddress, sub.Network, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrEmpty(e.AzureResourceId)
+                    && string.Equals(e.AzureResourceId, sub.Source.AzureResourceId, StringComparison.OrdinalIgnoreCase));
+
+        private string ProposedChildName(BulkAzureSubnetViewModel subnet) =>
+            TruncateAndSanitizeName(subnet.Name) is { Length: > 0 } sanitized
+                ? sanitized
+                : subnet.AddressPrefix.Replace('/', '_');
 
         private IEnumerable<BulkAzureSubnetViewModel> SubnetsWithinPrefix(
             BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
@@ -502,7 +519,9 @@ namespace Bastet.Services.Azure
                     item.Errors.Add(
                         $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) already has host IP assignments.");
                 }
-                if (exact.IsFullyAllocated)
+                if (exact.IsFullyAllocated
+                    && (!IsSameVNet(exact, p.Source.VNetResourceId)
+                        || p.Subnets.Any(s => LinkedRowForSameAzureSubnet(s, existingSubnets) is null)))
                 {
                     item.Errors.Add(
                         $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) is marked as fully allocated.");
@@ -610,6 +629,8 @@ namespace Bastet.Services.Azure
                     continue;
                 }
 
+                ExistingSubnetSnapshot? linkedRow = LinkedRowForSameAzureSubnet(sub, existingSubnets);
+
                 string baseName = TruncateAndSanitizeName(sub.Source.Name);
                 if (string.IsNullOrEmpty(baseName))
                 {
@@ -621,6 +642,30 @@ namespace Bastet.Services.Azure
 
                     baseName = SubnetNaming.WithSuffix(
                         baseName, $" ({sub.Network}-{sub.Cidr})", MaxSubnetNameLength);
+                }
+
+                if (linkedRow is not null)
+                {
+                    if (!renameMatched || string.Equals(linkedRow.Name, baseName, StringComparison.Ordinal))
+                    {
+                        usedNames.Add(linkedRow.Name);
+                        continue;
+                    }
+
+                    string renamedTo = DisambiguateName(baseName, usedNames, p.Source.VNetName);
+                    usedNames.Add(renamedTo);
+
+                    item.ChildSubnets.Add(new BulkImportPlannedChildSubnet
+                    {
+                        OriginalAzureName = sub.Source.Name,
+                        Name = renamedTo,
+                        NetworkAddress = sub.Network,
+                        Cidr = sub.Cidr,
+                        AzureResourceId = sub.Source.AzureResourceId,
+                        WillRename = true,
+                        ExistingSubnetId = linkedRow.Id
+                    });
+                    continue;
                 }
 
                 string finalName = DisambiguateName(baseName, usedNames, p.Source.VNetName);
@@ -698,7 +743,7 @@ namespace Bastet.Services.Azure
             {
                 foreach (ParsedSubnetSelection s in p.Subnets)
                 {
-                    if (s.FullyEncompasses)
+                    if (s.FullyEncompasses || LinkedRowForSameAzureSubnet(s, existingSubnets) is not null)
                     {
                         continue;
                     }

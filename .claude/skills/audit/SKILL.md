@@ -109,8 +109,7 @@ That is the entire Azure/Bastet arithmetic in the product. Every other screen �
 Details, unallocated ranges, host IPs, search — answers from Bastet's records alone and must never
 consult Azure. **A finding that brings Azure state into any surface outside those two is out of bounds
 by construction**, whatever it claims to have found. Check which surface a candidate is really about
-before you write it up; three of round 17's struck findings were reasoning about Azure on the Details
-page.
+before you write it up; findings reasoning about Azure on the Details page have been struck on sight.
 
 So this whole shape of finding is **invalid and must never be filed**:
 
@@ -119,9 +118,9 @@ So this whole shape of finding is **invalid and must never be filed**:
 That is not a defect. It is the product working. Rule 1 governs Bastet's *own* records disagreeing
 with each other or with a resource Bastet is linked to — nothing else. A finding that needs Bastet to
 know about un-imported Azure space to be a defect **is not a defect**, however good the failure
-scenario reads. Round 17 filed four of these and every one was struck by the owner on sight.
+scenario reads. Rounds have filed these repeatedly and the owner has struck every one on sight.
 
-Corollaries, each of which also killed a round-17 finding:
+Corollaries, each of which has killed a filed finding:
 
 - A wizard filter that hides a row which **cannot be imported** is correct — ticking it would change
   nothing, which is exactly what the filter means.
@@ -161,7 +160,21 @@ other ground is wrong however good its failure scenario looks.
 subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
 there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.
 Two things still count as work and must stay offered: **linking a target that is not yet linked**, and
-**renaming** when the operator has asked for renames. "Only show what would change" hides exactly the rows that
+**renaming** when the operator has asked for renames.
+
+**Renaming is gated on the Azure link, and on nothing else.** When the operator asks for renames, the
+wizard offers a rename for **both** the VNet target row **and** every already-imported child subnet
+whose Bastet name has drifted from its Azure name — the control says "subnets" and must mean it, since
+nothing else in the product can bring a drifted child name back into step. The single condition is that
+the row **already carries the Azure resource id** it is being renamed to match:
+
+- linked, and the name differs → offer the rename, and perform it
+- **not** linked, or linked to a different Azure resource → **"cannot import" stands, and no rename is
+  ever performed** — the range matching is not enough, because an unlinked row is operator-owned data
+  that this Azure resource has no claim on
+- fully allocated makes no difference to a rename *on its own*: a rename creates nothing inside the
+  target, so a linked fully-allocated row is renameable. It stays refused the moment the same selection
+  would also create a subnet inside it, which is a real conflict. "Only show what would change" hides exactly the rows that
 would change nothing, which is only correct while those four cases are classified correctly.
 
 **Reconcile does exactly two things, and a finding that grows it past them is wrong.**
@@ -738,21 +751,21 @@ the Refuted table, which is the whole content in that case and the part worth ha
 - **File it and rate it.** A finding the owner declines costs one line. A defect a round declines on
   their behalf has cost four rounds before.
 
-**But grade honestly, and stop stacking.** Round 17 filed ten High and zero Critical, and the owner
+**But grade honestly, and stop stacking.** A round once filed ten High and zero Critical, and the owner
 downgraded or struck most of the Highs in minutes. The inflation came from one habit: attaching a
 Rule-1 consequence to a finding whose actual defect is a string. Guard against it:
 
 - **Grade the defect you can reproduce, not the worst thing downstream of it.** A wrong message is a
   wrong message. If the only harm you can demonstrate is that the sentence is untrue, it is **Low**.
 - **If the fix is one string, the severity is Low.** No exceptions. Write the string fix and move on.
-- **A contradiction the operator can see on the same screen is Low**, not High. Round 17 filed as High
-  a message contradicted by the row rendered directly beneath it.
+- **A contradiction the operator can see on the same screen is Low**, not High. A round once filed as
+  High a message contradicted by the row rendered directly beneath it.
 - **Same defect class, same severity.** Three findings that are all "the app names a remedy it does not
   offer" cannot be graded High, High and Low. Sort by class before you grade.
 - **Critical means an operator loses or double-allocates real address space with no signal.** If no
   finding reaches that bar, the round has zero Critical, and that is a fine result to report.
 
 **And stop writing essays.** Four fields. A Fix field is one to three sentences: the change, and a
-named alternative if the obvious fix is unsound. Round 17's file was 82 KB for 21 findings — the Fix
+named alternative if the obvious fix is unsound. One round produced 82 KB for 21 findings — the Fix
 fields alone averaged 1.2 KB each and the owner read none of them. Under 25 KB for a full round, or
 the round has confused volume with rigour.

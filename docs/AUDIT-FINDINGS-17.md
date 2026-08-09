@@ -2,19 +2,21 @@
 
 branch `audit/round-17` / HEAD `425ec8d` / 752 tests passing / 2026-08-08
 
-Reviewed with the owner against the product model: **Bastet reports on what Bastet holds. Azure is
-authoritative only for rows Bastet has a link to. Un-imported Azure space is not Bastet's business -
-bringing it in is what the import wizard is for.** Findings that argued Bastet should know about
-Azure space it never imported are struck; see the bottom of this file.
+Reviewed with the owner against the product model: **Bastet is the authority and answers from its own
+records. Azure is not authoritative in Bastet at all - it is a source you import from, which is what
+the import wizard is for. Azure and Bastet state are compared in exactly two places: import (can this
+be added?) and reconcile (can this be deleted?).** Findings that argued Bastet should know about Azure
+space it never imported are struck; see the bottom of this file.
 
-16 findings stand (Q22 was found by the owner during review, not by the round). 1 is fixed. 5 were struck as invalid, and 2 more are flagged as edge cases for
-the owner to accept or drop.
+16 findings were filed (Q22 was found by the owner during review, not by the round). 3 are fixed
+(Q1, Q3, Q22), 13 stand, 5 were struck as invalid, and 2 more are flagged as edge cases for the owner
+to accept or drop.
 
 # Critical
 
 # High
 
-## Q3 - Wizard offers "Rename only" on a fully-allocated target, then the preview refuses that same rename and kills the whole batch `[x2]`
+## Q3 - FIXED - Wizard offered "Rename only" on a fully-allocated target, then refused that same rename `[x2]`
 **Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:495 (unconditional refusal); :213 (WouldRenameTarget set before the fully-allocated branch); src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:144-148, :200-217, :340; src/Bastet/Models/ViewModels/AzureBulkImportViewModels.cs:206 (CanCommit is all-or-nothing)
 **Breaks:** A collapsed target (one Bastet row, IsFullyAllocated, linked) that the operator has renamed comes back `wouldRenameTarget:true`, so the wizard enables its checkbox, badges it "Rename only" and promises "The only change would be renaming the Bastet subnet to match the VNet name." Preview then hits `if (exact.IsFullyAllocated)` at :495 and errors "is marked as fully allocated", CanCommit false. Full allocation is irrelevant to a rename, which puts nothing inside the target. Because CanCommit is all-or-nothing and Select all ticks the row, one such target refuses the entire batch with a 400.
 **Repro:** Rename a fully-allocated linked row, reopen the wizard, tick "Rename matched Bastet subnets to VNet names". Checkbox enables, badge reads "Rename only", preview errors, commit disabled. Same flow on a non-fully-allocated target commits cleanly.
@@ -30,7 +32,7 @@ the owner to accept or drop.
 
 # Medium
 
-## Q22 - "Rename matched Bastet subnets to VNet names" renames the VNet target only; child subnets are never offered `[owner]`
+## Q22 - FIXED - "Rename matched Bastet subnets to VNet names" renamed the VNet target only; child subnets were never offered `[owner]`
 **Where:** src/Bastet/Models/ViewModels/AzureBulkImportViewModels.cs:104-106 (WillRename/NewName exist only on BulkImportPlanItem, the target); :147-159 (BulkImportPlannedChildSubnet has no rename field at all); src/Bastet/Controllers/SubnetController.BulkAzure.cs:335 onward (the child loop only creates - an already-imported child never enters item.ChildSubnets); src/Bastet/Views/Azure/BulkImport/_StepSelection.cshtml:54 (the control's label says "subnets")
 **Breaks:** The control is labelled "Rename matched Bastet subnets to VNet names" and renames exactly one row: the VNet target. Imported child subnets whose Bastet names have drifted from their Azure names are shown as "Already imported as Bastet subnet 'ping'", not selectable, with no rename offered - and no other surface corrects them either, since reconcile never edits a row. The operator's only remedy is editing every child by hand, which is precisely what the toggle exists to avoid on a large import.
 **Repro:** Import a VNet with two subnets, rename both Bastet children (`a` -> `ping`, `b` -> `pong`), reopen the wizard and turn the rename switch on. The target renames; both children stay `ping` and `pong` with no offer. Verified live against rig-batch-17 10.60.0.0/16.

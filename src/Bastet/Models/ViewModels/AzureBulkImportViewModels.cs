@@ -31,6 +31,8 @@ namespace Bastet.Models.ViewModels
         public string? Reason { get; set; }
 
         public bool IsSelectable { get; set; } = true;
+
+        public bool WouldRenameSubnet { get; set; }
     }
 
     public class BulkAzurePrefixViewModel
@@ -156,6 +158,10 @@ namespace Bastet.Models.ViewModels
         public int Cidr { get; set; }
 
         public string AzureResourceId { get; set; } = string.Empty;
+
+        public bool WillRename { get; set; }
+
+        public int? ExistingSubnetId { get; set; }
     }
 
     public class BulkImportPlanItem
