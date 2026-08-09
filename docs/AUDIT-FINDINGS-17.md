@@ -52,11 +52,11 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 **Fix:** Not a one-liner, and worth its own decision. Resolve each planned child's parent with the existing FindDeepestContainer at :438, record it on BulkImportPlannedChildSubnet, and use it in place of the hardcoded `ParentSubnetId = targetSubnet.Id` at :360/:385; only then delete :368-378 and :724-730. Do NOT remove the sibling containment guard at :359-365 - the manual form enforces that one too. Interim: reword the refusal to name the remedy ("create it under 'covers-app' manually").
 **Residue of:** none
 
-## Q8 - Delete confirmation binds the reviewed subtree but not the reviewed row's own range `[x1]`
+## Q8 - FIXED - Delete confirmation bound the reviewed subtree but not the reviewed row's own range `[x1]`
 **Where:** src/Bastet/Controllers/SubnetController.Delete.cs:176-183; :32-43; src/Bastet/Views/Subnet/Delete/_DeleteConfirmationForm.cshtml; src/Bastet/Models/Subnet.cs:44 (`[Timestamp] RowVersion`, already present)
 **Breaks:** The stale-scope check re-derives only MaxDescendantSubnetId and MaxSubtreeHostIpTicks. Both are 0 for a childless leaf and stay 0 however the target row itself is mutated. An operator who reviewed and approved archiving `DMZ 10.77.0.0/24` can have a `/16` archived instead if another operator widened it in between - 256x the reviewed space, irreversibly, and the success banner reports the row's new name. The reversible Edit path already refuses on a RowVersion mismatch, so the irreversible operation is weaker than the reversible one.
 **Repro:** GET /Subnet/Delete/1 on a /24, widen to /16 via Edit, replay the original delete body -> 302, row archived as /16, no refusal.
-**Fix:** Carry the row's RowVersion in DeleteSubnetViewModel and as a hidden field; inside DeleteConfirmedCore take the stale branch when the loaded RowVersion is non-null and the posted value is null or differs. Guard on the loaded value so SQLite (no `[Timestamp]` value generator) does not fail every delete.
+**Fix applied:** DeleteSubnetViewModel carries RowVersion, the confirmation form posts it, and DeleteConfirmedCore refuses inside the subnet lock when the loaded RowVersion is non-null and the posted one is null or differs. Guarding on the loaded value keeps SQLite working, where [Timestamp] has no value generator. The subtree checks stay - RowVersion does not move when a descendant is inserted.
 **Residue of:** d18327e (Audit 16 Cleanup #165)
 
 ## Q12 - Two disagreeing implementations of the multi-prefix naming rule `[x2]`

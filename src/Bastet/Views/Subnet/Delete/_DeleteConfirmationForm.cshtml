@@ -4,6 +4,7 @@
     <input type="hidden" asp-for="Id" />
     <input type="hidden" name="confirmedMaxSubnetId" value="@Model.ConfirmedMaxSubnetId" />
     <input type="hidden" name="confirmedMaxHostIpTicks" value="@Model.ConfirmedMaxHostIpTicks" />
+    <input type="hidden" name="rowVersion" value="@(Model.RowVersion is null ? "" : Convert.ToBase64String(Model.RowVersion))" />
 
     <div class="mb-4">
         <label for="confirmation" class="form-label fw-bold">Type "approved" to confirm deletion:</label>
