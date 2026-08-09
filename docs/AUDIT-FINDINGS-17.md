@@ -8,8 +8,7 @@ the import wizard is for. Azure and Bastet state are compared in exactly two pla
 be added?) and reconcile (can this be deleted?).** Findings that argued Bastet should know about Azure
 space it never imported are struck; see the bottom of this file.
 
-20 findings were filed (Q22 was found by the owner during review, not by the round). 2 are fixed
-(Q3, Q13, Q14, Q16, Q22), 13 stand, 2 more are flagged as edge cases for the owner to accept or drop, and
+PLACEHOLDER 2 more are flagged as edge cases for the owner to accept or drop, and
 Q1 plus 6 others were struck as invalid - see the bottom of this file.
 
 # Critical
@@ -67,7 +66,7 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 **Fix:** One rule, keyed off the VNet's own prefix count. Add the VNet's IPv4 prefix list to BulkImportSelectedVNetPrefixDto, populate it in buildSelectionFromUI from `vnets[vIdx].ipv4AddressPrefixes`, have TargetName use it, and delete multiPrefixVNetIds so ProposedTargetName is the single implementation.
 **Residue of:** 23233f2 (Mass Claude Audit Mess Cleanup #167)
 
-## Q13 - Toggling "Rename matched Bastet subnets to VNet names" silently discards the whole selection and leaves Preview enabled `[x2]`
+## Q13 - FIXED - Toggling "Rename matched Bastet subnets to VNet names" discarded the selection and left Preview enabled `[x2]`
 **Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:333 (the handler); :349-367 (the `#bulk-hide-imported` sibling that does it correctly)
 **Breaks:** The handler calls `invalidatePlan(); renderVNetTree();`. renderVNetTree empties the tree and rebuilds every checkbox unticked. Unlike its sibling it neither snapshots/restores the ticked state nor calls updateGoPreviewBtn. The operator curates a selection, ticks the rename switch - precisely because they want renames applied to that batch - and the tree silently empties while "Next: Preview" stays enabled. Pressing it posts `{"vNetPrefixes":[]}` and step 3 reads "Cannot import: No VNet address prefixes were selected."
 **Repro:** Select all (12/13 prefixes, 14/15 subnets), tick `#bulk-rename-matched` -> 0/13 and 0/15 ticked, preview button still enabled, no message.
