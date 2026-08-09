@@ -7,7 +7,7 @@ authoritative only for rows Bastet has a link to. Un-imported Azure space is not
 bringing it in is what the import wizard is for.** Findings that argued Bastet should know about
 Azure space it never imported are struck; see the bottom of this file.
 
-15 findings stand. 1 is fixed. 5 were struck as invalid, and 2 more are flagged as edge cases for
+16 findings stand (Q22 was found by the owner during review, not by the round). 1 is fixed. 5 were struck as invalid, and 2 more are flagged as edge cases for
 the owner to accept or drop.
 
 # Critical
@@ -18,7 +18,7 @@ the owner to accept or drop.
 **Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:495 (unconditional refusal); :213 (WouldRenameTarget set before the fully-allocated branch); src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:144-148, :200-217, :340; src/Bastet/Models/ViewModels/AzureBulkImportViewModels.cs:206 (CanCommit is all-or-nothing)
 **Breaks:** A collapsed target (one Bastet row, IsFullyAllocated, linked) that the operator has renamed comes back `wouldRenameTarget:true`, so the wizard enables its checkbox, badges it "Rename only" and promises "The only change would be renaming the Bastet subnet to match the VNet name." Preview then hits `if (exact.IsFullyAllocated)` at :495 and errors "is marked as fully allocated", CanCommit false. Full allocation is irrelevant to a rename, which puts nothing inside the target. Because CanCommit is all-or-nothing and Select all ticks the row, one such target refuses the entire batch with a 400.
 **Repro:** Rename a fully-allocated linked row, reopen the wizard, tick "Rename matched Bastet subnets to VNet names". Checkbox enables, badge reads "Rename only", preview errors, commit disabled. Same flow on a non-fully-allocated target commits cleanly.
-**Fix:** At :495 guard the refusal with what it protects: `if (exact.IsFullyAllocated && p.Subnets.Any(s => !s.FullyEncompasses))`. Do not delete WouldRenameTarget/isRenameOnly - renames must stay offered.
+**Fix:** Same feature as Q22 - fix together. At :495 guard the refusal with what it protects: `if (exact.IsFullyAllocated && p.Subnets.Any(s => !s.FullyEncompasses))`. Do not delete WouldRenameTarget/isRenameOnly - renames must stay offered.
 **Residue of:** 23233f2 (Mass Claude Audit Mess Cleanup #167)
 
 ## Q10 - Reconcile destroys the finding, not just the delete: a linked row's range change is never reported `[x1]`
@@ -29,6 +29,13 @@ the owner to accept or drop.
 **Residue of:** a8f669b (Audit 8 Cleanup #152)
 
 # Medium
+
+## Q22 - "Rename matched Bastet subnets to VNet names" renames the VNet target only; child subnets are never offered `[owner]`
+**Where:** src/Bastet/Models/ViewModels/AzureBulkImportViewModels.cs:104-106 (WillRename/NewName exist only on BulkImportPlanItem, the target); :147-159 (BulkImportPlannedChildSubnet has no rename field at all); src/Bastet/Controllers/SubnetController.BulkAzure.cs:335 onward (the child loop only creates - an already-imported child never enters item.ChildSubnets); src/Bastet/Views/Azure/BulkImport/_StepSelection.cshtml:54 (the control's label says "subnets")
+**Breaks:** The control is labelled "Rename matched Bastet subnets to VNet names" and renames exactly one row: the VNet target. Imported child subnets whose Bastet names have drifted from their Azure names are shown as "Already imported as Bastet subnet 'ping'", not selectable, with no rename offered - and no other surface corrects them either, since reconcile never edits a row. The operator's only remedy is editing every child by hand, which is precisely what the toggle exists to avoid on a large import.
+**Repro:** Import a VNet with two subnets, rename both Bastet children (`a` -> `ping`, `b` -> `pong`), reopen the wizard and turn the rename switch on. The target renames; both children stay `ping` and `pong` with no offer. Verified live against rig-batch-17 10.60.0.0/16.
+**Fix:** Give BulkImportPlannedChildSubnet the same WillRename/NewName the target has; when the switch is on, emit already-imported children as rename candidates instead of dropping them at annotation; rename them in the commit loop rather than skipping. Q3 is the same feature failing on the other axis - fix them together, and make the label match whatever the final scope is.
+**Residue of:** none - the rename feature has only ever covered the target.
 
 ## Q4 - Unallocated-range rows contradict themselves: the size does not match the start/end it prints `[x2]`
 **Where:** src/Bastet/Services/IpUtilityService.cs:306-315 (head branch, count at :313); :230-255 (no-children early return, `subnetSize - 2`); :330-349 (tail branch, `lastIp--`); src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:38-40, :46-52
