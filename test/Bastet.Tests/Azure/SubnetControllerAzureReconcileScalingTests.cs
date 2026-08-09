@@ -63,7 +63,7 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
 
     private sealed record Outcome(int WholeTableReads, int SubnetsArchived, int HostIpsArchived, int SubnetsRemaining);
 
-    private static async Task<Outcome> ArchiveStaleTargetsAsync(int targetCount)
+    private static async Task<Outcome> ArchiveStaleTargetsAsync(int targetCount, bool withHostIps = false)
     {
         WholeTableSubnetReadCounter counter = new();
 
@@ -113,6 +113,7 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
                 NetworkAddress = $"10.{v}.1.0",
                 Cidr = 24,
                 ParentSubnetId = rootId,
+                AzureResourceId = $"/subscriptions/{SubId}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-gone-{v}/subnets/child",
                 CreatedAt = DateTime.UtcNow
             });
 
@@ -124,16 +125,20 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
                 NetworkAddress = $"10.{v}.1.0",
                 Cidr = 26,
                 ParentSubnetId = childId,
+                AzureResourceId = $"/subscriptions/{SubId}/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet-gone-{v}/subnets/grandchild",
                 CreatedAt = DateTime.UtcNow
             });
 
-            context.HostIpAssignments.Add(new HostIpAssignment
+            if (withHostIps)
             {
-                IP = $"10.{v}.1.5",
-                Name = $"host-{v}",
-                SubnetId = grandchildId,
-                CreatedAt = DateTime.UtcNow
-            });
+                context.HostIpAssignments.Add(new HostIpAssignment
+                {
+                    IP = $"10.{v}.1.5",
+                    Name = $"host-{v}",
+                    SubnetId = grandchildId,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
         }
 
         for (int pad = 0; pad < 200; pad++)
@@ -162,10 +167,10 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
                 Statuses = await AzureReconcileApproval.ForAsync(azure, snapshots, SubId, targets)
             },
             azure,
-            new AzureReconciler(new IpUtilityService()),
+            new AzureReconciler(),
             snapshots);
 
-        Assert.IsType<OkObjectResult>(result);
+        Assert.IsType(withHostIps ? typeof(ConflictObjectResult) : typeof(OkObjectResult), result);
 
         Outcome outcome = new(
             counter.Count,
@@ -190,13 +195,24 @@ public class SubnetControllerAzureReconcileScalingTests : IDisposable
     }
 
     [Fact]
-    public async Task BulkDeleteStaleAzureSubnets_NestedSubtreesWithHostIps_AreFullyArchived()
+    public async Task BulkDeleteStaleAzureSubnets_NestedAzureOnlySubtrees_AreFullyArchived()
     {
         Outcome outcome = await ArchiveStaleTargetsAsync(8);
 
         Assert.Equal(24, outcome.SubnetsArchived);
-        Assert.Equal(8, outcome.HostIpsArchived);
+        Assert.Equal(0, outcome.HostIpsArchived);
 
         Assert.Equal(200, outcome.SubnetsRemaining);
+    }
+
+    [Fact]
+    public async Task BulkDeleteStaleAzureSubnets_SubtreesHoldingHostIps_AreRefusedEntirely()
+    {
+        Outcome outcome = await ArchiveStaleTargetsAsync(8, withHostIps: true);
+
+        Assert.Equal(0, outcome.SubnetsArchived);
+        Assert.Equal(0, outcome.HostIpsArchived);
+
+        Assert.Equal(224, outcome.SubnetsRemaining);
     }
 }

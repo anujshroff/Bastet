@@ -48,14 +48,14 @@ git var GIT_AUTHOR_IDENT        # "Author identity unknown" (exit 128) means it 
 
 If that fails, **ask for the git name and email in the same message as the credentials.** Do not
 guess them, do not scrape them out of `git log`, and do not discover the problem forty minutes later
-at the commit step — round 7 would have completed every phase and then died on its last action.
+at the commit step, after every phase has already run.
 Whose name goes on a commit is the user's call; asking costs one line in a message you are already
 sending. If the identity resolves, say nothing and do not ask.
 
 Credentials are **never stored**. They are pasted by the user, written once to a scratchpad file the
 script points agents at, and die with the machine. Never into the repository, never into a config
 file, never into a prompt repeated across sixteen agents, never into a commit. A credential from a
-previous round is not evidence of a working one — they rotate, and round 6's was revoked.
+previous round is not evidence of a working one — they rotate and get revoked.
 
 **Ask nothing else. Ever.** Not scale, not rig, not verification depth, not "shall I proceed", not
 "should I continue". Everything else is fixed below or discovered by the script. If a required input
@@ -91,10 +91,92 @@ let an operator manage that space.** Every judgement resolves against that, in t
 3. **The operator must be able to act on what they are told.** A message naming a remedy the app refuses
    is a defect.
 
+**One flat, routable space.** Bastet manages a single IP space in which everything is routable against
+everything else, so the same range must never be allocated twice — preventing that collision is the
+product's reason to exist. Two consequences that decide findings:
+
+- **"Still allocated" is a question about the whole managed space, never about provenance.** If any live
+  resource holds a range, that range is in use, whichever VNet, subscription or import it came from, and
+  archiving Bastet's only record of it reports an in-use range as free. Overlapping Azure VNets are not
+  a case to defend — inside Bastet's model that overlap *is* the collision, not a legitimate
+  configuration, so "but VNets may legitimately overlap" is not a reason to withhold a finding.
+- **How the space is carved up is the operator's choice, and only theirs** — by hand, by Azure import,
+  or both. Neither origin is privileged: a rule that holds for a manually created subnet holds
+  identically for an imported one, and vice versa.
+- **One Azure range is one Bastet row.** A VNet with a single address prefix whose single subnet covers
+  that whole prefix is **one** row, not a VNet parent plus a byte-identical child. The import marks that
+  row fully allocated instead of creating the duplicate. A parent and child with the same CIDR *are* the
+  collision the product exists to prevent, and the second row tracks no free space, so it buys nothing.
+
+**Azure is the source of truth for the rows imported from it.** A subnet carrying an Azure resource id
+is a *record of* an Azure resource. **Deleted in Azure means deleted in Bastet; re-ranged in Azure means
+Bastet says so.** The **only** legitimate reason to refuse is **manual content in that hierarchy — a
+hand-added child subnet, or a host IP** — because that is operator-owned data Azure does not know about
+and must never be destroyed silently. Nothing else qualifies. The range turning up in another VNet does
+not; a prefix still "covered" after a re-carve does not. A finding that proposes withholding on any
+other ground is wrong however good its failure scenario looks.
+
+**The import wizard must not offer work that is not work.** A VNet prefix already linked to its Bastet
+subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
+there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.
+Two things still count as work and must stay offered: **linking a target that is not yet linked**, and
+**renaming** when the operator has asked for renames. "Only show what would change" hides exactly the rows that
+would change nothing, which is only correct while those four cases are classified correctly.
+
+**Reconcile does exactly two things, and a finding that grows it past them is wrong.**
+
+1. **Report Azure resources that are gone**, so the operator can choose to delete the Bastet row.
+2. **Report Azure resources whose range changed**, so the operator can choose to delete the Bastet row.
+
+That is the whole feature. Everything it is *not* has been tried and removed:
+
+- **It never edits a row.** Not the range, not the name, not the Azure link. There is no re-link.
+- **It never re-adds anything.** After deleting a row whose range changed, the operator goes back
+  through the **bulk import wizard** to bring in the current range. Reconcile does not create subnets,
+  so a message about a changed range must point at the import wizard — anything else names a remedy
+  reconcile does not offer, which is rule 3.
+- **It never hunts for un-imported Azure space.** Discovering ranges Bastet does not record is the
+  import wizard's job. Reconcile reporting them produces rows nobody can act on from that screen.
+- **It decides on the linked resource alone** — the resource id on the row against Azure's current
+  state. It does not consult other VNets, other subscriptions, or what else Bastet records.
+
+**The resource id is the only join key, and that is why the refusal list is one item long.** Reconcile
+asks exactly one question of Azure: *does the resource this row names still exist, and does it still
+hold this range?* Both are answered by looking up `AzureResourceId`. The address range is never a
+lookup key — it is only ever compared against **that same resource's own** current prefixes. Gone means
+delete. The single exception is manual content, and it is an exception precisely because it is the one
+thing the resource id cannot tell you about: Azure has no record of a hand-added child subnet or a host
+IP, so deleting on Azure's word would destroy data Azure never knew existed.
+
+**So any proposed withhold that reasons about a range rather than a resource id is wrong by
+construction.** "The range showed up in another VNet", "another subscription still holds it", "the
+prefix is still covered after the re-carve" — each asks a question reconcile does not ask, and each
+answers it with a range match across resources. That is the exact shape of the four withholds rounds
+14-17 added, and of `FindLiveOwnerOfRange`, which is deleted. If a finding needs cross-resource range
+matching to justify itself, the finding is the defect.
+
+Reconcile is small on purpose. **Prefer the finding that deletes machinery to the finding that adds a
+case to it.**
+
+**Reconcile and the bulk import wizard are clients of the IPAM, not privileged writers.** Every change they
+make — delete, edit, add — goes through the same validation a manual operation goes through. They must
+not write to the database directly to bypass a check, and must not carry their own copy of a rule that
+lets them persist a state the validated path would reject. **Any Azure-driven write that reaches the
+database without the base validation is a finding, whatever it was trying to achieve.** Where Azure's
+state cannot be represented without breaking a validation rule, that is a conflict to report to the
+operator — never a licence to write it anyway.
+
+**Rule 1 is symmetric, and only one half of it used to be written down.** "Never report allocated space
+as free" has a twin: **never pin an allocation record Azure says is gone.** A withheld deletion is not a
+safe default — it leaves Bastet asserting that free space is allocated, indefinitely, with no operator
+action that clears it. Weigh every proposed guard against **both** halves and say which one it serves.
+While only the first half was recorded, four consecutive rounds widened a single withhold path nobody
+had asked for and more than quadrupled the size of `AzureReconciler.cs`.
+
 **If a capability ships, making it work correctly is in scope.** Bastet imports Azure subnets, so
 multi-prefix subnets, top-ups and re-carves are in scope. "Feature change, not a bug fix", "the data
 model does not support it" and "out of scope" are not verdicts a round may reach — they describe work,
-not reasons to decline. Round 6 used one and it shipped the bug for four rounds.
+not reasons to decline. One round used such a verdict and it shipped the bug for four more.
 
 Since round 1 there have been **no intended product changes**. Everything filed is a defect against
 behaviour the product already promises, either from the original implementation or introduced by a
@@ -103,17 +185,44 @@ previous round's fixes. There is no third category.
 # The round exists to reduce defects, not to produce findings
 
 **Measure the residue rate and lead with it.** Every finding names which previous-round fix it came out
-of, or none. Round 16 was 11 of 15; its re-audit was 12 of 20. That means the fix process, not the
-codebase, has been the main defect source — and a round that does not say so plainly in its first
-sentence has buried the most important thing it knows.
+of, or none. Across recent rounds most findings have traced back to the previous round's own fixes,
+which means the fix process, not the codebase, has been the main defect source — and a round that does
+not say so plainly in its first sentence has buried the most important thing it knows.
 
 - **Report the defect, not the instance.** A finding naming one call site when the rule is wrong at
   three hands the reconcile step a fix that cannot close it. Name every site.
-- **A proposed fix that would introduce a new defect is worse than no proposal.** Round 16 had eight of
-  fifteen judged unsound, three of which would have shipped a new defect. That check is the most
-  valuable thing verification produces.
+- **A proposed fix that would introduce a new defect is worse than no proposal.** Roughly half of all
+  proposed fixes have been judged unsound on review, several of which would have shipped a new defect.
+  That check is the most valuable thing verification produces.
 - **A fix proposal must be narrow.** If closing a defect appears to need a component restructured, say
   so explicitly and separately — a restructure smuggled into a fix is where residue comes from.
+
+# Audit the mechanism before proposing to extend it
+
+**A previous round's fix that is already in the tree reads as settled design. It is not.** Four
+consecutive rounds once widened the same withhold path, each round's finders reporting it as *still not
+wide enough* — because it was in front of them and nothing invited them to ask whether it should exist.
+Four rounds compounding in a direction the owner had never asked for.
+
+So, whenever a candidate proposes **extending, widening or adding** a guard, withhold, refusal, special
+case or status:
+
+- **Name the contract it serves**, from *What Bastet is*. If you cannot point at the sentence, the
+  finding is that the mechanism exists, not that it is incomplete.
+- **Check who introduced it.** `git log -S` the identifying string. If a previous round added it, read
+  that round's commit message: you are reading an opinion, not a requirement.
+- **Prefer the finding that removes it.** "This mechanism is on the wrong axis" is a more valuable
+  finding than "this mechanism has a gap", and only the first can end the cycle.
+
+**Growth is evidence.** Report the line count of any component you file more than one finding against,
+at this round's HEAD and at the previous audit commit. A component that has doubled across rounds while
+the product's requirements did not change is being driven by the audit loop, and that belongs in the
+round's headline.
+
+**A subsystem must not re-derive a core rule.** When a component grows its own copy of IP arithmetic,
+free-space calculation or containment, the finding is the duplication itself — not each place the copy
+disagrees with `IpUtilityService`. One round filed three separate findings that were all a single
+duplicated engine drifting.
 
 # No questions, ever
 
@@ -134,10 +243,10 @@ when it is broken.
 
 # You are the operator, not a spectator
 
-Launch the workflow, then **watch it and intervene**. Round 7's skill said to launch and say nothing,
-answer status questions by pointing at `/workflows`, and never look at the run. All three were wrong:
-`/workflows` does not exist in the VSCode extension, the merge agent stalled dead twice, and the round
-only finished because those rules were broken. Observation is your job.
+Launch the workflow, then **watch it and intervene**. Do not launch and look away, and do not answer
+status questions by pointing at `/workflows` — it does not exist in the VSCode extension. Merge agents
+have stalled dead mid-run, and the round only finishes because someone is watching. Observation is
+your job.
 
 ## Your tool budget
 
@@ -283,7 +392,14 @@ worker who has never opened it, since six of the eight beats audit the whole app
 Accepted and still open, never re-raised: ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
 Development-only `DevAuthHandler` bypass, `GlobalSanitizationFilter` skipping nested `System.*`
 collections, `CollectDescendants` lacking a cycle guard, the unreachable IP-change branch in
-`ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and **C20**.
+`ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and the bounded
+race in the reconcile bulk delete — between Azure confirming a subtree deleted and the cascade
+archiving it, a concurrent write can grow that subtree inside the contended lock window. It is
+accepted, not unnoticed: Azure cannot be re-checked while holding the lock, the single-subnet delete
+has the same confirm-then-cascade semantics, everything is archived rather than destroyed, and
+closing it would make bulk stricter than single delete on a flow already behind a typed confirmation.
+Re-verifying the target's own NetworkAddress/Cidr/ResourceId does **not** address it — the target is
+unchanged; it is the subtree that grows.
 
 **Rig agent** → `RIG.md`. Preflight, baseline, then stands the rig up.
 
@@ -333,10 +449,10 @@ error immediately on launch, which is the only validation needed.
 
 **`Workflow` must be available.** It is the entire skill. If the tool is not present, **stop and say
 so** — never quietly fall back to `Agent`, which is what put sixty workers' tool calls into the user's
-terminal in rounds 6 and 7.
+terminal.
 
 **Memory.** Sixteen concurrent agents, each with a build, container or browser. **Under 16 GB the host
-dies mid-run** — round 7's first attempt died this way. Stop and name the figure.
+dies mid-run.** Stop and name the figure.
 
 **Git identity.** `git var GIT_AUTHOR_IDENT`. If it resolves, move on. If it does not, the name and
 email were collected in the up-front ask — set them at **global (user) scope**:
@@ -386,7 +502,7 @@ parallel, and the script **asserts the two round numbers match and stops if they
 independent derivations of the same number is a cheap correctness check on the round's own identity.
 
 Branching here rather than at Phase 5 means there is never a window in which the round could commit to
-`main`. Round 7 branched at commit time, which is to say it did not branch, and the findings commit
+`main`. Branching at commit time is not branching, and a round that did it put the findings commit
 landed on `main` and had to be moved afterwards. `main` must be byte-identical before and after a
 round.
 
@@ -400,7 +516,7 @@ not create.
 
 Then: database, application, browser image, and Azure fixtures in **both** resource groups so the
 disjoint principals see genuinely different slices of reality. **Keep an explicit inventory of every
-Azure resource created** — round 7's teardown reported success while removing none, because nothing
+Azure resource created** — a teardown once reported success while removing nothing, because nothing
 forced it to enumerate. The inventory is what Phase 5 deletes.
 
 ## Phase 2 — the beats, twice (20 agents + 1 merge)
@@ -411,7 +527,7 @@ round's delta, and that is the only reason they exist.**
 This is the mistake to avoid, and it is easy to make because beat 6 is where the highest-value findings
 have historically come from: pointing every beat at what changed recently. Do not. An audit that only
 re-examines the last round's diff is a regression check wearing an audit's name — it cannot find the
-defect that has been in `IpUtilityService` since round 3, and after enough rounds that is where the
+long-standing defect in `IpUtilityService`, and after enough rounds that is where the
 remaining defects are. Beats 1-5 and 8 sweep their surface across the entire codebase and treat
 recently-changed code on exactly the same terms as everything else: neither weighted nor exempt.
 
@@ -421,19 +537,19 @@ surface, not the diff.
 
 1. **Security / web** — authorization coverage, antiforgery, XSS, injection, SSRF, headers, log forging, secrets.
 2. **Logic & data integrity** — subnet/CIDR arithmetic, containment and overlap, host-IP validation, and any path that persists a state the validated path would reject.
-3. **Azure integration** — import wizards, bulk planner, reconciler. Highest stakes: the only code that *deletes* on the strength of what an external system reports. Work partial visibility hard — throttling, an empty page, a 403 on one group, a token expiring mid-enumeration, a paged response whose second page fails. Which of those does it treat as "absent, therefore delete"?
+3. **Azure integration** — the bulk import wizard, its planner, and the reconciler. Highest stakes: the only code that *deletes* on the strength of what an external system reports. Work partial visibility hard — throttling, an empty page, a 403 on one group, a token expiring mid-enumeration, a paged response whose second page fails. Which of those does it treat as "absent, therefore delete"?
 4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
-5. **UI & client-JS** — the three wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
-6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. This beat, and only this beat, is deliberately scoped to the delta: the round-N-1 fixes are dense in defects, and round 7's highest-value findings were all residue of round 6's. That density is why it gets a deep sweep — it is not a reason to point the other beats here.
+5. **UI & client-JS** — the bulk import and reconcile wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
+6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. This beat, and only this beat, is deliberately scoped to the delta: the previous round's fixes are dense in defects, and a round's highest-value findings are routinely all residue of them. That density is why it gets a deep sweep — it is not a reason to point the other beats here.
 7. **Regression tests** — do the tests added alongside those commits fail against the unfixed code? Revert the fix hunk in a scratch copy and find out.
 8. **Dead code & refactor residue** — orphans from earlier deletions.
 
 **Every worker prompt carries this:** write **nothing** into the repository directory — no PID files,
 no logs, no scratch, no notes; everything goes under the rig directory. "Do not modify the working
-tree" is not enough: round 7's beats read it as "do not edit source" and left four `.pid` files in the
+tree" is not enough: beats have read it as "do not edit source" and left `.pid` files in the
 root. One untracked file makes the tree dirty and Phase 5 refuses the commit. Also: own port, own
-catalog, kill only by captured PID — never `pkill -f "Bastet.dll"`, which cost two agents their
-applications in round 6.
+catalog, kill only by captured PID — never `pkill -f "Bastet.dll"`, which has killed other agents'
+applications mid-run.
 
 Tag `[x2]` (both passes, independently) or `[x1]` (one pass). **Absence is weak evidence** — a `[x1]`
 deserves *more* scrutiny, not less. The deep sweep is a third population and does not by itself make
@@ -453,32 +569,31 @@ enough to hand a human. The third only runs on disagreement, so it costs almost 
 the query, clicks the wizard — and records `reproduced` as `yes-ran-it` (with the actual command and
 the actual observed result), `no-could-not` (**refuted**), or `not-runnable` (the narrow exception for
 dead code and missing assertions, with the reason stated). A finding nobody executed is how a
-hallucinated defect reaches a human. In round 7 this killed 8 of 36 — nearly a quarter.
+hallucinated defect reaches a human. This routinely kills a fifth to a quarter of all candidates.
 
 A verifier may also change the answer rather than the confidence: kill a proposed *fix* while keeping
-the finding, correct a severity, correct a citation. Round 7 found 8 of 20 proposed fixes unsound or
-incomplete. Those corrections go in the file.
+the finding, correct a severity, correct a citation. Those corrections go in the file.
 
-**If a finding's own failure scenario opens with "not a runtime defect", it is refuted.** Rounds 4-7
-killed the same test-coverage-observation shape every time.
+**If a finding's own failure scenario opens with "not a runtime defect", it is refuted.** Every round
+kills this same test-coverage-observation shape; it is not a defect report.
 
 ## Phase 4 — the scribe (2 agents, sequential)
 
 One writes `docs/AUDIT-FINDINGS-<N>.md`. A second re-checks **every** citation against the working tree
-and **fixes** what is wrong — round 7's checker corrected 5 of 130, including one stale line number
-carried over from round 6. A findings file is correct only against the HEAD it was written at.
+and **fixes** what is wrong — stale line numbers and citations that moved are routine. A findings file
+is correct only against the HEAD it was written at.
 
 **Every finding names the previous-round fix it came out of, or says it came out of none.** One line
-in the finding: *"residue of O8"*, or nothing if it is independent. The scribe then totals them and
+in the finding — the previous round's finding id, or nothing if it is independent. The scribe totals them and
 opens the Verdict with the rate:
 
 > Round `<N>` filed `<F>` findings, of which `<R>` are residue of round `<N-1>`'s own fixes.
 
-Round 16's was **11 of 15** — the audit was not finding a rotten codebase, it was finding the fix
-loop's own output, and nobody had measured that in sixteen rounds. It is the single most useful number
-this round produces about *the process* rather than the software, it costs one line per finding, and a
-falling rate is the only evidence that the loop is converging. `/audit-reconcile` steps 5 and 6 exist
-to drive it down; this is how anyone can tell whether they worked.
+When most findings are residue, the audit is not finding a rotten codebase — it is finding the fix
+loop's own output. It is the single most useful number this round produces about *the process* rather
+than the software, it costs one line per finding, and a falling rate is the only evidence that the loop
+is converging. `/audit-reconcile` steps 5 and 6 exist to drive it down; this is how anyone can tell
+whether they worked.
 
 ## Phase 5 — teardown and commit (1 agent)
 
@@ -507,7 +622,7 @@ on replay, so they are noise.
 **Never push.** The remote is read-only here and publishing happens on the host.
 
 Then assert, and report failure loudly if any of these is false: the commit exists, it touches exactly
-one file, `main` still points where the baseline said it did, and the tree is clean. Round 7 satisfied
+one file, `main` still points where the baseline said it did, and the tree is clean. A round once satisfied
 none of the branch conditions and reported success anyway.
 
 ---
@@ -520,7 +635,7 @@ none of the branch conditions and reported success anyway.
 - **A concrete failure scenario** with real inputs and the wrong output.
 - **Evidence it was reproduced** — what was run, what came back.
 - **A proposed fix**, plus a cheaper interim where one exists.
-- **Attribution: which previous-round fix this is residue of**, by its id (*"residue of O8"*), or an
+- **Attribution: which previous-round fix this is residue of**, by that round's finding id, or an
   explicit *none* if it is independent of the last round. Use `git log`/`git blame` on the cited lines
   to settle it rather than guessing. This is what the residue rate is totalled from, and it is the
   round's only measurement of whether the fix loop is converging.
@@ -543,15 +658,15 @@ branch / HEAD / test baseline / date / residue rate
 Each finding is a heading and **four fields, nothing else**:
 
 ```
-## P7 — <one-line title> `[x2]`
+## <this round's letter><n> — <one-line title> `[x2]`
 **Where:** src/Bastet/Services/Azure/AzureReconciler.cs:757
 **Breaks:** <real inputs, the wrong output, one short paragraph>
 **Repro:** <what was run, what came back>
 **Fix:** <the narrow change; note if a verifier judged the filed fix unsound>
-**Residue of:** P5 | none
+**Residue of:** <previous round's finding id> | none
 ```
 
-**No Verdict essay, no "How this audit ran", no funnel table, no watch list.** Round 16's file reached
+**No Verdict essay, no "How this audit ran", no funnel table, no watch list.** One round's file reached
 181 KB and its value to either consumer would have survived at 15 KB. The one-line residue rate goes in
 the header; the human summary goes in chat, not the file.
 
@@ -580,4 +695,4 @@ the Refuted table, which is the whole content in that case and the part worth ha
   *silently asserting an allocated range is free* is top-severity however narrow the path, because being
   the authority on that question is the product's entire purpose.
 - **File it and rate it.** A finding the owner declines costs one line. A defect a round declines on
-  their behalf costs four rounds — round 6 proved that.
+  their behalf has cost four rounds before.

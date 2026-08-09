@@ -111,18 +111,6 @@ public partial class SubnetController : Controller
             }
         }
 
-        bool azureImportEnabled = bool.TryParse(
-            Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool result) && result;
-
-        bool isTopUp = subnet.ChildSubnets.Count != 0 && !string.IsNullOrEmpty(subnet.AzureResourceId);
-
-        ViewBag.CanImportFromAzure =
-            userContextService.UserHasRole(ApplicationRoles.Admin) &&
-            azureImportEnabled &&
-            (subnet.ChildSubnets.Count == 0 || isTopUp) &&
-            subnet.HostIpAssignments.Count == 0 &&
-            !subnet.IsFullyAllocated;
-
         return View(viewModel);
     }
 }

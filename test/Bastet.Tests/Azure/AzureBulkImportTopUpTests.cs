@@ -174,7 +174,7 @@ public class AzureBulkImportTopUpTests
     }
 
     [Fact]
-    public void AnEmptyTargetKeepsTheFirstImportWording()
+    public void AnEmptyTargetAlreadyLinkedWithNoAzureSubnets_IsAlreadyImported()
     {
         BulkAzureVNetViewModel vnet = new()
         {
@@ -186,6 +186,7 @@ public class AzureBulkImportTopUpTests
 
         _planner.AnnotateAvailability([vnet], [Target(linkedTo: VNetA, hasChildren: false)]);
 
-        Assert.Contains("Will import into existing", vnet.Prefixes[0].Reason);
+        Assert.Equal(BulkImportAvailability.AlreadyImported, vnet.Prefixes[0].Status);
+        Assert.False(vnet.Prefixes[0].IsSelectable);
     }
 }

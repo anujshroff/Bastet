@@ -1054,7 +1054,7 @@ public class AzureBulkImportPlannerTests
     }
 
     [Fact]
-    public void Availability_PrefixTargetLinkedToTheSameVNet_WillUpdateExisting()
+    public void Availability_PrefixAlreadyLinkedWithNothingToAdd_IsAlreadyImportedAndNotSelectable()
     {
         BulkAzureVNetViewModel vnet = AzVNet("vnet-va", ["10.98.0.0/16"]);
         List<ExistingSubnetSnapshot> existing =
@@ -1063,8 +1063,9 @@ public class AzureBulkImportPlannerTests
         _planner.AnnotateAvailability([vnet], existing);
 
         BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
-        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
-        Assert.True(prefix.IsSelectable);
+        Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+        Assert.Contains("nothing to add", prefix.Reason);
     }
 
     [Fact]

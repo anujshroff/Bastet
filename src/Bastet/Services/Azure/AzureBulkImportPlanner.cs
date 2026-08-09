@@ -171,12 +171,12 @@ namespace Bastet.Services.Azure
 
             foreach (BulkAzureVNetViewModel vnet in vnets)
             {
-                vnet.Prefixes = [.. vnet.Ipv4AddressPrefixes.Select(p => AnnotatePrefix(p, vnet, existingSubnets))];
-
                 foreach (BulkAzureSubnetViewModel subnet in vnet.Subnets)
                 {
                     AnnotateSubnet(subnet, vnet, existingSubnets);
                 }
+
+                vnet.Prefixes = [.. vnet.Ipv4AddressPrefixes.Select(p => AnnotatePrefix(p, vnet, existingSubnets))];
             }
         }
 
@@ -210,6 +210,9 @@ namespace Bastet.Services.Azure
 
                 bool isTopUp = IsSameVNet(exact, vnet);
 
+                result.WouldRenameTarget = !string.Equals(
+                    exact.Name, ProposedTargetName(vnet, network, cidr), StringComparison.Ordinal);
+
                 if (exact.HasChildSubnets && !isTopUp)
                 {
                     return Blocked(result,
@@ -221,7 +224,18 @@ namespace Bastet.Services.Azure
                 }
                 if (exact.IsFullyAllocated)
                 {
-                    return Blocked(result, $"Bastet subnet '{exact.Name}' is marked as fully allocated.");
+                    return isTopUp
+                        ? AlreadyImported(result,
+                            $"Already imported as Bastet subnet '{exact.Name}', which an Azure subnet covering the "
+                            + "whole prefix has marked fully allocated. There is nothing left to add.")
+                        : Blocked(result, $"Bastet subnet '{exact.Name}' is marked as fully allocated.");
+                }
+
+                if (isTopUp && !AnySubnetCanBeAdded(vnet, network, cidr))
+                {
+                    return AlreadyImported(result,
+                        $"Already imported as Bastet subnet '{exact.Name}'. Every Azure subnet in this prefix is "
+                        + "already recorded, so there is nothing to add.");
                 }
 
                 result.Status = BulkImportAvailability.WillUpdateExisting;
@@ -309,6 +323,17 @@ namespace Bastet.Services.Azure
                     return;
                 }
 
+                if (encompassedTarget is not null
+                    && encompassedTarget.IsFullyAllocated
+                    && IsSameVNet(encompassedTarget, vnet))
+                {
+                    subnet.Status = BulkImportAvailability.AlreadyImported;
+                    subnet.Reason = $"Bastet subnet '{encompassedTarget.Name}' is already marked fully allocated "
+                                    + "by this Azure subnet, so there is nothing to do.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
                 subnet.Status = BulkImportAvailability.Available;
                 subnet.Reason = "Covers the whole VNet prefix, so it marks the target fully allocated instead of being created.";
                 subnet.IsSelectable = true;
@@ -366,6 +391,32 @@ namespace Bastet.Services.Azure
                 ? $"Already imported as Bastet subnet '{exact.Name}'."
                 : $"Bastet subnet '{exact.Name}' already uses {subnet.AddressPrefix}.";
             subnet.IsSelectable = false;
+        }
+
+        private bool AnySubnetCanBeAdded(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
+            vnet.Subnets.Any(s =>
+                s.IsSelectable
+                && TryParseCidr(s.AddressPrefix, out string n, out int c)
+                && ((c == prefixCidr && string.Equals(n, prefixNetwork, StringComparison.OrdinalIgnoreCase))
+                    || ipUtilityService.IsSubnetContainedInParent(n, c, prefixNetwork, prefixCidr)));
+
+        private string ProposedTargetName(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr)
+        {
+            string name = TruncateAndSanitizeName(vnet.Name) is { Length: > 0 } sanitized
+                ? sanitized
+                : $"{prefixNetwork}_{prefixCidr}";
+
+            return vnet.Ipv4AddressPrefixes.Count > 1
+                ? SubnetNaming.WithSuffix(name, $" ({prefixNetwork}-{prefixCidr})", MaxSubnetNameLength)
+                : name;
+        }
+
+        private static BulkAzurePrefixViewModel AlreadyImported(BulkAzurePrefixViewModel result, string reason)
+        {
+            result.Status = BulkImportAvailability.AlreadyImported;
+            result.Reason = reason;
+            result.IsSelectable = false;
+            return result;
         }
 
         private static BulkAzurePrefixViewModel Blocked(BulkAzurePrefixViewModel result, string reason)
@@ -457,7 +508,7 @@ namespace Bastet.Services.Azure
                         + $"and importing '{p.Source.VNetResourceId}' would replace that link.");
                 }
 
-                if (renameMatched && !exact.HasChildSubnets)
+                if (renameMatched)
                 {
                     string proposed = TargetName(p, multiPrefixVNetIds);
                     if (!string.Equals(proposed, exact.Name, StringComparison.Ordinal))
@@ -805,9 +856,6 @@ namespace Bastet.Services.Azure
 
         private static string WithSuffix(string baseName, string suffix) =>
             SubnetNaming.WithSuffix(baseName, suffix, MaxSubnetNameLength);
-
-        private static string TruncateForName(string s) =>
-            s.Length > MaxSubnetNameLength ? s[..MaxSubnetNameLength] : s;
 
         private sealed class ParsedPrefixSelection
         {

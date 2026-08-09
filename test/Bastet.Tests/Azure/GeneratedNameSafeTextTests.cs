@@ -58,26 +58,6 @@ public class GeneratedNameSafeTextTests
         }
     }
 
-    [Fact]
-    public void EveryNameResolveImportNamesGenerates_SatisfiesTheAppsOwnInputRules()
-    {
-        List<AzureImportSubnetViewModel> subnets =
-        [
-            new() { Name = "sn-multi", NetworkAddress = "10.20.40.0", Cidr = 24, AzureResourceId = MultiPrefixSubnet },
-            new() { Name = "sn-multi", NetworkAddress = "10.20.5.0", Cidr = 24, AzureResourceId = MultiPrefixSubnet },
-            new() { Name = "sn-multi", NetworkAddress = "10.20.20.0", Cidr = 24, AzureResourceId = MultiPrefixSubnet }
-        ];
-
-        Dictionary<int, string> names = SubnetController.ResolveImportNames(subnets, []);
-
-        Assert.Equal(3, names.Count);
-
-        foreach (string name in names.Values)
-        {
-            Assert.True(_sanitizer.IsSafeText(name),
-                $"ResolveImportNames generated '{name}', which the app's own [SafeText] rules reject.");
-        }
-    }
 
     [Theory]
     [InlineData("sn-multi (10.20.40.0-24)")]

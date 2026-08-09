@@ -22,7 +22,7 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
 
     private readonly BastetDbContext _context;
     private readonly SubnetController _controller;
-    private readonly IAzureReconciler _reconciler = new AzureReconciler(new IpUtilityService());
+    private readonly IAzureReconciler _reconciler = new AzureReconciler();
     private readonly AzureSubnetSnapshotService _snapshotService;
 
     public SubnetControllerReconcileApprovedVerdictTests()
@@ -67,14 +67,7 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
             NetworkAddress = "10.111.1.0",
             Cidr = 24,
             ParentSubnetId = 1,
-            CreatedAt = DateTime.UtcNow
-        });
-        _context.SaveChanges();
-        _context.HostIpAssignments.Add(new HostIpAssignment
-        {
-            SubnetId = 2,
-            IP = "10.111.1.10",
-            Name = "web01",
+            AzureResourceId = $"{VNetId}/subnets/prod-app-tier",
             CreatedAt = DateTime.UtcNow
         });
         _context.SaveChanges();
@@ -108,7 +101,6 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
     {
         Assert.NotNull(await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken));
         Assert.NotNull(await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken));
-        Assert.Equal(1, await _context.HostIpAssignments.CountAsync(TestContext.Current.CancellationToken));
         Assert.Empty(await _context.DeletedSubnets.ToListAsync(TestContext.Current.CancellationToken));
     }
 
@@ -203,6 +195,32 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         _ = Assert.IsType<OkObjectResult>(result);
         Assert.Null(await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken));
         Assert.Null(await _context.Subnets.FindAsync([2], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ASubnetHoldingManuallyCreatedContent_IsRefusedAndSaysWhy()
+    {
+        _context.HostIpAssignments.Add(new HostIpAssignment
+        {
+            SubnetId = 2,
+            IP = "10.111.1.10",
+            Name = "web01",
+            CreatedAt = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        IActionResult result = await Delete(
+            Request(new AzureReconcileApprovedVerdict
+            {
+                SubnetId = 1,
+                StatusName = nameof(AzureReconcileStatus.VNetPrefixRemoved),
+                Reason = "VNet 'vnet-a' still exists but no longer has the address prefix 10.111.0.0/16."
+            }),
+            VNetBackWithADifferentPrefix());
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Contains("host IP assignment", conflict.Value?.ToString());
+        await AssertNothingArchived();
     }
 
     [Fact]

@@ -18,23 +18,6 @@
     </p>
 </div>
 
-<div id="rec-relink-success" class="alert alert-success d-none">
-    <i class="bi bi-check-circle-fill me-2"></i>
-    <strong>Re-link saved.</strong>
-    <div id="rec-relink-success-message" class="mt-1"></div>
-</div>
-
-<div id="rec-relink-error" class="alert alert-danger d-none">
-    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-    <strong>The re-link did not happen.</strong>
-    <div id="rec-relink-error-message" class="mt-1"></div>
-    <hr>
-
-    <p class="mb-0">
-        Nothing was changed. <span id="rec-relink-rescan-note"></span>
-    </p>
-</div>
-
 <div id="rec-scan-warnings" class="alert alert-warning d-none">
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
     <strong>Check this before deleting anything</strong>
@@ -51,8 +34,9 @@
         <div class="alert alert-danger">
             <i class="bi bi-exclamation-triangle-fill me-2"></i>
             <strong>These BASTET subnets no longer match Azure.</strong>
-            Deleting one also archives everything beneath it. Rows with a cascade warning will take child subnets or
-            host IP assignments with them, including any you created by hand.
+            Each one has either been deleted in Azure or had its address range changed there. Deleting a row also
+            archives the Azure-imported subnets beneath it. Where a range has changed, delete it here and then use
+            the Azure import wizard to bring in its current range.
         </div>
 
         <div class="form-check mb-2">
@@ -87,9 +71,10 @@
     <div id="rec-review-section" class="d-none mt-4">
         <h5><i class="bi bi-eye"></i> Needs review</h5>
         <div class="alert alert-secondary">
-            Nothing here can be fixed by deleting anything, so these are listed without checkboxes.
-            The reason column says what is wrong with each one. BASTET will not change them automatically.
-            Where a range has moved to another Azure subnet, a Re-link button repairs the link in place.
+            These are listed without checkboxes because BASTET will not delete them. Each one either holds subnets or
+            host IP assignments that were created here rather than imported from Azure, or carries a link BASTET
+            cannot make sense of. The reason column says which. Move or delete that content here first, then scan
+            again. <span id="rec-rescan-note"></span>
         </div>
 
         <div class="table-responsive">
@@ -98,8 +83,8 @@
                     <tr>
                         <th scope="col">Subnet</th>
                         <th scope="col">Network</th>
+                        <th scope="col">Status</th>
                         <th scope="col">Reason</th>
-                        <th scope="col">Action</th>
                     </tr>
                 </thead>
                 <tbody id="rec-review-rows"></tbody>

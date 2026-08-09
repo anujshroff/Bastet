@@ -34,9 +34,9 @@ public class AzureServiceTests
 
         List<AzureSubnetViewModel> subnets =
         [
-            new() { Name = "subnet1", AddressPrefix = "10.0.0.0/24", HasMultipleAddressSchemes = false },
-            new() { Name = "subnet2", AddressPrefix = "10.0.1.0/24", HasMultipleAddressSchemes = false },
-            new() { Name = "subnet3", AddressPrefix = "172.16.1.0/24", HasMultipleAddressSchemes = false }
+            new() { Name = "subnet1", AddressPrefix = "10.0.0.0/24" },
+            new() { Name = "subnet2", AddressPrefix = "10.0.1.0/24" },
+            new() { Name = "subnet3", AddressPrefix = "172.16.1.0/24" }
         ];
 
         _mockAzureService = new MockAzureService(true, subscriptions, vnets, subnets);
@@ -73,59 +73,7 @@ public class AzureServiceTests
         Assert.Contains(subscriptions, s => s.SubscriptionId == "sub-2");
     }
 
-    [Fact]
-    public async Task GetCompatibleVNets_WithMatchingCIDR_ReturnsFilteredVNets()
-    {
 
-        string subscriptionId = "sub-1";
-        string networkAddress = "10.0.0.0";
-        int cidr = 16;
 
-        List<AzureVNetViewModel> vnets = await _mockAzureService.GetCompatibleVNets(subscriptionId, networkAddress, cidr);
 
-        Assert.Single(vnets);
-        Assert.Equal("vnet1", vnets[0].Name);
-    }
-
-    [Fact]
-    public async Task GetCompatibleVNets_WithNoMatches_ReturnsEmptyList()
-    {
-
-        string subscriptionId = "sub-1";
-        string networkAddress = "192.168.1.0";
-        int cidr = 24;
-
-        List<AzureVNetViewModel> vnets = await _mockAzureService.GetCompatibleVNets(subscriptionId, networkAddress, cidr);
-
-        Assert.Empty(vnets);
-    }
-
-    [Fact]
-    public async Task GetCompatibleSubnets_WithParentSubnet_ReturnsFilteredSubnets()
-    {
-
-        string vnetResourceId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet1";
-        string networkAddress = "10.0.0.0";
-        int cidr = 16;
-
-        List<AzureSubnetViewModel> subnets = await _mockAzureService.GetCompatibleSubnets(vnetResourceId, networkAddress, cidr);
-
-        Assert.Equal(2, subnets.Count);
-        Assert.Contains(subnets, s => s.Name == "subnet1");
-        Assert.Contains(subnets, s => s.Name == "subnet2");
-        Assert.DoesNotContain(subnets, s => s.Name == "subnet3");
-    }
-
-    [Fact]
-    public async Task GetCompatibleSubnets_WithNoMatches_ReturnsEmptyList()
-    {
-
-        string vnetResourceId = "/subscriptions/sub-1/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/vnet1";
-        string networkAddress = "192.168.1.0";
-        int cidr = 24;
-
-        List<AzureSubnetViewModel> subnets = await _mockAzureService.GetCompatibleSubnets(vnetResourceId, networkAddress, cidr);
-
-        Assert.Empty(subnets);
-    }
 }

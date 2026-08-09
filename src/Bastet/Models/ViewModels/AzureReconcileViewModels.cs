@@ -26,6 +26,8 @@ namespace Bastet.Models.ViewModels
 
         public int HostIpCount { get; set; }
 
+        public int ManualDescendantCount { get; set; }
+
         public IReadOnlyList<int> DescendantSubnetIds { get; set; } = [];
     }
 
@@ -52,15 +54,9 @@ namespace Bastet.Models.ViewModels
 
         SubnetPrefixChanged,
 
-        FullyAllocatingSubnetDeleted,
-
         UnrecognisedResourceId,
 
-        RangeStillAllocatedInAzure,
-
-        VNetPrefixStillCovered,
-
-        AzureRangeNotImported
+        HeldByManualContent
     }
 
     public class AzureReconcileItem
@@ -81,10 +77,6 @@ namespace Bastet.Models.ViewModels
         public int HostIpCount { get; set; }
 
         public IReadOnlyList<int> DescendantSubnetIds { get; set; } = [];
-
-        public string SuggestedAzureResourceId { get; set; } = string.Empty;
-
-        public string SuggestedAzureSubnetName { get; set; } = string.Empty;
 
         public string StatusName => Status.ToString();
     }
@@ -132,10 +124,4 @@ namespace Bastet.Models.ViewModels
         public string Reason { get; set; } = string.Empty;
     }
 
-    public class AzureRelinkDto
-    {
-        public string SubscriptionId { get; set; } = string.Empty;
-
-        public int SubnetId { get; set; }
-    }
 }

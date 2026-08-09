@@ -10,8 +10,7 @@ namespace Bastet.Services.Azure
             string subscriptionId,
             string? subscriptionName,
             AzureVNetInventory inventory,
-            IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets,
-            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets);
+            IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets);
 
         void ApplyConfirmations(
             AzureReconcilePlanViewModel plan,
