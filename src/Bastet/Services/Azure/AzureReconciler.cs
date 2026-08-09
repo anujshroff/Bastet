@@ -97,7 +97,7 @@ namespace Bastet.Services.Azure
                     item.Status = AzureReconcileStatus.HeldByManualContent;
                     item.Reason = $"{item.Reason} {DescribeManualContent(snapshot)} "
                         + "BASTET will not delete it, because Azure has no record of that and it would be "
-                        + "destroyed with no way to restore it. Move or delete it here first, then run the scan again.";
+                        + "destroyed with no way to restore it. Delete it here first, then run the scan again.";
                     plan.ReviewItems.Add(item);
                     heldByManualContent.Add(item);
                     continue;

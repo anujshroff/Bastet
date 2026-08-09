@@ -103,18 +103,18 @@ Q1 plus 6 others were struck as invalid - see the bottom of this file.
 **Fix:** Tighten HtmlTagPattern to `</?[A-Za-z][^>]*>` so only element-shaped input counts, and change the parity test's input at line 62 to a genuinely tag-shaped string. Pair with Q11 - the name half stays refused otherwise, because `[SafeText]` admits neither bracket.
 **Residue of:** none
 
-## Q19 - The only legitimate reconcile refusal tells the operator to "Move" the content, an operation the app does not offer `[x1]`
+## Q19 - FIXED - The only legitimate reconcile refusal told the operator to "Move" the content, an operation the app does not offer `[x1]`
 **Where:** src/Bastet/Services/Azure/AzureReconciler.cs:100; src/Bastet/Views/Azure/Reconcile/_StepReview.cshtml:76
 **Breaks:** There is no move. A host IP's address is readonly and its SubnetId is a hidden field the Edit POST never applies; a subnet has no ParentSubnetId on EditSubnetViewModel and no parent selector. Delete is the only remedy, and it works.
 **Repro:** Both sentences render in the same response. GET /HostIp/Edit renders no `<select>` and no "move"; POSTing a changed SubnetId returns 302 and changes nothing.
 **Fix:** Both sites, no behaviour change: "Delete it here first, then run the scan again." / "The reason column says which. Delete that content here first, then scan again."
 **Residue of:** none
 
-## Q6 - Reconcile step 1 advertises an un-imported-range hunt whose code was deleted `[x2]`
+## Q6 - FIXED - Reconcile step 1 advertised an un-imported-range hunt whose code was deleted `[x2]`
 **Where:** src/Bastet/Views/Azure/Reconcile/_StepSubscription.cshtml:6
 **Breaks:** The step-1 blurb promises reconcile will report "plus Azure ranges BASTET does not record". No producer for that exists - 23233f2 deleted ReportAzureRangesNoBastetSubnetRecords, correctly, because finding un-imported Azure space is the import wizard's job. The sentence is a leftover promise for a feature that was removed on purpose.
 **Repro:** The sentence renders verbatim on GET /Azure/Reconcile; a scan over a partially imported subscription returns `items: []`.
-**Fix:** Delete the clause. State only that BASTET reports Azure-linked rows whose VNet or subnet no longer exists, and rows whose Azure resource no longer holds the recorded range.
+**Fix applied:** the clause is gone and the blurb now names both things reconcile actually reports. The second sentence was also false and was corrected in the same edit: a row offered for deletion can never hold hand-made content, because ManualDescendantCount counts any unlinked descendant in the subtree and diverts the row to Needs review. It now says the cascade archives the Azure-imported subnets beneath it, and that rows holding content created here are listed under Needs review and are never deleted.
 **Residue of:** d18327e (Audit 16 Cleanup #165)
 
 ## Q9 - The free-space panel's "Run Azure Reconcile" link renders for users who cannot open it `[x1]`

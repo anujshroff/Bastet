@@ -144,6 +144,9 @@ public class AzureReconcilerTests
         Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
         Assert.Contains("1 subnet created here", held.Reason);
         Assert.Contains(plan.Warnings, w => w.Contains("created here rather than imported from Azure"));
+
+        Assert.Contains("Delete it here first", held.Reason);
+        Assert.DoesNotContain("Move", held.Reason);
     }
 
     [Fact]
