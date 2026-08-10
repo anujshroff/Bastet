@@ -1,10 +1,7 @@
-using Bastet.Data;
 using Bastet.Models.ViewModels;
-using Bastet.Services;
 using Bastet.Services.Azure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Controllers
 {

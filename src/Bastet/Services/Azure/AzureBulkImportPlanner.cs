@@ -258,7 +258,6 @@ namespace Bastet.Services.Azure
         }
 
         private ExistingSubnetSnapshot? FindMoreSpecificParent(
-            BulkAzureSubnetViewModel subnet,
             BulkAzureVNetViewModel vnet,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
             string network,
@@ -354,7 +353,7 @@ namespace Bastet.Services.Azure
                     return;
                 }
 
-                ExistingSubnetSnapshot? moreSpecificParent = FindMoreSpecificParent(subnet, vnet, existingSubnets, network, cidr);
+                ExistingSubnetSnapshot? moreSpecificParent = FindMoreSpecificParent(vnet, existingSubnets, network, cidr);
 
                 if (moreSpecificParent is not null)
                 {

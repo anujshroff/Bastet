@@ -10,10 +10,10 @@ space it never imported are struck; see the bottom of this file.
 
 The round filed Q1-Q21; the owner found Q22 during review.
 
-**Fixed (18):** Q3, Q4, Q9, Q15, Q20, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+**Fixed (19):** Q3, Q4, Q9, Q15, Q20, Q21, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
 fixed and then struck.
 
-**Open (1):** Q21.
+**Open (0):** none.
 
 **Flagged as edge cases (2):** Q5, Q17 - owner to accept or drop.
 

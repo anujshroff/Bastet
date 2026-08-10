@@ -14,44 +14,10 @@ public partial class InputSanitizationService : IInputSanitizationService
     [GeneratedRegex(@"</?[A-Za-z][^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex HtmlTagPattern();
 
-    [GeneratedRegex(@"javascript:|vbscript:|onload|onerror|onclick|onmouseover|onkeydown|onkeyup|onchange|onsubmit|data:", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
-    private static partial Regex DangerousScriptPattern();
-
-    private const int MaxStringLength = 500;
     private const int MaxNameLength = 100;
     private const int MaxDescriptionLength = 1000;
 
     private const int MaxTagsLength = 255;
-
-    public string SanitizeString(string? input, bool allowHtml = false)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            return string.Empty;
-        }
-
-        string sanitized = input.Trim();
-        if (sanitized.Length > MaxStringLength)
-        {
-            sanitized = sanitized[..MaxStringLength];
-        }
-
-        if (allowHtml)
-        {
-
-            sanitized = RemoveDangerousScripts(sanitized);
-
-            sanitized = EncodeHtml(sanitized);
-        }
-        else
-        {
-
-            sanitized = StripHtml(sanitized);
-            sanitized = EncodeHtml(sanitized);
-        }
-
-        return sanitized;
-    }
 
     public string StripHtml(string? input)
     {
@@ -64,8 +30,6 @@ public partial class InputSanitizationService : IInputSanitizationService
 
         return stripped.Trim();
     }
-
-    public string EncodeHtml(string? input) => string.IsNullOrWhiteSpace(input) ? string.Empty : HttpUtility.HtmlEncode(input);
 
     public bool IsSafeText(string? input)
     {
@@ -118,16 +82,6 @@ public partial class InputSanitizationService : IInputSanitizationService
         }
 
         return parsedAddress.ToString() == sanitized;
-    }
-
-    private static string RemoveDangerousScripts(string input)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            return string.Empty;
-        }
-
-        return DangerousScriptPattern().Replace(input, string.Empty);
     }
 
     public string SanitizeName(string? input)
