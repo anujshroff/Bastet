@@ -62,7 +62,6 @@ namespace Bastet.Services.Azure
                     NetworkAddress = subnet.NetworkAddress,
                     Cidr = subnet.Cidr,
                     AzureResourceId = subnet.AzureResourceId!,
-                    IsFullyAllocated = subnet.IsFullyAllocated,
                     DescendantCount = descendants.Count,
                     HostIpCount = hostIps,
                     ManualDescendantCount = descendants.Count(d => string.IsNullOrEmpty(d.AzureResourceId)),

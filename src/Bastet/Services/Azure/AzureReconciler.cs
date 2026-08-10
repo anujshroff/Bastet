@@ -69,8 +69,8 @@ namespace Bastet.Services.Azure
 
                 if (!recognised)
                 {
-                    plan.ReviewItems.Add(Item(snapshot, AzureReconcileStatus.UnrecognisedResourceId, true,
-                        "The recorded Azure resource ID names neither a VNet nor a subnet, so nothing "
+                    plan.ReviewItems.Add(Item(snapshot, AzureReconcileStatus.UnrecognisedResourceId,
+                    "The recorded Azure resource ID names neither a VNet nor a subnet, so nothing "
                         + "can be established about it. Correct or clear the link on this subnet."));
                     continue;
                 }
@@ -279,13 +279,13 @@ namespace Bastet.Services.Azure
             if (!liveVNets.TryGetValue(snapshot.AzureResourceId, out BulkAzureVNetViewModel? vnet))
             {
 
-                return Item(snapshot, AzureReconcileStatus.VNetDeleted, true,
+                return Item(snapshot, AzureReconcileStatus.VNetDeleted,
                     "The VNet this subnet was imported from no longer exists in Azure, " +
                     "or no longer has any IPv4 address space.");
             }
 
             return !vnet.Ipv4AddressPrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase)
-                ? Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved, true,
+                ? Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved,
                     $"VNet '{vnet.Name}' still exists but no longer has the address prefix {prefix}. "
                     + "Delete it here if you want to, then use the Azure import wizard to bring in the "
                     + "VNet's current address space.")
@@ -300,14 +300,14 @@ namespace Bastet.Services.Azure
 
             if (!liveSubnetPrefixes.TryGetValue(snapshot.AzureResourceId, out List<string>? livePrefixes))
             {
-                return Item(snapshot, AzureReconcileStatus.SubnetDeleted, false,
+                return Item(snapshot, AzureReconcileStatus.SubnetDeleted,
                     "The Azure subnet this was imported from no longer exists.");
             }
 
             if (!livePrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
             {
                 string live = livePrefixes.Count == 0 ? "none" : string.Join(", ", livePrefixes);
-                return Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged, false,
+                return Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged,
                     $"The Azure subnet still exists but its address prefix is now {live}, not {prefix}. "
                     + "Delete it here if you want to, then use the Azure import wizard to bring in its "
                     + "current prefix.");
@@ -324,7 +324,6 @@ namespace Bastet.Services.Azure
         private static AzureReconcileItem Item(
             AzureLinkedSubnetSnapshot snapshot,
             AzureReconcileStatus status,
-            bool isVNetLevel,
             string reason) =>
             new()
             {
@@ -335,7 +334,6 @@ namespace Bastet.Services.Azure
                 AzureResourceId = snapshot.AzureResourceId,
                 Status = status,
                 Reason = reason,
-                IsVNetLevel = isVNetLevel,
                 DescendantCount = snapshot.DescendantCount,
                 HostIpCount = snapshot.HostIpCount,
                 DescendantSubnetIds = snapshot.DescendantSubnetIds

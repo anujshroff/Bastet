@@ -8,12 +8,10 @@ namespace Bastet.Services.Azure
 {
 
     public class AzureService(
-        IIpUtilityService ipUtilityService,
         AzureArmClientProvider armClientProvider,
         ILogger<AzureService> logger) : IAzureService
     {
         private readonly ArmClient? _armClient = armClientProvider.Client;
-        private readonly IIpUtilityService _ipUtilityService = ipUtilityService;
         private readonly ILogger<AzureService> _logger = logger;
 
         public async Task<bool> IsCredentialValid()

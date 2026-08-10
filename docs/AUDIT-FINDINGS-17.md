@@ -10,10 +10,10 @@ space it never imported are struck; see the bottom of this file.
 
 The round filed Q1-Q21; the owner found Q22 during review.
 
-**Fixed (17):** Q3, Q4, Q9, Q15, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+**Fixed (18):** Q3, Q4, Q9, Q15, Q20, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
 fixed and then struck.
 
-**Open (2):** Q20, Q21.
+**Open (1):** Q21.
 
 **Flagged as edge cases (2):** Q5, Q17 - owner to accept or drop.
 
@@ -145,7 +145,7 @@ fixed and then struck.
 
 # Info
 
-## Q20 - Azure services and view models carry write-only members `[x2]`
+## Q20 - FIXED - Azure services and view models carried write-only members `[x2]`
 **Where:** src/Bastet/Services/Azure/AzureService.cs:11, :16 (the IIpUtilityService ctor parameter and field - the assembly's only CA1823); src/Bastet/Models/ViewModels/AzureReconcileViewModels.cs:23 (snapshot IsFullyAllocated), :73 (item IsVNetLevel); AzureBulkImportViewModels.cs:69 and AzureReconcileViewModels.cs:104 (IsFeatureEnabled, rendered by no view)
 **Breaks:** No user-visible failure. The cost is a later reader taking them for live inputs - IsVNetLevel reads as if the reconcile UI still distinguished VNet-level rows, which it does not.
 **Repro:** `-p:AnalysisMode=AllEnabledByDefault` reports one CA1823. Greps find no reader for IsVNetLevel or IsFeatureEnabled outside the writes.

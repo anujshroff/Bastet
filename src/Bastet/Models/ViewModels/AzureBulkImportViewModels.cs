@@ -65,12 +65,6 @@ namespace Bastet.Models.ViewModels
         public List<BulkAzureSubnetViewModel> Subnets { get; set; } = [];
     }
 
-    public class BulkImportInitialViewModel
-    {
-
-        public bool IsFeatureEnabled { get; set; }
-    }
-
     public class BulkImportSelectedSubnetDto
     {
         public string Name { get; set; } = string.Empty;
