@@ -1211,8 +1211,11 @@ public class AzureBulkImportPlannerTests
         BulkAzureSubnetViewModel subnet = Assert.Single(vnet.Subnets);
         Assert.Equal(BulkImportAvailability.Blocked, subnet.Status);
         Assert.False(subnet.IsSelectable);
-        Assert.Contains("more specific existing Bastet parent", subnet.Reason);
+
         Assert.Contains("rig-a", subnet.Reason);
+        Assert.Contains("Azure has no such subnet", subnet.Reason);
+        Assert.Contains("placed directly under their VNet", subnet.Reason);
+        Assert.Contains("delete or re-carve", subnet.Reason);
     }
 
     [Fact]

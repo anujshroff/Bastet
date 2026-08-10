@@ -515,6 +515,11 @@ the browser actually sent against what was persisted.**
   | already-imported **child subnet**, name drifted, **rename on** | Rename only | **yes** |
   | unlinked row on the same range, **rename on** | Cannot import | no |
 
+- **A hand-made subnet between a VNet and its Azure subnet stays refused.** Import a VNet prefix only,
+  hand-carve a subnet inside it that contains one of the VNet's Azure subnets, then rescan: that Azure
+  subnet must stay `Cannot import`. Assert the reason names the row in the way, states that Azure has no
+  such subnet, and tells the operator to delete or re-carve it - a refusal that only states the fact is
+  the defect here, not the refusal itself. Importing it under the hand-made row is a FAIL, not a fix.
 - **Adopting a hand-built tree that partly overlaps Azure.** Build a Bastet /16 by hand with two
   hand-made children, one of which overlaps an Azure subnet in the matching VNet, and drive the whole
   thing: the prefix must be selectable, the clean Azure subnet must import, the overlapping one must

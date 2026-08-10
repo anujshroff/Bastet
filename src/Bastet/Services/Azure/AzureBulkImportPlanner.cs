@@ -359,9 +359,11 @@ namespace Bastet.Services.Azure
                 if (moreSpecificParent is not null)
                 {
                     subnet.Status = BulkImportAvailability.Blocked;
-                    subnet.Reason = $"Has a more specific existing Bastet parent '{moreSpecificParent.Name}' "
-                                    + $"({moreSpecificParent.NetworkAddress}/{moreSpecificParent.Cidr}), "
-                                    + "so it cannot be imported into this VNet prefix.";
+                    subnet.Reason = $"Bastet subnet '{moreSpecificParent.Name}' "
+                                    + $"({moreSpecificParent.NetworkAddress}/{moreSpecificParent.Cidr}) sits between this "
+                                    + $"VNet and {subnet.AddressPrefix}, and Azure has no such subnet. Imported subnets are "
+                                    + $"placed directly under their VNet, so delete or re-carve '{moreSpecificParent.Name}' "
+                                    + "before importing this one.";
                     subnet.IsSelectable = false;
                     return;
                 }
@@ -759,9 +761,10 @@ namespace Bastet.Services.Azure
                         else if (ipUtilityService.IsSubnetContainedInParent(s.Network, s.Cidr, e.NetworkAddress, e.Cidr))
                         {
                             plan.GlobalErrors.Add(
-                                $"Azure subnet '{s.Source.Name}' ({s.Source.AddressPrefix}, VNet '{p.Source.VNetName}') "
-                                + $"has a more specific existing Bastet parent '{e.Name}' ({e.NetworkAddress}/{e.Cidr}), "
-                                + "so it cannot be imported into this VNet prefix.");
+                                $"Azure subnet '{s.Source.Name}' ({s.Source.AddressPrefix}, VNet '{p.Source.VNetName}'): "
+                                + $"Bastet subnet '{e.Name}' ({e.NetworkAddress}/{e.Cidr}) sits between that VNet and this "
+                                + "subnet, and Azure has no such subnet. Imported subnets are placed directly under their "
+                                + $"VNet, so delete or re-carve '{e.Name}' before importing this one.");
                         }
                     }
                 }

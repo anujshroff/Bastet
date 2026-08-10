@@ -72,6 +72,20 @@ hand-added child subnet, or a host IP** — operator-owned data Azure does not k
 never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
 must not be applied as filed.
 
+**An imported row's place in the tree mirrors Azure's containment.** Azure has no subnet nesting - a
+subnet belongs to a VNet, flat - so a row carrying an `AzureResourceId` hangs directly off the row
+representing its VNet. **A hand-made subnet may not sit between a VNet row and its Azure subnets.**
+Refusing that is correct, and a finding proposing to resolve the Azure subnet under the hand-made
+middle-man is wrong however well it reads: nothing breaks functionally, because reconcile keys on
+resource id and free space keys on range, but the tree would then assert a containment Azure never had
+and nobody reading it could tell which level was real.
+
+This is the one place the manual and imported paths legitimately differ, and it does **not** contradict
+"a rule that holds for a manually created subnet holds identically for an imported one" - the manual
+form is free to carve anything, because a hand-made row claims to represent nothing but itself. What
+the refusal owes the operator is the rule and a remedy, not just the fact: name the row in the way, say
+Azure has no such subnet, and say to delete or re-carve it.
+
 **A row the operator built by hand can be adopted by the VNet it matches.** Linking a not-yet-linked
 target is real work and stays offered **whether or not that row already has children** — the operator
 may well have carved the space by hand first and now want Bastet to track it against Azure. Having
