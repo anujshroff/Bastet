@@ -247,11 +247,13 @@ public class IpUtilityService : IIpUtilityService
                 {
                     StartIp = UIntToIpString(startIp),
                     EndIp = UIntToIpString(endIp),
-                    AddressCount = subnetSize - 2
+                    AddressCount = subnetSize
                 });
             }
 
-            return unallocatedRanges;
+            StampUsable(unallocatedRanges, UIntToIpString(startIp), UIntToIpString(endIp), cidr);
+            StampUsable(unallocatedRanges, UIntToIpString(startIp), UIntToIpString(endIp), cidr);
+        return unallocatedRanges;
         }
 
         List<(uint Start, uint End)> allocatedRanges = [];
@@ -303,17 +305,6 @@ public class IpUtilityService : IIpUtilityService
             if (Start > currentPosition)
             {
 
-                if (currentPosition == startIp && cidr < 31)
-                {
-
-                    unallocatedRanges.Add(new IPRange
-                    {
-                        StartIp = UIntToIpString((uint)currentPosition),
-                        EndIp = UIntToIpString(Start - 1),
-                        AddressCount = Start - currentPosition - 1
-                    });
-                }
-                else
                 {
                     unallocatedRanges.Add(new IPRange
                     {
@@ -327,14 +318,9 @@ public class IpUtilityService : IIpUtilityService
             currentPosition = (long)End + 1;
         }
 
-        if (currentPosition < endIp || (currentPosition == endIp && cidr >= 31))
+        if (currentPosition <= endIp)
         {
             uint lastIp = endIp;
-
-            if (cidr < 31)
-            {
-                lastIp--;
-            }
 
             if (currentPosition <= lastIp)
             {
@@ -348,6 +334,7 @@ public class IpUtilityService : IIpUtilityService
             }
         }
 
+        StampUsable(unallocatedRanges, UIntToIpString(startIp), UIntToIpString(endIp), cidr);
         return unallocatedRanges;
     }
 
@@ -399,4 +386,18 @@ public class IpUtilityService : IIpUtilityService
     }
 
     #endregion
+
+    private static void StampUsable(List<IPRange> ranges, string networkAddress, string broadcastAddress, int cidr)
+    {
+        foreach (IPRange r in ranges)
+        {
+            long span = r.AddressCount;
+            if (cidr < 31)
+            {
+                if (string.Equals(r.StartIp, networkAddress, StringComparison.Ordinal)) { span--; }
+                if (string.Equals(r.EndIp, broadcastAddress, StringComparison.Ordinal)) { span--; }
+            }
+            r.UsableCount = span < 0 ? 0 : span;
+        }
+    }
 }

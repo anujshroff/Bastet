@@ -587,6 +587,13 @@ the browser actually sent against what was persisted.**
   is a failure. Then turn the rename switch on and assert neither prefix is offered a rename - an offer
   here means the annotation and the commit disagree about the name, and taking it strips the qualifier
   and recreates the duplicate.
+- **The free-space table's two counts.** On one subnet, assert every row satisfies
+  `Size == End - Start + 1`, and that `Usable Host IPs` drops by one for a range touching the parent's
+  network address, one for a range touching its broadcast, and two for a range touching both. Check a
+  /30 (4 and 2) and a /31 (2 and 2) in the same run - a /31 reserves neither address, so equal counts
+  there are correct. Then click Create Subnet on a range whose usable count is 0 and confirm it
+  succeeds: the block is allocatable even when no host IP can sit in it, which is exactly why the two
+  columns exist.
 - **Validation parity across write paths.** Take one field and drive the same value through every path
   that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
   directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused

@@ -335,6 +335,15 @@ at this round's HEAD and at the previous audit commit. A component that has doub
 the product's requirements did not change is being driven by the audit loop, and that belongs in the
 round's headline.
 
+**A displayed count must match the range it is printed beside.** `AddressCount == EndIp - StartIp + 1`,
+always. The free-space table broke this three different ways at once - one branch subtracted 1 from the
+count, one subtracted 2, and one trimmed the end instead - because each was separately trying to express
+"usable hosts" in a column labelled as a size. **When two questions are being asked of one number, the
+defect is the single column, not the arithmetic in it.** Show both: the block's size, which is what a
+subnet allocation uses and what a Create button must seed from, and the usable host count, which
+subtracts the parent's network and broadcast where the block touches them. A /31 and a /32 reserve
+neither, so there the two are equal - that is correct, not a special case.
+
 **A subsystem must not re-derive a core rule.** When a component grows its own copy of IP arithmetic,
 free-space calculation or containment, the finding is the duplication itself — not each place the copy
 disagrees with `IpUtilityService`. One round filed three separate findings that were all a single

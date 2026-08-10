@@ -72,6 +72,15 @@ hand-added child subnet, or a host IP** — operator-owned data Azure does not k
 never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
 must not be applied as filed.
 
+**A displayed count must match the range it is printed beside.** `AddressCount == EndIp - StartIp + 1`,
+always. The free-space table broke this three different ways at once - one branch subtracted 1 from the
+count, one subtracted 2, and one trimmed the end instead - because each was separately trying to express
+"usable hosts" in a column labelled as a size. **When two questions are being asked of one number, the
+defect is the single column, not the arithmetic in it.** Show both: the block's size, which is what a
+subnet allocation uses and what a Create button must seed from, and the usable host count, which
+subtracts the parent's network and broadcast where the block touches them. A /31 and a /32 reserve
+neither, so there the two are equal - that is correct, not a special case.
+
 **An imported row's place in the tree mirrors Azure's containment.** Azure has no subnet nesting - a
 subnet belongs to a VNet, flat - so a row carrying an `AzureResourceId` hangs directly off the row
 representing its VNet. **A hand-made subnet may not sit between a VNet row and its Azure subnets.**

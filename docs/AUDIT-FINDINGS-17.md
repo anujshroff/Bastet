@@ -10,10 +10,10 @@ space it never imported are struck; see the bottom of this file.
 
 The round filed Q1-Q21; the owner found Q22 during review.
 
-**Fixed (13):** Q3, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+**Fixed (14):** Q3, Q4, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
 fixed and then struck.
 
-**Open (5):** Q4 (needs an owner decision), Q9, Q15, Q20, Q21.
+**Open (4):** Q9, Q15, Q20, Q21.
 
 **Flagged as edge cases (2):** Q5, Q17 - owner to accept or drop.
 
@@ -46,11 +46,13 @@ fixed and then struck.
 **Fix:** Give BulkImportPlannedChildSubnet the same WillRename/NewName the target has; when the switch is on, emit already-imported children as rename candidates instead of dropping them at annotation; rename them in the commit loop rather than skipping. Q3 is the same feature failing on the other axis - fix them together, and make the label match whatever the final scope is.
 **Residue of:** none - the rename feature has only ever covered the target.
 
-## Q4 - Unallocated-range rows contradict themselves: the size does not match the start/end it prints `[x2]`
+## Q4 - FIXED - Unallocated-range rows contradicted themselves: the size did not match the start/end it printed `[x2]`
 **Where:** src/Bastet/Services/IpUtilityService.cs:306-315 (head branch, count at :313); :230-255 (no-children early return, `subnetSize - 2`); :330-349 (tail branch, `lastIp--`); src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:38-40, :46-52
 **Breaks:** The head branch prints `AddressCount = Start - currentPosition - 1` over a span of `Start - currentPosition`. On the live rig, 10.20.0.0/16 with child 10.20.1.0/24 renders `10.20.0.0 | 10.20.0.255 | 255 IP addresses` - 256 addresses labelled 255. Worse, 10.100.0.0/24 with child 10.100.0.1/32 renders `10.100.0.0 | 10.100.0.0 | 0 IP addresses` with a live Create Subnet button, and creating 10.100.0.0/32 succeeds. The no-children return prints `subnetSize - 2` over a full span; the tail branch drops the last address. Every branch reports less allocatable space than ValidateSubnetCreation accepts.
 **Repro:** /Subnet/Details on any subnet with a head or tail gap. 10.0.0.0/24 + child 10.0.0.64/26 -> `10.0.0.0 | 10.0.0.63 | 63 IP addresses`; POST 10.0.0.0/26 -> 302 and the row vanishes.
-**Fix:** Put all three branches on one axis so `AddressCount == EndIp - StartIp + 1` everywhere: delete the `currentPosition == startIp && cidr < 31` special case at :306-315 (the existing else already emits the true span), collapse :230-255 to `AddressCount = subnetSize`, and drop `if (cidr < 31) { lastIp--; }` at :330-349. Rewrite the counts pinned in SubnetPropertyCalculationTests.cs:185/:201/:222/:235/:248. Product question for the owner: if the Size column is meant to be usable hosts, the arithmetic is right and the display is wrong - then rename the column and stop seeding Create Subnet from an excluded address.
+**Owner's ruling:** show both numbers rather than pick a convention. Size is the block (`End - Start + 1`), which is what the Create Subnet button allocates from; Usable Host IPs subtracts the parent's network and broadcast where the block touches them. A /31 and /32 reserve neither, so the two are equal there.
+
+**Fix applied:** IPRange gains UsableCount; IpUtilityService stamps it and the three branches now emit the true span; the Details table gains a column. Usable reproduces today's number in every case, so no existing expectation was renumbered - the assertions moved from AddressCount to UsableCount and Size assertions were added beside them.
 **Residue of:** bf120d6 (Audit 4 Cleanup #141)
 
 ## Q7 - FIXED (as a message, not a behaviour) - the refusal is correct; it named no remedy `[x1]`

@@ -28,6 +28,7 @@
                             <th>Start Address</th>
                             <th>End Address</th>
                             <th>Size</th>
+                            <th>Usable Host IPs</th>
                             <th>Action</th>
                         </tr>
                     </thead>
@@ -38,6 +39,7 @@
                                 <td><code>@range.StartIp</code></td>
                                 <td><code>@range.EndIp</code></td>
                                 <td>@range.AddressCount.ToString("N0") IP addresses</td>
+                                <td>@range.UsableCount.ToString("N0")</td>
                                 <td>
                                     @inject Bastet.Services.IUserContextService SubnetUserContext
 
