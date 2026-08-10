@@ -39,7 +39,8 @@ public partial class SubnetController : Controller
             ChildSubnetCount = descendantCount,
             HostIpCount = hostIpCount,
             ConfirmedMaxSubnetId = await MaxDescendantSubnetIdAsync(id),
-            ConfirmedMaxHostIpTicks = await MaxSubtreeHostIpTicksAsync(id)
+            ConfirmedMaxHostIpTicks = await MaxSubtreeHostIpTicksAsync(id),
+            RowVersion = subnet.RowVersion
         };
 
         return View(viewModel);
@@ -130,7 +131,7 @@ public partial class SubnetController : Controller
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> DeleteConfirmed(
-        int id, string confirmation, int? confirmedMaxSubnetId, long? confirmedMaxHostIpTicks)
+        int id, string confirmation, int? confirmedMaxSubnetId, long? confirmedMaxHostIpTicks, byte[]? rowVersion = null)
     {
 
         if (confirmation != "approved")
@@ -150,7 +151,7 @@ public partial class SubnetController : Controller
         {
 
             return await subnetLockingService.ExecuteWithSubnetLockAsync(
-                () => DeleteConfirmedCore(id, confirmedMaxSubnetId.Value, confirmedMaxHostIpTicks.Value));
+                () => DeleteConfirmedCore(id, confirmedMaxSubnetId.Value, confirmedMaxHostIpTicks.Value, rowVersion));
         }
         catch (TimeoutException)
         {
@@ -160,7 +161,7 @@ public partial class SubnetController : Controller
     }
 
     private async Task<IActionResult> DeleteConfirmedCore(
-        int id, int confirmedMaxSubnetId, long confirmedMaxHostIpTicks)
+        int id, int confirmedMaxSubnetId, long confirmedMaxHostIpTicks, byte[]? rowVersion)
     {
 
         Subnet? subnet = await context.Subnets
@@ -171,6 +172,15 @@ public partial class SubnetController : Controller
         if (subnet == null)
         {
             return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
+        }
+
+        if (subnet.RowVersion is not null
+            && (rowVersion is null || !rowVersion.SequenceEqual(subnet.RowVersion)))
+        {
+            TempData["ErrorMessage"] =
+                "This subnet itself changed since you reviewed it. Nothing was deleted. "
+                + "Review its current range and details and confirm again.";
+            return RedirectToAction(nameof(Delete), new { id });
         }
 
         if (await MaxDescendantSubnetIdAsync(id) > confirmedMaxSubnetId

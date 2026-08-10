@@ -1,11 +1,11 @@
-@model Bastet.Models.ViewModels.AzureReconcileInitialViewModel
 
 <div class="alert alert-info">
     <i class="bi bi-info-circle"></i>
     Pick a subscription to check. BASTET will compare every subnet imported from that subscription against what
-    currently exists in Azure, and report the ones whose VNet or subnet has been deleted, plus Azure ranges BASTET
-    does not record. Deleting a flagged subnet archives everything beneath it, including subnets and host IP
-    assignments you created by hand or imported from another subscription.
+    currently exists in Azure, and report the ones whose VNet or subnet has been deleted, and the ones whose Azure
+    resource no longer holds the recorded range. Deleting a flagged subnet also archives the Azure-imported subnets
+    beneath it. Rows holding subnets or host IP assignments you created here are listed under Needs review and are
+    never deleted.
 </div>
 
 <div id="rec-subscription-loading" class="text-center py-3 d-none">

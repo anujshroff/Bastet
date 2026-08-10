@@ -64,13 +64,15 @@ public class AzureBulkImportTopUpTests
     }
 
     [Fact]
-    public void APopulatedTargetWithNoAzureLink_IsStillRefused()
+    public void APopulatedTargetWithNoAzureLink_IsAdopted()
     {
         BulkImportPlanItem item = Plan(
             Selection(false, Sub("sn-new", "10.90.77.0/24")),
             Target(linkedTo: null));
 
-        Assert.Contains(item.Errors, e => e.Contains("already has child subnets"));
+        Assert.Empty(item.Errors);
+        Assert.Equal(BulkImportTargetType.ExactMatch, item.TargetType);
+        Assert.Single(item.ChildSubnets);
     }
 
     [Fact]

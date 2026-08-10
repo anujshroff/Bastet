@@ -370,6 +370,8 @@ public class HostIpController(
 
                 using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
+                int? subnetIdForRedirect = null;
+
                 try
                 {
 
@@ -380,6 +382,7 @@ public class HostIpController(
                     }
 
                     int subnetId = hostIp.SubnetId;
+                    subnetIdForRedirect = subnetId;
 
                     DeletedHostIpAssignment deletedHostIp = new()
                     {
@@ -403,6 +406,18 @@ public class HostIpController(
 
                     TempData["SuccessMessage"] = $"Host IP {ip} was deleted successfully.";
                     return RedirectToAction(nameof(Index), new { subnetId });
+                }
+                catch (Exception ex) when (SqlSaveOutcome.IsIndeterminateTransaction(ex))
+                {
+                    logger.LogError(ex, "Host IP delete outcome unknown for {Ip}", ip);
+                    await TransactionCleanup.RollbackQuietlyAsync(transaction, logger);
+                    TempData["ErrorMessage"] =
+                        "BASTET could not confirm whether this host IP was deleted. "
+                        + "Check the subnet's host IPs and the deleted host IPs list before retrying.";
+
+                    return subnetIdForRedirect is int knownSubnetId
+                        ? RedirectToAction(nameof(Index), new { subnetId = knownSubnetId })
+                        : RedirectToAction(nameof(AllHostIps));
                 }
                 catch (Exception ex)
                 {

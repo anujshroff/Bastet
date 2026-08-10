@@ -1,4 +1,9 @@
 @model SubnetDetailsViewModel
+@inject Bastet.Services.IUserContextService SubnetUserContext
+
+@{
+    bool azureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _azureEnabled) && _azureEnabled;
+}
 
 @if (!Model.IsFullyAllocated && Model.UnallocatedRanges.Any())
 {
@@ -16,8 +21,19 @@
                         This subnet is linked to Azure. Ranges listed here are free
                         <strong>according to what BASTET has imported</strong> — if Azure has assigned
                         address space that was never imported, it will still be listed below.
-                        <a asp-controller="Azure" asp-action="Reconcile">Run Azure Reconcile</a>
-                        to check before allocating from these ranges.
+                        @if (azureImportEnabled && SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
+                        {
+                            <text>
+                                Run a <a asp-controller="Azure" asp-action="BulkImport">Bulk Azure Import</a>
+                                against this VNet to see the Azure subnets BASTET has not recorded.
+                            </text>
+                        }
+                        else
+                        {
+                            <text>
+                                Ask an administrator to run a Bulk Azure Import before allocating from these ranges.
+                            </text>
+                        }
                     </div>
                 </div>
             }
@@ -28,6 +44,7 @@
                             <th>Start Address</th>
                             <th>End Address</th>
                             <th>Size</th>
+                            <th>Max Usable IPs</th>
                             <th>Action</th>
                         </tr>
                     </thead>
@@ -38,8 +55,8 @@
                                 <td><code>@range.StartIp</code></td>
                                 <td><code>@range.EndIp</code></td>
                                 <td>@range.AddressCount.ToString("N0") IP addresses</td>
+                                <td>@range.UsableCount.ToString("N0")</td>
                                 <td>
-                                    @inject Bastet.Services.IUserContextService SubnetUserContext
 
                                     @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.HostIpAssignments.Count == 0 && Model.Cidr < 32)
                                     {

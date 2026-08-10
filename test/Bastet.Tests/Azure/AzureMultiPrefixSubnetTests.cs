@@ -50,8 +50,16 @@ public class AzureMultiPrefixSubnetTests
     }
 
     [Fact]
-    public void SubnetWithNoIpv4Prefixes_ProducesNoRows()
-        => Assert.Empty(AzureService.BuildInventorySubnetRows(SubnetId("vnet1", "v6"), "v6", []));
+    public void SubnetWithNoIpv4Prefixes_ProducesOneRowCarryingNoPrefixes()
+    {
+        BulkAzureSubnetViewModel row = Assert.Single(
+            AzureService.BuildInventorySubnetRows(SubnetId("vnet1", "v6"), "v6", []));
+
+        Assert.Equal(SubnetId("vnet1", "v6"), row.ResourceId);
+        Assert.Equal("v6", row.Name);
+        Assert.Empty(row.AddressPrefix);
+        Assert.Empty(row.Ipv4AddressPrefixes);
+    }
 
     [Fact]
     public void DuplicatePrefixesFromArm_AreCollapsed()

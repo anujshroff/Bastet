@@ -182,6 +182,7 @@ public partial class SubnetController : Controller
 
             int totalSubnetsCreated = 0;
             int totalTargetsRenamed = 0;
+            int totalChildSubnetsRenamed = 0;
             int totalTargetsCreated = 0;
             int totalTargetsMarkedFullyAllocated = 0;
 
@@ -350,6 +351,34 @@ public partial class SubnetController : Controller
                         });
                     }
 
+                    if (child.WillRename && child.ExistingSubnetId is int existingChildId)
+                    {
+                        Subnet? existingChild = await context.Subnets.FindAsync(existingChildId);
+
+                        if (existingChild is null
+                            || !string.Equals(existingChild.AzureResourceId, sanitizedChildResourceId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            await transaction.RollbackAsync();
+                            return Conflict(new
+                            {
+                                success = false,
+                                error = $"Bastet subnet '{child.Name}' ({child.NetworkAddress}/{child.Cidr}) is no longer "
+                                    + "linked to the Azure subnet it was previewed against. Run the preview again."
+                            });
+                        }
+
+                        if (!string.Equals(existingChild.Name, childName, StringComparison.Ordinal))
+                        {
+                            existingChild.Name = childName;
+                            existingChild.LastModifiedAt = DateTime.UtcNow;
+                            existingChild.ModifiedBy = userContextService.GetCurrentUsername();
+                            await context.SaveChangesAsync();
+                            totalChildSubnetsRenamed++;
+                        }
+
+                        continue;
+                    }
+
                     AzureImportSubnetViewModel childVm = new()
                     {
                         Name = childName,
@@ -399,6 +428,7 @@ public partial class SubnetController : Controller
                 $"Bulk import succeeded: created {totalTargetsCreated} VNet target subnet(s), " +
                 $"created {totalSubnetsCreated} Azure child subnet(s), " +
                 $"renamed {totalTargetsRenamed} target(s), " +
+                $"renamed {totalChildSubnetsRenamed} child subnet(s), " +
                 $"linked {totalTargetsLinked} existing target(s) to Azure, " +
                 $"and marked {totalTargetsMarkedFullyAllocated} target(s) as fully allocated.";
 
@@ -409,6 +439,7 @@ public partial class SubnetController : Controller
                 createdTargets = totalTargetsCreated,
                 createdChildSubnets = totalSubnetsCreated,
                 renamedTargets = totalTargetsRenamed,
+                renamedChildSubnets = totalChildSubnetsRenamed,
                 linkedTargets = totalTargetsLinked,
                 fullyAllocatedTargets = totalTargetsMarkedFullyAllocated
             });

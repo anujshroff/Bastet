@@ -18,6 +18,18 @@ the scratchpad and die with the machine. The only durable artefact is the report
 Never report allocated space as free (the worst output it can produce); never destroy an allocation
 record on incomplete information; and the operator must be able to act on what they are told.
 
+**Rule 0, which overrides those: Bastet is the authority, and it answers from its own records.** Free
+means free *according to Bastet*. **Azure is not authoritative in Bastet at all** — it is a source you
+import *from*, which is why the import wizard exists. Until a range is imported it does not exist as
+far as Bastet is concerned, and a phase must never fail because Bastet showed un-imported Azure space
+as free. That is the product working.
+
+**Azure state and Bastet state are compared in exactly two places, and nowhere else:** the bulk import
+wizard, which asks *can this be added?*, and reconcile, which asks *can this be deleted?* Every other
+screen — the subnet tree, Details, unallocated ranges, host IPs, search — answers from Bastet alone.
+**Never write an assertion that has any other surface consult Azure**, and never fail one because it
+did not.
+
 **One flat, routable space.** Bastet manages a single IP space in which everything is routable against
 everything else, so the same range must never be allocated twice — preventing that collision is the
 product's reason to exist. Two consequences when classifying a result:
@@ -496,9 +508,34 @@ the browser actually sent against what was persisted.**
   | a prefix Bastet does not record | *(no badge)* — "Will create a new Bastet subnet" | yes |
   | linked, with a subnet still addable | Will update existing | yes |
   | linked, everything recorded | Already imported | no |
-  | matched a hand-made subnet holding host IPs / children | Cannot import, reason naming which | no |
+  | matched a hand-made subnet holding host IPs | Cannot import, reason naming which | no |
+  | matched a hand-made subnet **with children**, unlinked | Will update existing | **yes** — adoption |
   | linked, childless, name differs, **rename on** | Rename only | **yes** |
+  | linked and **fully allocated**, name differs, **rename on** | Rename only | **yes** |
+  | already-imported **child subnet**, name drifted, **rename on** | Rename only | **yes** |
+  | unlinked row on the same range, **rename on** | Cannot import | no |
 
+- **A hand-made subnet between a VNet and its Azure subnet stays refused.** Import a VNet prefix only,
+  hand-carve a subnet inside it that contains one of the VNet's Azure subnets, then rescan: that Azure
+  subnet must stay `Cannot import`. Assert the reason names the row in the way, states that Azure has no
+  such subnet, and tells the operator to delete or re-carve it - a refusal that only states the fact is
+  the defect here, not the refusal itself. Importing it under the hand-made row is a FAIL, not a fix.
+- **Adopting a hand-built tree that partly overlaps Azure.** Build a Bastet /16 by hand with two
+  hand-made children, one of which overlaps an Azure subnet in the matching VNet, and drive the whole
+  thing: the prefix must be selectable, the clean Azure subnet must import, the overlapping one must
+  stay `Cannot import` **naming the Bastet row in the way**, and committing must link the parent while
+  leaving both hand-made rows present and still unlinked. Then POST the overlapping subnet directly,
+  bypassing the disabled checkbox, and assert the preview refuses with a global error and the commit
+  writes nothing. A whole-prefix refusal here is a regression, not a safeguard.
+- **Every toggle must re-derive the preview button.** Select all, then flip each toggle in turn and
+  assert the button's `disabled` state matches what is actually ticked. A re-render that rebuilds the
+  checkboxes unticked while the button stays enabled posts an empty selection and answers
+  "No VNet address prefixes were selected" — assert the count of ticked boxes and the button together,
+  because either alone passes.
+- **The already-imported wording must match what is underneath it.** A prefix whose contained Azure
+  subnets are all recorded says "already recorded"; one where any contained subnet is refused says
+  "either already recorded or cannot be imported". Assert the two separately in one scan, or the
+  wording drifts back to claiming completeness over a row rendered directly beneath it saying otherwise.
 - **The rename toggle re-renders the tree whether or not the filter is on.** It changes the badge and
   the checkbox, not just visibility. Assert `Rename only` appears with the filter **off** too, or a
   regression that gates the re-render on the filter passes unnoticed.
@@ -507,15 +544,70 @@ the browser actually sent against what was persisted.**
   **A target with child subnets renames like any other** — that case was once excluded, so cover it
   explicitly: rename it by hand, tick it with rename on, commit, and assert the target took the VNet
   name **and every child survived untouched**.
+- **Child subnets rename too, and the assertion is the database, not the banner.** Rename two imported
+  children by hand, tick them with rename on, commit, then **read the rows back** and assert the names
+  actually changed. A counter incremented over an untracked entity reports "renamed 2" while writing
+  nothing, so a pass that only reads the success message proves nothing. Assert the preview says
+  *Rename to* rather than *Create* for those rows, and that `createdChildSubnets` is 0.
+- **The rename gate is the Azure link.** Cover both refusals in the same run: a row on the matching
+  range with **no** `AzureResourceId`, and one linked to a **different** Azure resource. Both must stay
+  `Cannot import`, must never be renamed, and must keep the "already exists in Bastet" global error.
+- **A rename-only selection must be submittable on its own.** Tick only child subnets, leaving the
+  prefix checkbox unticked, and assert the preview button enables and the payload still carries the
+  parent prefix — the selection is built from prefix checkboxes, so a child-only selection is exactly
+  the case that silently posts nothing.
 - **"Only show what would change"** (`#bulk-hide-imported`): with it **on**, nothing that would do no work may
   remain visible. Build all four cases in one scan and assert each: a VNet prefix whose every Azure
   subnet is already recorded is **hidden** and labelled `AlreadyImported`; a collapsed fully-allocated
   target imported from *this* VNet is **hidden** (`AlreadyImported`, not `Blocked`); a prefix with one
   un-imported subnet **stays visible**; and an exact-match target that is **not yet linked** stays
-  visible, because importing it links it and that is work. Then flip `#bulk-rename-matched` **without
+  visible, because importing it links it and that is work - **including one whose Bastet row already has
+  children**, which is adoption and is also work. Then flip `#bulk-rename-matched` **without
   re-scanning**: a row whose only difference is its name must appear when rename is on and vanish when
   it is off. The counter-test matters most - if nothing is ever hidden, or everything is, the filter
   is not being exercised.
+
+  **Assert the rule, not just the cases.** The filter must keep every prefix the planner marked
+  `IsSelectable`, plus the rename-only rows the client itself enables - and nothing else. A filter that
+  decides visibility by listing status names silently mis-files the next status anyone adds, which is
+  exactly how a linkable row came to be hidden behind a control labelled "only show what would change".
+  Drive it by comparing the visible set against `isSelectable` from the same scan, not against a
+  hand-written list of expected VNet names.
+- **The delete-then-import loop, driven end to end.** Import a VNet with a subnet, re-range the VNet in
+  Azure while the subnet stays live, then scan: the parent **must be offered for deletion** carrying the
+  "no longer has the address prefix" reason, not swallowed into a warning because it has a healthy
+  child. Delete it, assert both rows land in DeletedSubnets, re-import, and assert the row comes back at
+  Azure's **current** range with its child beneath it. A scan that reports nothing here is a failure -
+  the row is pinned at a range Azure does not have and no operator action clears it. Pair it with a
+  manual-content case in the same run, which must still be withheld, since re-import cannot restore a
+  hand-made subnet.
+- **A multi-prefix VNet, imported one prefix at a time.** Import each prefix of a two-prefix VNet in a
+  separate pass, then read the rows back: the two targets must carry distinguishable names, and must
+  match what importing both at once produces. Two top-level rows with the same name and disjoint ranges
+  is a failure. Then turn the rename switch on and assert neither prefix is offered a rename - an offer
+  here means the annotation and the commit disagree about the name, and taking it strips the qualifier
+  and recreates the duplicate.
+- **The free-space table's two counts.** On one subnet, assert every row satisfies
+  `Size == End - Start + 1`, and that `Max Usable IPs` is the block minus its own network and
+  broadcast - `Size - 2`, with a /31 giving 2 and a /32 giving 1. Assert it on a subnet that **has child
+  subnets**: the figure must not change there, because it describes the block rather than what can be
+  assigned to this subnet, whose own panel says host IPs are impossible. A count that shifts with the
+  parent is the bug this replaced.
+- **Every transactional write must classify an indeterminate commit.** Hold a `TABLOCKX` on the archive
+  table and drive each destructive path - subnet delete, host IP delete, reconcile delete, bulk import.
+  Each must answer "BASTET could not confirm whether ..." rather than asserting a definite failure, log
+  an outcome-unknown line, and redirect somewhere that actually **renders**: the natural target often
+  404s once the write has landed, which is the one case the message exists for, so assert the banner is
+  visible on the followed page rather than that TempData was set. This is the only coverage these paths
+  have - `SqlException` has no public constructor and the unit harness runs SQLite, so none of the
+  controller-level classifiers are unit-tested.
+- **Validation parity across write paths.** Take one field and drive the same value through every path
+  that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
+  directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused
+  everywhere, and ordinary operator text (`core/edge (site B)`, `Prod: DC1`, `Zürich core`,
+  `HQ <-> DR`, `temp < 5 and load > 3`) accepted everywhere and stored verbatim. Then read the stored
+  value back off a rendered page and assert it is HTML-encoded — that, not the input filter, is what
+  makes the app safe, so a run that only checks the filter has tested the wrong thing.
 - **Reconcile** (`_ReconcileScripts.cshtml`, 3-step): scan; checkbox select-all and the indeterminate
   state; the review table rendering status and reason with **no action column**; the typed `approved` confirmation; the
   `deleting` flag preventing a second POST; and that the commit posts `confirmedIds` /

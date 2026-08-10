@@ -9,6 +9,12 @@ public static class MigrationLockConnectionString
 
     public static string? Configured(string? connectionString) => connectionString;
 
+    public static string LockResource(string? connectionString)
+    {
+        string catalog = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+        return $"Bastet:Migration:{catalog}".ToLowerInvariant();
+    }
+
     public static string MasterBootstrap(string? connectionString) =>
         new SqlConnectionStringBuilder(connectionString)
         {

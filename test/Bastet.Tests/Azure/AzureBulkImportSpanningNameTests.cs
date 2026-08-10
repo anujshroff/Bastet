@@ -27,11 +27,18 @@ public class AzureBulkImportSpanningNameTests
 
     private BulkImportPlanViewModel Plan(
         IReadOnlyList<ExistingSubnetSnapshot> existing, params BulkImportSelectedVNetPrefixDto[] prefixes) =>
+        Plan(existing, false, prefixes);
+
+    private BulkImportPlanViewModel Plan(
+        IReadOnlyList<ExistingSubnetSnapshot> existing,
+        bool renameMatched,
+        params BulkImportSelectedVNetPrefixDto[] prefixes) =>
         _planner.BuildPlan(
             new BulkImportSelectionDto
             {
                 SubscriptionId = "sub-1",
                 SubscriptionName = "Test Sub",
+                RenameMatchedBastetSubnets = renameMatched,
                 VNetPrefixes = [.. prefixes]
             },
             existing);
@@ -94,13 +101,31 @@ public class AzureBulkImportSpanningNameTests
             [
                 new ExistingSubnetSnapshot
                 {
-                    Id = 2, Name = "sn-span", NetworkAddress = "10.72.5.0", Cidr = 24,
+                    Id = 2, Name = "renamed-by-hand", NetworkAddress = "10.72.5.0", Cidr = 24,
+                    AzureResourceId = SpanningSubnet
+                }
+            ],
+            true,
+            Prefix("10.72.0.0/16", Sub("sn-span", "10.72.5.0/24", SpanningSubnet)));
+
+        Assert.Equal("sn-span", Assert.Single(ChildNames(plan)));
+    }
+
+    [Fact]
+    public void ThePersistedRowForTheSameRange_PlansNothingWhenRenamesWereNotAskedFor()
+    {
+        BulkImportPlanViewModel plan = Plan(
+            [
+                new ExistingSubnetSnapshot
+                {
+                    Id = 2, Name = "renamed-by-hand", NetworkAddress = "10.72.5.0", Cidr = 24,
                     AzureResourceId = SpanningSubnet
                 }
             ],
             Prefix("10.72.0.0/16", Sub("sn-span", "10.72.5.0/24", SpanningSubnet)));
 
-        Assert.Equal("sn-span", Assert.Single(ChildNames(plan)));
+        Assert.Empty(ChildNames(plan));
+        Assert.DoesNotContain(plan.GlobalErrors, e => e.Contains("already exists in Bastet", StringComparison.Ordinal));
     }
 
     [Fact]

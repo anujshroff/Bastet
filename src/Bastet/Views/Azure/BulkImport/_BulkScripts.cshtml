@@ -1,4 +1,3 @@
-@model Bastet.Models.ViewModels.BulkImportInitialViewModel
 
 <script>
     $(document).ready(function () {
@@ -147,6 +146,12 @@
                 && prefixInfo.wouldRenameTarget === true;
         }
 
+        function isSubnetRenameOnly(subnet, renameOn) {
+            return renameOn === true
+                && subnet.statusName === "AlreadyImported"
+                && subnet.wouldRenameSubnet === true;
+        }
+
         function availabilityBadge(statusName) {
             switch (statusName) {
                 case "Available": return "";
@@ -162,10 +167,13 @@
         }
 
         function prefixHasWork(prefixInfo, containedSubnets, renameOn) {
+            if (prefixInfo.isSelectable) {
+                return true;
+            }
             if (containedSubnets.some(function (s) { return s.isSelectable; })) {
                 return true;
             }
-            if (prefixInfo.statusName === "Available") {
+            if (containedSubnets.some(function (s) { return isSubnetRenameOnly(s, renameOn); })) {
                 return true;
             }
             return isRenameOnly(prefixInfo, renameOn);
@@ -227,7 +235,12 @@
                             const subnetId = `bulk-subnet-${vIdx}-${pIdx}-${sIdx}`;
                             const $subnetDiv = $('<div class="form-check"></div>');
 
-                            const subnetBlockedByPrefix = subnet.isSelectable && !prefixInfo.isSelectable;
+                            const subnetRenameOnly = isSubnetRenameOnly(subnet, renameOn);
+                            const subnetSelectable = subnet.isSelectable || subnetRenameOnly;
+                            const prefixUsable = prefixInfo.isSelectable
+                                || isRenameOnly(prefixInfo, renameOn)
+                                || (renameOn === true && prefixInfo.statusName === "AlreadyImported");
+                            const subnetBlockedByPrefix = subnetSelectable && !prefixUsable;
                             const $subnetCheckbox = $('<input type="checkbox" class="form-check-input bulk-subnet-checkbox">')
                                 .attr('id', subnetId)
                                 .attr('data-vnet-idx', vIdx)
@@ -236,18 +249,22 @@
                                 .attr('data-address-prefix', subnet.addressPrefix)
                                 .attr('data-resource-id', subnet.resourceId || '')
 
-                                .prop('disabled', !subnet.isSelectable || !prefixInfo.isSelectable);
+                                .prop('disabled', !subnetSelectable || !prefixUsable);
                             const $subnetLabel = $('<label class="form-check-label"></label>')
                                 .attr('for', subnetId)
                                 .html(`${escapeHtml(subnet.name)} <span class="text-muted">${escapeHtml(subnet.addressPrefix)}</span>`
-                                    + availabilityBadge(subnet.statusName)
+                                    + (subnetRenameOnly
+                                        ? '<span class="badge bg-info ms-1">Rename only</span>'
+                                        : availabilityBadge(subnet.statusName))
 
                                     + (subnetBlockedByPrefix
                                         ? '<span class="badge bg-secondary ms-1">Blocked by VNet prefix</span>'
                                         : ""));
                             $subnetDiv.append($subnetCheckbox).append($subnetLabel);
 
-                            $subnetDiv.append(reasonHtml(subnet.reason));
+                            $subnetDiv.append(reasonHtml(subnetRenameOnly
+                                ? `${subnet.reason} The only change would be renaming it to match the Azure subnet name.`
+                                : subnet.reason));
 
                             if (subnetBlockedByPrefix && !subnet.reason) {
                                 $subnetDiv.append(reasonHtml(
@@ -324,15 +341,16 @@
 
         function updateGoPreviewBtn() {
 
-            const anyPrefix = $(".bulk-prefix-checkbox:checked:not(:disabled)").length > 0;
-            $("#bulk-go-preview-btn").prop("disabled", !anyPrefix);
+            const anySelection = $(".bulk-prefix-checkbox:checked:not(:disabled)").length > 0
+                || $(".bulk-subnet-checkbox:checked:not(:disabled)").length > 0;
+            $("#bulk-go-preview-btn").prop("disabled", !anySelection);
 
             invalidatePlan();
         }
 
         $("#bulk-rename-matched").on("change", function () {
-            invalidatePlan();
             renderVNetTree();
+            updateGoPreviewBtn();
         });
 
         $("#bulk-select-all-btn").on("click", function () {
@@ -412,19 +430,31 @@
             const renameMatched = $("#bulk-rename-matched").is(":checked");
             const prefixSelections = [];
 
+            const wanted = [];
             $(".bulk-prefix-checkbox:checked:not(:disabled)").each(function () {
+                wanted.push({ vIdx: parseInt($(this).attr('data-vnet-idx'), 10), prefix: $(this).attr('data-prefix') });
+            });
+
+            $(".bulk-subnet-checkbox:checked:not(:disabled)").each(function () {
                 const vIdx = parseInt($(this).attr('data-vnet-idx'), 10);
                 const prefix = $(this).attr('data-prefix');
-                const vnet = vnets[vIdx];
+                if (!wanted.some(function (w) { return w.vIdx === vIdx && w.prefix === prefix; })) {
+                    wanted.push({ vIdx: vIdx, prefix: prefix });
+                }
+            });
+
+            $.each(wanted, function (_, w) {
+                const vnet = vnets[w.vIdx];
 
                 const prefixDto = {
                     vNetName: vnet.name,
                     vNetResourceId: vnet.resourceId,
-                    addressPrefix: prefix,
+                    addressPrefix: w.prefix,
+                    vNetIpv4AddressPrefixes: vnet.ipv4AddressPrefixes || [],
                     subnets: []
                 };
 
-                $(`.bulk-subnet-checkbox[data-vnet-idx='${vIdx}'][data-prefix='${prefix}']:checked:not(:disabled)`).each(function () {
+                $(`.bulk-subnet-checkbox[data-vnet-idx='${w.vIdx}'][data-prefix='${w.prefix}']:checked:not(:disabled)`).each(function () {
                     prefixDto.subnets.push({
                         name: $(this).attr('data-name'),
                         addressPrefix: $(this).attr('data-address-prefix'),
@@ -573,9 +603,10 @@
                 if (item.childSubnets && item.childSubnets.length > 0) {
                     const $childList = $('<ul class="list-unstyled ms-3 mb-0"></ul>');
                     $.each(item.childSubnets, function (j, c) {
-                        $childList.append($('<li></li>').html(
-                            `<i class="bi bi-plus-circle text-success"></i> Create <strong>${escapeHtml(c.name)}</strong> <code>${escapeHtml(c.networkAddress)}/${escapeHtml(c.cidr)}</code>` +
-                            (c.originalAzureName !== c.name ? ` <small class="text-muted">(was "${escapeHtml(c.originalAzureName)}")</small>` : "")
+                        $childList.append($('<li></li>').html(c.willRename
+                            ? `<i class="bi bi-pencil text-info"></i> Rename to <strong>${escapeHtml(c.name)}</strong> <code>${escapeHtml(c.networkAddress)}/${escapeHtml(c.cidr)}</code>`
+                            : `<i class="bi bi-plus-circle text-success"></i> Create <strong>${escapeHtml(c.name)}</strong> <code>${escapeHtml(c.networkAddress)}/${escapeHtml(c.cidr)}</code>` +
+                              (c.originalAzureName !== c.name ? ` <small class="text-muted">(was "${escapeHtml(c.originalAzureName)}")</small>` : "")
                         ));
                     });
                     $body.append('<div class="text-muted small">Child Azure subnets:</div>');
