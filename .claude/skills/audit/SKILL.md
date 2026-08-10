@@ -346,6 +346,20 @@ never off the parent: a first attempt subtracted the *parent's* reserved address
 "usable host IPs" figure on a subnet whose own panel said it could not have host IP assignments at all.
 A /31 gives 2 and a /32 gives 1, which falls out of the rule rather than being special-cased.
 
+**The IP arithmetic lives in exactly one place — keep it there.** `IpUtilityService` is the only code in
+the application that manipulates addresses as integers; every controller and validator calls into it.
+That is worth defending: a finding that a *second* implementation has appeared is a real finding, and
+the fix is to delete it rather than to reconcile the two. Two expressions of "usable addresses" once
+coexisted - one keyed on a CIDR, one on a raw count - and agreed only by coincidence.
+
+**Arithmetic is audited with properties, not with numbers.** A test that pins `254` passes while three
+branches drift apart around it, which is exactly what happened. Assert the invariants instead: a mask
+has `cidr` leading one-bits; broadcast is network + size - 1; a free range's count equals
+`end - start + 1`; free ranges are disjoint, ordered, inside the parent, and never overlap an
+allocation; and **free + allocated == total**, which is the conservation check that catches an
+off-by-one anywhere in the walk. Then mutate the arithmetic and confirm the properties fail - a
+property suite that survives an injected off-by-one is decorative.
+
 **A subsystem must not re-derive a core rule.** When a component grows its own copy of IP arithmetic,
 free-space calculation or containment, the finding is the duplication itself — not each place the copy
 disagrees with `IpUtilityService`. One round filed three separate findings that were all a single

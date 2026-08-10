@@ -72,6 +72,20 @@ hand-added child subnet, or a host IP** — operator-owned data Azure does not k
 never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
 must not be applied as filed.
 
+**The IP arithmetic lives in exactly one place — keep it there.** `IpUtilityService` is the only code in
+the application that manipulates addresses as integers; every controller and validator calls into it.
+That is worth defending: a finding that a *second* implementation has appeared is a real finding, and
+the fix is to delete it rather than to reconcile the two. Two expressions of "usable addresses" once
+coexisted - one keyed on a CIDR, one on a raw count - and agreed only by coincidence.
+
+**Arithmetic is audited with properties, not with numbers.** A test that pins `254` passes while three
+branches drift apart around it, which is exactly what happened. Assert the invariants instead: a mask
+has `cidr` leading one-bits; broadcast is network + size - 1; a free range's count equals
+`end - start + 1`; free ranges are disjoint, ordered, inside the parent, and never overlap an
+allocation; and **free + allocated == total**, which is the conservation check that catches an
+off-by-one anywhere in the walk. Then mutate the arithmetic and confirm the properties fail - a
+property suite that survives an injected off-by-one is decorative.
+
 **A displayed count must match the range it is printed beside.** `AddressCount == EndIp - StartIp + 1`,
 always. The free-space table broke this three different ways at once - one branch subtracted 1 from the
 count, one subtracted 2, and one trimmed the end instead - because each was separately trying to express

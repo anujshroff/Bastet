@@ -70,7 +70,7 @@ public class IpUtilityService : IIpUtilityService
 
     public long CalculateTotalIpAddresses(int cidr) => cidr is < 0 or > 32
             ? throw new ArgumentOutOfRangeException(nameof(cidr), "CIDR must be between 0 and 32")
-            : (long)Math.Pow(2, 32 - cidr);
+            : 1L << (32 - cidr);
 
     public long CalculateUsableIpAddresses(int cidr)
     {
@@ -79,14 +79,11 @@ public class IpUtilityService : IIpUtilityService
             throw new ArgumentOutOfRangeException(nameof(cidr), "CIDR must be between 0 and 32");
         }
 
-        if (cidr >= 31)
-        {
-
-            return cidr == 31 ? 2 : 1;
-        }
-
-        return Math.Max(0, (long)Math.Pow(2, 32 - cidr) - 2);
+        return UsableWithin(CalculateTotalIpAddresses(cidr));
     }
+
+    private static long UsableWithin(long addressCount) =>
+        addressCount <= 2 ? addressCount : addressCount - 2;
 
     public bool IsValidSubnet(string networkAddress, int cidr)
     {
@@ -229,31 +226,15 @@ public class IpUtilityService : IIpUtilityService
 
         if (validChildren.Count == 0 && validHostIps.Count == 0)
         {
-
-            if (cidr >= 31)
+            unallocatedRanges.Add(new IPRange
             {
-
-                unallocatedRanges.Add(new IPRange
-                {
-                    StartIp = UIntToIpString(startIp),
-                    EndIp = UIntToIpString(endIp),
-                    AddressCount = subnetSize
-                });
-            }
-            else
-            {
-
-                unallocatedRanges.Add(new IPRange
-                {
-                    StartIp = UIntToIpString(startIp),
-                    EndIp = UIntToIpString(endIp),
-                    AddressCount = subnetSize
-                });
-            }
+                StartIp = UIntToIpString(startIp),
+                EndIp = UIntToIpString(endIp),
+                AddressCount = subnetSize
+            });
 
             StampUsable(unallocatedRanges);
-            StampUsable(unallocatedRanges);
-        return unallocatedRanges;
+            return unallocatedRanges;
         }
 
         List<(uint Start, uint End)> allocatedRanges = [];
@@ -304,15 +285,12 @@ public class IpUtilityService : IIpUtilityService
         {
             if (Start > currentPosition)
             {
-
+                unallocatedRanges.Add(new IPRange
                 {
-                    unallocatedRanges.Add(new IPRange
-                    {
-                        StartIp = UIntToIpString((uint)currentPosition),
-                        EndIp = UIntToIpString(Start - 1),
-                        AddressCount = Start - currentPosition
-                    });
-                }
+                    StartIp = UIntToIpString((uint)currentPosition),
+                    EndIp = UIntToIpString(Start - 1),
+                    AddressCount = Start - currentPosition
+                });
             }
 
             currentPosition = (long)End + 1;
@@ -320,18 +298,12 @@ public class IpUtilityService : IIpUtilityService
 
         if (currentPosition <= endIp)
         {
-            uint lastIp = endIp;
-
-            if (currentPosition <= lastIp)
+            unallocatedRanges.Add(new IPRange
             {
-
-                unallocatedRanges.Add(new IPRange
-                {
-                    StartIp = UIntToIpString((uint)currentPosition),
-                    EndIp = UIntToIpString(lastIp),
-                    AddressCount = lastIp - currentPosition + 1
-                });
-            }
+                StartIp = UIntToIpString((uint)currentPosition),
+                EndIp = UIntToIpString(endIp),
+                AddressCount = endIp - currentPosition + 1
+            });
         }
 
         StampUsable(unallocatedRanges);
@@ -391,7 +363,7 @@ public class IpUtilityService : IIpUtilityService
     {
         foreach (IPRange r in ranges)
         {
-            r.UsableCount = r.AddressCount <= 2 ? r.AddressCount : r.AddressCount - 2;
+            r.UsableCount = UsableWithin(r.AddressCount);
         }
     }
 }
