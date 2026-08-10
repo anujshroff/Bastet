@@ -10,12 +10,12 @@ space it never imported are struck; see the bottom of this file.
 
 The round filed Q1-Q21; the owner found Q22 during review.
 
-**Fixed (20):** Q3, Q4, Q5, Q9, Q15, Q20, Q21, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+**Fixed (21):** Q3, Q4, Q5, Q17, Q9, Q15, Q20, Q21, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
 fixed and then struck.
 
 **Open (0):** none.
 
-**Flagged as edge cases (1):** Q17 - owner to accept or drop. Q5 was accepted and fixed.
+**Flagged as edge cases:** none outstanding. Q5 and Q17 were both accepted and fixed.
 
 **Struck as invalid:** see the table at the bottom of this file.
 
@@ -167,7 +167,7 @@ fixed and then struck.
 **Fix applied:** the VNet-level `continue` is gone and BuildInventorySubnetRows emits one row with both prefix fields empty when a subnet has no IPv4, which is what makes Ipv4PrefixesOf return [] and produce the "now none" wording. Both resources are then classified as range changes rather than absences, so nothing is proposed for deletion on an absence claim. The VNetDeleted reason's "or no longer has any IPv4 address space" clause is deleted - after this it describes a state that can no longer produce that status. The zero-IPv4 filter moved into AzureController.BulkGetVNets, so the wizard tree is unchanged.
 **Residue of:** none
 
-## Q17 - The migration app lock is taken in `master` on a cold start, so it blocks unrelated deployments `[x1]`
+## Q17 - FIXED - The migration app lock was taken in `master` on a cold start, so it blocked unrelated deployments `[x1]`
 **Where:** src/Bastet/Program.cs:307-326, :236, :245, :339-345
 **Breaks:** sp_getapplock is database-scoped. When the catalog does not yet exist the code falls back to a `master` connection and holds `Bastet:Migration` there for the whole migration. A second, unrelated Bastet deployment on the same SQL instance, also starting for the first time, blocks up to the 300 s timeout and then aborts with "Another replica appears to be stuck applying migrations" - false, and it points at the wrong system. Meanwhile for the case the lock is *for* - two replicas of one deployment against an existing catalog - EF's own `__EFMigrationsLock` already covers it. Needs two deployments cold-starting on one server.
 **Fix:** On the 4060 path, take the master lock only around CREATE DATABASE and release it; then take `Bastet:Migration` in the configured catalog and hold that across Migrate(). Name the catalog in the failure message.
