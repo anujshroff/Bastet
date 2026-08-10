@@ -588,12 +588,11 @@ the browser actually sent against what was persisted.**
   here means the annotation and the commit disagree about the name, and taking it strips the qualifier
   and recreates the duplicate.
 - **The free-space table's two counts.** On one subnet, assert every row satisfies
-  `Size == End - Start + 1`, and that `Usable Host IPs` drops by one for a range touching the parent's
-  network address, one for a range touching its broadcast, and two for a range touching both. Check a
-  /30 (4 and 2) and a /31 (2 and 2) in the same run - a /31 reserves neither address, so equal counts
-  there are correct. Then click Create Subnet on a range whose usable count is 0 and confirm it
-  succeeds: the block is allocatable even when no host IP can sit in it, which is exactly why the two
-  columns exist.
+  `Size == End - Start + 1`, and that `Max Usable IPs` is the block minus its own network and
+  broadcast - `Size - 2`, with a /31 giving 2 and a /32 giving 1. Assert it on a subnet that **has child
+  subnets**: the figure must not change there, because it describes the block rather than what can be
+  assigned to this subnet, whose own panel says host IPs are impossible. A count that shifts with the
+  parent is the bug this replaced.
 - **Validation parity across write paths.** Take one field and drive the same value through every path
   that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
   directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused

@@ -217,11 +217,11 @@ public class SubnetPropertyCalculationTests
         Assert.Equal("10.0.0.255", result[0].EndIp);
 
         Assert.Equal(128, result[0].AddressCount);
-        Assert.Equal(127, result[0].UsableCount);
+        Assert.Equal(126, result[0].UsableCount);
     }
 
     [Fact]
-    public void CalculateUnallocatedRanges_LeadingGapOfOne_IsOneAddressWithNoUsableHostIp()
+    public void CalculateUnallocatedRanges_LeadingGapOfOne_IsOneAddress()
     {
         List<HostIpAssignment> hostIps = [new() { IP = "10.0.0.1" }];
 
@@ -231,11 +231,11 @@ public class SubnetPropertyCalculationTests
         Assert.Equal("10.0.0.0", leading.StartIp);
         Assert.Equal("10.0.0.0", leading.EndIp);
         Assert.Equal(1, leading.AddressCount);
-        Assert.Equal(0, leading.UsableCount);
+        Assert.Equal(1, leading.UsableCount);
     }
 
     [Fact]
-    public void CalculateUnallocatedRanges_LeadingGapOfTwo_IsTwoAddressesWithOneUsableHostIp()
+    public void CalculateUnallocatedRanges_LeadingGapOfTwo_IsTwoAddresses()
     {
         List<HostIpAssignment> hostIps = [new() { IP = "10.0.0.2" }];
 
@@ -245,11 +245,11 @@ public class SubnetPropertyCalculationTests
         Assert.Equal("10.0.0.0", leading.StartIp);
         Assert.Equal("10.0.0.1", leading.EndIp);
         Assert.Equal(2, leading.AddressCount);
-        Assert.Equal(1, leading.UsableCount);
+        Assert.Equal(2, leading.UsableCount);
     }
 
     [Fact]
-    public void CalculateUnallocatedRanges_TrailingGap_IsTwoAddressesWithOneUsableHostIp()
+    public void CalculateUnallocatedRanges_TrailingGap_IsTwoAddresses()
     {
         List<Subnet> childSubnets = [
             new() { NetworkAddress = "10.0.0.0", Cidr = 25 },
@@ -267,7 +267,7 @@ public class SubnetPropertyCalculationTests
         Assert.Equal("10.0.0.254", last.StartIp);
         Assert.Equal("10.0.0.255", last.EndIp);
         Assert.Equal(2, last.AddressCount);
-        Assert.Equal(1, last.UsableCount);
+        Assert.Equal(2, last.UsableCount);
     }
 
     [Fact]
@@ -294,7 +294,7 @@ public class SubnetPropertyCalculationTests
         Assert.Equal("10.0.0.255", result[1].EndIp);
 
         Assert.Equal(64, result[1].AddressCount);
-        Assert.Equal(63, result[1].UsableCount);
+        Assert.Equal(62, result[1].UsableCount);
     }
 
     [Fact]

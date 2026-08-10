@@ -163,7 +163,7 @@ public class IpUtilityServiceTests
         {
             long span = ToUint(r.EndIp) - ToUint(r.StartIp) + 1;
             Assert.Equal(span, r.AddressCount);
-            Assert.InRange(r.UsableCount, Math.Max(0, span - 2), span);
+            Assert.Equal(span <= 2 ? span : span - 2, r.UsableCount);
         }
     }
 
@@ -177,7 +177,7 @@ public class IpUtilityServiceTests
     }
 
     [Fact]
-    public void ARangeTouchingBothParentBoundaries_ReservesTwo_AndOneBoundaryReservesOne()
+    public void MaxUsable_IsTheBlockMinusItsOwnNetworkAndBroadcast()
     {
         IPRange whole = Assert.Single(_svc.CalculateUnallocatedRanges("10.0.0.0", 24, [], []));
         Assert.Equal(256, whole.AddressCount);
@@ -187,9 +187,9 @@ public class IpUtilityServiceTests
             "10.0.0.0", 24, [new Subnet { NetworkAddress = "10.0.0.64", Cidr = 26 }], [])];
 
         Assert.Equal(64, split[0].AddressCount);
-        Assert.Equal(63, split[0].UsableCount);
+        Assert.Equal(62, split[0].UsableCount);
         Assert.Equal(128, split[1].AddressCount);
-        Assert.Equal(127, split[1].UsableCount);
+        Assert.Equal(126, split[1].UsableCount);
     }
 
     private static long ToUint(string ip)

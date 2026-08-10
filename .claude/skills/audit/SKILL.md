@@ -340,9 +340,11 @@ always. The free-space table broke this three different ways at once - one branc
 count, one subtracted 2, and one trimmed the end instead - because each was separately trying to express
 "usable hosts" in a column labelled as a size. **When two questions are being asked of one number, the
 defect is the single column, not the arithmetic in it.** Show both: the block's size, which is what a
-subnet allocation uses and what a Create button must seed from, and the usable host count, which
-subtracts the parent's network and broadcast where the block touches them. A /31 and a /32 reserve
-neither, so there the two are equal - that is correct, not a special case.
+subnet allocation uses and what a Create button must seed from, and **max usable IPs - the block minus
+its own network and broadcast**, which is what you would get by allocating it. Key that off the block,
+never off the parent: a first attempt subtracted the *parent's* reserved addresses, which put a
+"usable host IPs" figure on a subnet whose own panel said it could not have host IP assignments at all.
+A /31 gives 2 and a /32 gives 1, which falls out of the rule rather than being special-cased.
 
 **A subsystem must not re-derive a core rule.** When a component grows its own copy of IP arithmetic,
 free-space calculation or containment, the finding is the duplication itself — not each place the copy

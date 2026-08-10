@@ -251,8 +251,8 @@ public class IpUtilityService : IIpUtilityService
                 });
             }
 
-            StampUsable(unallocatedRanges, UIntToIpString(startIp), UIntToIpString(endIp), cidr);
-            StampUsable(unallocatedRanges, UIntToIpString(startIp), UIntToIpString(endIp), cidr);
+            StampUsable(unallocatedRanges);
+            StampUsable(unallocatedRanges);
         return unallocatedRanges;
         }
 
@@ -334,7 +334,7 @@ public class IpUtilityService : IIpUtilityService
             }
         }
 
-        StampUsable(unallocatedRanges, UIntToIpString(startIp), UIntToIpString(endIp), cidr);
+        StampUsable(unallocatedRanges);
         return unallocatedRanges;
     }
 
@@ -387,17 +387,11 @@ public class IpUtilityService : IIpUtilityService
 
     #endregion
 
-    private static void StampUsable(List<IPRange> ranges, string networkAddress, string broadcastAddress, int cidr)
+    private static void StampUsable(List<IPRange> ranges)
     {
         foreach (IPRange r in ranges)
         {
-            long span = r.AddressCount;
-            if (cidr < 31)
-            {
-                if (string.Equals(r.StartIp, networkAddress, StringComparison.Ordinal)) { span--; }
-                if (string.Equals(r.EndIp, broadcastAddress, StringComparison.Ordinal)) { span--; }
-            }
-            r.UsableCount = span < 0 ? 0 : span;
+            r.UsableCount = r.AddressCount <= 2 ? r.AddressCount : r.AddressCount - 2;
         }
     }
 }
