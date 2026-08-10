@@ -475,7 +475,7 @@ namespace Bastet.Services.Azure
             ParsedPrefixSelection p,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
             bool renameMatched,
-            IReadOnlySet<string> multiPrefixResourceIds)
+            HashSet<string> multiPrefixResourceIds)
         {
             BulkImportPlanItem item = new()
             {

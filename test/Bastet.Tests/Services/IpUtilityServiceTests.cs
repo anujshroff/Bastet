@@ -1,6 +1,6 @@
-using System.Net;
 using Bastet.Models;
 using Bastet.Services;
+using System.Net;
 
 namespace Bastet.Tests.Services;
 
@@ -114,7 +114,7 @@ public class IpUtilityServiceTests
     }
 
     private static string ToIp(uint value) =>
-        new IPAddress(BitConverter.GetBytes(value).Reverse().ToArray()).ToString();
+        new IPAddress([.. BitConverter.GetBytes(value).Reverse()]).ToString();
 
     private static uint ToUInt(string ip) =>
         BitConverter.ToUInt32([.. IPAddress.Parse(ip).GetAddressBytes().Reverse()], 0);
