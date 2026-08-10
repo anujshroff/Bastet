@@ -335,6 +335,13 @@ at this round's HEAD and at the previous audit commit. A component that has doub
 the product's requirements did not change is being driven by the audit loop, and that belongs in the
 round's headline.
 
+**Check who can reach the remedy a message names, not just whether it is true.** A link is part of the
+message: pointing an operator at a page that answers them with AccessDenied, or with a feature-disabled
+403, breaks rule 3 exactly as a wrong sentence does. Where the same destination is already linked
+elsewhere, copy that gating rather than inventing a second condition - the nav had this right sixteen
+lines from a panel that had it wrong. When the link is suppressed, close the sentence as prose instead
+of dropping the next step, or the reader is left with a warning and no move.
+
 **A displayed count must match the range it is printed beside.** `AddressCount == EndIp - StartIp + 1`,
 always. The free-space table broke this three different ways at once - one branch subtracted 1 from the
 count, one subtracted 2, and one trimmed the end instead - because each was separately trying to express

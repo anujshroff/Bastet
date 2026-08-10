@@ -10,10 +10,10 @@ space it never imported are struck; see the bottom of this file.
 
 The round filed Q1-Q21; the owner found Q22 during review.
 
-**Fixed (16):** Q3, Q4, Q15, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+**Fixed (17):** Q3, Q4, Q9, Q15, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
 fixed and then struck.
 
-**Open (3):** Q9, Q20, Q21.
+**Open (2):** Q20, Q21.
 
 **Flagged as edge cases (2):** Q5, Q17 - owner to accept or drop.
 
@@ -129,11 +129,11 @@ fixed and then struck.
 **Fix applied:** the clause is gone and the blurb now names both things reconcile actually reports. The second sentence was also false and was corrected in the same edit: a row offered for deletion can never hold hand-made content, because ManualDescendantCount counts any unlinked descendant in the subtree and diverts the row to Needs review. It now says the cascade archives the Azure-imported subnets beneath it, and that rows holding content created here are listed under Needs review and are never deleted.
 **Residue of:** d18327e (Audit 16 Cleanup #165)
 
-## Q9 - The free-space panel's "Run Azure Reconcile" link renders for users who cannot open it `[x1]`
+## Q9 - FIXED - The free-space panel named a remedy that could not answer the question, and linked it for users who cannot open it `[x1]`
 **Where:** src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:19; src/Bastet/Controllers/AzureController.cs:11 (RequireAdminRole) and :133-136 (403 when BASTET_AZURE_IMPORT is off); src/Bastet/Views/Shared/_Layout.cshtml:46-60 (the correct gating pattern)
 **Breaks:** The link is gated on nothing. A View/Edit/Delete-role user lands on AccessDenied; with the flag off everyone including Admins gets a 403 reading "Azure Import feature is not enabled", while the nav six lines away correctly hides the same link.
 **Repro:** Flag off -> Details renders `<a href="/Azure/Reconcile">` while the nav omits it; following it gives 302 -> /Error/403.
-**Fix:** Render the link only when the flag is set and the user is Admin, expressed inline exactly as _Layout.cshtml:46 does (`IsAzureImportEnabled` is internal to Bastet.dll and views compile separately, so a view cannot call it). Keep the warning sentence unconditional.
+**Fix applied, and it reinstates a half struck earlier.** The gating half was never in doubt: the link is now rendered only when BASTET_AZURE_IMPORT is set and the user is Admin, expressed inline exactly as _Layout.cshtml does, because IsAzureImportEnabled is internal to Bastet.dll and views compile separately. The other half was struck on the grounds that reconcile returning a clean scan is not a defect - true, but it does not cover the banner *pointing at* reconcile for a job reconcile does not have. Reconcile compares linked resources by resource id and never hunts un-imported Azure space; the bulk import wizard does. The remedy now names the wizard, which makes it true, and the same class as Q6 and Q19. When the link is suppressed the sentence closes as prose rather than dropping the next step.
 **Residue of:** none (origin 8afa2df, Audit 14 Cleanup #160)
 
 ## Q15 - FIXED - Host IP delete reported a definite failure for a write whose outcome is unknown `[x2]`

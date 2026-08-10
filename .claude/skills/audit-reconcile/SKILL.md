@@ -86,6 +86,13 @@ allocation; and **free + allocated == total**, which is the conservation check t
 off-by-one anywhere in the walk. Then mutate the arithmetic and confirm the properties fail - a
 property suite that survives an injected off-by-one is decorative.
 
+**Check who can reach the remedy a message names, not just whether it is true.** A link is part of the
+message: pointing an operator at a page that answers them with AccessDenied, or with a feature-disabled
+403, breaks rule 3 exactly as a wrong sentence does. Where the same destination is already linked
+elsewhere, copy that gating rather than inventing a second condition - the nav had this right sixteen
+lines from a panel that had it wrong. When the link is suppressed, close the sentence as prose instead
+of dropping the next step, or the reader is left with a warning and no move.
+
 **A displayed count must match the range it is printed beside.** `AddressCount == EndIp - StartIp + 1`,
 always. The free-space table broke this three different ways at once - one branch subtracted 1 from the
 count, one subtracted 2, and one trimmed the end instead - because each was separately trying to express
