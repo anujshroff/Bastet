@@ -593,6 +593,14 @@ the browser actually sent against what was persisted.**
   subnets**: the figure must not change there, because it describes the block rather than what can be
   assigned to this subnet, whose own panel says host IPs are impossible. A count that shifts with the
   parent is the bug this replaced.
+- **Every transactional write must classify an indeterminate commit.** Hold a `TABLOCKX` on the archive
+  table and drive each destructive path - subnet delete, host IP delete, reconcile delete, bulk import.
+  Each must answer "BASTET could not confirm whether ..." rather than asserting a definite failure, log
+  an outcome-unknown line, and redirect somewhere that actually **renders**: the natural target often
+  404s once the write has landed, which is the one case the message exists for, so assert the banner is
+  visible on the followed page rather than that TempData was set. This is the only coverage these paths
+  have - `SqlException` has no public constructor and the unit harness runs SQLite, so none of the
+  controller-level classifiers are unit-tested.
 - **Validation parity across write paths.** Take one field and drive the same value through every path
   that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
   directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused

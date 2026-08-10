@@ -10,10 +10,10 @@ space it never imported are struck; see the bottom of this file.
 
 The round filed Q1-Q21; the owner found Q22 during review.
 
-**Fixed (14):** Q3, Q4, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+**Fixed (16):** Q3, Q4, Q15, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
 fixed and then struck.
 
-**Open (4):** Q9, Q15, Q20, Q21.
+**Open (3):** Q9, Q20, Q21.
 
 **Flagged as edge cases (2):** Q5, Q17 - owner to accept or drop.
 
@@ -136,7 +136,7 @@ fixed and then struck.
 **Fix:** Render the link only when the flag is set and the user is Admin, expressed inline exactly as _Layout.cshtml:46 does (`IsAzureImportEnabled` is internal to Bastet.dll and views compile separately, so a view cannot call it). Keep the warning sentence unconditional.
 **Residue of:** none (origin 8afa2df, Audit 14 Cleanup #160)
 
-## Q15 - Host IP delete reports a definite failure for a write whose outcome is unknown `[x2]`
+## Q15 - FIXED - Host IP delete reported a definite failure for a write whose outcome is unknown `[x2]`
 **Where:** src/Bastet/Controllers/HostIpController.cs:407 (blanket catch over the archive transaction); src/Bastet/Controllers/SubnetController.Delete.cs:200-216 (the sibling that classifies); src/Bastet/Services/Data/SqlSaveOutcome.cs:31
 **Breaks:** If the connection is severed at CommitAsync, SQL Server may have committed: the assignment is archived and the address free, while the only handler asserts "Error deleting host IP. Details have been logged." - a statement that it did not happen. Every sibling destructive path was given the classifier; this one was not.
 **Repro:** Hold `TABLOCKX` on DeletedHostIpAssignments and delete a host IP -> the definite-failure banner, with a SqlException that IsIndeterminateTransaction returns true for. The same fault on /Subnet/Delete correctly reports "BASTET could not confirm whether this subnet was deleted."
