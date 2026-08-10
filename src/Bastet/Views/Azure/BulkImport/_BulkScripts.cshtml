@@ -166,14 +166,15 @@
             return reason ? `<div class="small text-muted ms-4">${escapeHtml(reason)}</div>` : "";
         }
 
+        function subnetHasWork(subnet, renameOn) {
+            return subnet.isSelectable || isSubnetRenameOnly(subnet, renameOn);
+        }
+
         function prefixHasWork(prefixInfo, containedSubnets, renameOn) {
             if (prefixInfo.isSelectable) {
                 return true;
             }
-            if (containedSubnets.some(function (s) { return s.isSelectable; })) {
-                return true;
-            }
-            if (containedSubnets.some(function (s) { return isSubnetRenameOnly(s, renameOn); })) {
+            if (containedSubnets.some(function (s) { return subnetHasWork(s, renameOn); })) {
                 return true;
             }
             return isRenameOnly(prefixInfo, renameOn);
@@ -226,7 +227,7 @@
 
                     const containedSubnets = contained;
                     const shownSubnets = hideImported
-                        ? containedSubnets.filter(function (s) { return s.isSelectable; })
+                        ? containedSubnets.filter(function (s) { return subnetHasWork(s, renameOn); })
                         : containedSubnets;
 
                     if (shownSubnets.length > 0) {
