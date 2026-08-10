@@ -166,6 +166,12 @@
             return reason ? `<div class="small text-muted ms-4">${escapeHtml(reason)}</div>` : "";
         }
 
+        function isPrefixUsable(prefixInfo, renameOn) {
+            return prefixInfo.isSelectable
+                || isRenameOnly(prefixInfo, renameOn)
+                || (renameOn === true && prefixInfo.statusName === "AlreadyImported");
+        }
+
         function subnetHasWork(subnet, renameOn) {
             return subnet.isSelectable || isSubnetRenameOnly(subnet, renameOn);
         }
@@ -174,7 +180,9 @@
             if (prefixInfo.isSelectable) {
                 return true;
             }
-            if (containedSubnets.some(function (s) { return subnetHasWork(s, renameOn); })) {
+
+            if (isPrefixUsable(prefixInfo, renameOn)
+                && containedSubnets.some(function (s) { return subnetHasWork(s, renameOn); })) {
                 return true;
             }
             return isRenameOnly(prefixInfo, renameOn);
@@ -238,9 +246,7 @@
 
                             const subnetRenameOnly = isSubnetRenameOnly(subnet, renameOn);
                             const subnetSelectable = subnet.isSelectable || subnetRenameOnly;
-                            const prefixUsable = prefixInfo.isSelectable
-                                || isRenameOnly(prefixInfo, renameOn)
-                                || (renameOn === true && prefixInfo.statusName === "AlreadyImported");
+                            const prefixUsable = isPrefixUsable(prefixInfo, renameOn);
                             const subnetBlockedByPrefix = subnetSelectable && !prefixUsable;
                             const $subnetCheckbox = $('<input type="checkbox" class="form-check-input bulk-subnet-checkbox">')
                                 .attr('id', subnetId)
