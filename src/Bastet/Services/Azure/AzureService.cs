@@ -113,11 +113,6 @@ namespace Bastet.Services.Azure
                         }
                     }
 
-                    if (vnetVm.Ipv4AddressPrefixes.Count == 0)
-                    {
-                        continue;
-                    }
-
                     foreach (SubnetData subnet in vnet.Data.Subnets ?? [])
                     {
                         vnetVm.Subnets.AddRange(BuildInventorySubnetRows(
@@ -169,13 +164,15 @@ namespace Bastet.Services.Azure
                 .Where(p => !string.IsNullOrEmpty(p))
                 .Distinct(StringComparer.OrdinalIgnoreCase)];
 
-            return [.. prefixes.Select(prefix => new BulkAzureSubnetViewModel
-            {
-                ResourceId = resourceId,
-                Name = name,
-                AddressPrefix = prefix,
-                Ipv4AddressPrefixes = [.. prefixes]
-            })];
+            return prefixes.Count == 0
+                ? [new BulkAzureSubnetViewModel { ResourceId = resourceId, Name = name }]
+                : [.. prefixes.Select(prefix => new BulkAzureSubnetViewModel
+                {
+                    ResourceId = resourceId,
+                    Name = name,
+                    AddressPrefix = prefix,
+                    Ipv4AddressPrefixes = [.. prefixes]
+                })];
         }
 
         private static bool IsIpv4AddressPrefix(string addressPrefix)

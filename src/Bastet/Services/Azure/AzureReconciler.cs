@@ -280,8 +280,7 @@ namespace Bastet.Services.Azure
             {
 
                 return Item(snapshot, AzureReconcileStatus.VNetDeleted,
-                    "The VNet this subnet was imported from no longer exists in Azure, " +
-                    "or no longer has any IPv4 address space.");
+                    "The VNet this subnet was imported from no longer exists in Azure.");
             }
 
             return !vnet.Ipv4AddressPrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase)

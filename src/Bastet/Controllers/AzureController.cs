@@ -80,7 +80,7 @@ namespace Bastet.Controllers
                     return Json(new { success = false, error = inventory.ErrorMessage });
                 }
 
-                List<BulkAzureVNetViewModel> vnets = inventory.VNets;
+                List<BulkAzureVNetViewModel> vnets = [.. inventory.VNets.Where(v => v.Ipv4AddressPrefixes.Count > 0)];
 
                 IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
                 planner.AnnotateAvailability(vnets, existing);

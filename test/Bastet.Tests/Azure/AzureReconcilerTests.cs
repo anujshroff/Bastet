@@ -327,4 +327,44 @@ public class AzureReconcilerTests
         Assert.Empty(plan.Items);
         Assert.Empty(plan.ReviewItems);
     }
+
+    private static BulkAzureSubnetViewModel AzSubnetWithNoIpv4(string vnetName, string name) =>
+        new() { ResourceId = SubnetId(vnetName, name), Name = name };
+
+    [Fact]
+    public void ASubnetThatLostItsIpv4Prefix_IsReportedAsARangeChange_NotAsDeleted()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.99.0.0/16"], AzSubnetWithNoIpv4("vnet-a", "dual"))),
+            [Linked(1, "dual", "10.99.1.0", 24, SubnetId("vnet-a", "dual"))]);
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, item.Status);
+        Assert.Contains("now none", item.Reason);
+        Assert.False(AzureReconciler.IsAbsenceStatus(item.Status));
+    }
+
+    [Fact]
+    public void AVNetThatLostItsIpv4Space_IsReportedAsARangeChange_NotAsDeleted()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", [])),
+            [Linked(1, "target", "10.99.0.0", 16, VNetId("vnet-a"))]);
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.VNetPrefixRemoved, item.Status);
+        Assert.False(AzureReconciler.IsAbsenceStatus(item.Status));
+    }
+
+    [Fact]
+    public void TheVNetDeletedReason_NoLongerClaimsItMightJustHaveLostIpv4()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [Linked(1, "target", "10.99.0.0", 16, VNetId("vnet-gone"))]);
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(AzureReconcileStatus.VNetDeleted, item.Status);
+        Assert.DoesNotContain("IPv4 address space", item.Reason);
+    }
 }

@@ -10,12 +10,12 @@ space it never imported are struck; see the bottom of this file.
 
 The round filed Q1-Q21; the owner found Q22 during review.
 
-**Fixed (19):** Q3, Q4, Q9, Q15, Q20, Q21, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+**Fixed (20):** Q3, Q4, Q5, Q9, Q15, Q20, Q21, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
 fixed and then struck.
 
 **Open (0):** none.
 
-**Flagged as edge cases (2):** Q5, Q17 - owner to accept or drop.
+**Flagged as edge cases (1):** Q17 - owner to accept or drop. Q5 was accepted and fixed.
 
 **Struck as invalid:** see the table at the bottom of this file.
 
@@ -161,10 +161,10 @@ fixed and then struck.
 
 # Flagged as edge cases - owner to accept or drop
 
-## Q5 - Reconcile cannot report an IPv4 range removed from a dual-stack Azure resource `[x1]`
+## Q5 - FIXED - Reconcile could not report an IPv4 range removed from a dual-stack Azure resource `[x1]`
 **Where:** src/Bastet/Services/Azure/AzureService.cs:118-121, :170-181; src/Bastet/Controllers/AzureController.cs:88
 **Breaks:** The inventory drops VNets and subnets with no IPv4 prefix, so a resource whose IPv4 range was removed (leaving it IPv6-only) never reaches `liveSubnetPrefixes`. It is classified as an absence, the confirmation step asks ARM directly, ARM says it exists, and the item is withheld with "still exist in Azure, so they have been withheld from deletion". The row is pinned forever and no operator action clears it. Legitimate under the product model - Bastet has a link and Azure changed - but it needs a dual-stack VNet and an IPv4 prefix removal to reach.
-**Fix:** Stop dropping these from the shared inventory; emit the row with both prefix fields empty so `Ipv4PrefixesOf` returns [] and the "now none" wording fires. Apply the zero-IPv4 filter in AzureController.BulkGetVNets only.
+**Fix applied:** the VNet-level `continue` is gone and BuildInventorySubnetRows emits one row with both prefix fields empty when a subnet has no IPv4, which is what makes Ipv4PrefixesOf return [] and produce the "now none" wording. Both resources are then classified as range changes rather than absences, so nothing is proposed for deletion on an absence claim. The VNetDeleted reason's "or no longer has any IPv4 address space" clause is deleted - after this it describes a state that can no longer produce that status. The zero-IPv4 filter moved into AzureController.BulkGetVNets, so the wizard tree is unchanged.
 **Residue of:** none
 
 ## Q17 - The migration app lock is taken in `master` on a cold start, so it blocks unrelated deployments `[x1]`
