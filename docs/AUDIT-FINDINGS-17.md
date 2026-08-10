@@ -1,6 +1,12 @@
 # Bastet - Round-17 Audit Findings
 
-branch `audit/round-17` / HEAD `425ec8d` / 752 tests passing / 2026-08-08
+branch `audit/round-17` / baseline HEAD `425ec8d`, 752 tests / final HEAD `b688930`, 820 tests, 0 warnings
+
+Final verification sweep: clean rebuild 0 warnings; 820/820; every fix re-driven against the final
+tree; the real app driven over every major area asserting rendered content with security headers
+present; both Azure surfaces driven end to end including the two counter-tests (an invisible resource
+withheld by name, a genuinely deleted one still offered and deleted); log classified, which caught one
+further defect (the migration lock released under the wrong name) now fixed; git status clean.
 
 Reviewed with the owner against the product model: **Bastet is the authority and answers from its own
 records. Azure is not authoritative in Bastet at all - it is a source you import from, which is what
