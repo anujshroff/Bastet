@@ -8,8 +8,16 @@ the import wizard is for. Azure and Bastet state are compared in exactly two pla
 be added?) and reconcile (can this be deleted?).** Findings that argued Bastet should know about Azure
 space it never imported are struck; see the bottom of this file.
 
-PLACEHOLDER 2 more are flagged as edge cases for the owner to accept or drop, and
-Q1 plus 6 others were struck as invalid - see the bottom of this file.
+The round filed Q1-Q21; the owner found Q22 during review.
+
+**Fixed (13):** Q3, Q6, Q7, Q8, Q10, Q11, Q12, Q13, Q14, Q16, Q18, Q19, Q22 - plus Q1, which was
+fixed and then struck.
+
+**Open (5):** Q4 (needs an owner decision), Q9, Q15, Q20, Q21.
+
+**Flagged as edge cases (2):** Q5, Q17 - owner to accept or drop.
+
+**Struck as invalid:** see the table at the bottom of this file.
 
 # Critical
 
