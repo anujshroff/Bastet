@@ -1,6 +1,6 @@
-using System.ComponentModel.DataAnnotations;
 using Bastet.Models.ViewModels;
 using Bastet.Services.Security;
+using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Tests.Security;
 

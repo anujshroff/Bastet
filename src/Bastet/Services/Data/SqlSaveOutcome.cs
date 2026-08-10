@@ -1,6 +1,6 @@
 using Microsoft.Data.SqlClient;
-using System.Net.Sockets;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Sockets;
 
 namespace Bastet.Services.Data;
 

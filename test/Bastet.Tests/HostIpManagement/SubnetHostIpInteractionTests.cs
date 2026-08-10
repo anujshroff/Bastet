@@ -581,7 +581,11 @@ public class SubnetHostIpInteractionTests : IDisposable
 
         _context.Subnets.Add(new Subnet
         {
-            Id = 701, Name = "added-after", NetworkAddress = "10.70.1.0", Cidr = 24, ParentSubnetId = 700
+            Id = 701,
+            Name = "added-after",
+            NetworkAddress = "10.70.1.0",
+            Cidr = 24,
+            ParentSubnetId = 700
         });
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 

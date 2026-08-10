@@ -6,9 +6,7 @@ using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Globalization;
 
 namespace Bastet.Tests.Security;
 
@@ -23,13 +21,10 @@ public class ErrorControllerTests
 
     private static IActionResult Invoke(ErrorController controller, int statusCode, string? token = null)
     {
-        controller.ControllerContext.RouteData = new RouteData();
-        controller.ControllerContext.RouteData.Values["statusCode"] =
-            statusCode.ToString(CultureInfo.InvariantCulture);
         controller.Request.QueryString = token is null
             ? QueryString.Empty
             : QueryString.Create(ErrorPageMessages.TokenQueryKey, token);
-        return controller.HttpStatusCodeHandler();
+        return controller.HttpStatusCodeHandler(statusCode);
     }
 
     private static string StashMessage(ErrorController controller, string message) =>
@@ -135,10 +130,9 @@ public class ErrorControllerTests
     public void HttpStatusCodeHandler_NoRouteValue_UsesTheStatusAlreadyOnTheResponse()
     {
         ErrorController controller = CreateController();
-        controller.ControllerContext.RouteData = new RouteData();
         controller.Response.StatusCode = 400;
 
-        IActionResult result = controller.HttpStatusCodeHandler();
+        IActionResult result = controller.HttpStatusCodeHandler(null);
 
         ViewResult view = Assert.IsType<ViewResult>(result);
         Assert.Equal("BadRequest", view.ViewName);

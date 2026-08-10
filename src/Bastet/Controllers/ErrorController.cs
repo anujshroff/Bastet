@@ -9,26 +9,23 @@ namespace Bastet.Controllers;
 public class ErrorController : Controller
 {
     [Route("/Error/{statusCode}")]
-    public IActionResult HttpStatusCodeHandler()
+    public IActionResult HttpStatusCodeHandler(int? statusCode)
     {
 
-        int statusCode = RouteData.Values.TryGetValue("statusCode", out object? routeValue)
-                         && int.TryParse(routeValue as string, out int statusFromRoute)
-            ? statusFromRoute
-            : Response.StatusCode;
+        int resolvedStatusCode = statusCode ?? Response.StatusCode;
 
         string? errorMessage = ErrorPageMessages.Take(TempData, Request.Query[ErrorPageMessages.TokenQueryKey]);
 
-        Response.StatusCode = statusCode is >= 400 and <= 599 ? statusCode : 500;
+        Response.StatusCode = resolvedStatusCode is >= 400 and <= 599 ? resolvedStatusCode : 500;
 
         ErrorViewModel viewModel = new()
         {
             RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier,
-            StatusCode = statusCode,
+            StatusCode = resolvedStatusCode,
             ErrorMessage = errorMessage
         };
 
-        switch (statusCode)
+        switch (resolvedStatusCode)
         {
             case 400:
                 viewModel.Title = "Bad Request";
