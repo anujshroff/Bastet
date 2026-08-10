@@ -353,6 +353,22 @@ never off the parent: a first attempt subtracted the *parent's* reserved address
 "usable host IPs" figure on a subnet whose own panel said it could not have host IP assignments at all.
 A /31 gives 2 and a /32 gives 1, which falls out of the rule rather than being special-cased.
 
+**The owner's product model outranks the finding's reasoning, and outranks yours.** A finding is one
+round's read of the code; the owner knows what the product is for. When they contradict, the finding is
+wrong by definition — record it struck or inverted, do not argue it through. In one round the owner
+inverted four:
+
+- a refusal the finding called a defect was correct, and only its *message* needed fixing, because
+  imported rows must mirror Azure's containment;
+- a withhold the finding wanted explained better should not have existed at all;
+- a column the finding wanted picked one way became two columns answering two questions;
+- and an "edge case" flagged for dropping was accepted, because pinning a record forever is not
+  softened by being rare.
+
+Each time the owner's answer was smaller, or truer to the product, than the filed fix. **If a fix
+starts growing a mechanism, stop and put the product question to the owner in one line** — the filed
+fix has often mis-framed the problem, and asking costs a sentence where implementing costs a round.
+
 **The IP arithmetic lives in exactly one place — keep it there.** `IpUtilityService` is the only code in
 the application that manipulates addresses as integers; every controller and validator calls into it.
 That is worth defending: a finding that a *second* implementation has appeared is a real finding, and

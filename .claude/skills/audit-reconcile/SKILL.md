@@ -72,6 +72,22 @@ hand-added child subnet, or a host IP** — operator-owned data Azure does not k
 never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
 must not be applied as filed.
 
+**The owner's product model outranks the finding's reasoning, and outranks yours.** A finding is one
+round's read of the code; the owner knows what the product is for. When they contradict, the finding is
+wrong by definition — record it struck or inverted, do not argue it through. In one round the owner
+inverted four:
+
+- a refusal the finding called a defect was correct, and only its *message* needed fixing, because
+  imported rows must mirror Azure's containment;
+- a withhold the finding wanted explained better should not have existed at all;
+- a column the finding wanted picked one way became two columns answering two questions;
+- and an "edge case" flagged for dropping was accepted, because pinning a record forever is not
+  softened by being rare.
+
+Each time the owner's answer was smaller, or truer to the product, than the filed fix. **If a fix
+starts growing a mechanism, stop and put the product question to the owner in one line** — the filed
+fix has often mis-framed the problem, and asking costs a sentence where implementing costs a round.
+
 **The IP arithmetic lives in exactly one place — keep it there.** `IpUtilityService` is the only code in
 the application that manipulates addresses as integers; every controller and validator calls into it.
 That is worth defending: a finding that a *second* implementation has appeared is a real finding, and
@@ -391,6 +407,27 @@ Then, because the suite is not enough: **re-run this finding's own reproduction 
 re-run the reproduction of every fix already made this round.** A fix that no longer demonstrates its
 defect closed is this round's problem, not next round's finding.
 
+**Prove every new test discriminates, by breaking the code it guards.** A test written after the fix,
+against the fix, passes by construction — that is not evidence. Revert the specific line the test
+exists for, confirm the test fails, restore. If it still passes, the test is decoration and the finding
+is unguarded.
+
+This is not a nicety. Three separate times in one round a test looked right and proved nothing:
+
+- an invariant over free-space ranges whose generated fixtures all began at the parent's network
+  address, so the head-gap branch it was written for was never exercised — restoring the old
+  off-by-one passed clean;
+- concurrency tests seeding a `[Timestamp]` column, which EF ignores as store-generated, so SQLite
+  stored NULL and the guard never ran;
+- two application instances started together to prove they no longer contend, which came up 13.2s and
+  13.3s **whether or not they did**, because the work was too fast for contention to show.
+
+Each was caught only by mutation. The third needed the test redesigned entirely — an external holder
+taking the lock and measuring the block — before it could distinguish the two outcomes at all. **If a
+test cannot fail, it is not testing.** Where the harness genuinely cannot reach a path — no public
+constructor, an in-memory provider that behaves differently — say so in the commit rather than writing
+something that passes regardless, and put the coverage in `/e2e`.
+
 ### 8. Mark it FIXED
 
 Append ` — FIXED` to the finding's heading and replace its body with **at most four lines**:
@@ -495,7 +532,10 @@ property, renaming a partial. Razor resolves at render time.
    Azure wizards - bulk import and reconcile. **Assert rendered content, not HTTP 200.** Confirm security headers ride on a normal
    response.
 5. **Read the log.** Classify every `fail:` / `warn:`. Some are expected — a deliberate permission-denied
-   probe logs an error by design. State the difference.
+   probe logs an error by design. State the difference. **This step earns its place:** in one round it
+   was the only thing that caught a fix which had renamed a lock resource on acquire but not on
+   release. Every cold start logged a failed release and fell back to discarding the connection.
+   Nothing failed, no test covered it, and the only symptom was one `fail:` line in a startup log.
 6. **With Azure credentials**, drive both surfaces end to end: subscriptions → discovery
    → bulk preview and commit → reconcile scan → delete commit. Include the two counter-tests:
    - a resource the credential *cannot see* must be **withheld**, with a warning naming it;
