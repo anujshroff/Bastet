@@ -930,6 +930,18 @@ the new build.
   (`ALTER DATABASE … SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE …`), **restart the app so
   auto-migrate recreates it**, and restore any Azure fixture the previous attempt mutated. A re-run
   against a half-mutated Azure reports refusals and absences that belong to the last attempt.
+
+  > **Idempotent by EXISTENCE is not idempotent by SHAPE.** A builder that skips creation when
+  > `az network vnet show` succeeds will happily leave a VNet a previous run re-ranged - the name is
+  > there, the address space is not what the phase expects. **Delete and rebuild the fixtures a phase
+  > mutates** rather than testing for their presence. On a second full round this left the re-range
+  > fixture at its post-mutation prefix and the phase still reported PASS on that half, which is worse
+  > than failing.
+
+- **A phase must CREATE every row it asserts on, not look it up.** A driver that starts with
+  `id = subnet_id(catalog, "100.80.0.0", 24)` passes for as long as some earlier command happened to
+  seed that row in the same catalog, then fails the moment the phase is run on its own. If a check
+  needs a hand-built tree, build it in the driver and assert the build succeeded before using it.
 - Write **nothing** into the repository working tree - no scratch files, no logs, no PID files. One
   untracked file makes the tree dirty and invalidates the closing assertion.
 - Scratch copies of the repo live under the rig directory and are modified freely; the real tree is
