@@ -355,15 +355,16 @@ if (autoMigrate)
         {
             using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
             releaseLock.CommandType = System.Data.CommandType.StoredProcedure;
-            releaseLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
+            releaseLock.Parameters.AddWithValue("@Resource", migrationLockResource);
             releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
             releaseLock.ExecuteNonQuery();
         }
         catch (Exception releaseException)
         {
             app.Logger.LogError(releaseException,
-                "Failed to release the 'Bastet:Migration' application lock after migration; discarding the pooled "
-                + "connection so the session-owned lock is dropped rather than stranded. Startup continues.");
+                "Failed to release the '{Resource}' application lock after migration; discarding the pooled "
+                + "connection so the session-owned lock is dropped rather than stranded. Startup continues.",
+                migrationLockResource);
 
             try
             {
