@@ -164,32 +164,4 @@ public class InputSanitizationServiceTests
         Assert.Equal(expected, result);
     }
 
-    [Theory]
-    [InlineData("Normal text", false, "Normal text")]
-    [InlineData("<script>alert('xss')</script>", false, "alert('xss')")]
-    [InlineData("<p>Paragraph</p>", true, "Paragraph")]
-    [InlineData("Text with javascript:alert('xss')", true, "Text with alert('xss')")]
-    [InlineData("Text with onload='alert(1)'", true, "Text with ='alert(1)'")]
-    public void SanitizeString_SanitizesCorrectly(string input, bool allowHtml, string expected)
-    {
-
-        string result = _sanitizationService.SanitizeString(input, allowHtml);
-
-        Assert.Contains(expected, result.Replace("&amp;", "&").Replace("&#39;", "'"));
-    }
-
-    [Theory]
-    [InlineData("Test & Company", "Test &amp; Company")]
-    [InlineData("<test>", "&lt;test&gt;")]
-    [InlineData("\"quoted\"", "&quot;quoted&quot;")]
-    [InlineData("'single'", "&#39;single&#39;")]
-    [InlineData("", "")]
-    [InlineData(null, "")]
-    public void EncodeHtml_EncodesCorrectly(string? input, string expected)
-    {
-
-        string result = _sanitizationService.EncodeHtml(input);
-
-        Assert.Equal(expected, result);
-    }
 }

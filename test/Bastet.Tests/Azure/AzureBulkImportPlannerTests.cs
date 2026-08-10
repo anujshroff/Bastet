@@ -21,11 +21,17 @@ public class AzureBulkImportPlannerTests
 
     private static BulkImportSelectedVNetPrefixDto Pref(
         string vnetName, string prefix, params BulkImportSelectedSubnetDto[] subs) =>
+        PrefOfVNet(vnetName, prefix, [prefix], subs);
+
+    private static BulkImportSelectedVNetPrefixDto PrefOfVNet(
+        string vnetName, string prefix, IReadOnlyList<string> vnetPrefixes,
+        params BulkImportSelectedSubnetDto[] subs) =>
         new()
         {
             VNetName = vnetName,
             VNetResourceId = $"/subscriptions/test/providers/Microsoft.Network/virtualNetworks/{vnetName}",
             AddressPrefix = prefix,
+            VNetIpv4AddressPrefixes = [.. vnetPrefixes],
             Subnets = [.. subs]
         };
 
@@ -144,7 +150,7 @@ public class AzureBulkImportPlannerTests
     }
 
     [Fact]
-    public void ExactMatch_TargetHasChildren_HardFails()
+    public void ExactMatch_TargetHasChildren_IsAdopted()
     {
         BulkImportSelectionDto sel = Sel(false,
             Pref("vnet-prod", "10.0.0.0/16", Sub("web", "10.0.1.0/24")));
@@ -153,9 +159,27 @@ public class AzureBulkImportPlannerTests
 
         BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
 
+        Assert.True(plan.CanCommit);
+        Assert.Empty(Assert.Single(plan.Items).Errors);
+    }
+
+    [Fact]
+    public void ExactMatch_TargetHasChildren_OverlappingAzureSubnetIsStillRefused()
+    {
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-prod", "10.0.0.0/16", Sub("web", "10.0.1.0/24"), Sub("db", "10.0.2.0/24")));
+
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "Existing", "10.0.0.0", 16, hasChildren: true),
+            Existing(2, "hand-carved", "10.0.2.0", 25)
+        ];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
+
         Assert.False(plan.CanCommit);
-        Assert.Single(plan.Items);
-        Assert.Contains(plan.Items[0].Errors, e => e.Contains("already has child subnets"));
+        Assert.Contains(plan.GlobalErrors, e => e.Contains("hand-carved") && e.Contains("invalid hierarchy"));
+        Assert.DoesNotContain(plan.GlobalErrors, e => e.Contains("'web'"));
     }
 
     [Fact]
@@ -299,8 +323,8 @@ public class AzureBulkImportPlannerTests
     {
 
         BulkImportSelectionDto sel = Sel(false,
-            Pref("vnet-multi", "10.0.0.0/16", Sub("a", "10.0.1.0/24")),
-            Pref("vnet-multi", "10.1.0.0/16", Sub("b", "10.1.1.0/24")));
+            PrefOfVNet("vnet-multi", "10.0.0.0/16", ["10.0.0.0/16", "10.1.0.0/16"], Sub("a", "10.0.1.0/24")),
+            PrefOfVNet("vnet-multi", "10.1.0.0/16", ["10.0.0.0/16", "10.1.0.0/16"], Sub("b", "10.1.1.0/24")));
 
         List<ExistingSubnetSnapshot> existing = [];
 
@@ -720,18 +744,17 @@ public class AzureBulkImportPlannerTests
     }
 
     [Fact]
-    public void Availability_PrefixTargetHasChildren_IsNotSelectable()
+    public void Availability_PrefixTargetHasChildren_IsSelectableSoItCanBeAdopted()
     {
 
-        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
+        BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"], AzSub("vnet-a", "web", "10.0.1.0/24"));
         List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16, hasChildren: true)];
 
         _planner.AnnotateAvailability([vnet], existing);
 
         BulkAzurePrefixViewModel prefix = Assert.Single(vnet.Prefixes);
-        Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
-        Assert.False(prefix.IsSelectable);
-        Assert.Contains("child subnets", prefix.Reason);
+        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
+        Assert.True(prefix.IsSelectable);
     }
 
     [Fact]
@@ -974,9 +997,9 @@ public class AzureBulkImportPlannerTests
             }
         }
 
-        Assert.DoesNotContain(selected, p => p.VNetName == "vnet-blocked");
+        Assert.Contains(selected, p => p.VNetName == "vnet-blocked");
         Assert.DoesNotContain(selected, p => p.VNetName == "vnet-nested");
-        Assert.Equal(3, selected.Count);
+        Assert.Equal(4, selected.Count);
 
         BulkImportPlanViewModel plan = _planner.BuildPlan(Sel(false, [.. selected]), existing);
 
@@ -1188,8 +1211,11 @@ public class AzureBulkImportPlannerTests
         BulkAzureSubnetViewModel subnet = Assert.Single(vnet.Subnets);
         Assert.Equal(BulkImportAvailability.Blocked, subnet.Status);
         Assert.False(subnet.IsSelectable);
-        Assert.Contains("more specific existing Bastet parent", subnet.Reason);
+
         Assert.Contains("rig-a", subnet.Reason);
+        Assert.Contains("Azure has no such subnet", subnet.Reason);
+        Assert.Contains("placed directly under their VNet", subnet.Reason);
+        Assert.Contains("delete or re-carve", subnet.Reason);
     }
 
     [Fact]

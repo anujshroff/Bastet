@@ -257,4 +257,56 @@ public class AzureBulkImportZeroWorkTests
 
         Assert.True(vnet.Prefixes[0].WouldRenameTarget);
     }
+
+    [Fact]
+    public void EverySubnetRecorded_SaysRecorded_WithoutTheCannotImportClause()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-a", ["10.20.0.0/16"], Sub("vnet-a", "web", "10.20.1.0/24"));
+        BulkAzurePrefixViewModel prefix = Annotate(vnet,
+            Row(1, "vnet-a", "10.20.0.0", 16, VNetId("vnet-a"), hasChildren: true),
+            Row(2, "web", "10.20.1.0", 24, SubnetId("vnet-a", "web")));
+
+        Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
+        Assert.Contains("already recorded, so there is nothing to add", prefix.Reason);
+        Assert.DoesNotContain("cannot be imported", prefix.Reason);
+    }
+
+    [Fact]
+    public void AContainedSubnetThatCannotBeImported_IsNamedInTheReason()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-a", ["10.20.0.0/16"],
+            Sub("vnet-a", "web", "10.20.1.0/24"),
+            Sub("vnet-a", "db", "10.20.9.0/26"));
+
+        BulkAzurePrefixViewModel prefix = Annotate(vnet,
+            Row(1, "vnet-a", "10.20.0.0", 16, VNetId("vnet-a"), hasChildren: true),
+            Row(2, "web", "10.20.1.0", 24, SubnetId("vnet-a", "web")),
+            Row(3, "hand-carved", "10.20.9.0", 27));
+
+        Assert.Equal(BulkImportAvailability.Blocked, vnet.Subnets[1].Status);
+        Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
+        Assert.Contains("either already recorded or cannot be imported", prefix.Reason);
+    }
+
+    [Fact]
+    public void AnUnlinkedExactMatch_IsSelectable_SoTheFilterCannotHideIt()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-a", ["10.80.0.0/16"]);
+        BulkAzurePrefixViewModel prefix = Annotate(vnet, Row(1, "legacy-core", "10.80.0.0", 16));
+
+        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
+        Assert.True(prefix.IsSelectable);
+    }
+
+    [Fact]
+    public void AFullyRecordedPrefix_IsNotSelectable_SoTheFilterHidesIt()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-a", ["10.85.0.0/16"], Sub("vnet-a", "s1", "10.85.1.0/24"));
+        BulkAzurePrefixViewModel prefix = Annotate(vnet,
+            Row(1, "vnet-a", "10.85.0.0", 16, VNetId("vnet-a"), hasChildren: true),
+            Row(2, "s1", "10.85.1.0", 24, SubnetId("vnet-a", "s1")));
+
+        Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+    }
 }

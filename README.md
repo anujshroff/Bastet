@@ -140,7 +140,7 @@ BASTET supports configuration through environment variables:
 | Logging Configuration | **BASTET_LOG_LEVEL_DEFAULT** | Default logging level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. The standard `Logging__LogLevel__Default` variable outranks this one if both are set. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ASPNETCORE** | Logging level for ASP.NET Core components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. The standard `Logging__LogLevel__Microsoft.AspNetCore` variable outranks this one if both are set. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ENTITYFRAMEWORK** | Logging level for Entity Framework components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. Covers every `Microsoft.EntityFrameworkCore.*` category, including the `Database.Command` one that prints SQL. The standard `Logging__LogLevel__*` variables outrank this one if both are set. |
-| Feature Configuration | **BASTET_AZURE_IMPORT** | Enables the Azure integration | `true` or `false` | `false` | When enabled, admin users can import subnets from Azure VNets and run Azure Reconcile. Gates the Subnet Azure Import, Bulk Azure Import, and Azure Reconcile flows. |
+| Feature Configuration | **BASTET_AZURE_IMPORT** | Enables the Azure integration | `true` or `false` | `false` | When enabled, admin users can import subnets from Azure VNets and run Azure Reconcile. Gates the Bulk Azure Import and Azure Reconcile flows. |
 
 ## Azure Integration
 
@@ -148,7 +148,6 @@ BASTET includes three flows for keeping subnets in step with Azure Virtual Netwo
 
 | Flow | Direction | Use it to |
 |------|-----------|-----------|
-| [Subnet Azure Import](#subnet-azure-import-per-subnet) | Azure → BASTET | Fill in one empty BASTET subnet from the matching Azure VNet |
 | [Bulk Azure Import](#bulk-azure-import-across-the-tree) | Azure → BASTET | Import many VNets and subnets across the whole tree in one transaction |
 | [Azure Reconcile](#azure-reconcile-find-what-azure-deleted) | Azure → BASTET | Find imported subnets whose Azure VNet or subnet has since been deleted, and remove them |
 
@@ -177,31 +176,20 @@ Azure.Core 1.59.0 introduced this with its managed identity host capability dete
 2. Ensure proper Azure authentication is configured
 3. Restart the application
 
-### Subnet Azure Import (per-subnet)
-
-Import children of a single, empty Bastet subnet whose address space exactly matches an Azure VNet's prefix.
-
-1. Navigate to a subnet's details page
-2. If the subnet has no child subnets or host IP assignments, a "Subnet Azure Import" button will appear (admin role required)
-3. Click "Subnet Azure Import" to start the import wizard
-4. Follow the multi-step process:
-   - Select an Azure Subscription
-   - Choose a compatible Virtual Network
-   - Select specific subnets to import
-5. The selected Azure subnets will be imported as child subnets
-
 ### Bulk Azure Import (across the tree)
 
 Import many VNets and their IPv4 subnets in one transaction, applied across the entire BASTET tree. Available from the top-level "Bulk Azure Import" nav link.
 
 1. Click "Bulk Azure Import" in the top navigation bar (admin role required)
 2. Pick an Azure subscription
-3. Tree-select the VNets and IPv4 subnets you want to import. Anything BASTET already has is greyed out and cannot be selected, so re-importing a subscription only offers what is genuinely new:
+3. Tree-select the VNets and IPv4 subnets you want to import. Rows BASTET cannot take are greyed out, so re-importing a subscription only offers what is genuinely new:
    - **Already imported** — imported from this exact Azure resource
-   - **Cannot import** — the address is already used by another BASTET subnet, or the target subnet already has children, host IPs, or is fully allocated
-   - **Will update existing** — the VNet prefix matches a BASTET subnet that will receive the import
+   - **Cannot import** — the address conflicts with something already in BASTET: another subnet uses it, importing it would swallow an existing subnet, or a hand-made subnet sits between the VNet and this subnet. The reason names the row in the way
+   - **Will update existing** — a BASTET subnet already covers this prefix and will receive the import. This includes **adopting** a subnet you created by hand, whether or not it already has children
 
-   Use the **Hide already imported** switch to show only what is still importable.
+   Two switches sit above the tree:
+   - **Only show what would change** hides every row that would do nothing if ticked, leaving just the work
+   - **Rename matched Bastet subnets to VNet names** renames a matched BASTET subnet, and any already-imported child subnet, to match its Azure name. Offered only where BASTET is already linked to that Azure resource
 4. Review the server-computed plan — every conflict (overlapping prefixes, would-create-invalid-hierarchy, target subnet already populated, etc.) is surfaced before commit and blocks it
 5. Commit — all imports are applied in a single database transaction (all-or-nothing)
 
@@ -223,6 +211,7 @@ VNets and address prefixes get deleted in Azure over time, but the subnets they 
    | **Prefix removed** | The VNet still exists but no longer has this address prefix |
    | **Subnet deleted** | The Azure subnet this was imported from no longer exists |
    | **Prefix changed** | The Azure subnet still exists but has been re-addressed |
+   | **Unrecognised link** | The recorded Azure resource ID names neither a VNet nor a subnet |
    | **Needs review** | Reported but not deletable — see below |
 
 4. Select what to remove. Rows that would archive child subnets or host IP assignments show a cascade count first
@@ -232,7 +221,11 @@ Only subnets carrying an Azure Resource ID are ever considered, so subnets you c
 
 **Safety:** if Azure cannot be read (expired credentials, a transient outage), reconcile reports the error and offers **nothing** for deletion. An empty answer from Azure and an unanswered question are not the same thing, and only one of them means "everything was deleted".
 
-**Needs review** covers drift that deleting cannot fix. If a fully-encompassing Azure subnet is deleted but its VNet and prefix survive, the BASTET subnet stays marked fully allocated with nothing backing that flag. Reconcile reports it and leaves it alone — the flag can also be set by hand, so it is never cleared automatically.
+**Needs review** is the one refusal reconcile has. A row holding subnets or host IP assignments you created here is never deleted, because Azure has no record of that content and re-importing cannot bring it back. Delete that content yourself and scan again. A row whose recorded Azure resource ID makes no sense is listed here too, for you to correct or clear.
+
+**A row with an Azure-imported subnet beneath it is still offered.** Deleting archives the whole subtree, and re-importing restores it — so nothing is withheld on that ground.
+
+**Where a range changed, reconcile does not fix it.** It reports and offers the delete; you then re-import through the Bulk Azure Import wizard to bring in the current range. Reconcile never edits a row, never re-links, and never hunts for Azure space BASTET has not imported — finding that is the import wizard's job.
 
 ## Usage
 
@@ -253,6 +246,15 @@ Only subnets carrying an Azure Resource ID are ever considered, so subnets you c
 2. Locate unallocated IP ranges
 3. Click "Create Subnet" next to an available range
 4. Enter subnet details including the pre-filled network address
+
+The **Unallocated IP Ranges** table on a subnet's details page reports each free block with two counts:
+
+| Column | Meaning |
+|--------|---------|
+| **Size** | Every address in the block, `End - Start + 1`. This is what a child subnet allocates from, and why **Create Subnet** starts at the block's first address — a subnet must begin on a CIDR boundary |
+| **Max Usable IPs** | What you would get for hosts if you allocated the block: `Size - 2`, minus its own network and broadcast. A `/31` gives 2 and a `/32` gives 1, which reserve neither |
+
+So a `/30` block reads `4` and `2`. The two differ deliberately: a one-address block is allocatable as a `/32` even though no host IP can sit in it.
 
 ### Viewing Subnet Details
 

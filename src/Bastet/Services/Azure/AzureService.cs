@@ -8,12 +8,10 @@ namespace Bastet.Services.Azure
 {
 
     public class AzureService(
-        IIpUtilityService ipUtilityService,
         AzureArmClientProvider armClientProvider,
         ILogger<AzureService> logger) : IAzureService
     {
         private readonly ArmClient? _armClient = armClientProvider.Client;
-        private readonly IIpUtilityService _ipUtilityService = ipUtilityService;
         private readonly ILogger<AzureService> _logger = logger;
 
         public async Task<bool> IsCredentialValid()
@@ -115,11 +113,6 @@ namespace Bastet.Services.Azure
                         }
                     }
 
-                    if (vnetVm.Ipv4AddressPrefixes.Count == 0)
-                    {
-                        continue;
-                    }
-
                     foreach (SubnetData subnet in vnet.Data.Subnets ?? [])
                     {
                         vnetVm.Subnets.AddRange(BuildInventorySubnetRows(
@@ -171,13 +164,15 @@ namespace Bastet.Services.Azure
                 .Where(p => !string.IsNullOrEmpty(p))
                 .Distinct(StringComparer.OrdinalIgnoreCase)];
 
-            return [.. prefixes.Select(prefix => new BulkAzureSubnetViewModel
-            {
-                ResourceId = resourceId,
-                Name = name,
-                AddressPrefix = prefix,
-                Ipv4AddressPrefixes = [.. prefixes]
-            })];
+            return prefixes.Count == 0
+                ? [new BulkAzureSubnetViewModel { ResourceId = resourceId, Name = name }]
+                : [.. prefixes.Select(prefix => new BulkAzureSubnetViewModel
+                {
+                    ResourceId = resourceId,
+                    Name = name,
+                    AddressPrefix = prefix,
+                    Ipv4AddressPrefixes = [.. prefixes]
+                })];
         }
 
         private static bool IsIpv4AddressPrefix(string addressPrefix)

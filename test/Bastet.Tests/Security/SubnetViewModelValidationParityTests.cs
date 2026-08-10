@@ -26,6 +26,14 @@ public class SubnetViewModelValidationParityTests
         return results;
     }
 
+    private static void AssertValid(object model)
+    {
+        List<ValidationResult> results = Validate(model);
+        Assert.True(results.Count == 0,
+            $"{model.GetType().Name} was rejected: "
+            + string.Join(" | ", results.Select(r => r.ErrorMessage)));
+    }
+
     private static void AssertRejects(object model, string member, string expectedMessageFragment)
     {
         object? value = model.GetType().GetProperty(member)!.GetValue(model);
@@ -59,7 +67,7 @@ public class SubnetViewModelValidationParityTests
     [Fact]
     public void MarkupInDescription_RejectedByBoth()
     {
-        const string description = "temp < 5 and load > 3";
+        const string description = "load <b>high</b>";
 
         AssertRejects(
             new CreateSubnetViewModel { Name = "ok", NetworkAddress = "10.0.0.0", Cidr = 24, Description = description },
@@ -128,5 +136,26 @@ public class SubnetViewModelValidationParityTests
             Description = description,
             Tags = tags
         }));
+    }
+
+    [Theory]
+    [InlineData("core/edge (site B)")]
+    [InlineData("Prod: DC1")]
+    [InlineData("Z\u00fcrich core")]
+    [InlineData("Bob's Lab")]
+    [InlineData("HQ <-> DR")]
+    public void OrdinaryOperatorNames_AcceptedByBoth(string name)
+    {
+        AssertValid(new CreateSubnetViewModel { Name = name, NetworkAddress = "10.0.0.0", Cidr = 24 });
+        AssertValid(new EditSubnetViewModel { Id = 1, Name = name, NetworkAddress = "10.0.0.0", Cidr = 24 });
+    }
+
+    [Theory]
+    [InlineData("temp < 5 and load > 3")]
+    [InlineData("reserve if load > 50% and temp < 5")]
+    public void OrdinaryOperatorDescriptions_AcceptedByBoth(string description)
+    {
+        AssertValid(new CreateSubnetViewModel { Name = "ok", NetworkAddress = "10.0.0.0", Cidr = 24, Description = description });
+        AssertValid(new EditSubnetViewModel { Id = 1, Name = "ok", NetworkAddress = "10.0.0.0", Cidr = 24, Description = description });
     }
 }

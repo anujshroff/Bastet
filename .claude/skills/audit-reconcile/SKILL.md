@@ -19,6 +19,31 @@ let an operator manage that space.** Every judgement call resolves against that,
 3. **The operator must be able to act on what they are told.** A message naming a remedy the app
    refuses is a defect, not a cosmetic issue.
 
+**Rule 0, which overrides all three: Bastet is the authority, and it answers from its own records.**
+Free means free *according to Bastet*. **Azure is not authoritative in Bastet at all** — it is a source
+you import *from*, which is exactly why the import wizard exists. Until a range is imported it does not
+exist as far as Bastet is concerned.
+
+So a finding of this shape is **invalid, and the job is to strike it, never to implement it**:
+
+> "Bastet shows 10.20.9.32 as free, but an Azure subnet Bastet never imported holds it."
+
+If a finding needs Bastet to know about un-imported Azure space to be a defect, it is not a defect.
+Record it as struck with that reason and write no code. Same for a wizard filter hiding a row that
+cannot be imported (correct — ticking it would change nothing), and for reconcile returning a clean
+scan over a partially imported subscription (also correct). Rounds have filed these repeatedly and the
+owner has struck every one.
+
+**Azure state and Bastet state are compared in exactly two places, and nowhere else:** the bulk import
+wizard, which asks *can this be added?*, and reconcile, which asks *can this be deleted?* That is the
+whole Azure/Bastet arithmetic in the product. Every other screen — the subnet tree, Details,
+unallocated ranges, host IPs, search — answers from Bastet's records alone and must never consult
+Azure. **A fix that would make any other surface aware of Azure is out of bounds**, and a finding that
+asks for one gets struck rather than implemented.
+
+**If the whole of a finding is that a string is untrue, fix the string and nothing else** — no new
+status, no new guard, no new branch behind it.
+
 **One flat, routable space.** Bastet manages a single IP space in which everything is routable against
 everything else, so the same range must never be allocated twice — preventing that collision is the
 product's reason to exist. Two consequences that decide fixes:
@@ -37,18 +62,145 @@ product's reason to exist. Two consequences that decide fixes:
   row fully allocated instead of creating the duplicate. Never fix in a direction that produces the
   second row: a parent and child with the same CIDR *are* the collision the product exists to prevent.
 
-**Azure is the source of truth for the rows imported from it.** A subnet carrying an Azure resource id
-is a *record of* an Azure resource. **Deleted in Azure means deleted in Bastet; re-ranged in Azure means
-Bastet says so.** The **only** legitimate reason to refuse is **manual content in that hierarchy — a
+**A row carrying an Azure resource id is a record the operator asked Bastet to keep in step with Azure.**
+Azure is still not authoritative — Bastet is — but for *that row* the operator said "track this", so when
+Azure no longer has the resource, or no longer holds the recorded range, **reconcile must say so and
+offer the delete**. It reports; the operator decides; nothing is removed on Azure's word alone. Silently
+withholding the report is its own defect — it leaves Bastet asserting an allocation the operator was
+never told to reconsider. The **only** legitimate reason to refuse is **manual content in that hierarchy — a
 hand-added child subnet, or a host IP** — operator-owned data Azure does not know about, which must
 never be destroyed silently. Nothing else qualifies, and a filed fix that withholds on any other ground
 must not be applied as filed.
+
+**The owner's product model outranks the finding's reasoning, and outranks yours.** A finding is one
+round's read of the code; the owner knows what the product is for. When they contradict, the finding is
+wrong by definition — record it struck or inverted, do not argue it through. In one round the owner
+inverted four:
+
+- a refusal the finding called a defect was correct, and only its *message* needed fixing, because
+  imported rows must mirror Azure's containment;
+- a withhold the finding wanted explained better should not have existed at all;
+- a column the finding wanted picked one way became two columns answering two questions;
+- and an "edge case" flagged for dropping was accepted, because pinning a record forever is not
+  softened by being rare.
+
+Each time the owner's answer was smaller, or truer to the product, than the filed fix. **If a fix
+starts growing a mechanism, stop and put the product question to the owner in one line** — the filed
+fix has often mis-framed the problem, and asking costs a sentence where implementing costs a round.
+
+**The IP arithmetic lives in exactly one place — keep it there.** `IpUtilityService` is the only code in
+the application that manipulates addresses as integers; every controller and validator calls into it.
+That is worth defending: a finding that a *second* implementation has appeared is a real finding, and
+the fix is to delete it rather than to reconcile the two. Two expressions of "usable addresses" once
+coexisted - one keyed on a CIDR, one on a raw count - and agreed only by coincidence.
+
+**Arithmetic is audited with properties, not with numbers.** A test that pins `254` passes while three
+branches drift apart around it, which is exactly what happened. Assert the invariants instead: a mask
+has `cidr` leading one-bits; broadcast is network + size - 1; a free range's count equals
+`end - start + 1`; free ranges are disjoint, ordered, inside the parent, and never overlap an
+allocation; and **free + allocated == total**, which is the conservation check that catches an
+off-by-one anywhere in the walk. Then mutate the arithmetic and confirm the properties fail - a
+property suite that survives an injected off-by-one is decorative.
+
+**Check who can reach the remedy a message names, not just whether it is true.** A link is part of the
+message: pointing an operator at a page that answers them with AccessDenied, or with a feature-disabled
+403, breaks rule 3 exactly as a wrong sentence does. Where the same destination is already linked
+elsewhere, copy that gating rather than inventing a second condition - the nav had this right sixteen
+lines from a panel that had it wrong. When the link is suppressed, close the sentence as prose instead
+of dropping the next step, or the reader is left with a warning and no move.
+
+**A displayed count must match the range it is printed beside.** `AddressCount == EndIp - StartIp + 1`,
+always. The free-space table broke this three different ways at once - one branch subtracted 1 from the
+count, one subtracted 2, and one trimmed the end instead - because each was separately trying to express
+"usable hosts" in a column labelled as a size. **When two questions are being asked of one number, the
+defect is the single column, not the arithmetic in it.** Show both: the block's size, which is what a
+subnet allocation uses and what a Create button must seed from, and **max usable IPs - the block minus
+its own network and broadcast**, which is what you would get by allocating it. Key that off the block,
+never off the parent: a first attempt subtracted the *parent's* reserved addresses, which put a
+"usable host IPs" figure on a subnet whose own panel said it could not have host IP assignments at all.
+A /31 gives 2 and a /32 gives 1, which falls out of the rule rather than being special-cased.
+
+**An imported row's place in the tree mirrors Azure's containment.** Azure has no subnet nesting - a
+subnet belongs to a VNet, flat - so a row carrying an `AzureResourceId` hangs directly off the row
+representing its VNet. **A hand-made subnet may not sit between a VNet row and its Azure subnets.**
+Refusing that is correct, and a finding proposing to resolve the Azure subnet under the hand-made
+middle-man is wrong however well it reads: nothing breaks functionally, because reconcile keys on
+resource id and free space keys on range, but the tree would then assert a containment Azure never had
+and nobody reading it could tell which level was real.
+
+This is the one place the manual and imported paths legitimately differ, and it does **not** contradict
+"a rule that holds for a manually created subnet holds identically for an imported one" - the manual
+form is free to carve anything, because a hand-made row claims to represent nothing but itself. What
+the refusal owes the operator is the rule and a remedy, not just the fact: name the row in the way, say
+Azure has no such subnet, and say to delete or re-carve it.
+
+**A row the operator built by hand can be adopted by the VNet it matches.** Linking a not-yet-linked
+target is real work and stays offered **whether or not that row already has children** — the operator
+may well have carved the space by hand first and now want Bastet to track it against Azure. Having
+children is not a conflict, and refusing on it keys on *provenance*, which is never a reason: the
+identical shape with the link already present is advertised as "Will add any missing subnets".
+The refusals that remain are the real conflicts, and they are decided **per subnet, not per prefix**:
+an Azure subnet that would contain, or be contained by, an existing Bastet row is refused by name,
+while its clean siblings still import and the operator's own subnets are left untouched and unlinked.
+So the correct outcome for a hand-built tree that partly overlaps Azure is **partial adoption**, never
+a whole-prefix refusal.
+
+**Every write path for a field must accept and refuse exactly the same input.** Create, Edit, the bulk
+import commit and any API caller are siblings: a rule on one and not the others produces a tree the app
+itself populated but its own form will not re-enter. Check the attribute sets side by side, not the
+error messages — the divergence that shipped was `[SafeText]` on the Create view model and not the Edit
+one, so an operator could rename a subnet to `core/edge (site B)` and then be refused when creating its
+sibling.
+
+**A validation rule that refuses ordinary operator text is a defect, not caution.** Output encoding is
+what makes the app safe — Razor encodes at every sink and the wizard's client escapes before it builds
+HTML — so an input filter is a usability rule wearing a security badge. `<[^>]*>` treated "temp < 5 and
+load > 3" as a tag while accepting the same words with the comparisons reversed. When tightening one,
+prove the change against a corpus of real markup **and** real operator text, and assert both directions:
+that markup is still refused, and that ordinary text is accepted by every write path.
+
+**The wizard's client must not re-derive a decision the planner already made.** `IsSelectable` is the
+planner's answer to "does ticking this do anything?" - so any client-side filter, badge or gate that
+re-answers it by enumerating status names is a second implementation that drifts the moment a status is
+added. It has already shipped once: "Only show what would change" tested `statusName === "Available"`
+and so hid every linkable row, i.e. hid exactly the work it promised to show. **Prefer deleting the
+duplicate over extending it.**
+
+The same rule holds **inside** the server. When one decision has two implementations they drift, and
+the drift is invisible until the two are compared: the wizard's target naming qualified a name when
+the *selection* held more than one prefix of a VNet, while the annotation qualified when the *VNet*
+did — so importing a two-prefix VNet one prefix at a time produced two rows with the same name and
+disjoint ranges, and the annotation then offered a rename that would undo the qualifier. **A finding
+that two code paths answer one question differently is a finding about the duplication, not about
+which answer is right.** Fix it by deleting an implementation, and prefer the input that describes the
+thing being named over the input that describes how the operator happened to click.
+
+**A live Azure-linked descendant is not a reason to withhold.** It is Azure content, and deleting the
+row archives it rather than destroying it — the operator then re-imports and gets it back under the
+corrected range, which is the whole point of the delete-then-import loop. Withholding on that ground
+buys nothing and costs the report: the range change is never mentioned, so the operator is never told
+why the row was flagged and Bastet goes on asserting a range Azure does not have. **Manual content
+remains the one refusal**, precisely because re-import cannot restore it.
 
 **The import wizard must not offer work that is not work.** A VNet prefix already linked to its Bastet
 subnet, with every Azure subnet under it already recorded, is `AlreadyImported` and **not selectable** —
 there is nothing to add. So is a collapsed target this same VNet has already marked fully allocated.
 Two things still count as work and must stay offered: **linking a target that is not yet linked**, and
-**renaming** when the operator has asked for renames. "Only show what would change" hides exactly the rows that
+**renaming** when the operator has asked for renames.
+
+**Renaming is gated on the Azure link, and on nothing else.** When the operator asks for renames, the
+wizard offers a rename for **both** the VNet target row **and** every already-imported child subnet
+whose Bastet name has drifted from its Azure name — the control says "subnets" and must mean it, since
+nothing else in the product can bring a drifted child name back into step. The single condition is that
+the row **already carries the Azure resource id** it is being renamed to match:
+
+- linked, and the name differs → offer the rename, and perform it
+- **not** linked, or linked to a different Azure resource → **"cannot import" stands, and no rename is
+  ever performed** — the range matching is not enough, because an unlinked row is operator-owned data
+  that this Azure resource has no claim on
+- fully allocated makes no difference to a rename *on its own*: a rename creates nothing inside the
+  target, so a linked fully-allocated row is renameable. It stays refused the moment the same selection
+  would also create a subnet inside it, which is a real conflict. "Only show what would change" hides exactly the rows that
 would change nothing, which is only correct while those four cases are classified correctly.
 
 **Reconcile does exactly two things. A fix that grows it past them is not a fix.**
@@ -255,6 +407,27 @@ Then, because the suite is not enough: **re-run this finding's own reproduction 
 re-run the reproduction of every fix already made this round.** A fix that no longer demonstrates its
 defect closed is this round's problem, not next round's finding.
 
+**Prove every new test discriminates, by breaking the code it guards.** A test written after the fix,
+against the fix, passes by construction — that is not evidence. Revert the specific line the test
+exists for, confirm the test fails, restore. If it still passes, the test is decoration and the finding
+is unguarded.
+
+This is not a nicety. Three separate times in one round a test looked right and proved nothing:
+
+- an invariant over free-space ranges whose generated fixtures all began at the parent's network
+  address, so the head-gap branch it was written for was never exercised — restoring the old
+  off-by-one passed clean;
+- concurrency tests seeding a `[Timestamp]` column, which EF ignores as store-generated, so SQLite
+  stored NULL and the guard never ran;
+- two application instances started together to prove they no longer contend, which came up 13.2s and
+  13.3s **whether or not they did**, because the work was too fast for contention to show.
+
+Each was caught only by mutation. The third needed the test redesigned entirely — an external holder
+taking the lock and measuring the block — before it could distinguish the two outcomes at all. **If a
+test cannot fail, it is not testing.** Where the harness genuinely cannot reach a path — no public
+constructor, an in-memory provider that behaves differently — say so in the commit rather than writing
+something that passes regardless, and put the coverage in `/e2e`.
+
 ### 8. Mark it FIXED
 
 Append ` — FIXED` to the finding's heading and replace its body with **at most four lines**:
@@ -359,7 +532,10 @@ property, renaming a partial. Razor resolves at render time.
    Azure wizards - bulk import and reconcile. **Assert rendered content, not HTTP 200.** Confirm security headers ride on a normal
    response.
 5. **Read the log.** Classify every `fail:` / `warn:`. Some are expected — a deliberate permission-denied
-   probe logs an error by design. State the difference.
+   probe logs an error by design. State the difference. **This step earns its place:** in one round it
+   was the only thing that caught a fix which had renamed a lock resource on acquire but not on
+   release. Every cold start logged a failed release and fell back to discarding the connection.
+   Nothing failed, no test covered it, and the only symptom was one `fail:` line in a startup log.
 6. **With Azure credentials**, drive both surfaces end to end: subscriptions → discovery
    → bulk preview and commit → reconcile scan → delete commit. Include the two counter-tests:
    - a resource the credential *cannot see* must be **withheld**, with a warning naming it;

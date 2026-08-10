@@ -18,6 +18,18 @@ the scratchpad and die with the machine. The only durable artefact is the report
 Never report allocated space as free (the worst output it can produce); never destroy an allocation
 record on incomplete information; and the operator must be able to act on what they are told.
 
+**Rule 0, which overrides those: Bastet is the authority, and it answers from its own records.** Free
+means free *according to Bastet*. **Azure is not authoritative in Bastet at all** — it is a source you
+import *from*, which is why the import wizard exists. Until a range is imported it does not exist as
+far as Bastet is concerned, and a phase must never fail because Bastet showed un-imported Azure space
+as free. That is the product working.
+
+**Azure state and Bastet state are compared in exactly two places, and nowhere else:** the bulk import
+wizard, which asks *can this be added?*, and reconcile, which asks *can this be deleted?* Every other
+screen — the subnet tree, Details, unallocated ranges, host IPs, search — answers from Bastet alone.
+**Never write an assertion that has any other surface consult Azure**, and never fail one because it
+did not.
+
 **One flat, routable space.** Bastet manages a single IP space in which everything is routable against
 everything else, so the same range must never be allocated twice — preventing that collision is the
 product's reason to exist. Two consequences when classifying a result:
@@ -150,6 +162,13 @@ curl -sSL https://bootstrap.pypa.io/get-pip.py | <rig>/azcli/bin/python -
 Debian's `venv` ships without `ensurepip`, so `python -m ensurepip` fails and the bootstrap script is
 the way through. Record the absolute path to the `az` binary. That venv's python also carries
 `requests`, which is what the drivers use.
+
+**`python3 -m venv` prints a loud failure here and still leaves a usable tree.** It ends with
+*"The virtual environment was not created successfully because ensurepip is not available … apt install
+python3.13-venv"* and a non-zero exit - but `bin/python` exists, and `get-pip.py` then completes the
+job. Do **not** treat that message as a stop, and do **not** put `set -e` ahead of it or the whole
+toolchain step aborts on a venv that is actually fine. Install `beautifulsoup4` and `lxml` into the
+same venv while you are there: the form-harvesting rule needs a real HTML parser.
 
 ## The browser
 
@@ -332,7 +351,9 @@ so a failure names the behaviour rather than a mismatched string.
 
 Every VNet in the visible group discovered and the hidden one absent; the dual-stack VNet offering
 only its IPv4 prefix and its dual-stack subnet appearing exactly once carrying only IPv4 with no `:`
-anywhere; the 3-prefix subnet emitting three rows **each carrying the complete prefix list**; the
+in any **address field** (scan the prefix lists, not the raw JSON - its own key/value separators are
+`:` and a naive substring test fails against correct output); the 3-prefix subnet emitting three rows
+**each carrying the complete prefix list**; the
 5-prefix subnet emitting five; the two-address-space VNet offering both and its spanning subnet
 appearing under each; the two overlapping VNets both discovered with distinct resource ids for
 identically-prefixed subnets; `/29` and end-of-range subnets discovered; the empty VNet offered with
@@ -412,8 +433,20 @@ Azure is unchanged.
 
 - a target linked to a **different** Azure VNet (and a hand-built POST refused server-side too)
 - a target marked **fully allocated**
-- a populated target with **no Azure link** (adoption)
 - a target carrying **host IP assignments** - see the trap below
+
+**Adoption is NOT a refusal.** A populated Bastet target with **no** Azure link must be *offered*
+(`WillUpdateExisting`), because importing it links it and that is work - phase F asserts the same thing
+twice. An earlier version of this file listed it here as a refusal; it is not, and testing it as one
+reports a defect that is not there.
+
+> **Target-level refusals are annotated on the PREFIX row, not on the Azure subnet row.**
+> "fully allocated" and "already has host IP assignments" describe the *target*, so they appear on the
+> VNet prefix, which is where `isSelectable` goes false. The contained Azure subnet row stays
+> `Available` - the selection can never reach it, because the prefix is disabled. A check that reads
+> the subnet row sees `Available`/`reason=None` and reports a missing refusal that is actually present
+> one level up. **This cost two checks in one run.** Assert on the prefix, then prove it server-side by
+> POSTing a hand-built selection that ticks the subnet anyway.
 
 > **The host-IP refusal must be tested against an EMPTY target, and the fixture must be proven.**
 > BASTET refuses host IPs on a subnet that has child subnets - *"This subnet has child subnets, so it
@@ -429,6 +462,13 @@ Azure is unchanged.
 verdict archiving; and in that same commit the invisible-resource row, the unparseable-id row and the
 manual-content row **still not archived**. Then the cascade guard withholding an ancestor whose
 descendant is protected, and the archived range only then being reported free.
+
+> **Free space is COALESCED, so a freed range rarely appears at its own network address.** Archiving
+> `10.169.0.0/16` under a `10.168.0.0/15` parent does not add a row starting at `10.169.0.0` - it widens
+> the existing `10.168.0.0 - 10.168.255.255` row to `10.168.0.0 - 10.169.255.255`. Assert *coverage* by
+> parsing the (start, end) pairs and testing whether an address inside the freed block falls in any
+> range, before and after. Looking for the network address as a literal start value fails both times and
+> reads as a defect.
 
 **No host IP is ever archived by reconcile.** A host IP anywhere in the hierarchy holds the whole
 subtree, so `hostIpsArchived` must be **0** on every reconcile commit in the run.
@@ -455,6 +495,14 @@ empty-but-successful subscription.
 the operator is told which fact was missing.** An empty subscription that really is empty must still
 produce the "Azure reported no VNets at all" warning rather than a silent mass deletion.
 
+> **A transport fault can land at either stage, so do NOT require `scanSucceeded == false`.** The
+> fixture matrix is small enough to list in a single ARM page, so a transport gate keyed on "the second
+> call to a `virtualNetworks` URI" fires on the per-resource **confirmation** calls, not on the listing.
+> The scan then succeeds, `globalErrors` is empty, and every absence row is withheld with the reason in
+> **`warnings`** - which is correct fail-closed behaviour. Assert the invariant (`items == 0`, and the
+> operator told) against `globalErrors` **or** `warnings`, and report which stage faulted. Demanding a
+> failed scan reports two defects that are not there.
+
 > **The confirmation-fault modes are vacuous unless absence rows exist.** "Nothing was offered for
 > deletion" proves nothing when nothing was deletable to begin with. Before running the throttled- or
 > denied-confirmation modes, run an unfaulted scan and assert there is at least one `VNetDeleted` or
@@ -479,9 +527,34 @@ the browser actually sent against what was persisted.**
   | a prefix Bastet does not record | *(no badge)* — "Will create a new Bastet subnet" | yes |
   | linked, with a subnet still addable | Will update existing | yes |
   | linked, everything recorded | Already imported | no |
-  | matched a hand-made subnet holding host IPs / children | Cannot import, reason naming which | no |
+  | matched a hand-made subnet holding host IPs | Cannot import, reason naming which | no |
+  | matched a hand-made subnet **with children**, unlinked | Will update existing | **yes** — adoption |
   | linked, childless, name differs, **rename on** | Rename only | **yes** |
+  | linked and **fully allocated**, name differs, **rename on** | Rename only | **yes** |
+  | already-imported **child subnet**, name drifted, **rename on** | Rename only | **yes** |
+  | unlinked row on the same range, **rename on** | Cannot import | no |
 
+- **A hand-made subnet between a VNet and its Azure subnet stays refused.** Import a VNet prefix only,
+  hand-carve a subnet inside it that contains one of the VNet's Azure subnets, then rescan: that Azure
+  subnet must stay `Cannot import`. Assert the reason names the row in the way, states that Azure has no
+  such subnet, and tells the operator to delete or re-carve it - a refusal that only states the fact is
+  the defect here, not the refusal itself. Importing it under the hand-made row is a FAIL, not a fix.
+- **Adopting a hand-built tree that partly overlaps Azure.** Build a Bastet /16 by hand with two
+  hand-made children, one of which overlaps an Azure subnet in the matching VNet, and drive the whole
+  thing: the prefix must be selectable, the clean Azure subnet must import, the overlapping one must
+  stay `Cannot import` **naming the Bastet row in the way**, and committing must link the parent while
+  leaving both hand-made rows present and still unlinked. Then POST the overlapping subnet directly,
+  bypassing the disabled checkbox, and assert the preview refuses with a global error and the commit
+  writes nothing. A whole-prefix refusal here is a regression, not a safeguard.
+- **Every toggle must re-derive the preview button.** Select all, then flip each toggle in turn and
+  assert the button's `disabled` state matches what is actually ticked. A re-render that rebuilds the
+  checkboxes unticked while the button stays enabled posts an empty selection and answers
+  "No VNet address prefixes were selected" — assert the count of ticked boxes and the button together,
+  because either alone passes.
+- **The already-imported wording must match what is underneath it.** A prefix whose contained Azure
+  subnets are all recorded says "already recorded"; one where any contained subnet is refused says
+  "either already recorded or cannot be imported". Assert the two separately in one scan, or the
+  wording drifts back to claiming completeness over a row rendered directly beneath it saying otherwise.
 - **The rename toggle re-renders the tree whether or not the filter is on.** It changes the badge and
   the checkbox, not just visibility. Assert `Rename only` appears with the filter **off** too, or a
   regression that gates the re-render on the filter passes unnoticed.
@@ -490,21 +563,110 @@ the browser actually sent against what was persisted.**
   **A target with child subnets renames like any other** — that case was once excluded, so cover it
   explicitly: rename it by hand, tick it with rename on, commit, and assert the target took the VNet
   name **and every child survived untouched**.
+- **Child subnets rename too, and the assertion is the database, not the banner.** Rename two imported
+  children by hand, tick them with rename on, commit, then **read the rows back** and assert the names
+  actually changed. A counter incremented over an untracked entity reports "renamed 2" while writing
+  nothing, so a pass that only reads the success message proves nothing. Assert the preview says
+  *Rename to* rather than *Create* for those rows, and that `createdChildSubnets` is 0.
+- **The rename gate is the Azure link.** Cover both refusals in the same run: a row on the matching
+  range with **no** `AzureResourceId`, and one linked to a **different** Azure resource. Both must stay
+  `Cannot import`, must never be renamed, and must keep the "already exists in Bastet" global error.
+- **A rename-only selection must be submittable on its own.** Tick only child subnets, leaving the
+  prefix checkbox unticked, and assert the preview button enables and the payload still carries the
+  parent prefix — the selection is built from prefix checkboxes, so a child-only selection is exactly
+  the case that silently posts nothing.
 - **"Only show what would change"** (`#bulk-hide-imported`): with it **on**, nothing that would do no work may
   remain visible. Build all four cases in one scan and assert each: a VNet prefix whose every Azure
   subnet is already recorded is **hidden** and labelled `AlreadyImported`; a collapsed fully-allocated
   target imported from *this* VNet is **hidden** (`AlreadyImported`, not `Blocked`); a prefix with one
   un-imported subnet **stays visible**; and an exact-match target that is **not yet linked** stays
-  visible, because importing it links it and that is work. Then flip `#bulk-rename-matched` **without
+  visible, because importing it links it and that is work - **including one whose Bastet row already has
+  children**, which is adoption and is also work. Then flip `#bulk-rename-matched` **without
   re-scanning**: a row whose only difference is its name must appear when rename is on and vanish when
   it is off. The counter-test matters most - if nothing is ever hidden, or everything is, the filter
   is not being exercised.
+
+  **Assert the rule, not just the cases.** The filter must keep every prefix the planner marked
+  `IsSelectable`, plus the rename-only rows the client itself enables - and nothing else. A filter that
+  decides visibility by listing status names silently mis-files the next status anyone adds, which is
+  exactly how a linkable row came to be hidden behind a control labelled "only show what would change".
+  Drive it by comparing the visible set against `isSelectable` from the same scan, not against a
+  hand-written list of expected VNet names.
+
+  **Assert the CHILD rows too, not only the prefixes - this is where it actually broke.** The filter
+  decides visibility twice: once for the prefix, once for the subnets rendered under it. A shipped
+  defect kept a prefix visible *because* it contained a rename-only child, then filtered that very
+  child out of the subnet list, because the two decisions used different predicates
+  (`prefixHasWork()` counted `isSubnetRenameOnly`; `shownSubnets` filtered on `isSelectable` alone,
+  and a rename-only row is not selectable). The row rendered with **no tickable control at all** and
+  the summary *"All 1 subnet(s) in this prefix are already imported."* over an outstanding rename.
+  So: build an already-imported child whose name has drifted, turn rename **on**, and assert with the
+  filter **on** that the child row is still rendered, still badged `Rename only`, still enabled, that
+  its parent shows no "already imported" *hidden-subnets summary*, and that ticking it and committing
+  renames the row **in the database**. Pair it with a fully-recorded, undrifted VNet that must stay
+  hidden - otherwise a filter that simply stopped filtering would pass.
+
+  Note the parent's own badge stays `Already imported` with "nothing to **add**", and that is correct:
+  it describes the prefix, where no Azure subnet can be added. Only the hidden-subnets summary is the
+  lie. Do not assert the badge away.
+- **The delete-then-import loop, driven end to end.** Import a VNet with a subnet, re-range the VNet in
+  Azure while the subnet stays live, then scan: the parent **must be offered for deletion** carrying the
+  "no longer has the address prefix" reason, not swallowed into a warning because it has a healthy
+  child. Delete it, assert both rows land in DeletedSubnets, re-import, and assert the row comes back at
+  Azure's **current** range with its child beneath it. A scan that reports nothing here is a failure -
+  the row is pinned at a range Azure does not have and no operator action clears it. Pair it with a
+  manual-content case in the same run, which must still be withheld, since re-import cannot restore a
+  hand-made subnet.
+- **A multi-prefix VNet, imported one prefix at a time.** Import each prefix of a two-prefix VNet in a
+  separate pass, then read the rows back: the two targets must carry distinguishable names, and must
+  match what importing both at once produces. Two top-level rows with the same name and disjoint ranges
+  is a failure. Then turn the rename switch on and assert neither prefix is offered a rename - an offer
+  here means the annotation and the commit disagree about the name, and taking it strips the qualifier
+  and recreates the duplicate.
+- **The free-space table's two counts.** On one subnet, assert every row satisfies
+  `Size == End - Start + 1`, and that `Max Usable IPs` is the block minus its own network and
+  broadcast - `Size - 2`, with a /31 giving 2 and a /32 giving 1. Assert it on a subnet that **has child
+  subnets**: the figure must not change there, because it describes the block rather than what can be
+  assigned to this subnet, whose own panel says host IPs are impossible. A count that shifts with the
+  parent is the bug this replaced.
+- **Every transactional write must classify an indeterminate commit.** Hold a `TABLOCKX` on the archive
+  table and drive each destructive path - subnet delete, host IP delete, reconcile delete, bulk import.
+  Each must answer "BASTET could not confirm whether ..." rather than asserting a definite failure, log
+  an outcome-unknown line, and redirect somewhere that actually **renders**: the natural target often
+  404s once the write has landed, which is the one case the message exists for, so assert the banner is
+  visible on the followed page rather than that TempData was set. This is the only coverage these paths
+  have - `SqlException` has no public constructor and the unit harness runs SQLite, so none of the
+  controller-level classifiers are unit-tested. Bulk import does not touch the archive tables, so lock
+  **`Subnets`** for that one, and prepare the selection *before* taking the lock.
+
+  > **Probe the lock with a request for the SAME lock, and poll both edges.** A plain
+  > `SELECT` does **not** conflict with a held `TABLOCKX` under row versioning, so a reader-based probe
+  > reports "free" while the lock is held - the driver then races the write in before the lock lands, or
+  > runs its positive control while the lock is still up. Probe with
+  > `SET LOCK_TIMEOUT 0; SELECT TOP 1 1 FROM [t] WITH (TABLOCKX);` and treat error **1222** as "held".
+  > Poll until acquired before driving the write, and poll until clear before the control - killing the
+  > holder does not release it immediately. **Two checks failed this way in one run, both of them the
+  > instrument rather than the application.**
+- **Validation parity across write paths.** Take one field and drive the same value through every path
+  that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
+  directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused
+  everywhere, and ordinary operator text (`core/edge (site B)`, `Prod: DC1`, `Zürich core`,
+  `HQ <-> DR`, `temp < 5 and load > 3`) accepted everywhere and stored verbatim. Then read the stored
+  value back off a rendered page and assert it is HTML-encoded — that, not the input filter, is what
+  makes the app safe, so a run that only checks the filter has tested the wrong thing.
 - **Reconcile** (`_ReconcileScripts.cshtml`, 3-step): scan; checkbox select-all and the indeterminate
   state; the review table rendering status and reason with **no action column**; the typed `approved` confirmation; the
   `deleting` flag preventing a second POST; and that the commit posts `confirmedIds` /
   `confirmedVerdicts` from the confirmation snapshot rather than live checkbox state.
 - **Subnet details** (`_SubnetCalculationScripts.cshtml`): the CIDR modal's overlap detection and
   network-address adjustment against rendered siblings.
+
+  > **The modal ADJUSTS before it refuses, so pick a size with nowhere to go.** Given a CIDR that would
+  > overlap, it searches for a free aligned block of that size and moves the network address there,
+  > announcing it via `#networkAddressHelp` - accepting that is **correct**, not a missed overlap. To
+  > exercise the refusal, carve the parent so no aligned block of the chosen size is free anywhere; the
+  > feedback then reads *"No compatible network address found for this CIDR size."* Test both: an
+  > adjustment that lands somewhere genuinely free, and a size that has no home at all.
 
 Practical notes, all learned the hard way:
 
@@ -527,6 +689,35 @@ Practical notes, all learned the hard way:
   cannot distinguish "ticked" from "submitted", which is the entire point of this phase.
 - **The reconcile half needs drift to exist.** Delete an imported VNet and move a subnet's prefix in
   Azure first, or there are no stale rows to select and nothing to confirm.
+- **The reconcile half also needs a REVIEW row**, or "the review table renders status and reason with
+  no action column" asserts against an empty table and cannot fail. Stale rows are not review rows:
+  add one Bastet-side (a subnet whose `AzureResourceId` is unparseable is the cheapest).
+- **`vnets`, `lastSelection` and `lastPlan` are closure-scoped `let`s, not on `window`.**
+  `page.evaluate("() => vnets…")` dies with `ReferenceError: vnets is not defined`. Read the same data
+  off the wire instead - a `page.on("response")` handler that keeps the `BulkImportPreview` JSON, or a
+  page-side `fetch('/Azure/BulkGetVNets?subscriptionId=…')` for the annotation.
+- **Use the ASYNC Playwright API.** Forcing the `previewSeq` out-of-order race means holding response
+  #1 while response #2 completes; in the sync API a `time.sleep` inside a route handler blocks the
+  driver loop and the responses still arrive in order, so the guard is never exercised. With
+  `async_playwright`, `await asyncio.sleep(4)` in the handler for the first request lets the second
+  overtake it. Fulfil the held one with a distinctive marker in `globalErrors` and assert the marker
+  never renders.
+- **A guard that disables its own button cannot be tested with `page.click`.** Playwright auto-waits
+  for "visible and enabled", so the second click of a double-commit test times out after 30s (the
+  guard worked - the test crashed). Dispatch both clicks synchronously in one evaluate,
+  `b.click(); b.click();`, so the JS `committing` / `deleting` flag is the only thing that can stop
+  the second POST.
+- **Check select-all with a real click, not `el.checked = true`.** After one row is ticked the box is
+  `indeterminate`, and setting `.checked` then firing `change` makes the handler read it as unchecked
+  and clear every row. `locator("#rec-select-all").check()` behaves like a user and works.
+- **To test the confirmation snapshot, untick WITHOUT firing `change`.** The delegated handler calls
+  `invalidateConfirmation()`, which discards `confirmedIds` - so a change event destroys the very state
+  under test. Set `.checked = false` directly; that is exactly "live state diverged from what was
+  confirmed". The step-2 checkboxes are also in a hidden tab pane by then, so `uncheck()` fails on
+  visibility anyway.
+- **The commit handlers navigate on success.** A `page.goto` issued straight after a commit races that
+  redirect and dies with `net::ERR_ABORTED`. Wait a few seconds, then `goto` with
+  `wait_until="domcontentloaded"` and one retry.
 
 ## G - Core IPAM behaviour
 
@@ -535,6 +726,12 @@ Practical notes, all learned the hard way:
 > ranges is correctly refused with *"This subnet must be a child of ..."*. One such collision failed
 > the first create, left the child id empty, and turned every later URL into `?subnetId=` - fourteen
 > failures from one bad address. `100.64.0.0/10` is unused by the matrix and works.
+
+> **The network address must actually BE the network address for its CIDR.** `100.70.0.0/12` is not -
+> the network of a `/12` containing it is `100.64.0.0` - so the create is correctly refused, the id
+> comes back `None`, and the phase dies on the first `int(...)` rather than reporting a check. Use
+> `100.64.0.0/10` for phase G and `100.70.0.0/16` for phase H, which are both genuine boundaries and
+> do not collide with each other or with the Azure matrix.
 
 > **Submit forms by HARVESTING the rendered fields, never by hand-listing them.** Edit carries a
 > `RowVersion` concurrency token and an `OriginalCidr` pair; a POST missing them redisplays the form
@@ -568,6 +765,14 @@ exceptions (`AccessDenied`, `Logout`, `SignedOut`, `SignInFailed`, the error rou
 makes every policy pass trivially and proves nothing. Role separation is driven from the **roles** tree
 built during the rig phase, one restart per role.
 
+> **The app's readiness probe must accept 403.** With `BASTET_E2E_ROLES=none`, `GET /` correctly
+> answers **403** - a launcher that waits for 200/302 declares the app dead and aborts the phase on
+> the one role set that matters most.
+
+> **The error routes answer with their own status.** `/Error/404` returns 404 and `/Error/500` returns
+> 500 - that *is* the contract. The rule for the `[AllowAnonymous]` set is only that none of them ever
+> answers **403**; asserting 200/302 fails them for being correct.
+
 > **Do not follow redirects when checking the `[AllowAnonymous]` exceptions.** `SignedOut` and
 > `SignInFailed` redirect an *authenticated* caller into the app, which then correctly refuses a
 > role-less principal - so following the redirect reports a 403 that belongs to `/Home`, not to the
@@ -579,6 +784,22 @@ handler so headers survive `Response.Clear()`); `X-Frame-Options: DENY` present 
 `'none'`; the global `ResponseCache: NoStore`; `BASTET_AZURE_IMPORT` gating every Azure endpoint; and
 concurrent writes contending on the **real** `sp_getapplock` against SQL Server, which the SQLite suite
 cannot reach - including that a second replica's write is refused honestly rather than silently lost.
+
+> **Make the contention deterministic: hold the lock from a THIRD session.** Racing two app writes and
+> hoping they collide is the check that once passed with every write completing in 0.05s. Instead hold
+> it yourself from `sqlcmd` -
+> `EXEC sp_getapplock @Resource='Bastet:SubnetOperations', @LockMode='Exclusive', @LockOwner='Session',
+> @LockTimeout=60000; WAITFOR DELAY '00:00:10';` - and drive a write from each of **two app replicas on
+> the same catalog**. Both must wait out the hold and both must persist. Time an uncontended write
+> first as the positive control (~0.2s against ~8s proves the wait was contention, not slowness). Then
+> hold it past the app's **30 s** `DEFAULT_TIMEOUT_MS` and assert the write is refused **and persisted
+> nothing** - a 302 there would mean it claimed success.
+>
+> **Killing the holder does not release the lock immediately.** The server-side session lingers well
+> after `docker exec` dies - 18 s in one run - so a "writes succeed again" control timed straight after
+> the kill measures the tail of the old lock and fails against correct behaviour. Poll
+> `SELECT APPLOCK_TEST('public','Bastet:SubnetOperations','Exclusive','Session')` until it returns `1`,
+> then start timing.
 
 ---
 
@@ -645,10 +866,41 @@ looks exactly like a defect, and three separate ones did:
   purges and the reconcile commit. It is not `delete` and not `confirm`.
 - **`SetAllocationStatus` lives on `HostIpController`**, not `SubnetController`, and binds
   `SubnetAllocationDto { SubnetId, IsFullyAllocated }`.
+- **The subnet delete form carries its own scope bounds** - `confirmedMaxSubnetId` and
+  `confirmedMaxHostIpTicks`. A hand-built delete POST that sends only `Id` and `confirmation` returns
+  **302 and archives nothing**, which reads exactly like a broken delete path. Harvest the form.
 
 Harvest forms with a real HTML parser over `input`/`textarea`/`select`, not a regex: a regex that
 assumes `name` precedes `value` silently drops `RowVersion`, and the POST then redisplays the form as
 **HTTP 200 with the row unchanged** - indistinguishable from a rejected edit.
+
+**Harvest the antiforgery token from a page that actually renders one.** `/Subnet` and `/Subnet/Details`
+do not; `/Subnet/Create`, `/Azure/BulkImport` and `/Azure/Reconcile` do. A token lookup that returns
+empty makes every state-changing POST come back **400 with an HTML body**, which is indistinguishable
+from the antiforgery or feature-gate refusal you were trying to measure.
+
+## Database schema facts the checks depend on
+
+Assert against the real schema, not the one you would have designed. Each of these produced a
+`sqlcmd` `Msg 207 (invalid column name)` mid-phase, which surfaces as a `ValueError` in the driver
+rather than as a failed check:
+
+- **There is no `IsDeleted` column.** Deletion is a move, not a flag: rows go to **`DeletedSubnets`**
+  and **`DeletedHostIpAssignments`**. `SELECT ... FROM Subnets` already sees only live rows, and
+  "was it archived rather than silently dropped" is a count against the archive table.
+- **The archive's IP column is `OriginalIP`**, not `IP`. `DeletedSubnets` keeps `NetworkAddress`/`Cidr`
+  but renames the identity columns to `OriginalId` / `OriginalParentId`.
+- **`Subnets`** is `Id, Name, NetworkAddress, Cidr, Description, Tags, ParentSubnetId, RowVersion,
+  CreatedAt, LastModifiedAt, CreatedBy, ModifiedBy, IsFullyAllocated, AzureResourceId`.
+- **The fully-allocated note is a whole LINE, not a fragment.** `FullyAllocatedNote.Strip` splits on
+  `\n` and drops lines that both start with `Fully allocated by Azure subnet '` and end with
+  `' which encompasses the entire address space.` A fixture that puts the note on the same line as
+  other text is **correctly** left alone - and reporting that as a failure to clear the note is a
+  fabrication. Build the fixture with a real newline.
+- **Counting rendered rows: count DISTINCT values, and exclude the subnet's own network address.**
+  Each host-IP row renders its IP more than once, and the parent's `x.y.z.0` matches the same regex,
+  so a naive `len(re.findall(...))` reports 100 or 51 rows on a 50-row page and the pagination check
+  fails against correct behaviour.
 
 ## Restart the application after any rebuild before measuring
 
@@ -667,6 +919,29 @@ the new build.
   archives absence rows leaves the next one with nothing to select, and a phase that assumes an import
   an earlier one never performed reports a refusal that never happened. Both occurred. If a phase needs
   drift, it creates that drift itself and asserts the precondition before asserting the behaviour.
+- **One AZURE FIXTURE SET per destructive phase, too - a private prefix, not the shared matrix.**
+  Phases C, D and F delete VNets, move subnet prefixes and drop address spaces. Run them against the
+  base matrix and they consume the fixtures A and B depend on, so nothing can be re-run without
+  rebuilding Azure. Give each its own prefix (`<run>c-`, `<run>d-`, `<run>f-`) built at the start of
+  the phase, append every id to the same inventory file, and leave the base matrix untouched. This is
+  also what makes a phase **re-runnable**: a failed driver is fixed and re-run by dropping its catalog
+  and rebuilding only its own prefix.
+- **Re-running a phase means resetting BOTH sides.** Drop the catalog
+  (`ALTER DATABASE … SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE …`), **restart the app so
+  auto-migrate recreates it**, and restore any Azure fixture the previous attempt mutated. A re-run
+  against a half-mutated Azure reports refusals and absences that belong to the last attempt.
+
+  > **Idempotent by EXISTENCE is not idempotent by SHAPE.** A builder that skips creation when
+  > `az network vnet show` succeeds will happily leave a VNet a previous run re-ranged - the name is
+  > there, the address space is not what the phase expects. **Delete and rebuild the fixtures a phase
+  > mutates** rather than testing for their presence. On a second full round this left the re-range
+  > fixture at its post-mutation prefix and the phase still reported PASS on that half, which is worse
+  > than failing.
+
+- **A phase must CREATE every row it asserts on, not look it up.** A driver that starts with
+  `id = subnet_id(catalog, "100.80.0.0", 24)` passes for as long as some earlier command happened to
+  seed that row in the same catalog, then fails the moment the phase is run on its own. If a check
+  needs a hand-built tree, build it in the driver and assert the build succeeded before using it.
 - Write **nothing** into the repository working tree - no scratch files, no logs, no PID files. One
   untracked file makes the tree dirty and invalidates the closing assertion.
 - Scratch copies of the repo live under the rig directory and are modified freely; the real tree is

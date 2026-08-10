@@ -227,6 +227,9 @@ if (autoMigrate)
 {
     using IServiceScope scope = app.Services.CreateScope();
 
+    string migrationCatalog = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+    string migrationLockResource = MigrationLockConnectionString.LockResource(connectionString);
+
     using SqlConnection migrationLockConnection = OpenMigrationLockConnection();
 
     SqlConnection OpenMigrationLockConnection()
@@ -308,7 +311,7 @@ if (autoMigrate)
     {
         getLock.CommandType = System.Data.CommandType.StoredProcedure;
         getLock.CommandTimeout = 330;
-        getLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
+        getLock.Parameters.AddWithValue("@Resource", migrationLockResource);
         getLock.Parameters.AddWithValue("@LockMode", "Exclusive");
         getLock.Parameters.AddWithValue("@LockOwner", "Session");
         getLock.Parameters.AddWithValue("@LockTimeout", 300000);
@@ -319,9 +322,10 @@ if (autoMigrate)
         if ((int)lockResult.Value < 0)
         {
             throw new InvalidOperationException(
-                $"Could not acquire the 'Bastet:Migration' application lock (result code {lockResult.Value}). "
-                + "Another replica appears to be stuck applying migrations. Startup was aborted rather than "
-                + "risking a concurrent migration.");
+                $"Could not acquire the '{migrationLockResource}' application lock (result code {lockResult.Value}) "
+                + $"while waiting to migrate '{migrationCatalog}'. Another BASTET instance using the same database "
+                + "holds it and has not finished. Startup was aborted rather than risking a concurrent migration. "
+                + "Query sys.dm_tran_locks on this server for that resource name to find the session holding it.");
         }
     }
 
@@ -339,9 +343,10 @@ if (autoMigrate)
     catch (SqlException ex) when (SqlSaveOutcome.IsIndeterminateErrorNumber(ex.Number))
     {
         throw new InvalidOperationException(
-            "Timed out waiting for another replica to finish applying migrations. "
-            + "Another replica appears to be stuck applying migrations. Startup was aborted rather than "
-            + "risking a concurrent migration.", ex);
+            $"The connection to '{migrationCatalog}' failed or timed out while migrations were being applied, "
+            + "so BASTET cannot tell whether they completed. Check the database's migration history before "
+            + "starting again. This does not indicate another instance is holding the migration lock - that "
+            + "failure is reported separately.", ex);
     }
     finally
     {
@@ -350,15 +355,16 @@ if (autoMigrate)
         {
             using SqlCommand releaseLock = new("sp_releaseapplock", migrationLockConnection);
             releaseLock.CommandType = System.Data.CommandType.StoredProcedure;
-            releaseLock.Parameters.AddWithValue("@Resource", "Bastet:Migration");
+            releaseLock.Parameters.AddWithValue("@Resource", migrationLockResource);
             releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
             releaseLock.ExecuteNonQuery();
         }
         catch (Exception releaseException)
         {
             app.Logger.LogError(releaseException,
-                "Failed to release the 'Bastet:Migration' application lock after migration; discarding the pooled "
-                + "connection so the session-owned lock is dropped rather than stranded. Startup continues.");
+                "Failed to release the '{Resource}' application lock after migration; discarding the pooled "
+                + "connection so the session-owned lock is dropped rather than stranded. Startup continues.",
+                migrationLockResource);
 
             try
             {

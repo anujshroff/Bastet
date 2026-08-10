@@ -194,7 +194,8 @@ public class SubnetPropertyCalculationTests
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
         Assert.Equal("10.0.0.255", result[0].EndIp);
-        Assert.Equal(254, result[0].AddressCount);
+        Assert.Equal(256, result[0].AddressCount);
+        Assert.Equal(254, result[0].UsableCount);
     }
 
     [Fact]
@@ -213,13 +214,14 @@ public class SubnetPropertyCalculationTests
         Assert.Single(result);
 
         Assert.Equal("10.0.0.128", result[0].StartIp);
-        Assert.Equal("10.0.0.254", result[0].EndIp);
+        Assert.Equal("10.0.0.255", result[0].EndIp);
 
-        Assert.Equal(127, result[0].AddressCount);
+        Assert.Equal(128, result[0].AddressCount);
+        Assert.Equal(126, result[0].UsableCount);
     }
 
     [Fact]
-    public void CalculateUnallocatedRanges_LeadingGapOfOne_ReportsNoUsableAddresses()
+    public void CalculateUnallocatedRanges_LeadingGapOfOne_IsOneAddress()
     {
         List<HostIpAssignment> hostIps = [new() { IP = "10.0.0.1" }];
 
@@ -228,11 +230,12 @@ public class SubnetPropertyCalculationTests
         IPRange leading = result[0];
         Assert.Equal("10.0.0.0", leading.StartIp);
         Assert.Equal("10.0.0.0", leading.EndIp);
-        Assert.Equal(0, leading.AddressCount);
+        Assert.Equal(1, leading.AddressCount);
+        Assert.Equal(1, leading.UsableCount);
     }
 
     [Fact]
-    public void CalculateUnallocatedRanges_LeadingGapOfTwo_ReportsOneUsableAddress()
+    public void CalculateUnallocatedRanges_LeadingGapOfTwo_IsTwoAddresses()
     {
         List<HostIpAssignment> hostIps = [new() { IP = "10.0.0.2" }];
 
@@ -241,11 +244,12 @@ public class SubnetPropertyCalculationTests
         IPRange leading = result[0];
         Assert.Equal("10.0.0.0", leading.StartIp);
         Assert.Equal("10.0.0.1", leading.EndIp);
-        Assert.Equal(1, leading.AddressCount);
+        Assert.Equal(2, leading.AddressCount);
+        Assert.Equal(2, leading.UsableCount);
     }
 
     [Fact]
-    public void CalculateUnallocatedRanges_TrailingGapOfOne_ReportsOneAddress()
+    public void CalculateUnallocatedRanges_TrailingGap_IsTwoAddresses()
     {
         List<Subnet> childSubnets = [
             new() { NetworkAddress = "10.0.0.0", Cidr = 25 },
@@ -261,8 +265,9 @@ public class SubnetPropertyCalculationTests
 
         IPRange last = Assert.Single(result);
         Assert.Equal("10.0.0.254", last.StartIp);
-        Assert.Equal("10.0.0.254", last.EndIp);
-        Assert.Equal(1, last.AddressCount);
+        Assert.Equal("10.0.0.255", last.EndIp);
+        Assert.Equal(2, last.AddressCount);
+        Assert.Equal(2, last.UsableCount);
     }
 
     [Fact]
@@ -286,9 +291,10 @@ public class SubnetPropertyCalculationTests
         Assert.Equal(64, result[0].AddressCount);
 
         Assert.Equal("10.0.0.192", result[1].StartIp);
-        Assert.Equal("10.0.0.254", result[1].EndIp);
+        Assert.Equal("10.0.0.255", result[1].EndIp);
 
-        Assert.Equal(63, result[1].AddressCount);
+        Assert.Equal(64, result[1].AddressCount);
+        Assert.Equal(62, result[1].UsableCount);
     }
 
     [Fact]
@@ -339,7 +345,8 @@ public class SubnetPropertyCalculationTests
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
         Assert.Equal("10.0.0.255", result[0].EndIp);
-        Assert.Equal(254, result[0].AddressCount);
+        Assert.Equal(256, result[0].AddressCount);
+        Assert.Equal(254, result[0].UsableCount);
     }
 
     [Fact]

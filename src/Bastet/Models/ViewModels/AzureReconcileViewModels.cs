@@ -20,8 +20,6 @@ namespace Bastet.Models.ViewModels
 
         public string AzureResourceId { get; set; } = string.Empty;
 
-        public bool IsFullyAllocated { get; set; }
-
         public int DescendantCount { get; set; }
 
         public int HostIpCount { get; set; }
@@ -70,8 +68,6 @@ namespace Bastet.Models.ViewModels
 
         public string Reason { get; set; } = string.Empty;
 
-        public bool IsVNetLevel { get; set; }
-
         public int DescendantCount { get; set; }
 
         public int HostIpCount { get; set; }
@@ -97,11 +93,6 @@ namespace Bastet.Models.ViewModels
         public List<string> Warnings { get; set; } = [];
 
         public bool CanCommit => ScanSucceeded && GlobalErrors.Count == 0 && Items.Count > 0;
-    }
-
-    public class AzureReconcileInitialViewModel
-    {
-        public bool IsFeatureEnabled { get; set; }
     }
 
     public class AzureReconcileDeleteDto

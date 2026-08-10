@@ -1,10 +1,4 @@
-using Bastet.Models.ViewModels;
-using Bastet.Models;
-using Bastet.Services.Data;
-using Bastet.Services.Security;
-using Bastet.Services.Validation;
 using Bastet.Services;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Bastet.Controllers;

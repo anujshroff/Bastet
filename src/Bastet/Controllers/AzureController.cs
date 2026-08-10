@@ -1,10 +1,7 @@
-using Bastet.Data;
 using Bastet.Models.ViewModels;
-using Bastet.Services;
 using Bastet.Services.Azure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Bastet.Controllers
 {
@@ -43,8 +40,6 @@ namespace Bastet.Controllers
                 return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
-            BulkImportInitialViewModel viewModel = new() { IsFeatureEnabled = true };
-
             try
             {
                 if (!await azureService.IsCredentialValid())
@@ -58,7 +53,7 @@ namespace Bastet.Controllers
                 ModelState.AddModelError("", "Error connecting to Azure. Details have been logged.");
             }
 
-            return View(viewModel);
+            return View();
         }
 
         [HttpGet]
@@ -85,7 +80,7 @@ namespace Bastet.Controllers
                     return Json(new { success = false, error = inventory.ErrorMessage });
                 }
 
-                List<BulkAzureVNetViewModel> vnets = inventory.VNets;
+                List<BulkAzureVNetViewModel> vnets = [.. inventory.VNets.Where(v => v.Ipv4AddressPrefixes.Count > 0)];
 
                 IReadOnlyList<ExistingSubnetSnapshot> existing = await snapshotService.GetExistingSubnetsAsync();
                 planner.AnnotateAvailability(vnets, existing);
@@ -135,8 +130,6 @@ namespace Bastet.Controllers
                 return this.RedirectToErrorPage(403, "Azure Import feature is not enabled");
             }
 
-            AzureReconcileInitialViewModel viewModel = new() { IsFeatureEnabled = true };
-
             try
             {
                 if (!await azureService.IsCredentialValid())
@@ -150,7 +143,7 @@ namespace Bastet.Controllers
                 ModelState.AddModelError("", "Error connecting to Azure. Details have been logged.");
             }
 
-            return View(viewModel);
+            return View();
         }
 
         [HttpPost]
