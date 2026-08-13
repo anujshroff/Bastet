@@ -1,5 +1,4 @@
 using Bastet.Models.ViewModels;
-using Bastet.Services;
 using Bastet.Services.Azure;
 
 namespace Bastet.Tests.TestHelpers;

@@ -1,7 +1,7 @@
 using Bastet.Data;
-using Bastet.Services.Data;
 using Bastet.Filters;
 using Bastet.Services;
+using Bastet.Services.Data;
 using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;

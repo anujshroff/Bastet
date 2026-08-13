@@ -1,4 +1,3 @@
-using Bastet.Controllers;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
 using Bastet.Services.Azure;
@@ -11,7 +10,7 @@ public class GeneratedNameSafeTextTests
     private const string VNetA = "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-a";
     private const string MultiPrefixSubnet = $"{VNetA}/subnets/sn-multi";
 
-    private readonly IInputSanitizationService _sanitizer = new InputSanitizationService();
+    private readonly InputSanitizationService _sanitizer = new();
 
     private static BulkImportSelectedSubnetDto Sub(string name, string prefix) =>
         new() { Name = name, AddressPrefix = prefix, AzureResourceId = MultiPrefixSubnet };

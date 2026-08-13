@@ -1,5 +1,5 @@
-using Bastet.Models.ViewModels;
 using Bastet.Models;
+using Bastet.Models.ViewModels;
 using Bastet.Services.Azure;
 using Bastet.Services.Data;
 using Microsoft.AspNetCore.Authorization;
