@@ -82,7 +82,7 @@ public partial class SubnetController : Controller
                     {
                         throw new ValidationException(
                             "This subnet is linked to an Azure resource, so its CIDR cannot be changed here. " +
-                            "Change the prefix in Azure and re-import, or delete the subnet and recreate it.");
+                            "Change the prefix in Azure, then ask an administrator to re-import it.");
                     }
 
                     if (viewModel.Cidr != subnet.Cidr)

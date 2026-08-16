@@ -78,10 +78,13 @@ public class AzureBulkImportZeroWorkTests
         Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
         Assert.False(prefix.IsSelectable);
         Assert.Contains("nothing left to add", prefix.Reason);
+        Assert.DoesNotContain("Azure subnet covering", prefix.Reason);
+        Assert.Contains("Details", prefix.Reason);
 
         BulkAzureSubnetViewModel whole = Assert.Single(vnet.Subnets);
         Assert.Equal(BulkImportAvailability.AlreadyImported, whole.Status);
         Assert.False(whole.IsSelectable);
+        Assert.DoesNotContain("by this Azure subnet", whole.Reason);
     }
 
     [Fact]

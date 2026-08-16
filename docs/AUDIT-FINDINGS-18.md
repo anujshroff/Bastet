@@ -104,19 +104,17 @@ _Reviewed: pass._
 **Fix:** Filed guard unsound — a one-element list satisfies it and still produces the wrong output, and it keeps both copies. Collapse `TargetName` and `ProposedTargetName` into one method taking (vnetName, prefixes, network, cidr). Sourcing prefixes from ARM is separate.
 **Residue of:** f4a0a87, which made the copies agree via the client DTO rather than deleting one.
 
-## R12 - The Create-Subnet CIDR modal prints usable hosts under the label "Resulting subnet size" `[x2]`
-**Where:** src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml:141, :96, :118, :123 (errors, same span); _CidrInputModal.cshtml:23 (label); pattern at _UnallocatedRanges.cshtml:46-47
-**Breaks:** On Details for 10.99.0.0/16 the free-space table round 17 split into Size and Max Usable IPs shows 65,536 / 65,534, while the modal on the same screen calls 254 the "subnet size" of a 256-address block. The count is not monotonic; the span also renders "Invalid IP addresses".
-**Repro:** `#cidrInput`: /24 -> 254, /30 -> 2, /31 -> 2, /99 -> "Invalid", beside a table reading 65,536 / 65,534.
-**Fix:** Cheapest correct version: relabel _CidrInputModal.cshtml:23 to "Maximum usable IPs:" — one string, no script change. If both numbers are wanted, add a second span worded as the table words it, and clear both at all three error sites.
-**Residue of:** Original (46b3e69), reaffirmed by round 5 (8cefc64), left by round 17.
+## R12 - The Create-Subnet CIDR modal prints usable hosts under the label "Resulting subnet size" `[x2]` — FIXED
+_Fixed. Relabelled to "Maximum usable IPs:" and dropped the " IP addresses" suffix, which also cured "Invalid IP addresses" at the three error sites._
+_Swept: no other text calls this number a size; the script's values match IpUtilityService.UsableWithin semantics (/31→2, /32→1)._
+_Verified: build 0 warnings, 836/836; client-side label — driven at the round-end gate._
+_Reviewed: pass._
 
-## R13 - A hand-marked fully-allocated target is refused with a sentence naming a cause that did not happen `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:215, :319 (same cause on the subnet row); :217 and the commit twin :508 state only the fact
-**Breaks:** The flag arrives either from the import or from the Details toggle, and the annotation asserts the first: after ticking it by hand on rig-rd-fa 10.79.0.0/16, the wizard says an Azure subnet covering the prefix marked it fully allocated with nothing left to add. Neither is true.
-**Repro:** Imported the prefix with no subnets, set the flag by POST /HostIp/SetAllocationStatus: that reason came back, Description NULL.
-**Fix:** Filed fix unsound — `ExistingSubnetSnapshot` carries no Description, and the note is absent whenever truncated or edited, so inferring provenance prints a fresh false cause. Replace :214-216 with a cause-free sentence naming the remedy (clear the flag on Details), and de-cause :319.
-**Residue of:** 23233f2 wrote this wording; the enclosing guard predates it (8afa2df).
+## R13 - A hand-marked fully-allocated target is refused with a sentence naming a cause that did not happen `[x1]` — FIXED
+_Fixed. Target-level message is now cause-free and names the reachable remedy (clear the flag on Details); the subnet-level annotation loses "by this Azure subnet"._
+_Swept: the Blocked twin and commit-path messages already stated only the fact; no other site asserts the cause._
+_Verified: two new assertions failed pre-fix; 836/836. Reviewer traced the remedy end-to-end: Details toggle → flag cleared → wizard offers WillUpdateExisting._
+_Reviewed: pass._
 
 ## R14 - With the import flag off, the free-space warning still tells every reader to get a Bulk Azure Import run `[x1]`
 **Where:** src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:31; the flag is already computed at :5 and :24
@@ -125,12 +123,11 @@ _Reviewed: pass._
 **Fix:** Replace the bare `@else` at :31 with `@else if (azureImportEnabled)` and no trailing else, so the paragraph closes as prose when the feature is off. Do not substitute "ask an administrator to enable the feature" — an env var is not a remedy the app offers.
 **Residue of:** f4a0a87 — blame puts the whole if/else pair on that commit.
 
-## R15 - The Azure-linked CIDR refusal names two remedies the operator may be unable to reach `[x1]`
-**Where:** src/Bastet/Controllers/SubnetController.Edit.cs:84 (message :81-86); Views/Subnet/Edit/_EditForm.cshtml:27-28 (the same two remedies, printed on the form before any POST); the equivalents at AzureReconciler.cs:289, :311 sit inside a gated screen
-**Breaks:** Edit is open to Edit|Delete|Admin, but the refusal says to re-import or to delete and recreate. Re-import is an Admin-only page that 403s whenever the flag is off (which does not clear AzureResourceId); delete is a Delete-role page an Edit-only operator has no button for.
-**Repro:** Flag false: 403 for the Admin identity, the CIDR POST rendered that sentence, Details suppressed its own link.
-**Fix:** Filed conditional fix unsound — it adds a third copy of the flag/role predicate, in another layer, for a message that links nothing. End both sites at "Change the prefix in Azure, then ask an administrator to re-import it." No test pins the text.
-**Residue of:** Round 6 (0de1293) wrote it; round 17 fixed only the _UnallocatedRanges site.
+## R15 - The Azure-linked CIDR refusal names two remedies the operator may be unable to reach `[x1]` — FIXED
+_Fixed. Both sites (Edit POST message and _EditForm text) end at "Change the prefix in Azure, then ask an administrator to re-import it." — no role/flag predicate copy added, per the finding._
+_Swept: reconciler equivalents correctly left alone (they sit in-flow behind the same admin gate); "delete the subnet and recreate" has zero remaining occurrences._
+_Verified: build 0 warnings, 836/836; reviewer confirmed re-import is genuinely admin-gated at both the controller and commit endpoint._
+_Reviewed: pass._
 
 ## R16 - Reconcile's prefix-removed message points at a wizard round 17 taught to hide the VNet `[x1]` — FIXED
 _Fixed. VNet- and subnet-level messages branch on remaining IPv4 prefixes: the wizard is named only when it can actually import; otherwise "nothing to re-import. Delete it here if you want to." The :83 filter untouched; _StepReview's stale blurb no longer claims the wizard remedy universally._
@@ -144,12 +141,11 @@ _Swept: "Correct or clear" survives only as a negative test assertion; no other 
 _Verified: test asserting the new sentence failed pre-fix; 836/836; reviewer confirmed no unlink path exists (Edit VM has no AzureResourceId; planner refuses re-link) and ReviewItems never get checkboxes._
 _Reviewed: pass._
 
-## R18 - "Blocked by VNet prefix" is printed beneath a prefix the same screen calls "Already imported" `[x1]`
-**Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:278 (guard :276, badge :267-269); _StepSelection.cshtml:10 (legend carrying the same claim)
-**Breaks:** `isPrefixUsable` is false for a prefix that is either Blocked or AlreadyImported with renames off, but badge and reason are worded only for the first. A fully-allocated linked row reads "Already imported ... nothing left to add" while four child rows beneath say its prefix cannot be imported.
-**Repro:** Marked the imported prefix fully allocated and re-opened the wizard: both sentences rendered as siblings.
-**Fix:** Filed fix unsound — reusing `availabilityBadge(prefixInfo.statusName)` would stamp "Already imported" on subnets never imported. Change strings only: :278 to "The VNet prefix above cannot be selected, so this subnet cannot be imported either.", legend to match.
-**Residue of:** none.
+## R18 - "Blocked by VNet prefix" is printed beneath a prefix the same screen calls "Already imported" `[x1]` — FIXED
+_Fixed. Fallback reason now reads "The VNet prefix above cannot be selected, so this subnet cannot be imported either."; legend matches ("cannot be selected"). Strings only, per the finding._
+_Swept: remaining "cannot be imported" strings all describe genuinely blocked subnets; the guard fires for both Blocked and AlreadyImported-with-renames-off, and both disable the prefix checkbox, so the wording is true for both._
+_Verified: build 0 warnings, 836/836; client-side — driven at the round-end gate._
+_Reviewed: pass._
 
 ## R19 - Bulk import commit banner never reads renamedChildSubnets, so a rename-only import reports all zeros `[x2]`
 **Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:675 (five of six counters); the server returns six at Controllers/SubnetController.BulkAzure.cs:439-444, worded correctly at :427-433
