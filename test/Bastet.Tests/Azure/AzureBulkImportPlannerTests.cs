@@ -770,14 +770,15 @@ public class AzureBulkImportPlannerTests
     }
 
     [Fact]
-    public void Availability_PrefixTargetFullyAllocated_IsNotSelectable()
+    public void Availability_UnlinkedFullyAllocatedPrefixTarget_IsOfferedForAdoption()
     {
         BulkAzureVNetViewModel vnet = AzVNet("vnet-a", ["10.0.0.0/16"]);
         List<ExistingSubnetSnapshot> existing = [Existing(1, "Existing", "10.0.0.0", 16, fullyAllocated: true)];
 
         _planner.AnnotateAvailability([vnet], existing);
 
-        Assert.False(Assert.Single(vnet.Prefixes).IsSelectable);
+        Assert.True(Assert.Single(vnet.Prefixes).IsSelectable);
+        Assert.Contains("Will link existing Bastet subnet", vnet.Prefixes[0].Reason);
         Assert.Contains("fully allocated", vnet.Prefixes[0].Reason);
     }
 

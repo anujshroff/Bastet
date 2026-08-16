@@ -78,13 +78,15 @@ public class AzureBulkImportLinkedRenameTests
     }
 
     [Fact]
-    public void FullyAllocatedTargetWithNoLink_IsStillRefused()
+    public void FullyAllocatedTargetWithNoLink_IsAdoptedAndRenamed()
     {
         BulkImportPlanViewModel plan = Plan(
             [Target("renamed-by-hand", true, null)], true, Prefix("10.80.0.0/16"));
 
-        Assert.True(SaysFullyAllocated(plan));
-        Assert.False(plan.CanCommit);
+        Assert.False(SaysFullyAllocated(plan));
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.True(item.WillRename);
+        Assert.True(plan.CanCommit);
     }
 
     [Fact]
@@ -93,7 +95,7 @@ public class AzureBulkImportLinkedRenameTests
         BulkImportPlanViewModel plan = Plan(
             [Target("renamed-by-hand", true, OtherVNet)], true, Prefix("10.80.0.0/16"));
 
-        Assert.True(SaysFullyAllocated(plan));
+        Assert.Contains(plan.Items[0].Errors, e => e.Contains("already linked to Azure VNet"));
         Assert.False(plan.CanCommit);
     }
 

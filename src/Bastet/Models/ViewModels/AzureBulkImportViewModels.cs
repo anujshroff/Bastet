@@ -33,6 +33,8 @@ namespace Bastet.Models.ViewModels
         public bool IsSelectable { get; set; } = true;
 
         public bool WouldRenameSubnet { get; set; }
+
+        public bool RenameOnlyCandidate => Status == BulkImportAvailability.AlreadyImported && WouldRenameSubnet;
     }
 
     public class BulkAzurePrefixViewModel
@@ -49,6 +51,10 @@ namespace Bastet.Models.ViewModels
         public string? Reason { get; set; }
 
         public bool IsSelectable { get; set; } = true;
+
+        public bool CanCarrySubnetWork => Status != BulkImportAvailability.Blocked;
+
+        public bool RenameOnlyCandidate => Status == BulkImportAvailability.AlreadyImported && WouldRenameTarget;
     }
 
     public class BulkAzureVNetViewModel

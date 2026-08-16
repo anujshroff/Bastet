@@ -206,15 +206,26 @@ namespace Bastet.Services.Azure
 
                 if (exact.HasHostIpAssignments)
                 {
-                    return Blocked(result, $"Bastet subnet '{exact.Name}' already has host IP assignments.");
+                    return isTopUp
+                        ? AlreadyImported(result,
+                            $"Already imported as Bastet subnet '{exact.Name}', which has host IP assignments, so "
+                            + "no subnets can be added inside it.")
+                        : Blocked(result, $"Bastet subnet '{exact.Name}' already has host IP assignments.");
                 }
                 if (exact.IsFullyAllocated)
                 {
-                    return isTopUp
-                        ? AlreadyImported(result,
+                    if (isTopUp)
+                    {
+                        return AlreadyImported(result,
                             $"Already imported as Bastet subnet '{exact.Name}', which is marked fully allocated, so "
-                            + "there is nothing left to add. Clear the flag on its Details page if subnets should go inside it.")
-                        : Blocked(result, $"Bastet subnet '{exact.Name}' is marked as fully allocated.");
+                            + "there is nothing left to add. Clear the flag on its Details page if subnets should go inside it.");
+                    }
+
+                    result.Status = BulkImportAvailability.WillUpdateExisting;
+                    result.Reason = $"Will link existing Bastet subnet '{exact.Name}' to this VNet. "
+                        + "It stays marked fully allocated, so no subnets will be created inside it.";
+                    result.IsSelectable = true;
+                    return result;
                 }
 
                 if (isTopUp && !AnySubnetCanBeAdded(vnet, network, cidr))
@@ -311,9 +322,16 @@ namespace Bastet.Services.Azure
                     return;
                 }
 
-                if (encompassedTarget is not null
-                    && encompassedTarget.IsFullyAllocated
-                    && IsSameVNet(encompassedTarget, vnet))
+                if (encompassedTarget is not null && encompassedTarget.HasHostIpAssignments)
+                {
+                    subnet.Status = BulkImportAvailability.Blocked;
+                    subnet.Reason = $"Covers the whole VNet prefix, which would mark Bastet subnet "
+                                    + $"'{encompassedTarget.Name}' fully allocated, but it has host IP assignments.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
+                if (encompassedTarget is not null && encompassedTarget.IsFullyAllocated)
                 {
                     subnet.Status = BulkImportAvailability.AlreadyImported;
                     subnet.Reason = $"Bastet subnet '{encompassedTarget.Name}' is marked fully allocated, "
@@ -363,6 +381,26 @@ namespace Bastet.Services.Azure
                                     + $"VNet and {subnet.AddressPrefix}, and Azure has no such subnet. Imported subnets are "
                                     + $"placed directly under their VNet, so delete or re-carve '{moreSpecificParent.Name}' "
                                     + "before importing this one.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
+                ExistingSubnetSnapshot? container = FindDeepestContainer(network, cidr, existingSubnets);
+
+                if (container is not null && container.HasHostIpAssignments)
+                {
+                    subnet.Status = BulkImportAvailability.Blocked;
+                    subnet.Reason = $"Containing Bastet subnet '{container.Name}' "
+                                    + $"({container.NetworkAddress}/{container.Cidr}) has host IP assignments and cannot have child subnets.";
+                    subnet.IsSelectable = false;
+                    return;
+                }
+
+                if (container is not null && container.IsFullyAllocated)
+                {
+                    subnet.Status = BulkImportAvailability.Blocked;
+                    subnet.Reason = $"Containing Bastet subnet '{container.Name}' "
+                                    + $"({container.NetworkAddress}/{container.Cidr}) is marked as fully allocated.";
                     subnet.IsSelectable = false;
                     return;
                 }
@@ -495,14 +533,14 @@ namespace Bastet.Services.Azure
                 item.ExistingTargetSubnetId = exact.Id;
                 item.ExistingTargetSubnetName = exact.Name;
 
-                if (exact.HasHostIpAssignments)
+                if (exact.HasHostIpAssignments
+                    && p.Subnets.Any(s => LinkedRowForSameAzureSubnet(s, existingSubnets) is null))
                 {
                     item.Errors.Add(
                         $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) already has host IP assignments.");
                 }
                 if (exact.IsFullyAllocated
-                    && (!IsSameVNet(exact, p.Source.VNetResourceId)
-                        || p.Subnets.Any(s => LinkedRowForSameAzureSubnet(s, existingSubnets) is null)))
+                    && p.Subnets.Any(s => !s.FullyEncompasses && LinkedRowForSameAzureSubnet(s, existingSubnets) is null))
                 {
                     item.Errors.Add(
                         $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) is marked as fully allocated.");
