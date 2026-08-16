@@ -32,31 +32,11 @@ _Swept: the first act still independently pins the stale-scope refusal (guard-de
 _Verified: reviewer relanded the actual watermark signature in scratch — old code compiled via the positional int→long escape and the extended test went RED; 840/840 on the real tree, src untouched._
 _Reviewed: pass — the §8 counter-test claim is now true in the strong sense, and the second act also pins rule 3 (the refusal's remedy is actionable)._
 
-## S2. HostIpController half of the 18-R3 fail-closed concurrency fix has no guarding test — full suite green with it reverted (Low) [x1]
-
-**Where:** `src/Bastet/Controllers/HostIpController.cs:243`
-**Breaks:** 18-R3 made concurrency conflicts fail closed in two sibling places:
-`SubnetController.Edit` (guarded by the new `Edit_POST_ConcurrencyConflict_KeepsTheStaleToken`
-test) and `HostIpController.Edit` (guarded by nothing). Restoring the two deleted lines in
-`HostIpController` (`viewModel.RowVersion = currentHostIp.RowVersion;`
-`ModelState.Remove(RowVersion)`) re-opens the blind-retry overwrite on host IP edits — a second
-submit silently destroys another user's saved host IP changes — and no test goes red, so the
-regression ships silently. Section 5's every-write-path-siblings invariant says a rule on one path
-and not the other is exactly the divergence that shipped before. Severity demoted Medium → Low on
-verification (both verifiers): at HEAD the code is correct and fail-closed, so the operator sees no
-wrong behaviour today; the exposure is a latent silent-regression guard gap, comparable to round
-18's test-pinning items, not the Medium behavioural defect 18-R3 itself was.
-**Repro:** In a copy of the repo, reverted only `src/Bastet/Controllers/HostIpController.cs` to
-`f2050fa^` (restoring the token refresh in the `DbUpdateConcurrencyException` branch) and ran the
-full suite: 838 passed, 0 failed. By contrast the same experiment on `SubnetController.Edit.cs`
-fails `Edit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite`, proving the
-harness can catch this shape. Both verifiers independently reproduced the 838-green result with the
-two 18-R3-deleted lines restored.
-**Fix:** Add the sibling test for `HostIpController.Edit` mirroring
-`Edit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite`: post an edit with
-a stale `RowVersion`, assert the redisplayed view model keeps the stale token and `ModelState`
-carries no `RowVersion` override.
-**Residue-of:** 18-R3
+## S2. HostIpController half of the 18-R3 fail-closed concurrency fix has no guarding test — full suite green with it reverted (Low) [x1] — FIXED
+_Fixed. Sibling test added mirroring the subnet-side stale-token test: stale POST redisplays with the posted token kept, the conflict message renders, no ModelState override._
+_Swept: assertions match the subnet sibling verbatim where in scope; the NULL-RowVersion trigger path confirmed to be the CONCURRENCY_CONFLICT branch by the reland experiment._
+_Verified: red with the two 18-R3-deleted lines relanded (and with the dangerous token-assignment line alone); green restored; 841/841, src untouched._
+_Reviewed: pass. Residual: a ModelState.Remove-only reland is not discriminated — reviewer judged it harmless (the rendered token stays stale either way)._
 
 ## S3. ASlash32_CanStillBeMarkedFullyAllocated is vacuous — it asserts its own constructor inputs and the /32 fully-allocated toggle is unguarded (Low) [x2] — FIXED
 _Fixed. `CanMarkFullyAllocated` added to SubnetDetailsViewModel, the view consumes it (inline predicate deleted), test re-pointed plus two negative tests._

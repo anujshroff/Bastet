@@ -661,6 +661,29 @@ public class SubnetHostIpInteractionTests : IDisposable
     }
 
     [Fact]
+    public async Task HostIpEdit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite()
+    {
+        byte[] staleToken = [9, 9, 9, 9, 9, 9, 9, 9];
+        EditHostIpViewModel viewModel = new()
+        {
+            IP = "192.168.0.10",
+            Name = "renamed-by-a-stale-editor",
+            SubnetId = 1,
+            RowVersion = staleToken
+        };
+
+        IActionResult result = await _hostIpController.Edit("192.168.0.10", viewModel);
+
+        ViewResult view = Assert.IsType<ViewResult>(result);
+        EditHostIpViewModel shown = Assert.IsType<EditHostIpViewModel>(view.Model);
+        Assert.Equal(staleToken, shown.RowVersion);
+        Assert.Contains(_hostIpController.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user"));
+        Assert.False(_hostIpController.ModelState.TryGetValue(nameof(shown.RowVersion), out _)
+            && _hostIpController.ModelState[nameof(shown.RowVersion)]!.Errors.Count > 0);
+    }
+
+    [Fact]
     public async Task DeleteConfirmed_WithNoReviewedScope_RefusesAndArchivesNothing()
     {
         _context.Subnets.Add(new Subnet { Id = 720, Name = "root", NetworkAddress = "10.72.0.0", Cidr = 16 });
