@@ -424,7 +424,7 @@ public partial class SubnetController : Controller
 
             await transaction.CommitAsync();
 
-            TempData["SuccessMessage"] =
+            string summary =
                 $"Bulk import succeeded: created {totalTargetsCreated} VNet target subnet(s), " +
                 $"created {totalSubnetsCreated} Azure child subnet(s), " +
                 $"renamed {totalTargetsRenamed} target(s), " +
@@ -432,10 +432,13 @@ public partial class SubnetController : Controller
                 $"linked {totalTargetsLinked} existing target(s) to Azure, " +
                 $"and marked {totalTargetsMarkedFullyAllocated} target(s) as fully allocated.";
 
+            TempData["SuccessMessage"] = summary;
+
             return Ok(new
             {
                 success = true,
                 redirectUrl = Url.Action("Index", "Subnet"),
+                summary,
                 createdTargets = totalTargetsCreated,
                 createdChildSubnets = totalSubnetsCreated,
                 renamedTargets = totalTargetsRenamed,

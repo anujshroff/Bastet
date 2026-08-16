@@ -345,23 +345,7 @@
             invalidatePlan();
         }
 
-        $("#bulk-rename-matched").on("change", function () {
-            renderVNetTree();
-            updateGoPreviewBtn();
-        });
-
-        $("#bulk-select-all-btn").on("click", function () {
-
-            $(".bulk-prefix-checkbox:not(:disabled), .bulk-subnet-checkbox:not(:disabled)").prop("checked", true);
-            updateGoPreviewBtn();
-        });
-
-        $("#bulk-deselect-all-btn").on("click", function () {
-            $(".bulk-prefix-checkbox, .bulk-subnet-checkbox").prop("checked", false);
-            updateGoPreviewBtn();
-        });
-
-        $("#bulk-hide-imported").on("change", function () {
+        function rerenderPreservingSelection() {
             const checkedPrefixes = $(".bulk-prefix-checkbox:checked:not(:disabled)")
                 .map(function () { return $(this).attr("data-vnet-idx") + "|" + $(this).attr("data-prefix"); }).get();
             const checkedSubnets = $(".bulk-subnet-checkbox:checked:not(:disabled)")
@@ -379,7 +363,22 @@
             });
 
             updateGoPreviewBtn();
+        }
+
+        $("#bulk-rename-matched").on("change", rerenderPreservingSelection);
+
+        $("#bulk-select-all-btn").on("click", function () {
+
+            $(".bulk-prefix-checkbox:not(:disabled), .bulk-subnet-checkbox:not(:disabled)").prop("checked", true);
+            updateGoPreviewBtn();
         });
+
+        $("#bulk-deselect-all-btn").on("click", function () {
+            $(".bulk-prefix-checkbox, .bulk-subnet-checkbox").prop("checked", false);
+            updateGoPreviewBtn();
+        });
+
+        $("#bulk-hide-imported").on("change", rerenderPreservingSelection);
 
         $("#bulk-back-to-subscription-btn").on("click", function () {
             activateTab("step1");
@@ -660,10 +659,7 @@
                 success: function (result) {
                     if (result && result.success) {
                         committed = true;
-                        $("#bulk-commit-success-message").text(
-
-                            ` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s) and ${result.renamedChildSubnets} child subnet(s), linked ${result.linkedTargets} existing target(s) to Azure, marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
-                        );
+                        $("#bulk-commit-success-message").text(" " + result.summary);
                         $("#bulk-commit-success").removeClass("d-none");
                         $("#bulk-confirm-commit-btn").hide();
                         if (result.redirectUrl) {
