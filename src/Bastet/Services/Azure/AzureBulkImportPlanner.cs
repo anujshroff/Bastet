@@ -212,8 +212,8 @@ namespace Bastet.Services.Azure
                 {
                     return isTopUp
                         ? AlreadyImported(result,
-                            $"Already imported as Bastet subnet '{exact.Name}', which an Azure subnet covering the "
-                            + "whole prefix has marked fully allocated. There is nothing left to add.")
+                            $"Already imported as Bastet subnet '{exact.Name}', which is marked fully allocated, so "
+                            + "there is nothing left to add. Clear the flag on its Details page if subnets should go inside it.")
                         : Blocked(result, $"Bastet subnet '{exact.Name}' is marked as fully allocated.");
                 }
 
@@ -316,8 +316,8 @@ namespace Bastet.Services.Azure
                     && IsSameVNet(encompassedTarget, vnet))
                 {
                     subnet.Status = BulkImportAvailability.AlreadyImported;
-                    subnet.Reason = $"Bastet subnet '{encompassedTarget.Name}' is already marked fully allocated "
-                                    + "by this Azure subnet, so there is nothing to do.";
+                    subnet.Reason = $"Bastet subnet '{encompassedTarget.Name}' is marked fully allocated, "
+                                    + "so there is nothing to do.";
                     subnet.IsSelectable = false;
                     return;
                 }

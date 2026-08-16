@@ -186,14 +186,9 @@
         }
 
         function cascadeNote(item) {
-            const parts = [];
-            if (item.descendantCount > 0) {
-                parts.push(item.descendantCount + " child subnet(s)");
-            }
-            if (item.hostIpCount > 0) {
-                parts.push(item.hostIpCount + " host IP(s)");
-            }
-            return parts.length ? "Also archives " + parts.join(" and ") + "." : "";
+            return item.descendantCount > 0
+                ? "Also archives " + item.descendantCount + " child subnet(s)."
+                : "";
         }
 
         function renderPlan(plan) {
@@ -326,16 +321,14 @@
             $("#rec-confirm-count").text(targets.length);
 
             let descendants = 0;
-            let hostIps = 0;
             targets.forEach(function (i) {
                 descendants += i.descendantCount;
-                hostIps += i.hostIpCount;
             });
 
-            if (descendants > 0 || hostIps > 0) {
+            if (descendants > 0) {
                 $("#rec-confirm-cascade")
-                    .html("<strong>This also archives " + descendants + " child subnet(s) and " + hostIps +
-                        " host IP assignment(s)</strong> that live beneath them.")
+                    .html("<strong>This also archives " + descendants +
+                        " child subnet(s)</strong> that live beneath them.")
                     .removeClass("d-none");
             } else {
                 $("#rec-confirm-cascade").addClass("d-none");

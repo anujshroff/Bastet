@@ -81,4 +81,39 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
 
         Assert.Equal(OtherUsersSave, shown.LastModifiedAt);
     }
+
+    [Fact]
+    public async Task Edit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 51,
+            Name = "app",
+            NetworkAddress = "10.51.0.0",
+            Cidr = 24,
+            CreatedAt = new DateTime(2026, 01, 01, 00, 00, 00, DateTimeKind.Utc),
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        byte[] staleToken = [9, 9, 9, 9, 9, 9, 9, 9];
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 51,
+            Name = "appA",
+            NetworkAddress = "10.51.0.0",
+            Cidr = 24,
+            OriginalCidr = 24,
+            RowVersion = staleToken
+        };
+
+        IActionResult result = await _controller.Edit(51, viewModel);
+
+        ViewResult view = Assert.IsType<ViewResult>(result);
+        EditSubnetViewModel shown = Assert.IsType<EditSubnetViewModel>(view.Model);
+        Assert.Equal(staleToken, shown.RowVersion);
+        Assert.False(_controller.ModelState.TryGetValue(nameof(shown.RowVersion), out _)
+            && _controller.ModelState[nameof(shown.RowVersion)]!.Errors.Count > 0);
+    }
 }

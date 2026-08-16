@@ -275,7 +275,7 @@
 
                             if (subnetBlockedByPrefix && !subnet.reason) {
                                 $subnetDiv.append(reasonHtml(
-                                    "Its VNet prefix cannot be imported, so this subnet cannot be either."));
+                                    "The VNet prefix above cannot be selected, so this subnet cannot be imported either."));
                             }
                             $subList.append($subnetDiv);
                         });
@@ -672,7 +672,7 @@
                         committed = true;
                         $("#bulk-commit-success-message").text(
 
-                            ` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s), linked ${result.linkedTargets} existing target(s) to Azure, marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
+                            ` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s) and ${result.renamedChildSubnets} child subnet(s), linked ${result.linkedTargets} existing target(s) to Azure, marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
                         );
                         $("#bulk-commit-success").removeClass("d-none");
                         $("#bulk-confirm-commit-btn").hide();

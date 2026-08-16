@@ -28,7 +28,7 @@
                                 against this VNet to see the Azure subnets BASTET has not recorded.
                             </text>
                         }
-                        else
+                        else if (azureImportEnabled)
                         {
                             <text>
                                 Ask an administrator to run a Bulk Azure Import before allocating from these ranges.
@@ -58,7 +58,7 @@
                                 <td>@range.UsableCount.ToString("N0")</td>
                                 <td>
 
-                                    @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.HostIpAssignments.Count == 0 && Model.Cidr < 32)
+                                    @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.CanAddChildSubnet)
                                     {
                                         <button type="button" class="btn btn-sm btn-success create-subnet-btn"
                                                 data-network="@range.StartIp"
