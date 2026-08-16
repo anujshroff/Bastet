@@ -6,6 +6,20 @@ test baseline 820 passing
 date 2026-08-15
 Round 18 filed 23 findings, of which 20 are residue of round 17's own fixes.
 
+## Triage — dispositions approved by the owner, 2026-08-15
+
+Fix this round, machinery-deletions before string fixes in shared files; re-cite line numbers after
+R1 moves AzureReconciler.cs:
+
+- **fix:** R1 (High; deletes machinery), R3 (narrow half only: remove the RowVersion refresh at all
+  three sites; the redisplay-path collapse is deferred), R7, R8, R20, R21, R22, R23 (verified
+  deletions / small gating), R12, R13, R15, R17, R18 (`strings` batch), R14, R16 (small
+  conditionals, not in the strings batch), R19 (minimal variant only: the one clause at :675),
+  R2 (own reviewed item, outside restructure scope, riskiest — do last).
+- **defer to the planner/wizard restructure**, transplanted whole with repros into
+  docs/DEFERRED-FINDINGS.md: R4, R5, R6, R9, R10, R11, plus R3's and R19's structural halves —
+  each is an instance of the duplication the restructure exists to collapse.
+
 ## Critical
 
 None.
