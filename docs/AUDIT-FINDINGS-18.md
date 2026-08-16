@@ -47,28 +47,16 @@ _Swept: zero remaining ModelState.Remove in src; the only other concurrency catc
 _Verified: new stale-token test red pre-fix, green post-fix (mutation-checked by reverting the fix); 837/837. Reviewer scratch-verified the base64 round-trip on normal validation-error redisplays, so fix-and-resave still works._
 _Reviewed: pass._
 
-## R4 - A hand-built fully-allocated row cannot be adopted by the VNet it exactly matches `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:503, :217 (annotation half, moves with it), :314-328
-**Breaks:** The operator has already built the row the import would produce for 10.20.0.0/24 ('dmz', fully allocated, unlinked) and the wizard refuses it. Adding only the AzureResourceId flips it to AlreadyImported: the refusal keys on provenance and names no remedy.
-**Repro:** Unlinked row: Blocked, preview errored, canCommit false; the link-only UPDATE flipped it.
-**Fix:** Annotation half unsound (its fall-through lands these on WillUpdateExisting/IsSelectable=true). At :503 use `exact.IsFullyAllocated && p.Subnets.Any(s => !s.FullyEncompasses && LinkedRowForSameAzureSubnet(s, existingSubnets) is null)`; at :211-217 fall through only when nothing would be created.
-**Residue of:** f4a0a87 (Audit 17 #170), which relaxed the linked half only.
+## R4 - A hand-built fully-allocated row cannot be adopted by the VNet it exactly matches `[x1]` — DEFERRED
+_Deferred to the planner/wizard restructure; transplanted whole into docs/DEFERRED-FINDINGS.md as 18-R4._
 
-## R5 - A linked VNet target with host IPs cannot be renamed, while the identical fully-allocated case can `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:207, :498-502; sibling at :211-218, :503-509
-**Breaks:** Import rig-empty, rename the row, assign one host IP: the planner computes wouldRenameTarget=true, discards it and returns Blocked "already has host IP assignments", disabling the box under a "Cannot import" badge. The only remedy offered is deleting the host IP data.
-**Repro:** Rename-only preview: willRename=True, newName='rig-empty', that error, canCommit false; the fully-allocated control committed renamedTargets 1.
-**Fix:** Filed annotation change unsound (its `!isTopUp` guard falls through to IsSelectable=true whenever the VNet has unrecorded subnets). Take :498 as filed; at :207 mirror the sibling — `isTopUp ? AlreadyImported(..."so no subnets can be added inside it.") : Blocked(...)`.
-**Residue of:** f4a0a87 (commit path) and 23233f2 (annotation), which relaxed the sibling.
+## R5 - A linked VNet target with host IPs cannot be renamed, while the identical fully-allocated case can `[x1]` — DEFERRED
+_Deferred to the planner/wizard restructure; transplanted whole into docs/DEFERRED-FINDINGS.md as 18-R5._
 
 ## Low
 
-## R6 - Child-subnet rename offer uses a second naming implementation, so the wizard offers renames it never performs `[x2]`
-**Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:398, :383-384, :615-626 (real base name), :630, :636-652; Views/Azure/BulkImport/_BulkScripts.cshtml:149, :176, :238, :272
-**Breaks:** A multi-prefix Azure subnet imports as 'snet-mp (10.81.1.0-24)' and 'snet-mp (10.81.2.0-24)' and both return wouldRenameSubnet=true, because the annotation compares the unqualified name. They render "Rename only" with enabled boxes, but ticking them previews no children and commits renamedChildSubnets 0.
-**Repro:** Straight after the import all three created rows returned wouldRenameSubnet=True; preview dropped two, commit renamed 0.
-**Fix:** Filed fix not implementable as written (the plan qualifies from selection-derived `multiPrefixResourceIds`; the subnet DTO carries no `Ipv4AddressPrefixes`). Delete `ProposedChildName`, derive the offer from the plan's base-name computation, and add `Ipv4AddressPrefixes` to the DTO.
-**Residue of:** f4a0a87, which added child renames with their own naming helper.
+## R6 - Child-subnet rename offer uses a second naming implementation, so the wizard offers renames it never performs `[x2]` — DEFERRED
+_Deferred to the planner/wizard restructure; transplanted whole into docs/DEFERRED-FINDINGS.md as 18-R6._
 
 ## R7 - Tags are still held to the strict SafeText allowlist round 17 removed from names and descriptions `[x2]` — FIXED
 _Fixed. TagsAttribute keeps MaxTags/MaxTagLength only; the IsSafeText check and vestigial service guard are gone. New TagsAttributeTests: five operator strings accepted, limits still refused._
@@ -82,26 +70,14 @@ _Swept: all child-creation offers now flow through the one property; /31 verifie
 _Verified: /32 test failed pre-fix; build 0 warnings; 836/836; reviewer confirmed SetAllocationStatus never checks CIDR and the ranges card never renders when fully allocated._
 _Reviewed: pass._
 
-## R9 - Toggling "Rename matched Bastet subnets to VNet names" discards the operator's entire selection `[x2]`
-**Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:358; the complete implementation is at :374-392 in the same file
-**Breaks:** `#bulk-hide-imported` snapshots the checked keys around `renderVNetTree()` and restores them; `#bulk-rename-matched` re-renders with no capture, and the render empties the tree first. Every tick is lost, the only signal being "Next: Preview" going disabled.
-**Repro:** Select all -> 31 checked; hide-imported on/off preserved 31; the rename toggle left 0 checked with 31 still enabled.
-**Fix:** Extract the capture/restore at :375-389 into `rerenderPreservingSelection()` (snapshot, re-render, re-apply to `:not(:disabled)` boxes, `updateGoPreviewBtn()`) and call it from both handlers. Keep the snapshot key.
-**Residue of:** 23233f2 added the re-render without the restore; f4a0a87 fixed the button instead.
+## R9 - Toggling "Rename matched Bastet subnets to VNet names" discards the operator's entire selection `[x2]` — DEFERRED
+_Deferred to the planner/wizard restructure; transplanted whole into docs/DEFERRED-FINDINGS.md as 18-R9._
 
-## R10 - isPrefixUsable re-derives IsSelectable from a status name, so renames-on enables a checkbox the server refuses `[x2]`
-**Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:169, consumed at :179-188, :249-250, :259; indistinguishable branches at Services/Azure/AzureBulkImportPlanner.cs:213-216 and :222-227
-**Breaks:** `AlreadyImported` is produced both when the target is fully allocated and when every contained subnet is recorded, and only the second allows ticking a child. With 10.79.0.0/16 AlreadyImported and snet-fa Available, the rename switch alone enables snet-fa, which the preview refuses.
-**Repro:** Renames off -> disabled with blocked badge; on -> enabled; previewing returned "... is marked as fully allocated".
-**Fix:** Filed fix unsound (its `CanContainNewSubnets` flag is true on a branch whose precondition is that nothing can be added; its interim re-breaks round 17's child renames). Fix server-side: in `AnnotateSubnet` (~:330-372) mark a subnet not selectable when its exact-match container is fully allocated or holds host IPs.
-**Residue of:** f4a0a87 introduced the `renameOn && "AlreadyImported"` clause; 440e0c9 extracted it.
+## R10 - isPrefixUsable re-derives IsSelectable from a status name, so renames-on enables a checkbox the server refuses `[x2]` — DEFERRED
+_Deferred to the planner/wizard restructure; transplanted whole into docs/DEFERRED-FINDINGS.md as 18-R10._
 
-## R11 - `TargetName` is a second implementation of `ProposedTargetName` that reads the client-supplied prefix list `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:840 (called at :523, :541, :557); paired implementation at :417, used by the annotation at :205
-**Breaks:** `ProposedTargetName` takes the qualifier decision from the ARM-read prefix list; `TargetName` takes it from `prefix.Source.VNetIpv4AddressPrefixes`, posted by the browser and validated nowhere. Omitting that array returns two plan items both named "rig-dual-prefix", canCommit true. UI-unreachable today.
-**Repro:** Same preview three ways: array present -> qualified names; omitted or one self-consistent element -> both unqualified.
-**Fix:** Filed guard unsound — a one-element list satisfies it and still produces the wrong output, and it keeps both copies. Collapse `TargetName` and `ProposedTargetName` into one method taking (vnetName, prefixes, network, cidr). Sourcing prefixes from ARM is separate.
-**Residue of:** f4a0a87, which made the copies agree via the client DTO rather than deleting one.
+## R11 - `TargetName` is a second implementation of `ProposedTargetName` that reads the client-supplied prefix list `[x1]` — DEFERRED
+_Deferred to the planner/wizard restructure; transplanted whole into docs/DEFERRED-FINDINGS.md as 18-R11._
 
 ## R12 - The Create-Subnet CIDR modal prints usable hosts under the label "Resulting subnet size" `[x2]` — FIXED
 _Fixed. Relabelled to "Maximum usable IPs:" and dropped the " IP addresses" suffix, which also cured "Invalid IP addresses" at the three error sites._
