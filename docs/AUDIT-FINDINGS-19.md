@@ -79,29 +79,11 @@ a stale `RowVersion`, assert the redisplayed view model keeps the stale token an
 carries no `RowVersion` override.
 **Residue-of:** 18-R3
 
-## S3. ASlash32_CanStillBeMarkedFullyAllocated is vacuous — it asserts its own constructor inputs and the /32 fully-allocated toggle is unguarded (Low) [x2]
-
-**Where:** `test/Bastet.Tests/SubnetManagement/SubnetDetailsActionGateTests.cs:41`
-**Breaks:** The test builds `Details(32)` and asserts `HostIpAssignments.Count == 0 &&
-ChildSubnets.Count == 0 && !IsFullyAllocated` — exactly the values it just constructed, touching no
-product predicate. The behaviour its name claims to pin (a /32 keeps the Mark as Fully Allocated
-button after 18-R8 added `Cidr < 32` to `CanAddChildSubnet`) lives only as an inline Razor
-expression in `_HostIpAssignments.cshtml`, which no test reaches. If the view gate regresses to the
-pre-fix form (`Model.CanAddChildSubnet && ...`), every /32 loses the toggle, the operator cannot
-record a fully-allocated /32, and Bastet reports allocated space as free (rule 1) until they find
-the host-IP workaround — with the whole suite green.
-**Repro:** In a copy of the repo, reverted
-`src/Bastet/Views/Subnet/Details/_HostIpAssignments.cshtml` to `f2050fa^` (restoring
-`Model.CanAddChildSubnet &&` to the toggle gate, which with the fixed `CanAddChildSubnet` removes
-the button from every /32) and ran the full suite: 838 passed, 0 failed, including this test. The
-test also passed every other revert experiment run in this beat; it contains no expression that any
-code change can falsify. Verifier independently reproduced the mutation experiment (0 build errors,
-suite green).
-**Fix:** Lift the toggle gate into a named view-model property (e.g. `CanMarkFullyAllocated =>
-HostIpAssignments.Count == 0 && ChildSubnets.Count == 0 && !IsFullyAllocated` on
-`SubnetDetailsViewModel`), use it in `_HostIpAssignments.cshtml`, and re-point the test at
-`Details(32).CanMarkFullyAllocated` — deleting the second inline implementation per section 5.
-**Residue-of:** 18-R8
+## S3. ASlash32_CanStillBeMarkedFullyAllocated is vacuous — it asserts its own constructor inputs and the /32 fully-allocated toggle is unguarded (Low) [x2] — FIXED
+_Fixed. `CanMarkFullyAllocated` added to SubnetDetailsViewModel, the view consumes it (inline predicate deleted), test re-pointed plus two negative tests._
+_Swept: no remaining inline copy of the predicate anywhere in src; server validator agrees with the gate (no CIDR term either side)._
+_Verified: build 0 warnings, 840/840; three mutations each kill exactly one distinct test — every term is load-bearing._
+_Reviewed: pass. Residual: a Razor re-inline still can't go red in unit tests (no render harness) — covered by /e2e and §5's duplication rule; judged acceptable._
 
 ## S4. CIDR-edit refusal test fails on correct code when BASTET_AZURE_IMPORT=true, and the flag-on remedy branch is unguarded (Low) [x1]
 
