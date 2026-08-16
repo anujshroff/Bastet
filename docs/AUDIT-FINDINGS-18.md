@@ -146,12 +146,11 @@ _Swept: remaining "cannot be imported" strings all describe genuinely blocked su
 _Verified: build 0 warnings, 836/836; client-side — driven at the round-end gate._
 _Reviewed: pass._
 
-## R19 - Bulk import commit banner never reads renamedChildSubnets, so a rename-only import reports all zeros `[x2]`
-**Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:675 (five of six counters); the server returns six at Controllers/SubnetController.BulkAzure.cs:439-444, worded correctly at :427-433
-**Breaks:** An operator whose only outstanding work is a drifted child name sees, for the two seconds before the redirect, "Created 0 VNet target(s), 0 child subnet(s), renamed 0 target(s), linked 0 ..., marked 0 ..." — an all-zero summary of a commit that did rename a subnet.
-**Repro:** Commit returned renamedChildSubnets 1 and SQL confirmed the rename; the in-page banner read all zeros.
-**Fix:** Better than the filed one-liner: return the already-built TempData summary as a `summary` field on the Ok(...) object and set the banner from it, deleting the duplicate sentence. Minimal alternative: add the renamed-child clause at :675.
-**Residue of:** f4a0a87, which added the sixth counter and updated one consumer.
+## R19 - Bulk import commit banner never reads renamedChildSubnets, so a rename-only import reports all zeros `[x2]` — FIXED
+_Fixed with the approved minimal variant: the banner gains "and N child subnet(s)" in the renamed clause; all six server counters now render. The summary-field dedup is deferred to the restructure._
+_Swept: every interpolated property in the commit handler verified against the server object — no phantom names._
+_Verified: build 0 warnings, 836/836; JSON casing confirmed camelCase either way._
+_Reviewed: pass._
 
 ## Info
 
