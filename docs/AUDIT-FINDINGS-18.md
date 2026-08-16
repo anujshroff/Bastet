@@ -177,12 +177,11 @@ _Reviewed: pass — reviewer confirmed no path puts a nonzero-hostIp item into p
 **Fix:** Delete `SafeTextAttribute` (:27-43). In SubnetCreateGetPrefillTests drop the IsSafeText assertions and the `SafeTextServiceProvider` helper, keep the `Assert.Equal` checks, and rename both tests. Fix the same claim at GeneratedNameSafeTextTests.cs:56.
 **Residue of:** f4a0a87, which deleted the last usages and orphaned the class.
 
-## R22 - AzureReconcilePlanViewModel.CanCommit is serialised on every scan but no code reads it `[x2]`
-**Where:** src/Bastet/Models/ViewModels/AzureReconcileViewModels.cs:95; `BulkImportPlanViewModel.CanCommit` (AzureBulkImportViewModels.cs:208) is used and must stay
-**Breaks:** The client gates Go on `selectedIds().length` and Delete on the typed "approved" plus a snapshot, and SubnetController.AzureReconcile.cs re-derives its refusals at :84, :97, :110 without consulting it — while a reader assumes the gate is server-computed.
-**Repro:** Scan body carried "canCommit":false; deleting line 95 out of tree built clean, 820/820.
-**Fix:** Delete the property — a computed getter with no setter that nothing binds; the only effect is one fewer field in the scan JSON. Do not wire it up for symmetry: reconcile commits a chosen selection, so a plan-wide gate would enable Go with nothing ticked.
-**Residue of:** none — born unread at aedd0bd, copied from the bulk-import plan.
+## R22 - AzureReconcilePlanViewModel.CanCommit is serialised on every scan but no code reads it `[x2]` — FIXED
+_Fixed. Deleted the computed property; not wired up for symmetry, per the finding._
+_Swept: zero readers of the reconcile canCommit in C#, Razor or JS; BulkImportPlanViewModel.CanCommit untouched and still read at its three sites._
+_Verified: build 0 warnings, 822/822; reviewer confirmed the commit endpoint re-derives ScanSucceeded/GlobalErrors/selection checks server-side._
+_Reviewed: pass._
 
 ## R23 - BuildSubnetTreeViewModel ignores its allSubnets parameter and sets a ParentSubnetId no view renders `[x1]`
 **Where:** src/Bastet/Controllers/SubnetController.Helpers.cs:258, :269, :279; Controllers/SubnetController.Read.cs:25 (only caller); Models/ViewModels/SubnetViewModels.cs:65
