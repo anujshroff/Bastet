@@ -22,7 +22,7 @@ public partial class SubnetController : Controller
 
         foreach (Subnet? rootSubnet in rootSubnets)
         {
-            hierarchicalSubnets.Add(BuildSubnetTreeViewModel(rootSubnet, allSubnets));
+            hierarchicalSubnets.Add(BuildSubnetTreeViewModel(rootSubnet));
         }
 
         return View(hierarchicalSubnets);

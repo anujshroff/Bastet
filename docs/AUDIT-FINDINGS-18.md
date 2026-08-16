@@ -183,12 +183,11 @@ _Swept: zero readers of the reconcile canCommit in C#, Razor or JS; BulkImportPl
 _Verified: build 0 warnings, 822/822; reviewer confirmed the commit endpoint re-derives ScanSucceeded/GlobalErrors/selection checks server-side._
 _Reviewed: pass._
 
-## R23 - BuildSubnetTreeViewModel ignores its allSubnets parameter and sets a ParentSubnetId no view renders `[x1]`
-**Where:** src/Bastet/Controllers/SubnetController.Helpers.cs:258, :269, :279; Controllers/SubnetController.Read.cs:25 (only caller); Models/ViewModels/SubnetViewModels.cs:65
-**Breaks:** The body walks `subnet.ChildSubnets` and only forwards `allSubnets` to itself, so the caller materialises a whole-table list to satisfy a signature. `SubnetTreeViewModel.ParentSubnetId` is read by no view and no test.
-**Repro:** Both removals on a clean export: 0 warnings, 820/820, byte-identical /Subnet HTML in an A/B.
-**Fix:** Drop the parameter, its forward at :279 and the argument at Read.cs:25 (keep the local, used at :20); delete the assignment at :269 and the property at SubnetViewModels.cs:65. Note that the whole-table load at Read.cs:16-18 is load-bearing: EF fixup populates ChildSubnets below level 2.
-**Residue of:** none.
+## R23 - BuildSubnetTreeViewModel ignores its allSubnets parameter and sets a ParentSubnetId no view renders `[x1]` — FIXED
+_Fixed. Dropped the parameter, its recursive forward and the call-site argument; deleted the unread ParentSubnetId assignment and property. The load-bearing whole-table Include stays._
+_Swept: no reader of SubnetTreeViewModel.ParentSubnetId in views, tests or JSON consumers; sibling ParentSubnetId properties untouched._
+_Verified: build 0 warnings, 822/822; /Subnet render re-checked at the round-end gate._
+_Reviewed: pass — reviewer confirmed EF fixup mechanism and no stranded usings._
 
 ## Refuted - reported by a finder, killed by the verifier
 

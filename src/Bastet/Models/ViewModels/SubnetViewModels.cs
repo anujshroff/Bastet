@@ -62,7 +62,6 @@ public class SubnetTreeViewModel : SubnetViewModel
     public string? Description { get; set; }
     public string SubnetMask { get; set; } = string.Empty;
     public long UsableIpAddresses { get; set; }
-    public int? ParentSubnetId { get; set; }
     public List<SubnetTreeViewModel> ChildSubnets { get; set; } = [];
 }
 
