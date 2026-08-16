@@ -91,7 +91,7 @@ public class SubnetDetailsViewModel
     public bool IsFullyAllocated { get; set; }
 
     public bool CanAddHostIp => ChildSubnets.Count == 0 && !IsFullyAllocated;
-    public bool CanAddChildSubnet => HostIpAssignments.Count == 0 && !IsFullyAllocated;
+    public bool CanAddChildSubnet => HostIpAssignments.Count == 0 && !IsFullyAllocated && Cidr < 32;
 
     public List<IPRange> UnallocatedRanges { get; set; } = [];
 

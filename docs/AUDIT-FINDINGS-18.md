@@ -77,12 +77,11 @@ _Swept: Create and Edit carry the identical [Tags]+[SanitizeTags] pair; no Tags 
 _Verified: 6 accept-cases failed pre-fix; build 0 warnings; 830/830. Reviewer probed "HQ <-> DR", "temp < 5 and load > 3", "Zürich" through SanitizeTags — byte-identical._
 _Reviewed: pass._
 
-## R8 - "Add Child Subnet" is offered on a /32, which the create form must always refuse, and with the wrong reason `[x1]`
-**Where:** src/Bastet/Models/ViewModels/SubnetViewModels.cs:95, Views/Subnet/Details/_ChildSubnets.cshtml:8, _HostIpAssignments.cshtml:110, _UnallocatedRanges.cshtml:61 (correct)
-**Breaks:** On a /32 with no host IPs the button links to /Subnet/Create?parentId=N and every submission is refused for containment, when the real rule is that a /32 has no room for a child — so the operator cannot tell why.
-**Repro:** One Details response carried both the anchor and an empty Action cell; Cidr 32 and 31 gave the containment error, 33 the range error.
-**Fix:** Filed fix incomplete — adding `Cidr < 32` to `CanAddChildSubnet` also hides "Mark as Fully Allocated" on every /32, which the server accepts. Add the term at :95, drop the redundant `Model.CanAddChildSubnet &&` at :110, and have :61 read `Model.CanAddChildSubnet`.
-**Residue of:** Round 6 (0de1293) added the `Cidr < 32` gate to one entry point only.
+## R8 - "Add Child Subnet" is offered on a /32, which the create form must always refuse, and with the wrong reason `[x1]` — FIXED
+_Fixed. `CanAddChildSubnet` gains `Cidr < 32`; the Mark-as-Fully-Allocated gate drops its redundant CanAddChildSubnet term (so /32s keep that button); _UnallocatedRanges' duplicate predicate collapsed into the property._
+_Swept: all child-creation offers now flow through the one property; /31 verified server-accepted (a /32 child passes containment), so /31 keeps the offer._
+_Verified: /32 test failed pre-fix; build 0 warnings; 836/836; reviewer confirmed SetAllocationStatus never checks CIDR and the ranges card never renders when fully allocated._
+_Reviewed: pass._
 
 ## R9 - Toggling "Rename matched Bastet subnets to VNet names" discards the operator's entire selection `[x2]`
 **Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:358; the complete implementation is at :374-392 in the same file
