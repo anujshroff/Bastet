@@ -71,12 +71,11 @@ _Reviewed: pass — reviewer traced transitive ManualDescendantCount/HostIpCount
 **Fix:** Filed fix not implementable as written (the plan qualifies from selection-derived `multiPrefixResourceIds`; the subnet DTO carries no `Ipv4AddressPrefixes`). Delete `ProposedChildName`, derive the offer from the plan's base-name computation, and add `Ipv4AddressPrefixes` to the DTO.
 **Residue of:** f4a0a87, which added child renames with their own naming helper.
 
-## R7 - Tags are still held to the strict SafeText allowlist round 17 removed from names and descriptions `[x2]`
-**Where:** src/Bastet/Services/Security/ValidationAttributes.cs:117 (closes both consumers), Models/ViewModels/SubnetViewModels.cs:36, EditSubnetViewModel.cs:36
-**Breaks:** POST /Subnet/Create with Name and Description both "10.0.0.0/8" is accepted while the identical Tags value is refused and the create fails — likewise "owner:netops", "Zürich", "site's-gw", "HQ <-> DR". Every Tags sink is Razor-encoded.
-**Repro:** Each string errored on Tags alone, Create and Edit; with :117-120 deleted, 820/820.
-**Fix:** Delete the `IsSafeText` check from `TagsAttribute.IsValid` (:117-120) and the then-vestigial sanitizer guard at :95-99, leaving MaxTags/MaxTagLength. Do not also delete `SafeTextAttribute` — `IsSafeText` has live callers and tests.
-**Residue of:** f4a0a87 — rule is original (3940c98); round 17 freed the name fields only.
+## R7 - Tags are still held to the strict SafeText allowlist round 17 removed from names and descriptions `[x2]` — FIXED
+_Fixed. TagsAttribute keeps MaxTags/MaxTagLength only; the IsSafeText check and vestigial service guard are gone. New TagsAttributeTests: five operator strings accepted, limits still refused._
+_Swept: Create and Edit carry the identical [Tags]+[SanitizeTags] pair; no Tags write path bypasses them; markup still neutralised by SanitizeTags/StripHtml and Razor-encoded at every sink (no @Html.Raw)._
+_Verified: 6 accept-cases failed pre-fix; build 0 warnings; 830/830. Reviewer probed "HQ <-> DR", "temp < 5 and load > 3", "Zürich" through SanitizeTags — byte-identical._
+_Reviewed: pass._
 
 ## R8 - "Add Child Subnet" is offered on a /32, which the create form must always refuse, and with the wrong reason `[x1]`
 **Where:** src/Bastet/Models/ViewModels/SubnetViewModels.cs:95, Views/Subnet/Details/_ChildSubnets.cshtml:8, _HostIpAssignments.cshtml:110, _UnallocatedRanges.cshtml:61 (correct)

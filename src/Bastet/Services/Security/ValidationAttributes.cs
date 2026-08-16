@@ -74,12 +74,6 @@ public class TagsAttribute : ValidationAttribute
             return ValidationResult.Success;
         }
 
-        IInputSanitizationService? sanitizationService = validationContext.GetService<IInputSanitizationService>();
-        if (sanitizationService == null)
-        {
-            return new ValidationResult("Input sanitization service not available");
-        }
-
         string[] tags = [.. stringValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(tag => tag.Trim())
             .Where(tag => !string.IsNullOrWhiteSpace(tag))];
@@ -94,11 +88,6 @@ public class TagsAttribute : ValidationAttribute
             if (tag.Length > MaxTagLength)
             {
                 return new ValidationResult($"Each tag must be {MaxTagLength} characters or less");
-            }
-
-            if (!sanitizationService.IsSafeText(tag))
-            {
-                return new ValidationResult($"Tag '{tag}' contains invalid characters");
             }
         }
 
