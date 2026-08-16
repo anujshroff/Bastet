@@ -41,12 +41,11 @@ _Reviewed: pass — reviewer traced transitive ManualDescendantCount/HostIpCount
 **Fix:** Filed fix unsound — its interim (`>` to `>=`) refuses every delete of a subnet holding host IPs. Have `MaxSubtreeHostIpTicksAsync` return the subtree count, feed `HostIpCount` and the guard from it (deleting `CountAllDescendantHostIps`), post it as a nullable field joined to :143, and drop the watermark.
 **Residue of:** d18327e (Audit 16 #165), which added the watermark and guard.
 
-## R3 - Edit concurrency redisplay refreshes RowVersion, so the retry it instructs reverts the other commit `[x1]`
-**Where:** src/Bastet/Controllers/SubnetController.Edit.cs:178 (msg :192-195), :255 (msg :259-263); Controllers/HostIpController.cs:244 (msg :252-255); Views/Subnet/Edit/_EditForm.cshtml and the HostIp Edit partial
-**Breaks:** A opens Edit on 172.16.0.0/12; B saves /13, freeing 172.24.0.0/13. A's stale POST throws, but the redisplay swaps in the current RowVersion while keeping A's fields and calling them current, so Save again reverts the row and discards B's change.
-**Repro:** Redisplay showed Cidr 12 with a refreshed RowVersion; the retry returned 302 and SQL showed /12. HostIp identical.
-**Fix:** Filed fix unsound as scoped — it threads Current* fields into two redisplay paths that are already duplicates. Delete Edit.cs:170-190 first (all redone at :227-269), then name the differing fields and stored values in the one remaining message.
-**Residue of:** Partly — the token refresh is original (3480e52); the untrue sentence is d18327e.
+## R3 - Edit concurrency redisplay refreshes RowVersion, so the retry it instructs reverts the other commit `[x1]` — FIXED (narrow half; remainder deferred)
+_Fixed. The token refresh and its ModelState.Remove are gone at all three sites; a blind retry now fails closed with a reload instruction instead of silently reverting the other commit. Messages rewritten to be true. Redisplay-path collapse and field-diff message deferred to the restructure._
+_Swept: zero remaining ModelState.Remove in src; the only other concurrency catch never refreshed a token; Delete flows redirect to GET and cannot replay silently._
+_Verified: new stale-token test red pre-fix, green post-fix (mutation-checked by reverting the fix); 837/837. Reviewer scratch-verified the base64 round-trip on normal validation-error redisplays, so fix-and-resave still works._
+_Reviewed: pass._
 
 ## R4 - A hand-built fully-allocated row cannot be adopted by the VNet it exactly matches `[x1]`
 **Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:503, :217 (annotation half, moves with it), :314-328

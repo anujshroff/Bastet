@@ -174,8 +174,6 @@ public partial class SubnetController : Controller
 
                 if (currentSubnet != null)
                 {
-
-                    viewModel.RowVersion = currentSubnet.RowVersion;
                     viewModel.NetworkAddress = currentSubnet.NetworkAddress;
                     viewModel.OriginalCidr = currentSubnet.Cidr;
                     viewModel.CreatedAt = currentSubnet.CreatedAt;
@@ -185,14 +183,11 @@ public partial class SubnetController : Controller
                     {
                         viewModel.ParentSubnetInfo = $"{currentSubnet.ParentSubnet.Name} ({currentSubnet.ParentSubnet.NetworkAddress}/{currentSubnet.ParentSubnet.Cidr})";
                     }
-
-                    ModelState.Remove(nameof(viewModel.RowVersion));
                 }
 
                 ModelState.AddModelError("",
-                    "This subnet was modified by another user while you were editing it. " +
-                    "Your changes have been preserved below, but you should review the current values before saving. " +
-                    "Click 'Save Changes' again to apply your updates.");
+                    "This subnet was modified by another user while you were editing it, so it was not saved. " +
+                    "Reload the page to see the current values, then re-apply the changes that still make sense.");
             }
             catch (TimeoutException)
             {
@@ -252,15 +247,11 @@ public partial class SubnetController : Controller
             && origSubnet.RowVersion is not null
             && !postedRowVersion.SequenceEqual(origSubnet.RowVersion);
 
-        viewModel.RowVersion = origSubnet.RowVersion;
-
-        ModelState.Remove(nameof(viewModel.RowVersion));
-
         if (rowMovedUnderneath && !ownWriteMayHaveLanded)
         {
             ModelState.AddModelError("",
-                "This subnet has changed since this form was loaded. The values shown are the current "
-                + "ones; review them before saving.");
+                "This subnet has changed since this form was loaded, so it cannot be saved from here. "
+                + "Reload the page to see the current values.");
         }
 
         if (origSubnet.ParentSubnet != null)
