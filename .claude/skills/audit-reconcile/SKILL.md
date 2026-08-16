@@ -266,9 +266,12 @@ service principal secrets. The gate needs the rig; a round that tears down first
 
 1. **Append to `docs/AUDIT-LEDGER.md`:** one Findings row per finding — id
    (`<round>-<finding>`), severity, terminal verdict (fixed / refuted / struck / inverted /
-   deferred), the round's merge PR reference (branch shas die in the squash — cite `#<PR>` once
-   known, or the round branch name until then), one line of what — and the round's row in the
-   Rounds table with the residue rate. Facts only; the ledger must not carry an argument.
+   deferred), one line of what — and the round's row in the Rounds table with the residue rate.
+   **No shas in new rows**: they are written before the squash merge exists, so any sha dies with
+   the branch; the round number is the durable key, and the merge commit is always findable via
+   `git log main --grep "Audit <N>"`. Instead, **backfill the previous round**: its merge is on
+   main beneath you now — put its merge sha and PR number into that round's Rounds-table cell.
+   Facts only; the ledger must not carry an argument.
 2. **Append owner rulings from triage to `docs/PRODUCT-MODEL.md` §8, verbatim**, each with its
    counter-test pointer.
 3. **Delete the findings file** — `git rm docs/AUDIT-FINDINGS-*.md`, committed. The files poison

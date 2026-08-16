@@ -46,8 +46,10 @@ Per-finding records begin at round 18. `id` is `<round>-<finding>` and is the id
 
 The round-18 rows' sha column holds branch-local commits that did not survive the squash merge —
 they identify which one-commit-per-finding change each row describes, but resolve nowhere; every
-round-18 change reached `main` in `f2050fa` (#177). From round 19 on, rows cite the round's merge
-PR instead.
+round-18 change reached `main` in `f2050fa` (#177). From round 19 on, new rows carry no sha — the
+round number is the durable key (`git log main --grep "Audit <N>"` finds the merge), and each
+reconcile close-out backfills the *previous* round's Rounds-table cell with its merge sha and PR
+number once they exist.
 
 | id | severity | verdict | sha | what |
 |---|---|---|---|---|
