@@ -38,6 +38,7 @@ at round granularity only.
 | — | — | — | — | — | 23233f2 | mass revert: rounds 14–16 withhold/re-link/inbound machinery and single-VNet wizard deleted |
 | 17 | 21 | 21 | 3 | 12 of 21 | f4a0a87 | |
 | 18 | 23 | 17 | 2 | 20 of 23 | f2050fa (#177) | first round under the rebuilt skill: every fix independently reviewed; whole-diff gate filed 1 violation (repaired) + 1 recorded product question; 6 findings deferred to the planner/wizard restructure |
+| 19 | 4 | 4 | 0 | 4 of 4 | — (backfilled by round 20) | regression-only round over the round-18 delta; all four findings were regression-guard gaps in round-18's own tests, all mutation-verified, all fixed; gate: zero diff-review findings, 41/41 rig checks, both Azure counter-tests both directions |
 
 ## Findings
 
@@ -80,3 +81,7 @@ number once they exist.
 | 18-R21 | Info | fixed | d56bea5 | Orphaned SafeTextAttribute deleted; tests re-pinned to NoHtml |
 | 18-R22 | Info | fixed | e6eef15 | Unread reconcile CanCommit deleted |
 | 18-R23 | Info | fixed | 3d1d427 | Ignored parameter and unread ParentSubnetId removed from the tree view model |
+| 19-S1 | Low | fixed | — | Delete-scope counter-test gained a re-review-then-delete second act; a watermark reland now goes red, making the §8 18-R2 claim true |
+| 19-S2 | Low | fixed | — | HostIp edit's fail-closed concurrency redisplay gained its sibling stale-token test |
+| 19-S3 | Low | fixed | — | Fully-allocated toggle gate lifted into CanMarkFullyAllocated; vacuous test re-pointed, every term mutation-load-bearing |
+| 19-S4 | Low | fixed | — | CIDR-refusal test pins both feature-flag branches explicitly, serialized in AzureFeatureFlagCollection |
