@@ -88,15 +88,16 @@ public class AzureBulkImportZeroWorkTests
     }
 
     [Fact]
-    public void AFullyAllocatedTargetBelongingToAnotherVNet_IsStillBlocked()
+    public void AnUnlinkedFullyAllocatedExactMatch_IsOfferedForAdoption()
     {
         BulkAzureVNetViewModel vnet = VNet("vnet-c", ["10.52.0.0/16"]);
 
         BulkAzurePrefixViewModel prefix = Annotate(vnet,
             Row(1, "someone-else", "10.52.0.0", 16, fullyAllocated: true));
 
-        Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
-        Assert.False(prefix.IsSelectable);
+        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
+        Assert.True(prefix.IsSelectable);
+        Assert.Contains("Will link existing Bastet subnet", prefix.Reason);
     }
 
     // Something can still be added -> stays selectable.

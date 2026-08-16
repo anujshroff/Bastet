@@ -405,21 +405,26 @@ Azure is unchanged.
 **Refusals** - each is a way the top-up allowance could have gone wrong:
 
 - a target linked to a **different** Azure VNet (and a hand-built POST refused server-side too)
-- a target marked **fully allocated**
-- a target carrying **host IP assignments** - see the trap below
+- a target marked **fully allocated**, only when the selection would **create a subnet inside it** -
+  link-only adoption of an unlinked fully-allocated match is offered (`WillUpdateExisting`, "Will link
+  existing Bastet subnet"), and a linked one is `AlreadyImported` with rename still offered
+- a target carrying **host IP assignments**: an **unlinked** one stays refused outright, in the
+  annotation AND the plan (a hand-built POST must fail); a **linked** one is `AlreadyImported`
+  ("no subnets can be added inside it") with rename still offered, and a plan error fires only for
+  a selection that would create inside it - a new subnet, or the whole-prefix mark-fully-allocated
+  row - see the trap below
 
 **Adoption is NOT a refusal.** A populated Bastet target with **no** Azure link must be *offered*
 (`WillUpdateExisting`), because importing it links it and that is work - phase F asserts the same thing
 twice. An earlier version of this file listed it here as a refusal; it is not, and testing it as one
-reports a defect that is not there.
+reports a defect that is not there. The same holds for an unlinked **fully-allocated** exact match:
+adoption links it, it stays fully allocated, and nothing is created inside it.
 
-> **Target-level refusals are annotated on the PREFIX row, not on the Azure subnet row.**
+> **Target-level refusals are annotated on the PREFIX row and on the contained Azure subnet rows.**
 > "fully allocated" and "already has host IP assignments" describe the *target*, so they appear on the
-> VNet prefix, which is where `isSelectable` goes false. The contained Azure subnet row stays
-> `Available` - the selection can never reach it, because the prefix is disabled. A check that reads
-> the subnet row sees `Available`/`reason=None` and reports a missing refusal that is actually present
-> one level up. **This cost two checks in one run.** Assert on the prefix, then prove it server-side by
-> POSTing a hand-built selection that ticks the subnet anyway.
+> VNet prefix; since round 20 the contained Azure subnet rows are also `Blocked` with a
+> "Containing Bastet subnet" reason, so both levels carry the answer. Assert on the prefix, then prove
+> it server-side by POSTing a hand-built selection that ticks the subnet anyway.
 
 > **The host-IP refusal must be tested against an EMPTY target, and the fixture must be proven.**
 > BASTET refuses host IPs on a subnet that has child subnets - *"This subnet has child subnets, so it

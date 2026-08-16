@@ -38,7 +38,8 @@ at round granularity only.
 | — | — | — | — | — | 23233f2 | mass revert: rounds 14–16 withhold/re-link/inbound machinery and single-VNet wizard deleted |
 | 17 | 21 | 21 | 3 | 12 of 21 | f4a0a87 | |
 | 18 | 23 | 17 | 2 | 20 of 23 | f2050fa (#177) | first round under the rebuilt skill: every fix independently reviewed; whole-diff gate filed 1 violation (repaired) + 1 recorded product question; 6 findings deferred to the planner/wizard restructure |
-| 19 | 4 | 4 | 0 | 4 of 4 | — (backfilled by round 20) | regression-only round over the round-18 delta; all four findings were regression-guard gaps in round-18's own tests, all mutation-verified, all fixed; gate: zero diff-review findings, 41/41 rig checks, both Azure counter-tests both directions |
+| 19 | 4 | 4 | 0 | 4 of 4 | 6a21950 (#178) | regression-only round over the round-18 delta; all four findings were regression-guard gaps in round-18's own tests, all mutation-verified, all fixed; gate: zero diff-review findings, 41/41 rig checks, both Azure counter-tests both directions |
+| 20 | 9 | 9 | 0 | 9 of 9 worked (1 regression-guard residue of round 19 + the 8 round-18 deferred findings, closed in-round by owner instruction) | — (backfilled by round 21) | regression-only round over the round-19 delta (one finding), then the owner folded the entire round-18 deferred-findings queue into the round: 5 fix batches, every fix independently reviewed (2 review-demonstrated failures each repaired and re-reviewed), whole-diff gate filed 1 violation (repaired, re-reviewed), full browser drive of every changed wizard behavior, both Azure counter-tests both directions; DEFERRED-FINDINGS.md emptied and deleted; this is a large unaudited delta — **the next audit runs Regression-only over it** |
 
 ## Findings
 
@@ -85,3 +86,12 @@ number once they exist.
 | 19-S2 | Low | fixed | — | HostIp edit's fail-closed concurrency redisplay gained its sibling stale-token test |
 | 19-S3 | Low | fixed | — | Fully-allocated toggle gate lifted into CanMarkFullyAllocated; vacuous test re-pointed, every term mutation-load-bearing |
 | 19-S4 | Low | fixed | — | CIDR-refusal test pins both feature-flag branches explicitly, serialized in AzureFeatureFlagCollection |
+| 20-S1 | Low | fixed | — | ChildSubnets terms of both Details action gates (CanMarkFullyAllocated and the wholly uncovered CanAddHostIp) pinned by mutation-proven tests; 19-S3's every-term-load-bearing claim was untrue for the ChildSubnets term |
+| 18-R4 | Medium | fixed | — | Unlinked fully-allocated exact match now offered for link-only adoption (WillUpdateExisting); refusal no longer keys on provenance |
+| 18-R5 | Medium | fixed | — | Linked host-IP target now AlreadyImported with rename offered; creation inside still refused; gate repair restored the unlinked-target plan refusal |
+| 18-R10 | Low | fixed | — | isPrefixUsable deleted; client consumes server-computed CanCarrySubnetWork and RenameOnlyCandidate; subnets under fully-allocated/host-IP containers Blocked server-side |
+| 18-R6 | Low | fixed | — | Child names and rename offers computed by one method from the subnet's own ARM prefix list (Ipv4AddressPrefixes now on the selection DTO); phantom multi-prefix rename offers gone |
+| 18-R11 | Low | fixed | — | TargetName deleted; ProposedTargetName is the single target-naming implementation for annotation and plan |
+| 18-R9 | Low | fixed | — | rerenderPreservingSelection extracted and bound to both wizard toggles; selection survives all flips (browser-verified) |
+| 18-R3-rem | Medium | fixed | — | Edit concurrency catch redisplay deleted; one unified message names each differing stored value; HostIp sibling message aligned |
+| 18-R19-rem | Low | fixed | — | Commit response carries the server-built summary; banner set from it; client-assembled sentence deleted |

@@ -146,6 +146,20 @@ public class SubnetControllerBulkAzureImportTests : IDisposable
     }
 
     [Fact]
+    public async Task BulkCreateFromAzurePlan_ReturnsTheBannerSentenceItself_NotJustCounters()
+    {
+        BulkImportSelectionDto selection = Selection(ApprovedNewTopLevel());
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(await Commit(selection));
+
+        using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(ok.Value));
+        Assert.True(body.RootElement.TryGetProperty("summary", out System.Text.Json.JsonElement summary));
+        Assert.Equal(_controller.TempData["SuccessMessage"], summary.GetString());
+        Assert.StartsWith("Bulk import succeeded: created 1 VNet target subnet(s)", summary.GetString());
+    }
+
+    [Fact]
     public async Task BulkCreateFromAzurePlan_PlanUnchangedSincePreview_StillCommits()
     {
 

@@ -83,6 +83,115 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
     }
 
     [Fact]
+    public async Task Edit_POST_ConcurrencyConflict_NamesTheStoredValuesThatDiffer()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 52,
+            Name = "web",
+            NetworkAddress = "10.52.0.0",
+            Cidr = 24,
+            Tags = "prod",
+            CreatedAt = new DateTime(2026, 01, 01, 00, 00, 00, DateTimeKind.Utc),
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 52,
+            Name = "webA",
+            NetworkAddress = "10.52.0.0",
+            Cidr = 24,
+            OriginalCidr = 24,
+            Tags = "prod",
+            RowVersion = [9, 9, 9, 9, 9, 9, 9, 9]
+        };
+
+        await _controller.Edit(52, viewModel);
+
+        string message = Assert.Single(
+            _controller.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
+        Assert.Contains("Name is now 'web'", message);
+        Assert.DoesNotContain("Tags", message);
+    }
+
+    [Fact]
+    public async Task Edit_POST_ConcurrencyConflict_ReportsTheConflictExactlyOnce()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 53,
+            Name = "db",
+            NetworkAddress = "10.53.0.0",
+            Cidr = 24,
+            CreatedAt = new DateTime(2026, 01, 01, 00, 00, 00, DateTimeKind.Utc),
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await _context.Database.ExecuteSqlAsync(
+            $"UPDATE Subnets SET RowVersion = {new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }} WHERE Id = 53",
+            TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 53,
+            Name = "dbA",
+            NetworkAddress = "10.53.0.0",
+            Cidr = 24,
+            OriginalCidr = 24,
+            RowVersion = [9, 9, 9, 9, 9, 9, 9, 9]
+        };
+
+        await _controller.Edit(53, viewModel);
+
+        Assert.Single(
+            _controller.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user")
+                || e.ErrorMessage.Contains("changed since this form was loaded"));
+    }
+
+    [Fact]
+    public async Task Edit_POST_AStaleTokenOnAValidationFailurePath_NamesTheStoredValuesThatDiffer()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 54,
+            Name = "cache",
+            NetworkAddress = "10.54.0.0",
+            Cidr = 24,
+            CreatedAt = new DateTime(2026, 01, 01, 00, 00, 00, DateTimeKind.Utc),
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await _context.Database.ExecuteSqlAsync(
+            $"UPDATE Subnets SET RowVersion = {new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }} WHERE Id = 54",
+            TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        _controller.ModelState.AddModelError("Name", "forced invalid");
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 54,
+            Name = "cacheA",
+            NetworkAddress = "10.54.0.0",
+            Cidr = 24,
+            OriginalCidr = 24,
+            RowVersion = [9, 9, 9, 9, 9, 9, 9, 8]
+        };
+
+        await _controller.Edit(54, viewModel);
+
+        string message = Assert.Single(
+            _controller.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
+        Assert.Contains("Name is now 'cache'", message);
+    }
+
+    [Fact]
     public async Task Edit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite()
     {
         _context.Subnets.Add(new Subnet

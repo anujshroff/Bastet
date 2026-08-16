@@ -98,8 +98,12 @@ public class AzureMultiPrefixSubnetTests
     {
         string id = SubnetId("multi-vnet", "sn-multi");
 
-        BulkImportPlanViewModel plan = _planner.BuildPlan(
-            Sel(Sub("sn-multi", "10.31.0.0/24", id), Sub("sn-multi", "10.31.1.0/24", id)), []);
+        BulkImportSelectedSubnetDto first = Sub("sn-multi", "10.31.0.0/24", id);
+        BulkImportSelectedSubnetDto second = Sub("sn-multi", "10.31.1.0/24", id);
+        first.Ipv4AddressPrefixes = ["10.31.0.0/24", "10.31.1.0/24"];
+        second.Ipv4AddressPrefixes = ["10.31.0.0/24", "10.31.1.0/24"];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(Sel(first, second), []);
 
         BulkImportPlanItem item = Assert.Single(plan.Items);
         Assert.Equal(2, item.ChildSubnets.Count);
