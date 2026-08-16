@@ -116,12 +116,11 @@ _Swept: the Blocked twin and commit-path messages already stated only the fact; 
 _Verified: two new assertions failed pre-fix; 836/836. Reviewer traced the remedy end-to-end: Details toggle → flag cleared → wizard offers WillUpdateExisting._
 _Reviewed: pass._
 
-## R14 - With the import flag off, the free-space warning still tells every reader to get a Bulk Azure Import run `[x1]`
-**Where:** src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:31; the flag is already computed at :5 and :24
-**Breaks:** A deployment imports Azure space then turns BASTET_AZURE_IMPORT off. An Admin opening Details for a still-linked subnet is told to ask an administrator to run a Bulk Azure Import, while that page 403s for everyone — round 17 wrote one else for two suppression reasons.
-**Repro:** Flag false rendered the sentence while /Azure/BulkImport 403'd for the Admin identity; flag true rendered the link.
-**Fix:** Replace the bare `@else` at :31 with `@else if (azureImportEnabled)` and no trailing else, so the paragraph closes as prose when the feature is off. Do not substitute "ask an administrator to enable the feature" — an env var is not a remedy the app offers.
-**Residue of:** f4a0a87 — blame puts the whole if/else pair on that commit.
+## R14 - With the import flag off, the free-space warning still tells every reader to get a Bulk Azure Import run `[x1]` — FIXED
+_Fixed. The bare `@else` is now `@else if (azureImportEnabled)` with no trailing else; flag-off closes the warning as complete prose naming no remedy._
+_Swept: nav link and controller gate use the identical strict flag parse; no other surface names the wizard flag-off._
+_Verified: build 0 warnings, 836/836; three render states re-checked at the round-end gate._
+_Reviewed: pass._
 
 ## R15 - The Azure-linked CIDR refusal names two remedies the operator may be unable to reach `[x1]` — FIXED
 _Fixed. Both sites (Edit POST message and _EditForm text) end at "Change the prefix in Azure, then ask an administrator to re-import it." — no role/flag predicate copy added, per the finding._
