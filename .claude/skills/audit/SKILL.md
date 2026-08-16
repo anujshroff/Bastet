@@ -364,17 +364,25 @@ attributions and opens the header with the rate:
 
 > Round `<N>` filed `<F>` findings, of which `<R>` are residue of round `<N-1>`'s own fixes.
 
-## Phase 5 — teardown and commit (1 agent)
+## Phase 5 — commit, then teardown (1 agent)
+
+**The commit comes first.** Only committed files survive this machine, the VM checkpoint erases the
+local rig regardless, and stray cloud fixtures are a one-command manual sweep — the findings commit
+is the round's product; teardown is housekeeping. A round once had its commit queued behind a slow
+Azure teardown while a usage cap counted down; nothing about cleaning up is worth losing the
+round's output.
 
 In order:
 
-1. Tear down containers, processes, and **every Azure resource in the rig inventory** — enumerate
-   and delete, then **re-list both resource groups and assert no round fixture remains**. An empty
-   removal list with a success verdict is a bug, and so is a delete whose error nobody read.
-2. Sweep untracked root-level strays, each guarded with `git ls-files --error-unmatch`, touching
+1. Sweep untracked root-level strays, each guarded with `git ls-files --error-unmatch`, touching
    nothing under `src/`, `test/` or `docs/`.
-3. Confirm `git branch --show-current` is `audit/round-<N>`. **If it is `main`, stop and report.**
-4. Confirm the tree carries nothing but the findings file, then commit it alone.
+2. Confirm `git branch --show-current` is `audit/round-<N>`. **If it is `main`, stop and report.**
+3. Confirm the tree carries nothing but the findings file, then commit it alone.
+4. **Then** tear down, best-effort: containers, processes, and every Azure resource in the rig
+   inventory — enumerate and delete, then **re-list both resource groups**. An empty removal list
+   with a success verdict is still a bug, and so is a delete whose error nobody read — but a
+   teardown failure is reported in the completion summary with the surviving fixture list for a
+   manual sweep; it is never a round failure and never blocks or amends the commit.
 
 Commit subject, fixed shape:
 
