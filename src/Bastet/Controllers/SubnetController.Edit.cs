@@ -81,8 +81,10 @@ public partial class SubnetController : Controller
                     if (cidrChanged && !string.IsNullOrEmpty(subnet.AzureResourceId))
                     {
                         throw new ValidationException(
-                            "This subnet is linked to an Azure resource, so its CIDR cannot be changed here. " +
-                            "Change the prefix in Azure, then ask an administrator to re-import it.");
+                            "This subnet is linked to an Azure resource, so its CIDR cannot be changed here." +
+                            (AzureController.IsAzureImportEnabled()
+                                ? " Change the prefix in Azure, then ask an administrator to re-import it."
+                                : string.Empty));
                     }
 
                     if (viewModel.Cidr != subnet.Cidr)

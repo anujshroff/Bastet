@@ -696,7 +696,9 @@ public class SubnetControllerCidrEditTests : IDisposable
         _ = Assert.IsType<ViewResult>(result);
         Assert.False(_controller.ModelState.IsValid);
         Assert.Contains("Cidr", _controller.ModelState.Keys);
-        Assert.Contains("Azure", _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty);
+        string message = _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty;
+        Assert.Contains("Azure", message);
+        Assert.DoesNotContain("re-import", message);
 
         Subnet? unchanged = await _context.Subnets.FindAsync([30], TestContext.Current.CancellationToken);
         Assert.NotNull(unchanged);

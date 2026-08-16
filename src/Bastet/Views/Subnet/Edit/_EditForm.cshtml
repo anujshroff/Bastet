@@ -24,8 +24,11 @@
                     </div>
                     <input type="hidden" asp-for="Cidr" />
                     <div class="form-text">
-                        Imported from Azure, so the prefix is fixed here. Change it in Azure, then
-                        ask an administrator to re-import it.
+                        Imported from Azure, so the prefix is fixed here.
+                        @if (Bastet.Controllers.AzureController.IsAzureImportEnabled())
+                        {
+                            <text>Change it in Azure, then ask an administrator to re-import it.</text>
+                        }
                     </div>
                 }
                 else

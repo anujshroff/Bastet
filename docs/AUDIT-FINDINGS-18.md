@@ -38,8 +38,8 @@ _Reviewed: pass — reviewer traced transitive ManualDescendantCount/HostIpCount
 _Fixed. The watermark is gone: SubtreeHostIpCountAsync feeds both the review page's HostIpCount and the guard (single implementation; CountAllDescendantHostIps deleted); the form posts the reviewed count and the guard refuses when the live count exceeds it — clock-independent._
 _Swept: zero remaining references to the ticks watermark; both pre-existing scope tests updated and still isolate the subnet half._
 _Verified: new clock-behind test red pre-fix (subtree was archived), green post-fix; mutation check (guard disabled) sent it red again; 838/838._
-_Reviewed: pass._
-_Not done: a delete-then-add that nets the count equal during the review window can still slip — same acceptance class as the §7 bounded race; no clock-free monotone identity exists for host IPs without a schema change._
+_Reviewed: pass. The round-end diff review demonstrated the residual concretely (reviewed IP deleted + different IP added during the review window → count matches → the never-reviewed IP is archived) and noted the old watermark caught that shape under sane clocks; both reviewers agree no product-model sentence pins either mechanism._
+_Not done: that swap residual — same acceptance class as the §7 bounded race; no clock-free monotone identity exists for host IPs without a schema change. Product question for the owner: should the delete-scope guard refuse on ANY host-IP churn (posting the reviewed IP set, refusing deletions too), at the cost of "review again" on benign races?_
 
 ## R3 - Edit concurrency redisplay refreshes RowVersion, so the retry it instructs reverts the other commit `[x1]` — FIXED (narrow half; remainder deferred)
 _Fixed. The token refresh and its ModelState.Remove are gone at all three sites; a blind retry now fails closed with a reload instruction instead of silently reverting the other commit. Messages rewritten to be true. Redisplay-path collapse and field-diff message deferred to the restructure._
@@ -98,10 +98,10 @@ _Verified: build 0 warnings, 836/836; three render states re-checked at the roun
 _Reviewed: pass._
 
 ## R15 - The Azure-linked CIDR refusal names two remedies the operator may be unable to reach `[x1]` — FIXED
-_Fixed. Both sites (Edit POST message and _EditForm text) end at "Change the prefix in Azure, then ask an administrator to re-import it." — no role/flag predicate copy added, per the finding._
-_Swept: reconciler equivalents correctly left alone (they sit in-flow behind the same admin gate); "delete the subnet and recreate" has zero remaining occurrences._
-_Verified: build 0 warnings, 836/836; reviewer confirmed re-import is genuinely admin-gated at both the controller and commit endpoint._
-_Reviewed: pass._
+_Fixed. Both sites end at "Change the prefix in Azure, then ask an administrator to re-import it." Round-end gate repair: that sentence is now gated on `AzureController.IsAzureImportEnabled()` at both sites — flag off closes the refusal as prose, since re-import is then unreachable for everyone._
+_Swept: reconciler equivalents correctly left alone (in-flow behind the same admin gate); "delete the subnet and recreate" has zero remaining occurrences._
+_Verified: flag-off assertions red pre-repair, green post; 838/838._
+_Reviewed: pass per-fix; the whole-diff model reviewer filed the flag-off gap (§5 remedy-reachability), repaired in the gate's one iteration by copying the existing gating._
 
 ## R16 - Reconcile's prefix-removed message points at a wizard round 17 taught to hide the VNet `[x1]` — FIXED
 _Fixed. VNet- and subnet-level messages branch on remaining IPv4 prefixes: the wizard is named only when it can actually import; otherwise "nothing to re-import. Delete it here if you want to." The :83 filter untouched; _StepReview's stale blurb no longer claims the wizard remedy universally._
