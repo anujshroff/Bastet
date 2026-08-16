@@ -38,7 +38,8 @@ at round granularity only.
 | — | — | — | — | — | 23233f2 | mass revert: rounds 14–16 withhold/re-link/inbound machinery and single-VNet wizard deleted |
 | 17 | 21 | 21 | 3 | 12 of 21 | f4a0a87 | |
 | 18 | 23 | 17 | 2 | 20 of 23 | f2050fa (#177) | first round under the rebuilt skill: every fix independently reviewed; whole-diff gate filed 1 violation (repaired) + 1 recorded product question; 6 findings deferred to the planner/wizard restructure |
-| 19 | 4 | 4 | 0 | 4 of 4 | — (backfilled by round 20) | regression-only round over the round-18 delta; all four findings were regression-guard gaps in round-18's own tests, all mutation-verified, all fixed; gate: zero diff-review findings, 41/41 rig checks, both Azure counter-tests both directions |
+| 19 | 4 | 4 | 0 | 4 of 4 | 6a21950 (#178) | regression-only round over the round-18 delta; all four findings were regression-guard gaps in round-18's own tests, all mutation-verified, all fixed; gate: zero diff-review findings, 41/41 rig checks, both Azure counter-tests both directions |
+| 20 | 1 | 1 | 0 | 1 of 1 | — (backfilled by round 21) | regression-only round over the round-19 delta; residue 1 ≤ 2, so the scale gate unlocks full discovery for round 21; the one finding was the unguarded ChildSubnets term of CanMarkFullyAllocated; gate: zero diff-review findings, full app drive, both Azure counter-tests both directions |
 
 ## Findings
 
@@ -85,3 +86,4 @@ number once they exist.
 | 19-S2 | Low | fixed | — | HostIp edit's fail-closed concurrency redisplay gained its sibling stale-token test |
 | 19-S3 | Low | fixed | — | Fully-allocated toggle gate lifted into CanMarkFullyAllocated; vacuous test re-pointed, every term mutation-load-bearing |
 | 19-S4 | Low | fixed | — | CIDR-refusal test pins both feature-flag branches explicitly, serialized in AzureFeatureFlagCollection |
+| 20-S1 | Low | fixed | — | ChildSubnets terms of both Details action gates (CanMarkFullyAllocated and the wholly uncovered CanAddHostIp) pinned by mutation-proven tests; 19-S3's every-term-load-bearing claim was untrue for the ChildSubnets term |
