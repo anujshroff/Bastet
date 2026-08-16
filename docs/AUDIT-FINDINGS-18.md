@@ -132,19 +132,17 @@ _Reviewed: pass._
 **Fix:** Filed conditional fix unsound — it adds a third copy of the flag/role predicate, in another layer, for a message that links nothing. End both sites at "Change the prefix in Azure, then ask an administrator to re-import it." No test pins the text.
 **Residue of:** Round 6 (0de1293) wrote it; round 17 fixed only the _UnallocatedRanges site.
 
-## R16 - Reconcile's prefix-removed message points at a wizard round 17 taught to hide the VNet `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureReconciler.cs:288, :309-312 (same remedy, unactionable when the subnet has no IPv4 prefix); Views/Azure/Reconcile/_StepReview.cshtml:38 must not contradict it
-**Breaks:** A VNet-linked row whose prefix is gone is told to delete it and re-import the VNet's current address space. When the VNet has lost all IPv4 prefixes — the case round 17 added this path for — BulkGetVNets:83 filters it out, so the wizard never lists it.
-**Repro:** rig-rd-loss set to IPv6 only: scan returned VNetPrefixRemoved with that reason; BulkGetVNets no longer listed the VNet.
-**Fix:** Branch the closing sentence on `vnet.Ipv4AddressPrefixes.Count` (the live VNet is in scope): keep the wording when IPv4 space remains, otherwise say the VNet has no IPv4 space left and name no wizard. Keep the delete clause. Do not relax the :83 filter.
-**Residue of:** f4a0a87 removed the zero-IPv4 skip from `GetVNetInventory`.
+## R16 - Reconcile's prefix-removed message points at a wizard round 17 taught to hide the VNet `[x1]` — FIXED
+_Fixed. VNet- and subnet-level messages branch on remaining IPv4 prefixes: the wizard is named only when it can actually import; otherwise "nothing to re-import. Delete it here if you want to." The :83 filter untouched; _StepReview's stale blurb no longer claims the wizard remedy universally._
+_Swept: no other site carries the universal wizard claim; the wizard-named branch matches the BulkGetVNets filter predicate exactly._
+_Verified: two tests asserted DoesNotContain("import wizard") failing pre-fix; the with-prefix wizard test still passes; 836/836._
+_Reviewed: pass — reviewer verified an IPv4-less subnet is unrenderable in the wizard JS, so the wording does not overclaim._
 
-## R17 - Reconcile tells the operator to "correct or clear the link on this subnet" - the app has no way to do either `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureReconciler.cs:74; Views/Azure/Reconcile/_StepReview.cshtml:72-77 (blurb telling both categories to delete content)
-**Breaks:** A row whose AzureResourceId parses but names neither a VNet nor a subnet gets that instruction, and no such control exists: the Edit view model has no AzureResourceId, and the only writer is the import commit, which refuses to re-link and never clears. The blurb is false here too.
-**Repro:** An NSG-linked row scanned as UnrecognisedResourceId with both false sentences on screen; over-posting the id left it unchanged.
-**Fix:** Filed replacement unsound — delete-and-re-import destroys a record on information the app admits it lacks. End the reason at what is true: BASTET cannot check this row and will not offer it for deletion. Scope the _StepReview sentence to manual content; add no unlink control.
-**Residue of:** Round 6 (0de1293) wrote the sentence; the _StepReview half is f4a0a87.
+## R17 - Reconcile tells the operator to "correct or clear the link on this subnet" - the app has no way to do either `[x1]` — FIXED
+_Fixed. The reason now ends at what is true — BASTET cannot check this row and will not offer it for deletion; the _StepReview blurb scopes delete-content-first to rows holding content created here. No unlink control added, per the finding._
+_Swept: "Correct or clear" survives only as a negative test assertion; no other view instructs the unreachable remedy._
+_Verified: test asserting the new sentence failed pre-fix; 836/836; reviewer confirmed no unlink path exists (Edit VM has no AzureResourceId; planner refuses re-link) and ReviewItems never get checkboxes._
+_Reviewed: pass._
 
 ## R18 - "Blocked by VNet prefix" is printed beneath a prefix the same screen calls "Already imported" `[x1]`
 **Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:278 (guard :276, badge :267-269); _StepSelection.cshtml:10 (legend carrying the same claim)

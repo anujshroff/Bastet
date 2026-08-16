@@ -324,7 +324,10 @@ public class AzureReconcilerTests
             [Linked(1, "app", "10.24.1.0", 24, resourceId)]);
 
         Assert.Empty(plan.Items);
-        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, Assert.Single(plan.ReviewItems).Status);
+        AzureReconcileItem reviewed = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, reviewed.Status);
+        Assert.DoesNotContain("Correct or clear", reviewed.Reason);
+        Assert.Contains("will not offer it for deletion", reviewed.Reason);
     }
 
     [Fact]
@@ -378,7 +381,9 @@ public class AzureReconcilerTests
 
         AzureReconcileItem item = Assert.Single(plan.Items);
         Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, item.Status);
-        Assert.Contains("now none", item.Reason);
+        Assert.Contains("no longer has an IPv4 address prefix", item.Reason);
+        Assert.DoesNotContain("import wizard", item.Reason);
+        Assert.Contains("Delete it here", item.Reason);
         Assert.False(AzureReconciler.IsAbsenceStatus(item.Status));
     }
 
@@ -391,6 +396,8 @@ public class AzureReconcilerTests
 
         AzureReconcileItem item = Assert.Single(plan.Items);
         Assert.Equal(AzureReconcileStatus.VNetPrefixRemoved, item.Status);
+        Assert.DoesNotContain("import wizard", item.Reason);
+        Assert.Contains("Delete it here", item.Reason);
         Assert.False(AzureReconciler.IsAbsenceStatus(item.Status));
     }
 
