@@ -648,6 +648,16 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.IsType<RedirectToActionResult>(result);
         Assert.NotNull(await _context.Subnets.FindAsync([730], TestContext.Current.CancellationToken));
         Assert.Equal(2, await _context.HostIpAssignments.CountAsync(h => h.SubnetId == 730, TestContext.Current.CancellationToken));
+
+        ViewResult secondReview = Assert.IsType<ViewResult>(await _subnetController.Delete(730));
+        DeleteSubnetViewModel reReviewed = Assert.IsType<DeleteSubnetViewModel>(secondReview.Model);
+        Assert.Equal(2, reReviewed.HostIpCount);
+
+        IActionResult confirmedRetry = await _subnetController.DeleteConfirmed(
+            730, "approved", reReviewed.ConfirmedMaxSubnetId, reReviewed.HostIpCount);
+
+        Assert.IsType<RedirectToActionResult>(confirmedRetry);
+        Assert.Null(await _context.Subnets.FindAsync([730], TestContext.Current.CancellationToken));
     }
 
     [Fact]

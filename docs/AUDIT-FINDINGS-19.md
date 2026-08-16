@@ -26,32 +26,11 @@ None.
 
 ## Low
 
-## S1. Clock-behind-writer delete-guard test passes with its fix reverted; the section-8 counter-test does not enforce the 18-R2 ruling (Low) [x2]
-
-**Where:** `test/Bastet.Tests/HostIpManagement/SubnetHostIpInteractionTests.cs:614`
-**Breaks:** If the delete-scope guard regresses from the subtree host-IP count back to the
-wall-clock watermark (the exact 18-R2 defect), this test stays green: its posted count of 1 binds
-positionally into the old `long? confirmedMaxHostIpTicks` parameter, and any real `CreatedAt` tick
-value exceeds 1, so the old broken guard also refuses. The refusal it asserts is satisfied by any
-refusing implementation, so a delete that archives host IPs a clock-behind concurrent writer added
-could ship silently (rule 2). Product model section 8 names this test as the counter-test enforcing
-the 18-R2 owner ruling, and it does not enforce it. Severity demoted Medium → Low on verification:
-the shipped guard is correct today, so no wrong answer is given and no data is at risk unless the
-defect relands; a naive watermark reland is even accidentally caught by the sibling test
-`DeleteSubnet_WithNestedHostIps_ArchivesAllHostIps`, so "could ship silently" requires the
-re-introducer to also rewire that test's caller.
-**Repro:** In a copy of the repo, reverted `src/Bastet/Controllers/SubnetController.Delete.cs` and
-`src/Bastet/Models/ViewModels/DeleteSubnetViewModel.cs` to `f2050fa^` (the pre-fix watermark
-guard); the unchanged test compiles (int→long implicit conversion at line 646) and PASSES. Rewiring
-the same call to the old contract (passing `reviewed.ConfirmedMaxHostIpTicks` as the old form
-posted) makes it FAIL with `Assert.NotNull`: the watermark guard lets the delete of subnet 730
-proceed despite the backdated concurrent host IP — proving the scenario is real and the shipped
-wiring is what is decorative. Independently reproduced by the verifier in a scratch clone.
-**Fix:** Extend the test with a second act: after the refused confirm, confirm again with the
-current count (2) and assert the delete then proceeds. Under a watermark reintroduction the second
-confirm still refuses (subtree max ticks vastly exceeds 2), turning the test red; under the count
-guard it succeeds, also pinning rule 3 (the operator can act after re-review).
-**Residue-of:** 18-R2
+## S1. Clock-behind-writer delete-guard test passes with its fix reverted; the section-8 counter-test does not enforce the 18-R2 ruling (Low) [x2] — FIXED
+_Fixed. The test gains a second act: re-review via GET (page shows count 2), confirm with fresh scope, assert the delete proceeds — any always-refusing implementation, including a watermark reland, now goes red._
+_Swept: the first act still independently pins the stale-scope refusal (guard-deleted mutation goes red at the first NotNull)._
+_Verified: reviewer relanded the actual watermark signature in scratch — old code compiled via the positional int→long escape and the extended test went RED; 840/840 on the real tree, src untouched._
+_Reviewed: pass — the §8 counter-test claim is now true in the strong sense, and the second act also pins rule 3 (the refusal's remedy is actionable)._
 
 ## S2. HostIpController half of the 18-R3 fail-closed concurrency fix has no guarding test — full suite green with it reverted (Low) [x1]
 
