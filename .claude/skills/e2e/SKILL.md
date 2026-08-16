@@ -14,53 +14,26 @@ the scratchpad and die with the machine. The only durable artefact is the report
 
 ## What Bastet is — how every pass/fail is decided
 
-**An IPAM tool. Its job is to be the authority on which IP space is allocated and which is free.**
-Never report allocated space as free (the worst output it can produce); never destroy an allocation
-record on incomplete information; and the operator must be able to act on what they are told.
+**`docs/PRODUCT-MODEL.md` is the single authority on what the product does. Read it whole before
+classifying anything; nothing in this file overrides it, and this file carries no copy of it —
+copies drift.** What follows is only how the model becomes verdicts on a live rig:
 
-**Rule 0, which overrides those: Bastet is the authority, and it answers from its own records.** Free
-means free *according to Bastet*. **Azure is not authoritative in Bastet at all** — it is a source you
-import *from*, which is why the import wizard exists. Until a range is imported it does not exist as
-far as Bastet is concerned, and a phase must never fail because Bastet showed un-imported Azure space
-as free. That is the product working.
-
-**Azure state and Bastet state are compared in exactly two places, and nowhere else:** the bulk import
-wizard, which asks *can this be added?*, and reconcile, which asks *can this be deleted?* Every other
-screen — the subnet tree, Details, unallocated ranges, host IPs, search — answers from Bastet alone.
-**Never write an assertion that has any other surface consult Azure**, and never fail one because it
-did not.
-
-**One flat, routable space.** Bastet manages a single IP space in which everything is routable against
-everything else, so the same range must never be allocated twice — preventing that collision is the
-product's reason to exist. Two consequences when classifying a result:
-
-- **"Still allocated" is a question about the whole managed space, never about provenance.** If any
-  live resource holds a range, that range is in use, whichever VNet, subscription or import it came
-  from. Overlapping Azure VNets are not a case to defend — inside Bastet's model that overlap *is* the
-  collision, so never pass a result on the grounds that the duplicate lived in a different VNet.
-- **How the space is carved up is the operator's choice, and only theirs** — by hand, by Azure import,
-  or both. Neither origin is privileged, so a scenario that must hold for a manually created subnet
-  must hold identically for an imported one. Cover both paths, not just the import wizard.
-- **One Azure range is one Bastet row.** A VNet with a single address prefix whose single subnet covers
-  that whole prefix imports as **one** row, marked fully allocated — not a VNet parent plus a
-  byte-identical child. Two rows with the same CIDR is a failure, not a pass.
-
-**Reconcile does exactly two things**, and a run that expects more of it is asserting behaviour the
-product deliberately does not have:
-
-1. reports Azure resources that are **gone**, so the operator can choose to delete the Bastet row;
-2. reports Azure resources whose **range changed**, so the operator can choose to delete the Bastet row.
-
-It never edits a row, never re-links, never re-adds, and never reports un-imported Azure space. After
-deleting a row whose range changed, the operator re-imports through the **bulk import wizard** — so a
-changed-range message that does not point there is a defect.
-
-**It joins on the Azure resource id and nothing else.** Gone from Azure means deletable here. The only
-refusal is **manual content in the hierarchy: a hand-added child subnet, or a host IP** — the one thing
-a resource id cannot tell you about, since Azure has no record of it. So a result where a row is
-withheld because its **range** turned up somewhere else — another VNet, another subscription, a prefix
-still "covered" after a re-carve — is a **FAIL**, not a cautious pass. Phase C's counter-assertions
-exist to catch exactly that.
+- **A phase must never fail because Bastet showed un-imported Azure space as free** — that is the
+  product working (model §2). Never write an assertion that has any surface outside the bulk import
+  wizard and reconcile consult Azure, and never fail one because it did not.
+- **Never pass a duplicate-range result because the duplicate lived in a different VNet** — inside
+  the model that overlap *is* the collision (§1). A VNet whose single subnet covers its whole prefix
+  imports as **one** row, marked fully allocated; two rows with the same CIDR is a failure, not a
+  pass.
+- **A scenario that must hold for a manually created subnet must hold identically for an imported
+  one** (§1) — cover both paths, not just the wizard.
+- **A run that expects reconcile to do more than its two reports (§3) is asserting behaviour the
+  product deliberately does not have.** A changed-range reason points at the bulk import wizard
+  **when the resource still has IPv4 space to re-import** — when it has none, the reason says so and
+  names no wizard, and asserting the wizard pointer there is the stale expectation, not a defect.
+- **A row withheld because its range turned up somewhere else** — another VNet, another
+  subscription, a prefix still "covered" after a re-carve — **is a FAIL, not a cautious pass** (§3).
+  Phase C's counter-assertions exist to catch exactly that.
 
 ## Mode
 
@@ -867,8 +840,9 @@ looks exactly like a defect, and three separate ones did:
 - **`SetAllocationStatus` lives on `HostIpController`**, not `SubnetController`, and binds
   `SubnetAllocationDto { SubnetId, IsFullyAllocated }`.
 - **The subnet delete form carries its own scope bounds** - `confirmedMaxSubnetId` and
-  `confirmedMaxHostIpTicks`. A hand-built delete POST that sends only `Id` and `confirmation` returns
-  **302 and archives nothing**, which reads exactly like a broken delete path. Harvest the form.
+  `confirmedHostIpCount` (a subtree host-IP count; the old `confirmedMaxHostIpTicks` watermark is
+  gone). A hand-built delete POST that sends only `Id` and `confirmation` returns **302 and archives
+  nothing**, which reads exactly like a broken delete path. Harvest the form.
 
 Harvest forms with a real HTML parser over `input`/`textarea`/`select`, not a regex: a regex that
 assumes `name` precedes `value` silently drops `RowVersion`, and the POST then redisplays the form as

@@ -38,11 +38,16 @@ public class SubnetDetailsActionGateTests
         Assert.False(Details(32).CanAddChildSubnet);
 
     [Fact]
-    public void ASlash32_CanStillBeMarkedFullyAllocated()
-    {
-        SubnetDetailsViewModel model = Details(32);
-        Assert.True(model.HostIpAssignments.Count == 0 && model.ChildSubnets.Count == 0 && !model.IsFullyAllocated);
-    }
+    public void ASlash32_CanStillBeMarkedFullyAllocated() =>
+        Assert.True(Details(32).CanMarkFullyAllocated);
+
+    [Fact]
+    public void AFullyAllocatedSubnet_IsNotOfferedTheMarkToggleAgain() =>
+        Assert.False(Details(24, fullyAllocated: true).CanMarkFullyAllocated);
+
+    [Fact]
+    public void HostIps_BlockMarkingFullyAllocated() =>
+        Assert.False(Details(24, hostIps: 1).CanMarkFullyAllocated);
 
     [Fact]
     public void HostIps_StillBlockAddChildSubnet() =>

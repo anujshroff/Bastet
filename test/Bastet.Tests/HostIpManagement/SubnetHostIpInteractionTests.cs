@@ -648,6 +648,39 @@ public class SubnetHostIpInteractionTests : IDisposable
         Assert.IsType<RedirectToActionResult>(result);
         Assert.NotNull(await _context.Subnets.FindAsync([730], TestContext.Current.CancellationToken));
         Assert.Equal(2, await _context.HostIpAssignments.CountAsync(h => h.SubnetId == 730, TestContext.Current.CancellationToken));
+
+        ViewResult secondReview = Assert.IsType<ViewResult>(await _subnetController.Delete(730));
+        DeleteSubnetViewModel reReviewed = Assert.IsType<DeleteSubnetViewModel>(secondReview.Model);
+        Assert.Equal(2, reReviewed.HostIpCount);
+
+        IActionResult confirmedRetry = await _subnetController.DeleteConfirmed(
+            730, "approved", reReviewed.ConfirmedMaxSubnetId, reReviewed.HostIpCount);
+
+        Assert.IsType<RedirectToActionResult>(confirmedRetry);
+        Assert.Null(await _context.Subnets.FindAsync([730], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task HostIpEdit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite()
+    {
+        byte[] staleToken = [9, 9, 9, 9, 9, 9, 9, 9];
+        EditHostIpViewModel viewModel = new()
+        {
+            IP = "192.168.0.10",
+            Name = "renamed-by-a-stale-editor",
+            SubnetId = 1,
+            RowVersion = staleToken
+        };
+
+        IActionResult result = await _hostIpController.Edit("192.168.0.10", viewModel);
+
+        ViewResult view = Assert.IsType<ViewResult>(result);
+        EditHostIpViewModel shown = Assert.IsType<EditHostIpViewModel>(view.Model);
+        Assert.Equal(staleToken, shown.RowVersion);
+        Assert.Contains(_hostIpController.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user"));
+        Assert.False(_hostIpController.ModelState.TryGetValue(nameof(shown.RowVersion), out _)
+            && _hostIpController.ModelState[nameof(shown.RowVersion)]!.Errors.Count > 0);
     }
 
     [Fact]
