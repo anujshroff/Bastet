@@ -164,12 +164,11 @@ _Reviewed: pass — reviewer traced transitive ManualDescendantCount/HostIpCount
 
 ## Info
 
-## R20 - Reconcile confirm screen's host-IP cascade count is structurally always 0 `[x1]`
-**Where:** src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:193, :329, :332, :335, :337-338; set at Services/Azure/AzureReconciler.cs:337 on Models/ViewModels/AzureReconcileViewModels.cs:73, which has no other reader
-**Breaks:** `BuildPlan` diverts every snapshot with `HostIpCount > 0` into ReviewItems (:93-102), so every item reaching `plan.Items` has hostIpCount 0 and the confirm step always says "...and 0 host IP assignment(s)".
-**Repro:** A deleted-VNet row with one child scanned as two items, hostIpCount 0; adding a host IP moved both into reviewItems.
-**Fix:** Delete the `hostIpCount` clause in `cascadeNote` (:193-195) and the `hostIps` accumulator pieces, leaving "This also archives N child subnet(s)...". Then drop `AzureReconcileItem.HostIpCount` and its assignment at :337. Leave `hostIpsArchived` alone.
-**Residue of:** 23233f2, which added the host-IP divert and killed this display.
+## R20 - Reconcile confirm screen's host-IP cascade count is structurally always 0 `[x1]` — FIXED
+_Fixed. Deleted the hostIpCount clause in cascadeNote, the confirm-step hostIps accumulator, and `AzureReconcileItem.HostIpCount` with its assignment; `hostIpsArchived` untouched._
+_Swept: no remaining reader of item.hostIpCount in src/ or test/; snapshot.HostIpCount (transitive, feeds the divert) kept._
+_Verified: build 0 warnings, 822/822; structural-always-0 confirmed via the :91 divert and transitive snapshot counts. Client-side display — no unit test can reach it; covered by /e2e's wizard pass._
+_Reviewed: pass — reviewer confirmed no path puts a nonzero-hostIp item into plan.Items and nothing is stranded._
 
 ## R21 - SafeTextAttribute is applied to nothing; two tests pin it as a rule the POST no longer applies `[x1]`
 **Where:** src/Bastet/Services/Security/ValidationAttributes.cs:27-43; test/Bastet.Tests/SubnetManagement/SubnetCreateGetPrefillTests.cs:105, :111, :143, :150-154; Azure/GeneratedNameSafeTextTests.cs:56 (same claim)

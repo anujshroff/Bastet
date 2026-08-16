@@ -70,8 +70,6 @@ namespace Bastet.Models.ViewModels
 
         public int DescendantCount { get; set; }
 
-        public int HostIpCount { get; set; }
-
         public IReadOnlyList<int> DescendantSubnetIds { get; set; } = [];
 
         public string StatusName => Status.ToString();

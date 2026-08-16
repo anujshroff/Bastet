@@ -326,7 +326,6 @@ namespace Bastet.Services.Azure
                 Status = status,
                 Reason = reason,
                 DescendantCount = snapshot.DescendantCount,
-                HostIpCount = snapshot.HostIpCount,
                 DescendantSubnetIds = snapshot.DescendantSubnetIds
             };
 
