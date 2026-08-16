@@ -26,12 +26,11 @@ None.
 
 ## High
 
-## R1 - Reconcile pins a row Azure confirmed deleted, because a descendant is in another subscription `[x2]`
-**Where:** src/Bastet/Services/Azure/AzureReconciler.cs:115, :41, :80 (`notCovered`), :217 (`stillLive`, same shape)
-**Breaks:** A VNetDeleted row (10.40.0.0/16, ARM 404) is dropped from `plan.Items` because its only child links to another subscription. Nothing is offered, the warning names no remedy, and the /16 stays allocated.
-**Repro:** Scan: items [], canCommit false, one withheld warning; re-pointing the child's id into the scanned subscription offered both rows.
-**Fix:** Delete the :115-118 call and the `notCovered` set (:41, :80), keeping the `continue` at :81. Verified: build clean, 820/820, delete then works. Decide `stillLive` at :213 in the same change; add a test.
-**Residue of:** dcc15ab (Audit 9 #154); round 17 deleted the same-subscription twin.
+## R1 - Reconcile pins a row Azure confirmed deleted, because a descendant is in another subscription `[x2]` — FIXED
+_Fixed. Deleted the `notCovered` cross-subscription cascade withhold and removed `stillLive` from the ApplyConfirmations cascade set; the manual-content and notVisible/unknown withholds remain._
+_Swept: "notCovered", "different subscription", "not checked by this scan" across src/ and test/ — no other site; views render Warnings generically._
+_Verified: two new tests failed pre-fix, pass post-fix; build 0 warnings; 822/822._
+_Reviewed: pass — reviewer traced transitive ManualDescendantCount/HostIpCount in AzureSubnetSnapshotService and delete-time Conflict re-check; archives, not destroys._
 
 ## Medium
 

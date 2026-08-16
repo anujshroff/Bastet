@@ -38,7 +38,6 @@ namespace Bastet.Services.Azure
             Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
 
-            HashSet<int> notCovered = [];
             List<AzureReconcileItem> heldByManualContent = [];
 
             foreach (BulkAzureVNetViewModel vnet in inventory.VNets)
@@ -77,7 +76,6 @@ namespace Bastet.Services.Azure
 
                 if (!BelongsToSubscription(snapshot.AzureResourceId, subscriptionId))
                 {
-                    notCovered.Add(snapshot.Id);
                     continue;
                 }
 
@@ -111,11 +109,6 @@ namespace Bastet.Services.Azure
                     + "host IP assignments that were created here rather than imported from Azure: "
                     + $"{NameList(heldByManualContent)}.");
             }
-
-            WithholdTargetsWhoseCascadeIsBlocked(
-                plan, notCovered,
-                "archiving them would also archive Azure-linked subnet(s) beneath them that belong to a "
-                + "different subscription and were not checked by this scan");
 
             WithholdTargetsWhoseCascadeIsBlocked(
                 plan, [.. heldByManualContent.Select(i => i.SubnetId)],
@@ -210,7 +203,6 @@ namespace Bastet.Services.Azure
             [
                 .. notVisible.Select(i => i.SubnetId),
                 .. unknown.Select(i => i.SubnetId),
-                .. stillLive.Select(i => i.SubnetId),
                 .. plan.ReviewItems.Select(i => i.SubnetId)
             ];
 
