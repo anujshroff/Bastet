@@ -147,6 +147,17 @@ public class AzureBulkImportSelectabilityTests
     }
 
     [Fact]
+    public void AnUnlinkedTargetWithHostIps_IsRefusedByThePlanToo()
+    {
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Selection(rename: true),
+            [Target(linkedTo: null, name: "hand-built", hasHostIps: true)]);
+
+        Assert.Contains(plan.Items[0].Errors, e => e.Contains("host IP assignments"));
+        Assert.False(plan.CanCommit);
+    }
+
+    [Fact]
     public void AnUnlinkedTargetWithHostIps_StaysBlocked()
     {
         BulkAzureVNetViewModel vnet = VNet();

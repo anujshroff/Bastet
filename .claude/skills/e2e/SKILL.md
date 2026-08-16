@@ -408,9 +408,11 @@ Azure is unchanged.
 - a target marked **fully allocated**, only when the selection would **create a subnet inside it** -
   link-only adoption of an unlinked fully-allocated match is offered (`WillUpdateExisting`, "Will link
   existing Bastet subnet"), and a linked one is `AlreadyImported` with rename still offered
-- a target carrying **host IP assignments**: an **unlinked** one stays refused outright; a **linked**
-  one is `AlreadyImported` ("no subnets can be added inside it") with rename still offered, and only
-  creating a subnet inside it is a plan error - see the trap below
+- a target carrying **host IP assignments**: an **unlinked** one stays refused outright, in the
+  annotation AND the plan (a hand-built POST must fail); a **linked** one is `AlreadyImported`
+  ("no subnets can be added inside it") with rename still offered, and a plan error fires only for
+  a selection that would create inside it - a new subnet, or the whole-prefix mark-fully-allocated
+  row - see the trap below
 
 **Adoption is NOT a refusal.** A populated Bastet target with **no** Azure link must be *offered*
 (`WillUpdateExisting`), because importing it links it and that is work - phase F asserts the same thing
