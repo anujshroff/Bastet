@@ -24,24 +24,6 @@ public class NoHtmlAttribute : ValidationAttribute
     }
 }
 
-public class SafeTextAttribute : ValidationAttribute
-{
-    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
-    {
-        if (value is not string stringValue || string.IsNullOrWhiteSpace(stringValue))
-        {
-            return ValidationResult.Success;
-        }
-
-        IInputSanitizationService? sanitizationService = validationContext.GetService<IInputSanitizationService>();
-        return sanitizationService == null
-            ? new ValidationResult("Input sanitization service not available")
-            : !sanitizationService.IsSafeText(stringValue)
-            ? new ValidationResult(ErrorMessage ?? "Input contains invalid or potentially dangerous characters")
-            : ValidationResult.Success;
-    }
-}
-
 public class NetworkInputAttribute : ValidationAttribute
 {
     public bool RequireValidIp { get; set; } = false;

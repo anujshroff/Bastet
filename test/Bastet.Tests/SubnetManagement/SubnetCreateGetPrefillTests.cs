@@ -102,14 +102,14 @@ public class SubnetCreateGetPrefillTests : IDisposable
     [Theory]
     [InlineData("10.0.1.0", 24, 1)]
     [InlineData("10.0.9.9", 32, 1)]
-    public async Task Create_PrefilledName_PassesTheValidationThePostApplies(
+    public async Task Create_PrefilledName_PassesTheNoHtmlRuleThePostApplies(
         string networkAddress, int cidr, int parentId)
     {
         IActionResult result = await _controller.Create(networkAddress, cidr, parentId);
         string name = ModelOf(result).Name;
 
-        SafeTextAttribute rule = new();
-        ValidationContext context = new(new object(), new SafeTextServiceProvider(), null);
+        NoHtmlAttribute rule = new();
+        ValidationContext context = new(new object(), new SanitizationServiceProvider(), null);
 
         Assert.True(
             rule.GetValidationResult(name, context) == System.ComponentModel.DataAnnotations.ValidationResult.Success,
@@ -121,7 +121,7 @@ public class SubnetCreateGetPrefillTests : IDisposable
     [InlineData("Bob's Lab", "Bobs Lab-10.7.1.0-24")]
     [InlineData("DC1:Core", "DC1Core-10.7.1.0-24")]
     [InlineData("/ / /", "10.7.1.0-24")]
-    public async Task Create_ParentNameOutsideSafeText_PrefillStillPassesThePost(
+    public async Task Create_ParentNameWithStrippedCharacters_PrefillStillPassesThePost(
         string parentName, string expectedName)
     {
         _context.Subnets.Add(new Subnet
@@ -140,14 +140,14 @@ public class SubnetCreateGetPrefillTests : IDisposable
 
         Assert.Equal(expectedName, name);
 
-        SafeTextAttribute rule = new();
-        ValidationContext context = new(new object(), new SafeTextServiceProvider(), null);
+        NoHtmlAttribute rule = new();
+        ValidationContext context = new(new object(), new SanitizationServiceProvider(), null);
         Assert.True(
             rule.GetValidationResult(name, context) == System.ComponentModel.DataAnnotations.ValidationResult.Success,
             $"the prefilled name '{name}' is refused by the rule its own POST applies");
     }
 
-    private sealed class SafeTextServiceProvider : IServiceProvider
+    private sealed class SanitizationServiceProvider : IServiceProvider
     {
         public object? GetService(Type serviceType) =>
             serviceType == typeof(IInputSanitizationService) ? new InputSanitizationService() : null;

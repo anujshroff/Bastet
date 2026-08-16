@@ -170,12 +170,11 @@ _Swept: no remaining reader of item.hostIpCount in src/ or test/; snapshot.HostI
 _Verified: build 0 warnings, 822/822; structural-always-0 confirmed via the :91 divert and transitive snapshot counts. Client-side display — no unit test can reach it; covered by /e2e's wizard pass._
 _Reviewed: pass — reviewer confirmed no path puts a nonzero-hostIp item into plan.Items and nothing is stranded._
 
-## R21 - SafeTextAttribute is applied to nothing; two tests pin it as a rule the POST no longer applies `[x1]`
-**Where:** src/Bastet/Services/Security/ValidationAttributes.cs:27-43; test/Bastet.Tests/SubnetManagement/SubnetCreateGetPrefillTests.cs:105, :111, :143, :150-154; Azure/GeneratedNameSafeTextTests.cs:56 (same claim)
-**Breaks:** Round 17 removed the last three `[SafeText]` usages and nothing discovers ValidationAttribute subclasses by reflection, so the class runs nowhere. Its only references assert the prefilled name is refused by the rule its own POST applies — stricter than the app enforces.
-**Repro:** POST /Subnet/Create with Name="Prod/Web: core (site B)" wrote the row; `<b>bold</b>` hit `[NoHtml]`, so attributes do run.
-**Fix:** Delete `SafeTextAttribute` (:27-43). In SubnetCreateGetPrefillTests drop the IsSafeText assertions and the `SafeTextServiceProvider` helper, keep the `Assert.Equal` checks, and rename both tests. Fix the same claim at GeneratedNameSafeTextTests.cs:56.
-**Residue of:** f4a0a87, which deleted the last usages and orphaned the class.
+## R21 - SafeTextAttribute is applied to nothing; two tests pin it as a rule the POST no longer applies `[x1]` — FIXED
+_Fixed. Deleted SafeTextAttribute; the two prefill tests now assert against NoHtml — the rule the POST actually applies — instead of being emptied as filed, so no test-count regression; GeneratedNameSafeTextTests message de-[SafeText]ed._
+_Swept: zero remaining SafeTextAttribute references; NoHtml/NetworkInput/Tags/IsSafeText all still have live callers._
+_Verified: build 0 warnings, 822/822; reviewer traced prefill would fail NoHtml if it emitted a tag._
+_Reviewed: pass._
 
 ## R22 - AzureReconcilePlanViewModel.CanCommit is serialised on every scan but no code reads it `[x2]` — FIXED
 _Fixed. Deleted the computed property; not wired up for symmetry, per the finding._

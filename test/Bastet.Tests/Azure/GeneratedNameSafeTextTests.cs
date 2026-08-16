@@ -53,7 +53,7 @@ public class GeneratedNameSafeTextTests
         foreach (string name in generated)
         {
             Assert.True(_sanitizer.IsSafeText(name),
-                $"The planner generated '{name}', which the app's own [SafeText] rules reject.");
+                $"The planner generated '{name}', which the subnet naming rules reject.");
         }
     }
 
