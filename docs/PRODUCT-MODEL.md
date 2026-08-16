@@ -283,4 +283,8 @@ counter-test that enforces the ruling (or `untestable` with one line why). No ag
 summary, no reasoning added. Rulings made before this file existed are already folded into sections
 1–7 and are not re-listed here.
 
-*(no entries yet)*
+- **18-R2** — asked whether the delete-scope guard should refuse on any host-IP churn (posting the
+  reviewed IP set) or stay count-based, accepting that a delete-then-add netting the count equal
+  during the review window can slip. Owner: "Accept the count (Recommended)". Counter-test:
+  `DeleteConfirmed_AHostIpAddedByAClockBehindWriter_StillRefusesTheDelete` pins the half that must
+  refuse; the accepted swap residual is deliberate and must not be re-filed as a finding.
