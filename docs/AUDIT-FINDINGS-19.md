@@ -44,28 +44,11 @@ _Swept: no remaining inline copy of the predicate anywhere in src; server valida
 _Verified: build 0 warnings, 840/840; three mutations each kill exactly one distinct test — every term is load-bearing._
 _Reviewed: pass. Residual: a Razor re-inline still can't go red in unit tests (no render harness) — covered by /e2e and §5's duplication rule; judged acceptable._
 
-## S4. CIDR-edit refusal test fails on correct code when BASTET_AZURE_IMPORT=true, and the flag-on remedy branch is unguarded (Low) [x1]
-
-**Where:** `test/Bastet.Tests/SubnetManagement/SubnetControllerCidrEditTests.cs:701`
-**Breaks:** The 18-R15 fix makes the Azure-linked CIDR refusal message flag-dependent: with the
-import feature enabled it says "Change the prefix in Azure, then ask an administrator to re-import
-it." The test asserts `DoesNotContain("re-import")` without arranging the flag, so it only pins the
-flag-off branch by accident of ambient environment: running `dotnet test` in a shell configured
-like a real Azure-enabled deployment (the rig's own app runs with `BASTET_AZURE_IMPORT=true`) turns
-a correct build red, and nothing anywhere pins the flag-on remedy sentence, so that branch can
-regress to naming an unreachable remedy (rule 3) unguarded.
-**Repro:** On unmodified `f2050fa` code, ran `dotnet test` with `BASTET_AZURE_IMPORT=true` in the
-environment, filtered to `*CidrChangeOnAzureLinkedSubnet*`: both theory cases (newCidr 15 and 17)
-fail with `Assert.DoesNotContain() Failure: Sub-string found` at
-`SubnetControllerCidrEditTests.cs:701`. The same tests pass with the variable unset, and fail
-correctly against the pre-fix code (old message contained "re-import" unconditionally), confirming
-the assertion only discriminates in the flag-off environment. Both verifiers independently
-reproduced the flag-on failure on unmodified HEAD.
-**Fix:** Have the test pin both branches explicitly: set `BASTET_AZURE_IMPORT=true` around one act
-and assert the administrator re-import sentence, clear it around another and assert the message
-ends as prose with no remedy named, restoring the prior value in a `finally` — the pattern the
-Azure controller tests already use.
-**Residue-of:** 18-R15
+## S4. CIDR-edit refusal test fails on correct code when BASTET_AZURE_IMPORT=true, and the flag-on remedy branch is unguarded (Low) [x1] — FIXED
+_Fixed. The theory pins both branches explicitly — flag on asserts the re-import sentence, flag off asserts the message closes at the fact — restoring the prior value in finally; the class joins AzureFeatureFlagCollection so the env-var handling is structurally parallel-safe._
+_Swept: every other BASTET_AZURE_IMPORT-touching test class already sits in that serialized collection._
+_Verified: green with flag unset AND ambient-true; two mutations (unconditional sentence; inverted conditional) each redden their own act; 841/841, src untouched._
+_Reviewed: pass — reviewer's collection-membership advisory adopted._
 
 ## Info
 
