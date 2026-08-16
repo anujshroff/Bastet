@@ -21,15 +21,12 @@ None.
 
 ## Low
 
-### 20-S1: CanMarkFullyAllocated's ChildSubnets term is unguarded — 841/841 tests pass with it deleted (Low) [x2]
+### 20-S1: CanMarkFullyAllocated's ChildSubnets term is unguarded — 841/841 tests pass with it deleted (Low) [x2] — FIXED
 
-Where:      test/Bastet.Tests/SubnetManagement/SubnetDetailsActionGateTests.cs:50
-
-Breaks:     Round 19 (19-S3) lifted the fully-allocated toggle gate into SubnetDetailsViewModel.CanMarkFullyAllocated and the ledger records "every term mutation-load-bearing", but no test pins the ChildSubnets.Count == 0 term. If a future edit drops that term, the Details page offers "Mark fully allocated" on a subnet that has child subnets; the POST then fails server-side in HostIpController.SetAllocationStatus, so the operator is offered an action the app always refuses (product-model rule 3: an offered remedy that cannot be acted on). The delta's own gate tests (ASlash32_CanStillBeMarkedFullyAllocated, AFullyAllocatedSubnet_IsNotOfferedTheMarkToggleAgain, HostIps_BlockMarkingFullyAllocated) cover the other two terms only.
-
-Repro:      In a repo copy at /tmp/claude-1000/-home-anuj-code-Bastet/52de6a9c-c73b-4530-ad7f-b7ed4a3449dd/scratchpad/rig20/scratch-b7p2, changed src/Bastet/Models/ViewModels/SubnetViewModels.cs:95 to `public bool CanMarkFullyAllocated => HostIpAssignments.Count == 0 && !IsFullyAllocated;` (ChildSubnets term removed), rebuilt, ran the ENTIRE suite: 841 total, 0 failed. By contrast, removing the !IsFullyAllocated term fails AFullyAllocatedSubnet_IsNotOfferedTheMarkToggleAgain and removing the host-IP term fails HostIps_BlockMarkingFullyAllocated, so only this term is decoration-guarded. (SetAllocationStatus_SubnetWithChildren_Fails covers the controller, not the view-model gate the view renders from.) Verifier (yes-ran-it): independently reproduced in /tmp/claude-1000/-home-anuj-code-Bastet/52de6a9c-c73b-4530-ad7f-b7ed4a3449dd/scratchpad/rig20/verify-v1 — removed the ChildSubnets.Count == 0 term from CanMarkFullyAllocated (SubnetViewModels.cs:95) and ran `dotnet test`: 841 total, 0 failed, confirming no test pins that term and refuting the ledger's 19-S3 "every term mutation-load-bearing" claim.
-
-Fix:        Add a fourth gate test alongside the two added by 19-S3 in SubnetDetailsActionGateTests: `[Fact] public void ChildSubnets_BlockMarkingFullyAllocated() => Assert.False(Details(24, children: 1).CanMarkFullyAllocated);` — verified red under the mutation, green on unmodified code.
+_Fixed. Added ChildSubnets_BlockMarkingFullyAllocated, and swept the sibling gate CanAddHostIp (zero coverage on either term): ABareSubnet_OffersAddHostIp, ChildSubnets_BlockAddingHostIps, FullAllocation_BlocksAddingHostIps. Tests only, no src change._
+_Swept: every `=> bool` gate in the view models; CanAddChildSubnet's three terms already pinned, CanCommit already covered, no other unguarded term._
+_Verified: four mutations in a scratch copy each killed exactly one new test; full suite 845/845, 0 warnings._
+_Reviewed: (c) — reviewer independently re-ran all four mutations and the over-pinning check against HostIpValidationService; no corrections._
 
 Residue-of: 19-S3
 

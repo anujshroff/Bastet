@@ -50,10 +50,26 @@ public class SubnetDetailsActionGateTests
         Assert.False(Details(24, hostIps: 1).CanMarkFullyAllocated);
 
     [Fact]
+    public void ChildSubnets_BlockMarkingFullyAllocated() =>
+        Assert.False(Details(24, children: 1).CanMarkFullyAllocated);
+
+    [Fact]
     public void HostIps_StillBlockAddChildSubnet() =>
         Assert.False(Details(24, hostIps: 1).CanAddChildSubnet);
 
     [Fact]
     public void FullAllocation_StillBlocksAddChildSubnet() =>
         Assert.False(Details(24, fullyAllocated: true).CanAddChildSubnet);
+
+    [Fact]
+    public void ABareSubnet_OffersAddHostIp() =>
+        Assert.True(Details(24).CanAddHostIp);
+
+    [Fact]
+    public void ChildSubnets_BlockAddingHostIps() =>
+        Assert.False(Details(24, children: 1).CanAddHostIp);
+
+    [Fact]
+    public void FullAllocation_BlocksAddingHostIps() =>
+        Assert.False(Details(24, fullyAllocated: true).CanAddHostIp);
 }
