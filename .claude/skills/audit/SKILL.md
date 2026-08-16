@@ -17,7 +17,7 @@ anything else. Nothing in this file overrides it.** `docs/AUDIT-LEDGER.md` is th
 
 Read the Rounds table in `docs/AUDIT-LEDGER.md`. **If the most recent completed round's residue is
 above 2, this round runs Regression-only, whatever was asked** — say so at launch and do not offer
-the choice. The loop has diverged before (residue 11/15 → 12/21 → 22/23 across rounds 16–18) and a
+the choice. The loop has diverged before (residue 11/15 → 12/21 → 20/23 across rounds 16–18) and a
 full discovery round during divergence audits the fix process's own output. A Regression-only round
 is the measurement instrument: it scopes to the delta since the last audit and writes the residue
 number that re-opens discovery.

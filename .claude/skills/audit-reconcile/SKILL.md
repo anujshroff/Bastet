@@ -17,7 +17,7 @@ squash-merged, so per-finding commits and messages do not survive to it; the led
 ## Why this skill is shaped this way
 
 Re-auditing completed rounds repeatedly found *more* defects than the round fixed, the large
-majority residue of those very fixes — residue ran 11/15, 12/21, then 22/23 across rounds 16–18.
+majority residue of those very fixes — residue ran 11/15, 12/21, then 20/23 across rounds 16–18.
 The fix process, not the codebase, was the main defect source, and the single biggest cause was
 that **every fix was verified only by its own author**, whose defects surfaced a full round later.
 Hence: independent review of every fix (step 8), a whole-diff gate before the round is declared
@@ -266,8 +266,9 @@ service principal secrets. The gate needs the rig; a round that tears down first
 
 1. **Append to `docs/AUDIT-LEDGER.md`:** one Findings row per finding — id
    (`<round>-<finding>`), severity, terminal verdict (fixed / refuted / struck / inverted /
-   deferred), the branch sha, one line of what — and the round's row in the Rounds table with the
-   residue rate. Facts only; the ledger must not carry an argument.
+   deferred), the round's merge PR reference (branch shas die in the squash — cite `#<PR>` once
+   known, or the round branch name until then), one line of what — and the round's row in the
+   Rounds table with the residue rate. Facts only; the ledger must not carry an argument.
 2. **Append owner rulings from triage to `docs/PRODUCT-MODEL.md` §8, verbatim**, each with its
    counter-test pointer.
 3. **Delete the findings file** — `git rm docs/AUDIT-FINDINGS-*.md`, committed. The files poison
