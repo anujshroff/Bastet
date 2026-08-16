@@ -291,7 +291,9 @@ public class HostIpController(
                     return NotFound();
                 }
 
-                ModelState.AddModelError("", "The host IP was modified by another user. Please reload and try again.");
+                ModelState.AddModelError("",
+                    "This host IP was modified by another user while you were editing it, so it was not saved. " +
+                    "Reload the page to see the current values, then re-apply the changes that still make sense.");
                 return View(viewModel);
             }
             catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
