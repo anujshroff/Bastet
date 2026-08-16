@@ -34,12 +34,12 @@ _Reviewed: pass — reviewer traced transitive ManualDescendantCount/HostIpCount
 
 ## Medium
 
-## R2 - Delete scope guard keys host IP additions on a wall clock, so a not-newer insert is archived silently `[x1]`
-**Where:** src/Bastet/Controllers/SubnetController.Delete.cs:187, :81-91, :41-42, :143-148; Models/ViewModels/DeleteSubnetViewModel.cs:18, :22; Views/Subnet/Delete/_DeleteConfirmationForm.cshtml:5-7
-**Breaks:** The subnet half compares database identities, the host IP half a UtcNow watermark with strict `>`. A host IP inserted by a clock-behind replica never trips the guard and is archived against a review that never showed it. Not established: that deployments run replicas with drifting clocks (skew was shimmed in).
-**Repro:** Two instances, one shimmed +120s: the POST archived 2 host IPs after a page saying 1.
-**Fix:** Filed fix unsound — its interim (`>` to `>=`) refuses every delete of a subnet holding host IPs. Have `MaxSubtreeHostIpTicksAsync` return the subtree count, feed `HostIpCount` and the guard from it (deleting `CountAllDescendantHostIps`), post it as a nullable field joined to :143, and drop the watermark.
-**Residue of:** d18327e (Audit 16 #165), which added the watermark and guard.
+## R2 - Delete scope guard keys host IP additions on a wall clock, so a not-newer insert is archived silently `[x1]` — FIXED
+_Fixed. The watermark is gone: SubtreeHostIpCountAsync feeds both the review page's HostIpCount and the guard (single implementation; CountAllDescendantHostIps deleted); the form posts the reviewed count and the guard refuses when the live count exceeds it — clock-independent._
+_Swept: zero remaining references to the ticks watermark; both pre-existing scope tests updated and still isolate the subnet half._
+_Verified: new clock-behind test red pre-fix (subtree was archived), green post-fix; mutation check (guard disabled) sent it red again; 838/838._
+_Reviewed: pass._
+_Not done: a delete-then-add that nets the count equal during the review window can still slip — same acceptance class as the §7 bounded race; no clock-free monotone identity exists for host IPs without a schema change._
 
 ## R3 - Edit concurrency redisplay refreshes RowVersion, so the retry it instructs reverts the other commit `[x1]` — FIXED (narrow half; remainder deferred)
 _Fixed. The token refresh and its ModelState.Remove are gone at all three sites; a blind retry now fails closed with a reload instruction instead of silently reverting the other commit. Messages rewritten to be true. Redisplay-path collapse and field-diff message deferred to the restructure._
