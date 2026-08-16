@@ -451,10 +451,16 @@
                 };
 
                 $(`.bulk-subnet-checkbox[data-vnet-idx='${w.vIdx}'][data-prefix='${w.prefix}']:checked:not(:disabled)`).each(function () {
+                    const resourceId = $(this).attr('data-resource-id') || '';
+                    const addressPrefix = $(this).attr('data-address-prefix');
+                    const source = (vnet.subnets || []).filter(function (s) {
+                        return (s.resourceId || '') === resourceId && s.addressPrefix === addressPrefix;
+                    })[0];
                     prefixDto.subnets.push({
                         name: $(this).attr('data-name'),
-                        addressPrefix: $(this).attr('data-address-prefix'),
-                        azureResourceId: $(this).attr('data-resource-id') || ''
+                        addressPrefix: addressPrefix,
+                        azureResourceId: resourceId,
+                        ipv4AddressPrefixes: source ? (source.ipv4AddressPrefixes || []) : []
                     });
                 });
 

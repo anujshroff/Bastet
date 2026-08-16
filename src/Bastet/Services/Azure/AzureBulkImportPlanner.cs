@@ -20,13 +20,24 @@ namespace Bastet.Services.Azure
             IsSameVNet(existing, vnet.ResourceId);
 
         private static bool HasPersistedSiblingFromSameAzureSubnet(
-            ParsedSubnetSelection sub,
+            string? azureResourceId,
+            string network,
+            int cidr,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets) =>
-            !string.IsNullOrEmpty(sub.Source.AzureResourceId)
+            !string.IsNullOrEmpty(azureResourceId)
             && existingSubnets.Any(e =>
-                string.Equals(e.AzureResourceId, sub.Source.AzureResourceId, StringComparison.OrdinalIgnoreCase)
-                && !(e.Cidr == sub.Cidr
-                     && string.Equals(e.NetworkAddress, sub.Network, StringComparison.OrdinalIgnoreCase)));
+                string.Equals(e.AzureResourceId, azureResourceId, StringComparison.OrdinalIgnoreCase)
+                && !(e.Cidr == cidr
+                     && string.Equals(e.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)));
+
+        private static bool ShouldQualifyChildName(
+            string? azureResourceId,
+            IReadOnlyList<string> ipv4AddressPrefixes,
+            string network,
+            int cidr,
+            IReadOnlyList<ExistingSubnetSnapshot> existingSubnets) =>
+            ipv4AddressPrefixes.Count(p => TryParseCidr(p, out _, out _)) > 1
+            || HasPersistedSiblingFromSameAzureSubnet(azureResourceId, network, cidr, existingSubnets);
 
         public BulkImportPlanViewModel BuildPlan(
             BulkImportSelectionDto selection,
@@ -131,19 +142,10 @@ namespace Bastet.Services.Azure
             DetectVNetPrefixOverlaps(parsed, plan);
             DetectAzureSubnetOverlaps(parsed, plan);
 
-            HashSet<string> multiPrefixResourceIds = new(
-                parsed.SelectMany(p => p.Subnets)
-                    .Where(s => !s.FullyEncompasses && !string.IsNullOrEmpty(s.Source.AzureResourceId))
-                    .GroupBy(s => s.Source.AzureResourceId!, StringComparer.OrdinalIgnoreCase)
-                    .Where(g => g.Count() > 1)
-                    .Select(g => g.Key),
-                StringComparer.OrdinalIgnoreCase);
-
             foreach (ParsedPrefixSelection p in parsed)
             {
                 BulkImportPlanItem item = BuildPlanItem(
-                    p, existingSubnets, selection.RenameMatchedBastetSubnets,
-                    multiPrefixResourceIds);
+                    p, existingSubnets, selection.RenameMatchedBastetSubnets);
                 plan.Items.Add(item);
             }
 
@@ -202,7 +204,7 @@ namespace Bastet.Services.Azure
                 bool isTopUp = IsSameVNet(exact, vnet);
 
                 result.WouldRenameTarget = !string.Equals(
-                    exact.Name, ProposedTargetName(vnet, network, cidr), StringComparison.Ordinal);
+                    exact.Name, ProposedTargetName(vnet.Name, vnet.Ipv4AddressPrefixes.Count, network, cidr), StringComparison.Ordinal);
 
                 if (exact.HasHostIpAssignments)
                 {
@@ -418,8 +420,10 @@ namespace Bastet.Services.Azure
             subnet.Reason = sameAzureResource
                 ? $"Already imported as Bastet subnet '{exact.Name}'."
                 : $"Bastet subnet '{exact.Name}' already uses {subnet.AddressPrefix}.";
+
+            bool qualifyWithRange = ShouldQualifyChildName(subnet.ResourceId, subnet.Ipv4AddressPrefixes, network, cidr, existingSubnets);
             subnet.WouldRenameSubnet = sameAzureResource
-                && !string.Equals(exact.Name, ProposedChildName(subnet), StringComparison.Ordinal);
+                && !string.Equals(exact.Name, ProposedChildName(subnet.Name, network, cidr, qualifyWithRange), StringComparison.Ordinal);
             subnet.IsSelectable = false;
         }
 
@@ -433,10 +437,18 @@ namespace Bastet.Services.Azure
                     && !string.IsNullOrEmpty(e.AzureResourceId)
                     && string.Equals(e.AzureResourceId, sub.Source.AzureResourceId, StringComparison.OrdinalIgnoreCase));
 
-        private string ProposedChildName(BulkAzureSubnetViewModel subnet) =>
-            TruncateAndSanitizeName(subnet.Name) is { Length: > 0 } sanitized
-                ? sanitized
-                : subnet.AddressPrefix.Replace('/', '_');
+        private string ProposedChildName(string? azureName, string network, int cidr, bool qualifyWithRange)
+        {
+            string baseName = TruncateAndSanitizeName(azureName);
+            if (baseName.Length == 0)
+            {
+                return $"{network}_{cidr}";
+            }
+
+            return qualifyWithRange
+                ? SubnetNaming.WithSuffix(baseName, $" ({network}-{cidr})", MaxSubnetNameLength)
+                : baseName;
+        }
 
         private IEnumerable<BulkAzureSubnetViewModel> SubnetsWithinPrefix(
             BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
@@ -452,13 +464,13 @@ namespace Bastet.Services.Azure
             SubnetsWithinPrefix(vnet, prefixNetwork, prefixCidr)
                 .Any(s => s.Status == BulkImportAvailability.Blocked);
 
-        private string ProposedTargetName(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr)
+        private string ProposedTargetName(string? vnetName, int ipv4PrefixCount, string prefixNetwork, int prefixCidr)
         {
-            string name = TruncateAndSanitizeName(vnet.Name) is { Length: > 0 } sanitized
+            string name = TruncateAndSanitizeName(vnetName) is { Length: > 0 } sanitized
                 ? sanitized
                 : $"{prefixNetwork}_{prefixCidr}";
 
-            return vnet.Ipv4AddressPrefixes.Count > 1
+            return ipv4PrefixCount > 1
                 ? SubnetNaming.WithSuffix(name, $" ({prefixNetwork}-{prefixCidr})", MaxSubnetNameLength)
                 : name;
         }
@@ -512,8 +524,7 @@ namespace Bastet.Services.Azure
         private BulkImportPlanItem BuildPlanItem(
             ParsedPrefixSelection p,
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets,
-            bool renameMatched,
-            HashSet<string> multiPrefixResourceIds)
+            bool renameMatched)
         {
             BulkImportPlanItem item = new()
             {
@@ -558,7 +569,7 @@ namespace Bastet.Services.Azure
 
                 if (renameMatched)
                 {
-                    string proposed = TargetName(p);
+                    string proposed = ProposedTargetName(p.Source.VNetName, p.Source.VNetIpv4AddressPrefixes.Count, p.PrefixNetwork, p.PrefixCidr);
                     if (!string.Equals(proposed, exact.Name, StringComparison.Ordinal))
                     {
                         item.WillRename = true;
@@ -576,7 +587,7 @@ namespace Bastet.Services.Azure
                     item.TargetType = BulkImportTargetType.AutoCreateChild;
                     item.AutoCreateParentSubnetId = deepest.Id;
                     item.AutoCreateParentSubnetName = deepest.Name;
-                    item.AutoCreateTargetName = TargetName(p);
+                    item.AutoCreateTargetName = ProposedTargetName(p.Source.VNetName, p.Source.VNetIpv4AddressPrefixes.Count, p.PrefixNetwork, p.PrefixCidr);
 
                     if (deepest.HasHostIpAssignments)
                     {
@@ -592,7 +603,7 @@ namespace Bastet.Services.Azure
                 else
                 {
                     item.TargetType = BulkImportTargetType.AutoCreateTopLevel;
-                    item.AutoCreateTargetName = TargetName(p);
+                    item.AutoCreateTargetName = ProposedTargetName(p.Source.VNetName, p.Source.VNetIpv4AddressPrefixes.Count, p.PrefixNetwork, p.PrefixCidr);
                 }
             }
 
@@ -650,18 +661,9 @@ namespace Bastet.Services.Azure
 
                 ExistingSubnetSnapshot? linkedRow = LinkedRowForSameAzureSubnet(sub, existingSubnets);
 
-                string baseName = TruncateAndSanitizeName(sub.Source.Name);
-                if (string.IsNullOrEmpty(baseName))
-                {
-                    baseName = $"{sub.Network}_{sub.Cidr}";
-                }
-                else if (multiPrefixResourceIds.Contains(sub.Source.AzureResourceId)
-                         || HasPersistedSiblingFromSameAzureSubnet(sub, existingSubnets))
-                {
-
-                    baseName = SubnetNaming.WithSuffix(
-                        baseName, $" ({sub.Network}-{sub.Cidr})", MaxSubnetNameLength);
-                }
+                string baseName = ProposedChildName(
+                    sub.Source.Name, sub.Network, sub.Cidr,
+                    ShouldQualifyChildName(sub.Source.AzureResourceId, sub.Source.Ipv4AddressPrefixes, sub.Network, sub.Cidr, existingSubnets));
 
                 if (linkedRow is not null)
                 {
@@ -873,18 +875,6 @@ namespace Bastet.Services.Azure
             network = parts[0];
             cidr = parsedCidr;
             return true;
-        }
-
-        private string TargetName(ParsedPrefixSelection prefix)
-        {
-            string name = TruncateAndSanitizeName(prefix.Source.VNetName) is { Length: > 0 } sanitized
-                ? sanitized
-                : $"{prefix.PrefixNetwork}_{prefix.PrefixCidr}";
-
-            return prefix.Source.VNetIpv4AddressPrefixes.Count > 1
-                ? SubnetNaming.WithSuffix(
-                    name, $" ({prefix.PrefixNetwork}-{prefix.PrefixCidr})", MaxSubnetNameLength)
-                : name;
         }
 
         private string TruncateAndSanitizeName(string? rawName)
