@@ -101,6 +101,21 @@ public class AzureBulkImportZeroWorkTests
     }
 
     [Fact]
+    public void ACollapsedFullyAllocatedTarget_LinkedWithDifferentIdCasing_IsStillAlreadyImported()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-c", ["10.63.0.0/16"],
+            Sub("vnet-c", "whole", "10.63.0.0/16"));
+
+        BulkAzurePrefixViewModel prefix = Annotate(vnet,
+            Row(1, "vnet-c", "10.63.0.0", 16, VNetId("vnet-c").ToUpperInvariant(), fullyAllocated: true));
+
+        Assert.Equal(BulkImportAvailability.AlreadyImported, prefix.Status);
+
+        BulkAzureSubnetViewModel whole = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.AlreadyImported, whole.Status);
+    }
+
+    [Fact]
     public void AWholePrefixSubnetOverAnUnlinkedFullyAllocatedRow_IsNotBadgedAlreadyImported()
     {
         BulkAzureVNetViewModel vnet = VNet("vnet-d", ["10.54.0.0/16"],
