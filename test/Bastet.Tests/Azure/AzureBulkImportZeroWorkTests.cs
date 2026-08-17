@@ -100,6 +100,38 @@ public class AzureBulkImportZeroWorkTests
         Assert.Contains("Will link existing Bastet subnet", prefix.Reason);
     }
 
+    [Fact]
+    public void AWholePrefixSubnetOverAnUnlinkedFullyAllocatedRow_IsNotBadgedAlreadyImported()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-d", ["10.54.0.0/16"],
+            Sub("vnet-d", "whole", "10.54.0.0/16"));
+
+        BulkAzurePrefixViewModel prefix = Annotate(vnet,
+            Row(1, "hand-built", "10.54.0.0", 16, fullyAllocated: true));
+
+        Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
+
+        BulkAzureSubnetViewModel whole = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Blocked, whole.Status);
+        Assert.False(whole.IsSelectable);
+        Assert.Contains("marked fully allocated, so there is nothing to do", whole.Reason);
+    }
+
+    [Fact]
+    public void AWholePrefixSubnetOverAFullyAllocatedRowLinkedToAnotherVNet_IsNotBadgedAlreadyImported()
+    {
+        BulkAzureVNetViewModel vnet = VNet("vnet-e", ["10.55.0.0/16"],
+            Sub("vnet-e", "whole", "10.55.0.0/16"));
+
+        BulkAzurePrefixViewModel prefix = Annotate(vnet,
+            Row(1, "other-owner", "10.55.0.0", 16, VNetId("vnet-other"), fullyAllocated: true));
+
+        BulkAzureSubnetViewModel whole = Assert.Single(vnet.Subnets);
+        Assert.Equal(BulkImportAvailability.Blocked, whole.Status);
+        Assert.False(whole.IsSelectable);
+        Assert.Contains("marked fully allocated, so there is nothing to do", whole.Reason);
+    }
+
     // Something can still be added -> stays selectable.
 
     [Fact]

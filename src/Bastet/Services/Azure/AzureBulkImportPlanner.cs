@@ -335,7 +335,9 @@ namespace Bastet.Services.Azure
 
                 if (encompassedTarget is not null && encompassedTarget.IsFullyAllocated)
                 {
-                    subnet.Status = BulkImportAvailability.AlreadyImported;
+                    subnet.Status = IsSameVNet(encompassedTarget, vnet)
+                        ? BulkImportAvailability.AlreadyImported
+                        : BulkImportAvailability.Blocked;
                     subnet.Reason = $"Bastet subnet '{encompassedTarget.Name}' is marked fully allocated, "
                                     + "so there is nothing to do.";
                     subnet.IsSelectable = false;

@@ -203,4 +203,47 @@ public class AzureBulkImportSelectabilityTests
         Assert.Equal(BulkImportAvailability.Blocked, vnet.Subnets[0].Status);
         Assert.Contains("host IP", vnet.Subnets[0].Reason);
     }
+
+    [Fact]
+    public void CanCarrySubnetWork_IsFalseForExactlyTheBlockedStatus()
+    {
+        foreach (BulkImportAvailability status in Enum.GetValues<BulkImportAvailability>())
+        {
+            BulkAzurePrefixViewModel prefix = new() { Status = status };
+
+            Assert.Equal(status != BulkImportAvailability.Blocked, prefix.CanCarrySubnetWork);
+        }
+    }
+
+    [Fact]
+    public void APrefixIsARenameOnlyCandidate_ExactlyWhenAlreadyImportedAndItWouldRename()
+    {
+        foreach (BulkImportAvailability status in Enum.GetValues<BulkImportAvailability>())
+        {
+            foreach (bool wouldRename in (bool[])[true, false])
+            {
+                BulkAzurePrefixViewModel prefix = new() { Status = status, WouldRenameTarget = wouldRename };
+
+                Assert.Equal(
+                    status == BulkImportAvailability.AlreadyImported && wouldRename,
+                    prefix.RenameOnlyCandidate);
+            }
+        }
+    }
+
+    [Fact]
+    public void ASubnetIsARenameOnlyCandidate_ExactlyWhenAlreadyImportedAndItWouldRename()
+    {
+        foreach (BulkImportAvailability status in Enum.GetValues<BulkImportAvailability>())
+        {
+            foreach (bool wouldRename in (bool[])[true, false])
+            {
+                BulkAzureSubnetViewModel subnet = new() { Status = status, WouldRenameSubnet = wouldRename };
+
+                Assert.Equal(
+                    status == BulkImportAvailability.AlreadyImported && wouldRename,
+                    subnet.RenameOnlyCandidate);
+            }
+        }
+    }
 }
