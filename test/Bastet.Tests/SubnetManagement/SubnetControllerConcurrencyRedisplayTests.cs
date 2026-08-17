@@ -317,6 +317,47 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
     }
 
     [Fact]
+    public async Task Edit_POST_ConcurrencyConflict_AttributesEachWordingToItsOwnField()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 58,
+            Name = "batch",
+            NetworkAddress = "10.58.0.0",
+            Cidr = 24,
+            Tags = "prod",
+            CreatedAt = new DateTime(2026, 01, 01, 00, 00, 00, DateTimeKind.Utc),
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await _context.Database.ExecuteSqlAsync(
+            $"UPDATE Subnets SET RowVersion = {new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }} WHERE Id = 58",
+            TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        _controller.ModelState.AddModelError("Name", "forced invalid");
+        EditSubnetViewModel viewModel = new()
+        {
+            Id = 58,
+            Name = "batch",
+            NetworkAddress = "10.58.0.0",
+            Cidr = 24,
+            OriginalCidr = 24,
+            Description = "added since",
+            Tags = "staging",
+            RowVersion = [9, 9, 9, 9, 9, 9, 9, 8]
+        };
+
+        await _controller.Edit(58, viewModel);
+
+        string message = Assert.Single(
+            _controller.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
+        Assert.Contains("Tags are now 'prod'", message);
+        Assert.Contains("Description is now empty", message);
+    }
+
+    [Fact]
     public async Task Edit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite()
     {
         _context.Subnets.Add(new Subnet

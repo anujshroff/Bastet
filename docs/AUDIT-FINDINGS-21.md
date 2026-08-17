@@ -29,6 +29,7 @@ _Fixed in this commit. Three tests added to SubnetControllerConcurrencyRedisplay
 _Swept: the route drives the same differing-list block a genuine DbUpdateConcurrencyException reaches (one shared implementation, reviewer-traced); no parallel copy exists._
 _Verified: 8/8 on the file, 875/875 full; author mutation (all three branches deleted) red; reviewer ran 5 finer single-fault mutations, each red._
 _Reviewed: pass — one disclosed residual (symmetric swap of the two empty literals) taken as a strengthening: the attribution test was added and the swap mutant confirmed red._
+_Gate repair: the whole-diff gate demonstrated a surviving Tags-branch cross-attribution mutant (empty-check keyed on Description); AttributesEachWordingToItsOwnField added, independently re-reviewed (pass), unique killer of that mutant and of three sibling attribution mutants._
 **Residue of:** 18-R3-rem
 
 ## L4 — 18-R3-rem's HostIp concurrency-message alignment has no guarding test — reverting the hunk leaves all 866 tests green `[x2]` — FIXED
