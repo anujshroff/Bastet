@@ -113,6 +113,16 @@ public class AzureBulkImportSelectabilityTests
     }
 
     [Fact]
+    public void ATargetLinkedWithDifferentIdCasing_IsNotRefusedAsALinkReplacement()
+    {
+        BulkImportPlanItem item = Plan(
+            Selection(),
+            Target(linkedTo: VNetA.ToUpperInvariant()));
+
+        Assert.Empty(item.Errors);
+    }
+
+    [Fact]
     public void ALinkedTargetWithHostIps_RenameOnly_IsPlannedWithoutErrors()
     {
         BulkImportPlanItem item = Plan(

@@ -116,6 +116,7 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
             e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
         Assert.Contains("Name is now 'web'", message);
         Assert.DoesNotContain("Tags", message);
+        Assert.DoesNotContain("Description is now", message);
     }
 
     [Fact]
@@ -273,6 +274,7 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
             e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
         Assert.Contains("Description is now empty", message);
         Assert.Contains("Tags are now empty", message);
+        Assert.DoesNotContain("CIDR is now", message);
     }
 
     [Fact]
