@@ -70,8 +70,6 @@ namespace Bastet.Models.ViewModels
 
         public int DescendantCount { get; set; }
 
-        public int HostIpCount { get; set; }
-
         public IReadOnlyList<int> DescendantSubnetIds { get; set; } = [];
 
         public string StatusName => Status.ToString();
@@ -91,8 +89,6 @@ namespace Bastet.Models.ViewModels
         public List<string> GlobalErrors { get; set; } = [];
 
         public List<string> Warnings { get; set; } = [];
-
-        public bool CanCommit => ScanSucceeded && GlobalErrors.Count == 0 && Items.Count > 0;
     }
 
     public class AzureReconcileDeleteDto

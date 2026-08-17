@@ -24,24 +24,6 @@ public class NoHtmlAttribute : ValidationAttribute
     }
 }
 
-public class SafeTextAttribute : ValidationAttribute
-{
-    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
-    {
-        if (value is not string stringValue || string.IsNullOrWhiteSpace(stringValue))
-        {
-            return ValidationResult.Success;
-        }
-
-        IInputSanitizationService? sanitizationService = validationContext.GetService<IInputSanitizationService>();
-        return sanitizationService == null
-            ? new ValidationResult("Input sanitization service not available")
-            : !sanitizationService.IsSafeText(stringValue)
-            ? new ValidationResult(ErrorMessage ?? "Input contains invalid or potentially dangerous characters")
-            : ValidationResult.Success;
-    }
-}
-
 public class NetworkInputAttribute : ValidationAttribute
 {
     public bool RequireValidIp { get; set; } = false;
@@ -92,12 +74,6 @@ public class TagsAttribute : ValidationAttribute
             return ValidationResult.Success;
         }
 
-        IInputSanitizationService? sanitizationService = validationContext.GetService<IInputSanitizationService>();
-        if (sanitizationService == null)
-        {
-            return new ValidationResult("Input sanitization service not available");
-        }
-
         string[] tags = [.. stringValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(tag => tag.Trim())
             .Where(tag => !string.IsNullOrWhiteSpace(tag))];
@@ -112,11 +88,6 @@ public class TagsAttribute : ValidationAttribute
             if (tag.Length > MaxTagLength)
             {
                 return new ValidationResult($"Each tag must be {MaxTagLength} characters or less");
-            }
-
-            if (!sanitizationService.IsSafeText(tag))
-            {
-                return new ValidationResult($"Tag '{tag}' contains invalid characters");
             }
         }
 

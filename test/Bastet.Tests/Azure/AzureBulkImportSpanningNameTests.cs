@@ -23,7 +23,16 @@ public class AzureBulkImportSpanningNameTests
         };
 
     private static BulkImportSelectedSubnetDto Sub(string name, string prefix, string resourceId) =>
-        new() { Name = name, AddressPrefix = prefix, AzureResourceId = resourceId };
+        new() { Name = name, AddressPrefix = prefix, AzureResourceId = resourceId, Ipv4AddressPrefixes = [prefix] };
+
+    private static BulkImportSelectedSubnetDto SpanningSub(string prefix) =>
+        new()
+        {
+            Name = "sn-span",
+            AddressPrefix = prefix,
+            AzureResourceId = SpanningSubnet,
+            Ipv4AddressPrefixes = ["10.71.5.0/24", "10.72.5.0/24"]
+        };
 
     private BulkImportPlanViewModel Plan(
         IReadOnlyList<ExistingSubnetSnapshot> existing, params BulkImportSelectedVNetPrefixDto[] prefixes) =>
@@ -51,8 +60,8 @@ public class AzureBulkImportSpanningNameTests
     {
         BulkImportPlanViewModel plan = Plan(
             [],
-            Prefix("10.71.0.0/16", Sub("sn-span", "10.71.5.0/24", SpanningSubnet)),
-            Prefix("10.72.0.0/16", Sub("sn-span", "10.72.5.0/24", SpanningSubnet)));
+            Prefix("10.71.0.0/16", SpanningSub("10.71.5.0/24")),
+            Prefix("10.72.0.0/16", SpanningSub("10.72.5.0/24")));
 
         List<string> names = ChildNames(plan);
 

@@ -141,15 +141,11 @@
         }
 
         function isRenameOnly(prefixInfo, renameOn) {
-            return renameOn === true
-                && prefixInfo.statusName === "AlreadyImported"
-                && prefixInfo.wouldRenameTarget === true;
+            return renameOn === true && prefixInfo.renameOnlyCandidate === true;
         }
 
         function isSubnetRenameOnly(subnet, renameOn) {
-            return renameOn === true
-                && subnet.statusName === "AlreadyImported"
-                && subnet.wouldRenameSubnet === true;
+            return renameOn === true && subnet.renameOnlyCandidate === true;
         }
 
         function availabilityBadge(statusName) {
@@ -166,12 +162,6 @@
             return reason ? `<div class="small text-muted ms-4">${escapeHtml(reason)}</div>` : "";
         }
 
-        function isPrefixUsable(prefixInfo, renameOn) {
-            return prefixInfo.isSelectable
-                || isRenameOnly(prefixInfo, renameOn)
-                || (renameOn === true && prefixInfo.statusName === "AlreadyImported");
-        }
-
         function subnetHasWork(subnet, renameOn) {
             return subnet.isSelectable || isSubnetRenameOnly(subnet, renameOn);
         }
@@ -181,7 +171,7 @@
                 return true;
             }
 
-            if (isPrefixUsable(prefixInfo, renameOn)
+            if (prefixInfo.canCarrySubnetWork
                 && containedSubnets.some(function (s) { return subnetHasWork(s, renameOn); })) {
                 return true;
             }
@@ -246,7 +236,7 @@
 
                             const subnetRenameOnly = isSubnetRenameOnly(subnet, renameOn);
                             const subnetSelectable = subnet.isSelectable || subnetRenameOnly;
-                            const prefixUsable = isPrefixUsable(prefixInfo, renameOn);
+                            const prefixUsable = prefixInfo.canCarrySubnetWork === true;
                             const subnetBlockedByPrefix = subnetSelectable && !prefixUsable;
                             const $subnetCheckbox = $('<input type="checkbox" class="form-check-input bulk-subnet-checkbox">')
                                 .attr('id', subnetId)
@@ -275,7 +265,7 @@
 
                             if (subnetBlockedByPrefix && !subnet.reason) {
                                 $subnetDiv.append(reasonHtml(
-                                    "Its VNet prefix cannot be imported, so this subnet cannot be either."));
+                                    "The VNet prefix above cannot be selected, so this subnet cannot be imported either."));
                             }
                             $subList.append($subnetDiv);
                         });
@@ -355,23 +345,7 @@
             invalidatePlan();
         }
 
-        $("#bulk-rename-matched").on("change", function () {
-            renderVNetTree();
-            updateGoPreviewBtn();
-        });
-
-        $("#bulk-select-all-btn").on("click", function () {
-
-            $(".bulk-prefix-checkbox:not(:disabled), .bulk-subnet-checkbox:not(:disabled)").prop("checked", true);
-            updateGoPreviewBtn();
-        });
-
-        $("#bulk-deselect-all-btn").on("click", function () {
-            $(".bulk-prefix-checkbox, .bulk-subnet-checkbox").prop("checked", false);
-            updateGoPreviewBtn();
-        });
-
-        $("#bulk-hide-imported").on("change", function () {
+        function rerenderPreservingSelection() {
             const checkedPrefixes = $(".bulk-prefix-checkbox:checked:not(:disabled)")
                 .map(function () { return $(this).attr("data-vnet-idx") + "|" + $(this).attr("data-prefix"); }).get();
             const checkedSubnets = $(".bulk-subnet-checkbox:checked:not(:disabled)")
@@ -389,7 +363,22 @@
             });
 
             updateGoPreviewBtn();
+        }
+
+        $("#bulk-rename-matched").on("change", rerenderPreservingSelection);
+
+        $("#bulk-select-all-btn").on("click", function () {
+
+            $(".bulk-prefix-checkbox:not(:disabled), .bulk-subnet-checkbox:not(:disabled)").prop("checked", true);
+            updateGoPreviewBtn();
         });
+
+        $("#bulk-deselect-all-btn").on("click", function () {
+            $(".bulk-prefix-checkbox, .bulk-subnet-checkbox").prop("checked", false);
+            updateGoPreviewBtn();
+        });
+
+        $("#bulk-hide-imported").on("change", rerenderPreservingSelection);
 
         $("#bulk-back-to-subscription-btn").on("click", function () {
             activateTab("step1");
@@ -462,10 +451,16 @@
                 };
 
                 $(`.bulk-subnet-checkbox[data-vnet-idx='${w.vIdx}'][data-prefix='${w.prefix}']:checked:not(:disabled)`).each(function () {
+                    const resourceId = $(this).attr('data-resource-id') || '';
+                    const addressPrefix = $(this).attr('data-address-prefix');
+                    const source = (vnet.subnets || []).filter(function (s) {
+                        return (s.resourceId || '') === resourceId && s.addressPrefix === addressPrefix;
+                    })[0];
                     prefixDto.subnets.push({
                         name: $(this).attr('data-name'),
-                        addressPrefix: $(this).attr('data-address-prefix'),
-                        azureResourceId: $(this).attr('data-resource-id') || ''
+                        addressPrefix: addressPrefix,
+                        azureResourceId: resourceId,
+                        ipv4AddressPrefixes: source ? (source.ipv4AddressPrefixes || []) : []
                     });
                 });
 
@@ -670,10 +665,7 @@
                 success: function (result) {
                     if (result && result.success) {
                         committed = true;
-                        $("#bulk-commit-success-message").text(
-
-                            ` Created ${result.createdTargets} VNet target(s), ${result.createdChildSubnets} child subnet(s), renamed ${result.renamedTargets} target(s), linked ${result.linkedTargets} existing target(s) to Azure, marked ${result.fullyAllocatedTargets} target(s) as fully allocated.`
-                        );
+                        $("#bulk-commit-success-message").text(" " + result.summary);
                         $("#bulk-commit-success").removeClass("d-none");
                         $("#bulk-confirm-commit-btn").hide();
                         if (result.redirectUrl) {

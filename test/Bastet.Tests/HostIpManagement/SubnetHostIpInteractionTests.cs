@@ -422,7 +422,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         int initialDeletedSubnetCount = await _context.DeletedSubnets.CountAsync(TestContext.Current.CancellationToken);
         int initialDeletedHostIpCount = await _context.DeletedHostIpAssignments.CountAsync(TestContext.Current.CancellationToken);
 
-        IActionResult result = await _subnetController.DeleteConfirmed(subnetId, "approved", int.MaxValue, long.MaxValue);
+        IActionResult result = await _subnetController.DeleteConfirmed(subnetId, "approved", int.MaxValue, int.MaxValue);
 
         RedirectToActionResult redirectResult = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Index", redirectResult.ActionName);
@@ -590,7 +590,7 @@ public class SubnetHostIpInteractionTests : IDisposable
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         IActionResult result = await _subnetController.DeleteConfirmed(
-            700, "approved", reviewedMaxSubnetId, long.MaxValue);
+            700, "approved", reviewedMaxSubnetId, int.MaxValue);
 
         Assert.IsType<RedirectToActionResult>(result);
         Assert.NotNull(await _context.Subnets.FindAsync([700], TestContext.Current.CancellationToken));
@@ -604,10 +604,83 @@ public class SubnetHostIpInteractionTests : IDisposable
         await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         IActionResult result = await _subnetController.DeleteConfirmed(
-            710, "approved", 999, long.MaxValue);
+            710, "approved", 999, int.MaxValue);
 
         Assert.IsType<RedirectToActionResult>(result);
         Assert.Null(await _context.Subnets.FindAsync([710], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task DeleteConfirmed_AHostIpAddedByAClockBehindWriter_StillRefusesTheDelete()
+    {
+        DateTime reviewTime = new(2026, 03, 01, 12, 00, 00, DateTimeKind.Utc);
+        _context.Subnets.Add(new Subnet { Id = 730, Name = "root", NetworkAddress = "10.73.0.0", Cidr = 16, CreatedAt = reviewTime, CreatedBy = "test-user" });
+        _context.HostIpAssignments.Add(new HostIpAssignment
+        {
+            IP = "10.73.0.10",
+            Name = "reviewed",
+            SubnetId = 730,
+            CreatedAt = reviewTime,
+            CreatedBy = "test-user"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        ViewResult review = Assert.IsType<ViewResult>(await _subnetController.Delete(730));
+        DeleteSubnetViewModel reviewed = Assert.IsType<DeleteSubnetViewModel>(review.Model);
+        Assert.Equal(1, reviewed.HostIpCount);
+
+        _context.HostIpAssignments.Add(new HostIpAssignment
+        {
+            IP = "10.73.0.11",
+            Name = "added-by-clock-behind-writer",
+            SubnetId = 730,
+            CreatedBy = "replica-b"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await _context.Database.ExecuteSqlAsync(
+            $"UPDATE HostIpAssignments SET CreatedAt = {reviewTime.AddSeconds(-120)} WHERE IP = '10.73.0.11'",
+            TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        IActionResult result = await _subnetController.DeleteConfirmed(
+            730, "approved", reviewed.ConfirmedMaxSubnetId, reviewed.HostIpCount);
+
+        Assert.IsType<RedirectToActionResult>(result);
+        Assert.NotNull(await _context.Subnets.FindAsync([730], TestContext.Current.CancellationToken));
+        Assert.Equal(2, await _context.HostIpAssignments.CountAsync(h => h.SubnetId == 730, TestContext.Current.CancellationToken));
+
+        ViewResult secondReview = Assert.IsType<ViewResult>(await _subnetController.Delete(730));
+        DeleteSubnetViewModel reReviewed = Assert.IsType<DeleteSubnetViewModel>(secondReview.Model);
+        Assert.Equal(2, reReviewed.HostIpCount);
+
+        IActionResult confirmedRetry = await _subnetController.DeleteConfirmed(
+            730, "approved", reReviewed.ConfirmedMaxSubnetId, reReviewed.HostIpCount);
+
+        Assert.IsType<RedirectToActionResult>(confirmedRetry);
+        Assert.Null(await _context.Subnets.FindAsync([730], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task HostIpEdit_POST_ConcurrencyConflict_KeepsTheStaleToken_SoABlindRetryCannotOverwrite()
+    {
+        byte[] staleToken = [9, 9, 9, 9, 9, 9, 9, 9];
+        EditHostIpViewModel viewModel = new()
+        {
+            IP = "192.168.0.10",
+            Name = "renamed-by-a-stale-editor",
+            SubnetId = 1,
+            RowVersion = staleToken
+        };
+
+        IActionResult result = await _hostIpController.Edit("192.168.0.10", viewModel);
+
+        ViewResult view = Assert.IsType<ViewResult>(result);
+        EditHostIpViewModel shown = Assert.IsType<EditHostIpViewModel>(view.Model);
+        Assert.Equal(staleToken, shown.RowVersion);
+        Assert.Contains(_hostIpController.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user"));
+        Assert.False(_hostIpController.ModelState.TryGetValue(nameof(shown.RowVersion), out _)
+            && _hostIpController.ModelState[nameof(shown.RowVersion)]!.Errors.Count > 0);
     }
 
     [Fact]

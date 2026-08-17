@@ -239,6 +239,44 @@ public class AzureReconcilerTests
     }
 
     [Fact]
+    public void AnAncestorOfADescendantLinkedToAnotherSubscription_IsStillOffered()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [
+                Linked(1, "parent", "10.40.0.0", 16, VNetId("vnet-a"), descendantIds: [2]),
+                Linked(2, "child", "10.40.1.0", 24,
+                    "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s")
+            ]);
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(1, item.SubnetId);
+        Assert.Equal(AzureReconcileStatus.VNetDeleted, item.Status);
+    }
+
+    [Fact]
+    public void AnAncestorOfADescendantConfirmedStillLive_IsStillOffered()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [
+                Linked(1, "parent", "10.41.0.0", 16, VNetId("vnet-a"), descendantIds: [2]),
+                Linked(2, "child", "10.41.1.0", 24, SubnetId("vnet-a", "sn-a"))
+            ]);
+
+        Assert.Equal(2, plan.Items.Count);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-a")] = AzureResourceConfirmation.Deleted,
+            [SubnetId("vnet-a", "sn-a")] = AzureResourceConfirmation.Live
+        });
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(1, item.SubnetId);
+    }
+
+    [Fact]
     public void AnAncestorOfAManuallyCreatedDescendant_IsStillWithheld()
     {
         AzureReconcilePlanViewModel plan = Build(
@@ -286,7 +324,10 @@ public class AzureReconcilerTests
             [Linked(1, "app", "10.24.1.0", 24, resourceId)]);
 
         Assert.Empty(plan.Items);
-        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, Assert.Single(plan.ReviewItems).Status);
+        AzureReconcileItem reviewed = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, reviewed.Status);
+        Assert.DoesNotContain("Correct or clear", reviewed.Reason);
+        Assert.Contains("will not offer it for deletion", reviewed.Reason);
     }
 
     [Fact]
@@ -340,7 +381,9 @@ public class AzureReconcilerTests
 
         AzureReconcileItem item = Assert.Single(plan.Items);
         Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, item.Status);
-        Assert.Contains("now none", item.Reason);
+        Assert.Contains("no longer has an IPv4 address prefix", item.Reason);
+        Assert.DoesNotContain("import wizard", item.Reason);
+        Assert.Contains("Delete it here", item.Reason);
         Assert.False(AzureReconciler.IsAbsenceStatus(item.Status));
     }
 
@@ -353,6 +396,8 @@ public class AzureReconcilerTests
 
         AzureReconcileItem item = Assert.Single(plan.Items);
         Assert.Equal(AzureReconcileStatus.VNetPrefixRemoved, item.Status);
+        Assert.DoesNotContain("import wizard", item.Reason);
+        Assert.Contains("Delete it here", item.Reason);
         Assert.False(AzureReconciler.IsAbsenceStatus(item.Status));
     }
 

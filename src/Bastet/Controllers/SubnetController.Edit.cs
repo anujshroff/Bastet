@@ -59,6 +59,7 @@ public partial class SubnetController : Controller
 
         byte[]? postedRowVersion = viewModel.RowVersion;
         bool ownWriteMayHaveLanded = false;
+        bool concurrencyConflict = false;
 
         if (ModelState.IsValid)
         {
@@ -81,8 +82,10 @@ public partial class SubnetController : Controller
                     if (cidrChanged && !string.IsNullOrEmpty(subnet.AzureResourceId))
                     {
                         throw new ValidationException(
-                            "This subnet is linked to an Azure resource, so its CIDR cannot be changed here. " +
-                            "Change the prefix in Azure and re-import, or delete the subnet and recreate it.");
+                            "This subnet is linked to an Azure resource, so its CIDR cannot be changed here." +
+                            (AzureController.IsAzureImportEnabled()
+                                ? " Change the prefix in Azure, then ask an administrator to re-import it."
+                                : string.Empty));
                     }
 
                     if (viewModel.Cidr != subnet.Cidr)
@@ -167,32 +170,7 @@ public partial class SubnetController : Controller
                     return this.RedirectToErrorPage(404, "The subnet no longer exists. It may have been deleted by another user.");
                 }
 
-                Subnet? currentSubnet = await context.Subnets
-                    .AsNoTracking()
-                    .Include(s => s.ParentSubnet)
-                    .FirstOrDefaultAsync(s => s.Id == id);
-
-                if (currentSubnet != null)
-                {
-
-                    viewModel.RowVersion = currentSubnet.RowVersion;
-                    viewModel.NetworkAddress = currentSubnet.NetworkAddress;
-                    viewModel.OriginalCidr = currentSubnet.Cidr;
-                    viewModel.CreatedAt = currentSubnet.CreatedAt;
-                    viewModel.LastModifiedAt = currentSubnet.LastModifiedAt;
-
-                    if (currentSubnet.ParentSubnet != null)
-                    {
-                        viewModel.ParentSubnetInfo = $"{currentSubnet.ParentSubnet.Name} ({currentSubnet.ParentSubnet.NetworkAddress}/{currentSubnet.ParentSubnet.Cidr})";
-                    }
-
-                    ModelState.Remove(nameof(viewModel.RowVersion));
-                }
-
-                ModelState.AddModelError("",
-                    "This subnet was modified by another user while you were editing it. " +
-                    "Your changes have been preserved below, but you should review the current values before saving. " +
-                    "Click 'Save Changes' again to apply your updates.");
+                concurrencyConflict = true;
             }
             catch (TimeoutException)
             {
@@ -248,19 +226,44 @@ public partial class SubnetController : Controller
         viewModel.CreatedAt = origSubnet.CreatedAt;
         viewModel.LastModifiedAt = origSubnet.LastModifiedAt;
 
-        bool rowMovedUnderneath = postedRowVersion is not null
-            && origSubnet.RowVersion is not null
-            && !postedRowVersion.SequenceEqual(origSubnet.RowVersion);
-
-        viewModel.RowVersion = origSubnet.RowVersion;
-
-        ModelState.Remove(nameof(viewModel.RowVersion));
+        bool rowMovedUnderneath = concurrencyConflict
+            || (postedRowVersion is not null
+                && origSubnet.RowVersion is not null
+                && !postedRowVersion.SequenceEqual(origSubnet.RowVersion));
 
         if (rowMovedUnderneath && !ownWriteMayHaveLanded)
         {
+            List<string> differing = [];
+            if (!string.Equals(origSubnet.Name, viewModel.Name, StringComparison.Ordinal))
+            {
+                differing.Add($"Name is now '{origSubnet.Name}'");
+            }
+
+            if (!string.Equals(origSubnet.Description ?? string.Empty, viewModel.Description ?? string.Empty, StringComparison.Ordinal))
+            {
+                differing.Add(string.IsNullOrEmpty(origSubnet.Description)
+                    ? "Description is now empty"
+                    : $"Description is now '{origSubnet.Description}'");
+            }
+
+            if (!string.Equals(origSubnet.Tags ?? string.Empty, viewModel.Tags ?? string.Empty, StringComparison.Ordinal))
+            {
+                differing.Add(string.IsNullOrEmpty(origSubnet.Tags)
+                    ? "Tags are now empty"
+                    : $"Tags are now '{origSubnet.Tags}'");
+            }
+
+            if (origSubnet.Cidr != viewModel.Cidr)
+            {
+                differing.Add($"CIDR is now /{origSubnet.Cidr}");
+            }
+
             ModelState.AddModelError("",
-                "This subnet has changed since this form was loaded. The values shown are the current "
-                + "ones; review them before saving.");
+                "This subnet was modified by another user while you were editing it, so it was not saved. "
+                + (differing.Count > 0
+                    ? $"Stored values that differ from this form: {string.Join("; ", differing)}. "
+                    : string.Empty)
+                + "Reload the page to see the current values, then re-apply the changes that still make sense.");
         }
 
         if (origSubnet.ParentSubnet != null)

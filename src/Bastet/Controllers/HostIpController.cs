@@ -240,19 +240,14 @@ public class HostIpController(
 
                             if (currentHostIp != null)
                             {
-
-                                viewModel.RowVersion = currentHostIp.RowVersion ?? [];
                                 viewModel.SubnetInfo = $"{currentHostIp.Subnet.Name} ({currentHostIp.Subnet.NetworkAddress}/{currentHostIp.Subnet.Cidr})";
                                 viewModel.CreatedAt = currentHostIp.CreatedAt;
                                 viewModel.LastModifiedAt = currentHostIp.LastModifiedAt;
-
-                                ModelState.Remove(nameof(viewModel.RowVersion));
                             }
 
                             ModelState.AddModelError("",
-                                "This host IP was modified by another user while you were editing it. " +
-                                "Your changes have been preserved below, but you should review the current values before saving. " +
-                                "Click 'Save Changes' again to apply your updates.");
+                                "This host IP was modified by another user while you were editing it, so it was not saved. " +
+                                "Reload the page to see the current values, then re-apply the changes that still make sense.");
                         }
                         else
                         {
@@ -296,7 +291,9 @@ public class HostIpController(
                     return NotFound();
                 }
 
-                ModelState.AddModelError("", "The host IP was modified by another user. Please reload and try again.");
+                ModelState.AddModelError("",
+                    "This host IP was modified by another user while you were editing it, so it was not saved. " +
+                    "Reload the page to see the current values, then re-apply the changes that still make sense.");
                 return View(viewModel);
             }
             catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))

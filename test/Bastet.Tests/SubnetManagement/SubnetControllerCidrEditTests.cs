@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
 
+[Collection(Bastet.Tests.Azure.AzureFeatureFlagCollection.Name)]
 public class SubnetControllerCidrEditTests : IDisposable
 {
     private readonly BastetDbContext _context;
@@ -691,12 +692,33 @@ public class SubnetControllerCidrEditTests : IDisposable
             OriginalCidr = 16
         };
 
-        IActionResult result = await _controller.Edit(30, viewModel);
+        string? priorFlag = Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT");
+        try
+        {
+            Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", "true");
+            IActionResult flagOnResult = await _controller.Edit(30, viewModel);
 
-        _ = Assert.IsType<ViewResult>(result);
-        Assert.False(_controller.ModelState.IsValid);
-        Assert.Contains("Cidr", _controller.ModelState.Keys);
-        Assert.Contains("Azure", _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty);
+            _ = Assert.IsType<ViewResult>(flagOnResult);
+            string flagOnMessage = _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty;
+            Assert.Contains("Azure", flagOnMessage);
+            Assert.Contains("ask an administrator to re-import it", flagOnMessage);
+
+            _controller.ModelState.Clear();
+            Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", null);
+            IActionResult flagOffResult = await _controller.Edit(30, viewModel);
+
+            _ = Assert.IsType<ViewResult>(flagOffResult);
+            Assert.False(_controller.ModelState.IsValid);
+            Assert.Contains("Cidr", _controller.ModelState.Keys);
+            string flagOffMessage = _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty;
+            Assert.Contains("Azure", flagOffMessage);
+            Assert.EndsWith("cannot be changed here.", flagOffMessage);
+            Assert.DoesNotContain("re-import", flagOffMessage);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", priorFlag);
+        }
 
         Subnet? unchanged = await _context.Subnets.FindAsync([30], TestContext.Current.CancellationToken);
         Assert.NotNull(unchanged);

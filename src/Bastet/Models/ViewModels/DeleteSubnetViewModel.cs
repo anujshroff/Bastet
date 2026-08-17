@@ -19,8 +19,6 @@ public class DeleteSubnetViewModel
 
     public int ConfirmedMaxSubnetId { get; set; }
 
-    public long ConfirmedMaxHostIpTicks { get; set; }
-
     public byte[]? RowVersion { get; set; }
 
 }

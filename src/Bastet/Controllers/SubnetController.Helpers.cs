@@ -255,7 +255,7 @@ public partial class SubnetController : Controller
         return true;
     }
 
-    private SubnetTreeViewModel BuildSubnetTreeViewModel(Subnet subnet, List<Subnet> allSubnets)
+    private SubnetTreeViewModel BuildSubnetTreeViewModel(Subnet subnet)
     {
         SubnetTreeViewModel viewModel = new()
         {
@@ -266,7 +266,6 @@ public partial class SubnetController : Controller
             Description = subnet.Description,
             SubnetMask = ipUtilityService.CalculateSubnetMask(subnet.Cidr),
             UsableIpAddresses = ipUtilityService.CalculateUsableIpAddresses(subnet.Cidr),
-            ParentSubnetId = subnet.ParentSubnetId,
             ChildSubnets = []
         };
 
@@ -276,7 +275,7 @@ public partial class SubnetController : Controller
             .ThenBy(s => IPAddress.Parse(s.NetworkAddress).GetAddressBytes()[2])
             .ThenBy(s => IPAddress.Parse(s.NetworkAddress).GetAddressBytes()[3]))
         {
-            viewModel.ChildSubnets.Add(BuildSubnetTreeViewModel(childSubnet, allSubnets));
+            viewModel.ChildSubnets.Add(BuildSubnetTreeViewModel(childSubnet));
         }
 
         return viewModel;

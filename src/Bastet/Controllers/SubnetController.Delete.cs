@@ -25,10 +25,6 @@ public partial class SubnetController : Controller
 
         int descendantCount = await CountAllDescendants(id);
 
-        int hostIpCount = subnet.HostIpAssignments.Count;
-
-        hostIpCount += await CountAllDescendantHostIps(id);
-
         DeleteSubnetViewModel viewModel = new()
         {
             Id = subnet.Id,
@@ -37,9 +33,8 @@ public partial class SubnetController : Controller
             Cidr = subnet.Cidr,
             Description = subnet.Description,
             ChildSubnetCount = descendantCount,
-            HostIpCount = hostIpCount,
+            HostIpCount = await SubtreeHostIpCountAsync(id),
             ConfirmedMaxSubnetId = await MaxDescendantSubnetIdAsync(id),
-            ConfirmedMaxHostIpTicks = await MaxSubtreeHostIpTicksAsync(id),
             RowVersion = subnet.RowVersion
         };
 
@@ -78,60 +73,19 @@ public partial class SubnetController : Controller
         return ids.Count == 0 ? 0 : ids.Max();
     }
 
-    private async Task<long> MaxSubtreeHostIpTicksAsync(int subnetId)
+    private async Task<int> SubtreeHostIpCountAsync(int subnetId)
     {
         List<int> ids = [.. await SubtreeSubnetIdsAsync(subnetId), subnetId];
 
-        List<DateTime> created = await context.HostIpAssignments.AsNoTracking()
-            .Where(h => ids.Contains(h.SubnetId))
-            .Select(h => h.CreatedAt)
-            .ToListAsync();
-
-        return created.Count == 0 ? 0 : created.Max().Ticks;
-    }
-
-    private async Task<int> CountAllDescendantHostIps(int subnetId)
-    {
-
-        List<Subnet> allSubnets = await context.Subnets
-            .Include(s => s.HostIpAssignments)
-            .ToListAsync();
-
-        int hostIpCount = 0;
-
-        HashSet<int> processedIds = [];
-
-        Queue<int> queue = new();
-        queue.Enqueue(subnetId);
-        processedIds.Add(subnetId);
-
-        while (queue.Count > 0)
-        {
-            int currentId = queue.Dequeue();
-
-            List<Subnet> childSubnets = [.. allSubnets.Where(s => s.ParentSubnetId == currentId)];
-
-            foreach (Subnet? child in childSubnets)
-            {
-                if (!processedIds.Contains(child.Id))
-                {
-
-                    hostIpCount += child.HostIpAssignments.Count;
-
-                    queue.Enqueue(child.Id);
-                    processedIds.Add(child.Id);
-                }
-            }
-        }
-
-        return hostIpCount;
+        return await context.HostIpAssignments.AsNoTracking()
+            .CountAsync(h => ids.Contains(h.SubnetId));
     }
 
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> DeleteConfirmed(
-        int id, string confirmation, int? confirmedMaxSubnetId, long? confirmedMaxHostIpTicks, byte[]? rowVersion = null)
+        int id, string confirmation, int? confirmedMaxSubnetId, int? confirmedHostIpCount, byte[]? rowVersion = null)
     {
 
         if (confirmation != "approved")
@@ -140,7 +94,7 @@ public partial class SubnetController : Controller
             return RedirectToAction(nameof(Delete), new { id });
         }
 
-        if (confirmedMaxSubnetId is null || confirmedMaxHostIpTicks is null)
+        if (confirmedMaxSubnetId is null || confirmedHostIpCount is null)
         {
             TempData["ErrorMessage"] =
                 "The deletion scope was missing from the form. Review the subnet and confirm again.";
@@ -151,7 +105,7 @@ public partial class SubnetController : Controller
         {
 
             return await subnetLockingService.ExecuteWithSubnetLockAsync(
-                () => DeleteConfirmedCore(id, confirmedMaxSubnetId.Value, confirmedMaxHostIpTicks.Value, rowVersion));
+                () => DeleteConfirmedCore(id, confirmedMaxSubnetId.Value, confirmedHostIpCount.Value, rowVersion));
         }
         catch (TimeoutException)
         {
@@ -161,7 +115,7 @@ public partial class SubnetController : Controller
     }
 
     private async Task<IActionResult> DeleteConfirmedCore(
-        int id, int confirmedMaxSubnetId, long confirmedMaxHostIpTicks, byte[]? rowVersion)
+        int id, int confirmedMaxSubnetId, int confirmedHostIpCount, byte[]? rowVersion)
     {
 
         Subnet? subnet = await context.Subnets
@@ -184,7 +138,7 @@ public partial class SubnetController : Controller
         }
 
         if (await MaxDescendantSubnetIdAsync(id) > confirmedMaxSubnetId
-            || await MaxSubtreeHostIpTicksAsync(id) > confirmedMaxHostIpTicks)
+            || await SubtreeHostIpCountAsync(id) > confirmedHostIpCount)
         {
             TempData["ErrorMessage"] =
                 "Subnets or host IP assignments were added beneath this subnet after you reviewed it. "
