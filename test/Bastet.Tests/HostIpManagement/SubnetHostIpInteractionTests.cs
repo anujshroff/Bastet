@@ -20,7 +20,6 @@ public class SubnetHostIpInteractionTests : IDisposable
     private readonly IIpUtilityService _ipUtilityService;
     private readonly SubnetValidationService _subnetValidationService;
     private readonly HostIpValidationService _hostIpValidationService;
-    private readonly IInputSanitizationService _sanitizationService;
     private readonly SubnetController _subnetController;
     private readonly HostIpController _hostIpController;
 
@@ -33,7 +32,6 @@ public class SubnetHostIpInteractionTests : IDisposable
         _ipUtilityService = new IpUtilityService();
         _subnetValidationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
-        _sanitizationService = new InputSanitizationService();
 
         _subnetController = new SubnetController(_context, _ipUtilityService,
             _subnetValidationService, _hostIpValidationService, _userContextService,

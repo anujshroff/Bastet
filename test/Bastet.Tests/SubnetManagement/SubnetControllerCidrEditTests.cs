@@ -18,7 +18,6 @@ public class SubnetControllerCidrEditTests : IDisposable
     private readonly IUserContextService _userContextService;
     private readonly IIpUtilityService _ipUtilityService;
     private readonly SubnetValidationService _validationService;
-    private readonly IInputSanitizationService _sanitizationService;
     private readonly SubnetController _controller;
 
     public SubnetControllerCidrEditTests()
@@ -29,7 +28,6 @@ public class SubnetControllerCidrEditTests : IDisposable
         _userContextService = ControllerTestHelper.CreateMockUserContextService();
         _ipUtilityService = new IpUtilityService();
         _validationService = new SubnetValidationService(_ipUtilityService);
-        _sanitizationService = new InputSanitizationService();
 
         HostIpValidationService hostIpValidationService = new(_ipUtilityService, _context);
 
