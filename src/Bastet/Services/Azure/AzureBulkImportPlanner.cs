@@ -189,7 +189,7 @@ namespace Bastet.Services.Azure
 
                 if (!string.IsNullOrEmpty(exact.AzureResourceId)
                     && !string.IsNullOrEmpty(vnet.ResourceId)
-                    && !string.Equals(exact.AzureResourceId, vnet.ResourceId, StringComparison.OrdinalIgnoreCase))
+                    && !AzureResourceIdentity.IsSameResourceId(exact.AzureResourceId, vnet.ResourceId))
                 {
                     return Blocked(result,
                         $"Bastet subnet '{exact.Name}' is already linked to Azure VNet '{exact.AzureResourceId}'. "
@@ -561,7 +561,7 @@ namespace Bastet.Services.Azure
 
                 if (!string.IsNullOrEmpty(exact.AzureResourceId)
                     && !string.IsNullOrEmpty(p.Source.VNetResourceId)
-                    && !string.Equals(exact.AzureResourceId, p.Source.VNetResourceId, StringComparison.OrdinalIgnoreCase))
+                    && !AzureResourceIdentity.IsSameResourceId(exact.AzureResourceId, p.Source.VNetResourceId))
                 {
                     item.Errors.Add(
                         $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' "

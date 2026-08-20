@@ -87,11 +87,11 @@ Round 24 filed 19 findings, of which 7 are residue of previous rounds' own fixes
 
 # Info
 
-## I1 — 23-L6 left two inline resource-id equality implementations in the planner instead of routing them through AzureResourceIdentity.IsSameResourceId `[x2]`
-**Where:** src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:197 (AnnotatePrefix, context 195-197); src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:569 (BuildPlan, context 567-569)
-**Breaks:** Two link-replacement refusal checks still spell resource-id equality inline (null-guards plus string.Equals OrdinalIgnoreCase) against 23-L6's one-implementation contract. No wrong output today; the defect is the surviving duplication — the next comparison-mode change to the helper silently strands these two.
-**Repro:** Verified (scratch clone): IsSameResourceId→Ordinal → 880/881 while the :569 pin ATargetLinkedWithDifferentIdCasing_IsNotRefusedAsALinkReplacement PASSED (sites stranded); filed fix verbatim → 25/881 failed; corrected fix → 881/881, and re-mutating the helper then reddens both site casing tests. Sites date to ff285cf (round 7); BulkAzure.cs:258 is Ordinal by design.
-**Fix:** verifier judged the filed fix unsound: Keep both explicit IsNullOrEmpty guards at each site and replace only the equality term: at AzureBulkImportPlanner.cs:197 change "!string.Equals(exact.AzureResourceId, vnet.ResourceId, StringComparison.OrdinalIgnoreCase)" to "!AzureResourceIdentity.IsSameResourceId(exact.AzureResourceId, vnet.ResourceId)", and at :569 change "!string.Equals(exact.AzureResourceId, p.Source.VNetResourceId, StringComparison.OrdinalIgnoreCase)" to "!AzureResourceIdentity.IsSameResourceId(exact.AzureResourceId, p.Source.VNetResourceId)". The guards must NOT fold into the helper: the compare is negated, so !IsSameResourceId is true when either id is empty, which would refuse every unlinked exact-match target as a link replacement (18-R4 adoption) — applying the filed fix verbatim reddens 25 tests. With guards kept the semantics are bit-identical today (verified 881/881 green) and a future comparison-mode change to the helper propagates to both sites (verified: helper mutation reddens both site-pinning casing tests after the corrected fix).
+## I1 — 23-L6 left two inline resource-id equality implementations in the planner instead of routing them through AzureResourceIdentity.IsSameResourceId `[x2]` — FIXED
+_Fixed in round 24. Routed the two link-replacement refusal checks (AnnotatePrefix and the BuildPlanItem error path) through AzureResourceIdentity.IsSameResourceId, keeping both explicit IsNullOrEmpty guards per the verifier's correction — folding them would refuse every unlinked exact-match target (18-R4 adoption) since the compare is negated._
+_Swept: no other inline resource-id equality remains in the planner; the deliberate Ordinal store gate in BulkAzure.cs untouched._
+_Verified: build 0/0, 881/881; helper→Ordinal mutant now reddens exactly the two site-pinning casing tests (they were stranded green pre-fix), restored green; adoption suites 45/45._
+_Reviewed: independent reviewer PASS — semantics bit-identical, guard-folding trap confirmed avoided, propagation proven by mutation._
 **Residue of:** 23-L6
 
 ## I2 — Locking-service registration dispatches on a provider that is constant; sqlite and default arms are dead dispatch `[x1]`
