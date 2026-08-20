@@ -15,7 +15,7 @@ public class HostIpViewModel
 public class CreateHostIpViewModel
 {
     [Required(ErrorMessage = "IP address is required")]
-    [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid IP address format")]
+    [NetworkInput(ErrorMessage = "Invalid IP address format")]
     [SanitizeNetworkInput]
     [Display(Name = "IP Address")]
     public string IP { get; set; } = string.Empty;

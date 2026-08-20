@@ -26,8 +26,6 @@ public class NoHtmlAttribute : ValidationAttribute
 
 public class NetworkInputAttribute : ValidationAttribute
 {
-    public bool RequireValidIp { get; set; } = false;
-
     protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
     {
         if (value is not string stringValue || string.IsNullOrWhiteSpace(stringValue))
@@ -41,24 +39,9 @@ public class NetworkInputAttribute : ValidationAttribute
             return new ValidationResult("Input sanitization service not available");
         }
 
-        if (RequireValidIp)
-        {
-            if (!sanitizationService.IsValidIpAddress(stringValue))
-            {
-                return new ValidationResult(ErrorMessage ?? "Invalid IP address format");
-            }
-        }
-        else
-        {
-
-            string sanitized = sanitizationService.SanitizeNetworkInput(stringValue);
-            if (sanitized != stringValue.Trim())
-            {
-                return new ValidationResult(ErrorMessage ?? "Input contains invalid characters for network input");
-            }
-        }
-
-        return ValidationResult.Success;
+        return !sanitizationService.IsValidIpAddress(stringValue)
+            ? new ValidationResult(ErrorMessage ?? "Invalid IP address format")
+            : ValidationResult.Success;
     }
 }
 
