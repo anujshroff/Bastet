@@ -219,11 +219,8 @@
             const startingNum = ipAddressToNumber(startingAddress);
 
             const parentCidr = parseInt($('#parentCidr').val());
-            const parentId = $('#parentId').val();
 
-            const parentNetwork = childSubnets.find(s => s.id === parentId)?.networkAddress || startingAddress;
-
-            const parentBoundaries = getSubnetBoundaries(parentNetwork, parentCidr);
+            const parentBoundaries = getSubnetBoundaries(startingAddress, parentCidr);
 
             const subnetSize = Math.pow(2, 32 - cidr);
 
