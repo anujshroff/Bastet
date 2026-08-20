@@ -311,7 +311,46 @@ public class AzureReconcilerTests
             [Linked(1, "app", "10.23.1.0", 24, SubnetId("vnet-a", "sn-a"))]);
 
         Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [SubnetId("vnet-a", "sn-a")] = AzureResourceConfirmation.Deleted
+        });
+
+        Assert.Single(plan.Items);
         Assert.Contains(plan.Warnings, w => w.Contains("no VNets at all"));
+    }
+
+    [Fact]
+    public void AnEmptySubscription_WhereEveryFlaggedRowIsThenWithheld_DoesNotWarnThatRowsBelowAreGone()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(),
+            [Linked(1, "app", "10.23.1.0", 24, SubnetId("vnet-a", "sn-a"))]);
+
+        Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [SubnetId("vnet-a", "sn-a")] = AzureResourceConfirmation.NotVisible
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("no VNets at all"));
+        Assert.Contains(plan.Warnings, w => w.Contains("denied access"));
+    }
+
+    [Fact]
+    public void AHeldRowWhoseVNetIsMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [Linked(1, "target", "10.30.0.0", 16, VNetId("vnet-a"), manualDescendants: 1)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.DoesNotContain("no longer exists", held.Reason);
+        Assert.Contains("could not be found in this subscription's listing", held.Reason);
     }
 
     [Theory]

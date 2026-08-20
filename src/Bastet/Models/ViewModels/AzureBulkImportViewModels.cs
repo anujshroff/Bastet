@@ -24,6 +24,8 @@ namespace Bastet.Models.ViewModels
 
         public List<string> Ipv4AddressPrefixes { get; set; } = [];
 
+        public List<string> ContainingPrefixes { get; set; } = [];
+
         public BulkImportAvailability Status { get; set; } = BulkImportAvailability.Available;
 
         public string StatusName => Status.ToString();

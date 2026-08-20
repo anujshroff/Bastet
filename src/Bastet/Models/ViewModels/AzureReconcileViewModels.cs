@@ -82,6 +82,8 @@ namespace Bastet.Models.ViewModels
 
         public bool ScanSucceeded { get; set; }
 
+        public bool InventoryWasEmpty { get; set; }
+
         public List<AzureReconcileItem> Items { get; set; } = [];
 
         public List<AzureReconcileItem> ReviewItems { get; set; } = [];

@@ -3,8 +3,6 @@ namespace Bastet.Models.ViewModels;
 public class DeletedSubnetsViewModel
 {
 
-    public int OriginalId { get; set; }
-
     public string Name { get; set; } = string.Empty;
 
     public string NetworkAddress { get; set; } = string.Empty;
@@ -12,8 +10,6 @@ public class DeletedSubnetsViewModel
     public int Cidr { get; set; }
 
     public string? Description { get; set; }
-
-    public int? OriginalParentId { get; set; }
 
     public DateTime DeletedAt { get; set; }
 

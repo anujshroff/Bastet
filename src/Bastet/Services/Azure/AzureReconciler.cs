@@ -35,8 +35,8 @@ namespace Bastet.Services.Azure
                 return plan;
             }
 
-            Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(AzureResourceIdentity.IdComparer);
+            Dictionary<string, List<string>> liveSubnetPrefixes = new(AzureResourceIdentity.IdComparer);
 
             List<AzureReconcileItem> heldByManualContent = [];
 
@@ -90,8 +90,11 @@ namespace Bastet.Services.Azure
 
                 if (snapshot.ManualDescendantCount > 0 || snapshot.HostIpCount > 0)
                 {
+                    string lead = IsAbsenceStatus(item.Status)
+                        ? AbsentFromListingClause(item.Status)
+                        : item.Reason;
                     item.Status = AzureReconcileStatus.HeldByManualContent;
-                    item.Reason = $"{item.Reason} {DescribeManualContent(snapshot)} "
+                    item.Reason = $"{lead} {DescribeManualContent(snapshot)} "
                         + "BASTET will not delete it, because Azure has no record of that and it would be "
                         + "destroyed with no way to restore it. Delete it here first, then run the scan again.";
                     plan.ReviewItems.Add(item);
@@ -114,12 +117,7 @@ namespace Bastet.Services.Azure
                 plan, [.. heldByManualContent.Select(i => i.SubnetId)],
                 "archiving them would also archive subnet(s) beneath them that hold manually created content");
 
-            if (inventory.VNets.Count == 0 && plan.Items.Count > 0)
-            {
-                plan.Warnings.Add(
-                    $"Azure reported no VNets at all in this subscription, so every one of the {plan.Items.Count} Azure-linked subnet(s) below is flagged as deleted. " +
-                    "Confirm the subscription is the right one and really is empty before deleting anything.");
-            }
+            plan.InventoryWasEmpty = inventory.VNets.Count == 0;
 
             return plan;
         }
@@ -209,7 +207,19 @@ namespace Bastet.Services.Azure
             WithholdTargetsWhoseCascadeIsBlocked(
                 plan, withheld,
                 "archiving them would also archive subnet(s) beneath them that were withheld from deletion");
+
+            if (plan.InventoryWasEmpty && plan.Items.Count > 0)
+            {
+                plan.Warnings.Add(
+                    $"Azure reported no VNets at all in this subscription, so every one of the {plan.Items.Count} Azure-linked subnet(s) below is flagged as deleted. " +
+                    "Confirm the subscription is the right one and really is empty before deleting anything.");
+            }
         }
+
+        private static string AbsentFromListingClause(AzureReconcileStatus status) =>
+            status == AzureReconcileStatus.VNetDeleted
+                ? "The VNet this subnet was imported from could not be found in this subscription's listing."
+                : "The Azure subnet this was imported from could not be found in this subscription's listing.";
 
         private static string DescribeManualContent(AzureLinkedSubnetSnapshot snapshot)
         {

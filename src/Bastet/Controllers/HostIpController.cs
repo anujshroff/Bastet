@@ -53,8 +53,7 @@ public class HostIpController(
                 Name = h.Name,
                 CreatedAt = h.CreatedAt,
                 CreatedBy = h.CreatedBy,
-                LastModifiedAt = h.LastModifiedAt,
-                ModifiedBy = h.ModifiedBy
+                LastModifiedAt = h.LastModifiedAt
             })];
 
         ViewBag.SubnetId = subnetId;
@@ -479,8 +478,7 @@ public class HostIpController(
                 Cidr = h.Subnet.Cidr,
                 CreatedAt = h.HostIp.CreatedAt,
                 CreatedBy = h.HostIp.CreatedBy,
-                LastModifiedAt = h.HostIp.LastModifiedAt,
-                ModifiedBy = h.HostIp.ModifiedBy
+                LastModifiedAt = h.HostIp.LastModifiedAt
             })];
 
         AllHostIpsViewModel viewModel = new()
@@ -523,14 +521,10 @@ public class HostIpController(
         {
             AllDeletedHostIpItemViewModel viewModel = new()
             {
-                Id = deletedHostIp.Id,
                 OriginalIP = deletedHostIp.OriginalIP,
                 Name = deletedHostIp.Name,
                 OriginalSubnetId = deletedHostIp.OriginalSubnetId,
                 CreatedAt = deletedHostIp.CreatedAt,
-                CreatedBy = deletedHostIp.CreatedBy,
-                LastModifiedAt = deletedHostIp.LastModifiedAt,
-                ModifiedBy = deletedHostIp.ModifiedBy,
                 DeletedAt = deletedHostIp.DeletedAt,
                 DeletedBy = deletedHostIp.DeletedBy
             };
@@ -627,16 +621,11 @@ public class HostIpController(
 
         List<DeletedHostIpViewModel> viewModels = [.. deletedHostIps.Select(d => new DeletedHostIpViewModel
         {
-            Id = d.Id,
             OriginalIP = d.OriginalIP,
             Name = d.Name,
-            OriginalSubnetId = d.OriginalSubnetId,
             DeletedAt = d.DeletedAt,
             DeletedBy = d.DeletedBy,
-            CreatedAt = d.CreatedAt,
-            CreatedBy = d.CreatedBy,
-            LastModifiedAt = d.LastModifiedAt,
-            ModifiedBy = d.ModifiedBy
+            CreatedAt = d.CreatedAt
         })];
 
         DeletedHostIpListViewModel model = new()

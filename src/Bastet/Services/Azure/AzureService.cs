@@ -193,18 +193,18 @@ namespace Bastet.Services.Azure
 
             List<string> distinct = [.. resourceIds
                 .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)];
+                .Distinct(AzureResourceIdentity.IdComparer)];
 
             if (distinct.Count == 0)
             {
-                return new Dictionary<string, AzureResourceConfirmation>(StringComparer.OrdinalIgnoreCase);
+                return new Dictionary<string, AzureResourceConfirmation>(AzureResourceIdentity.IdComparer);
             }
 
             if (_armClient == null)
             {
 
                 return distinct.ToDictionary(
-                    id => id, _ => AzureResourceConfirmation.Unknown, StringComparer.OrdinalIgnoreCase);
+                    id => id, _ => AzureResourceConfirmation.Unknown, AzureResourceIdentity.IdComparer);
             }
 
             using SemaphoreSlim gate = new(MaxConcurrentResourceChecks);
@@ -223,7 +223,7 @@ namespace Bastet.Services.Azure
             });
 
             KeyValuePair<string, AzureResourceConfirmation>[] results = await Task.WhenAll(checks);
-            return new Dictionary<string, AzureResourceConfirmation>(results, StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, AzureResourceConfirmation>(results, AzureResourceIdentity.IdComparer);
         }
 
         private const int MaxConcurrentResourceChecks = 8;

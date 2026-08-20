@@ -217,6 +217,26 @@ public class AzureMultiPrefixSubnetTests
     }
 
     [Fact]
+    public void AnnotateAvailability_StampsEachSubnetWithOnlyTheVNetPrefixThatContainsIt()
+    {
+        BulkAzureSubnetViewModel a = new() { ResourceId = SubnetId("mp", "a"), Name = "a", AddressPrefix = "10.50.1.0/24" };
+        BulkAzureSubnetViewModel b = new() { ResourceId = SubnetId("mp", "b"), Name = "b", AddressPrefix = "10.60.2.0/24" };
+
+        BulkAzureVNetViewModel vnet = new()
+        {
+            ResourceId = VNetId("mp"),
+            Name = "mp",
+            Ipv4AddressPrefixes = ["10.50.0.0/16", "10.60.0.0/16"],
+            Subnets = [a, b]
+        };
+
+        _planner.AnnotateAvailability([vnet], []);
+
+        Assert.Equal(["10.50.0.0/16"], a.ContainingPrefixes);
+        Assert.Equal(["10.60.0.0/16"], b.ContainingPrefixes);
+    }
+
+    [Fact]
     public void ReconcilerStillReportsDrift_WhenThePrefixIsGenuinelyGone()
     {
         string id = SubnetId("multi-vnet", "sn-multi");

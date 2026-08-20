@@ -90,8 +90,7 @@ public partial class SubnetController : Controller
                     Name = h.Name,
                     CreatedAt = h.CreatedAt,
                     CreatedBy = h.CreatedBy,
-                    LastModifiedAt = h.LastModifiedAt,
-                    ModifiedBy = h.ModifiedBy
+                    LastModifiedAt = h.LastModifiedAt
                 })],
 
             UnallocatedRanges = [.. ipUtilityService.CalculateUnallocatedRanges(
