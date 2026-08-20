@@ -116,7 +116,7 @@ public partial class InputSanitizationService : IInputSanitizationService
         string sanitized = input.Trim();
 
         string[] tags = [.. sanitized.Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(tag => StripHtml(tag.Trim()))
+            .Select(tag => tag.Trim())
             .Where(tag => !string.IsNullOrWhiteSpace(tag) && tag.Length <= 50)
             .Take(10)];
 

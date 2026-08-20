@@ -15,11 +15,11 @@ Round 24 filed 19 findings, of which 7 are residue of previous rounds' own fixes
 
 # Low
 
-## L1 — Tags accepted by validation are silently rewritten by SanitizeTags before persisting `[x1]`
-**Where:** src/Bastet/Services/Security/InputSanitizationService.cs:119 (StripHtml call; statement starts :118); via [SanitizeTags] on src/Bastet/Models/ViewModels/SubnetViewModels.cs:37 and src/Bastet/Models/ViewModels/EditSubnetViewModel.cs:37; strip pinned at test/Bastet.Tests/Security/InputSanitizationServiceTests.cs:103
-**Breaks:** Tags="rack<b12>,web" passes validation (18-R7 left TagsAttribute count/length only), but SanitizeTags → StripHtml stores "rack,web" — "<b12>" silently deleted, on Create and Edit. Validation and sanitization disagree; Name/Description avoid this via [NoHtml]'s up-front refusal.
-**Repro:** Verified live: POST /Subnet/Create Tags="rack<b12>,web" → 302, no error, stored "rack,web"; Edit Tags="db<x9>,prod" → stored "db,prod". f2050fa (18-R7) removed the refusal; strip pinned by the "<script>evil</script>,goodtag" InlineData.
-**Fix:** Delete the StripHtml call in SanitizeTags (keep trim, splitting, join, and the count/length caps), so sanitizer and the 18-R7 validation rule accept identical tag text; re-pin the InlineData to expect the text preserved. Razor encodes tags at every sink, so display safety is unaffected (PRODUCT-MODEL §5).
+## L1 — Tags accepted by validation are silently rewritten by SanitizeTags before persisting `[x1]` — FIXED
+_Fixed in round 24. Deleted the StripHtml call from SanitizeTags' per-tag Select (trim, split, Take(10), per-tag ≤50, 255-cap all kept), so sanitizer and the 18-R7 validation rule accept identical tag text; re-pinned the script InlineData to preservation and added a rack<b12> row._
+_Swept: Create and Edit share the single [SanitizeTags] path; no other write path stores operator tags (BulkAzure sets Tags null); the one render sink is Razor-encoded, zero Html.Raw, no JS inserts Tags._
+_Verified: build 0/0, 882/882; both new pins red against the unfixed code; reviewer's live browser XSS probe — <script>alert(1)</script>,x stored and rendered as encoded text, no execution, operator text round-trips verbatim._
+_Reviewed: independent reviewer PASS — full sink enumeration, live XSS probe, write-path parity, caps re-run._
 **Residue of:** 18-R7
 
 ## L2 — Subnet Create form carries its own client-side IP arithmetic (mask/total/usable) duplicating IpUtilityService `[x2]`
