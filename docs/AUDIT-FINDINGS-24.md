@@ -22,11 +22,11 @@ _Verified: build 0/0, 882/882; both new pins red against the unfixed code; revie
 _Reviewed: independent reviewer PASS — full sink enumeration, live XSS probe, write-path parity, caps re-run._
 **Residue of:** 18-R7
 
-## L2 — Subnet Create form carries its own client-side IP arithmetic (mask/total/usable) duplicating IpUtilityService `[x2]`
-**Where:** src/Bastet/Views/Subnet/Create/_SubnetFormScripts.cshtml:3-31 (the Details engine is parked as 23-L2-remainder, not re-filed)
-**Breaks:** calculateSubnetMask/calculateTotalIPs/calculateUsableIPs (incl. /31→2, /32→1) re-implement the IpUtilityService equivalents for the live mask/total/usable display on /Subnet/Create — a third client IP engine, violating PRODUCT-MODEL §5; drift makes Create contradict the pinned authority.
-**Repro:** Verified live (Playwright): Cidr 26/31/32/0 all rendered mask/total/usable matching IpUtilityService semantics with zero network requests during typing; the JS mirrors IpUtilityService.cs:9-25/71-73/75-86 line for line. Original feature code (c103bdf #34).
-**Fix:** Delete the three client functions and have updateSubnetInfo index a server-computed table: serialize the 33 per-CIDR {mask, total, usable} triples (via IpUtilityService) into the Create view as JSON, so the client only looks up, never computes.
+## L2 — Subnet Create form carries its own client-side IP arithmetic (mask/total/usable) duplicating IpUtilityService `[x2]` — FIXED
+_Fixed in round 24. _SubnetFormScripts.cshtml @injects IIpUtilityService and serializes the 33 per-CIDR {mask,total,usable} triples at render; updateSubnetInfo only indexes the table; the three client functions deleted (zero IP arithmetic remains in the file)._
+_Swept: the Details engine stays parked as 23-L2-remainder (deferred), not re-touched; Html.Raw input is server-generated JSON only._
+_Verified: build 0/0, 882/882; reviewer's 33/33 equivalence check against the old formulas; live drive — CIDR 26/31/32/0/invalid all render identically incl. locale commas, GET-seeded cidr still server-renders then JS takes over._
+_Reviewed: independent reviewer PASS._
 **Residue of:** none
 
 ## L3 — Held prefix-changed reconcile rows tell the operator to delete a row the same sentence block says BASTET will not delete `[x2]` `strings`
@@ -57,11 +57,11 @@ _Reviewed: independent reviewer PASS — full sink enumeration, live XSS probe, 
 **Fix:** Delete the $('#rec-rescan-note').text(...) assignment and the empty <span id="rec-rescan-note"> in _StepReview.cshtml:76, folding a tense-neutral sentence into the static explainer prose (e.g. 'The results below reflect Azure as of the latest scan.').
 **Residue of:** none
 
-## L7 — Bulk import wizard loadVNets has no supersession guard: a stale VNet response repaints the current tree `[x1]`
-**Where:** src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml:104
-**Breaks:** Select subscription A (slow listing), back to step 1, select B: B renders, then A's late response silently overwrites the tree and wipes ticks while selectedSubscriptionId/Name remain B — the operator imports A's resource ids under B's identity. loadVNets' handlers run unconditionally, unlike loadPreview (previewSeq) and runScan (scanSeq); the only re-triggerable AJAX in either wizard without the guard.
-**Repro:** Verified live (Playwright): held the first BulkGetVNets response, re-selected, ticked a prefix, fulfilled the held response with a marker payload → tree became "STALE-MARKER-VNET 10.250.0.0/24", ticks 1→0. Two-subscription case not driven (rig SP sees one subscription) but the overwrite is proven. loadVNets from 73fc76f (#108).
-**Fix:** Add 'let vnetSeq = 0;', capture 'const seq = ++vnetSeq;' in loadVNets, and return early from success/error/complete when 'seq !== vnetSeq' — identical shape to loadPreview's previewSeq guard.
+## L7 — Bulk import wizard loadVNets has no supersession guard: a stale VNet response repaints the current tree `[x1]` — FIXED
+_Fixed in round 24. Added vnetSeq with the byte-identical guard shape to previewSeq/scanSeq: capture on entry, early-return in success/error/complete when superseded._
+_Swept: loadVNets was the only re-triggerable AJAX in either wizard without the guard (loadAzureSubscriptions fires once per page)._
+_Verified: build 0/0, 882/882; reviewer reproduced the finding's stale-response probe — pre-fix the held response repainted the tree and wiped ticks (STALE-MARKER rendered, 1→0); with the fix the tree is byte-identical, ticks kept, spinner not stuck._
+_Reviewed: independent reviewer PASS — probe proven non-vacuous against reverted code._
 **Residue of:** none
 
 ## L8 — 23-L1's reworded noLongerStale 409 headline is pinned by no test — reverting it to the refuted false wording keeps the suite green `[x2]`
