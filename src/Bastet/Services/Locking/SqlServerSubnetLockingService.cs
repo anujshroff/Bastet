@@ -29,9 +29,9 @@ public class SqlServerSubnetLockingService(BastetDbContext context, ILogger<SqlS
 
     private static readonly SemaphoreSlim _localGate = new(1, 1);
 
-    public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null)
+    public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation)
     {
-        int timeoutMs = (int)(timeout?.TotalMilliseconds ?? DEFAULT_TIMEOUT_MS);
+        const int timeoutMs = DEFAULT_TIMEOUT_MS;
 
         long waitStarted = Stopwatch.GetTimestamp();
         if (!await _localGate.WaitAsync(timeoutMs))

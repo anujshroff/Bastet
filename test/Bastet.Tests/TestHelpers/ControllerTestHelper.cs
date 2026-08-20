@@ -39,7 +39,7 @@ public static class ControllerTestHelper
 
 public class NoOpSubnetLockingService : ISubnetLockingService
 {
-    public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null) =>
+    public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation) =>
 
         await operation();
 }
