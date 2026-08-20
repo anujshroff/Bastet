@@ -77,9 +77,6 @@ namespace Bastet.Models.ViewModels
 
     public class AzureReconcilePlanViewModel
     {
-        public string SubscriptionId { get; set; } = string.Empty;
-        public string? SubscriptionName { get; set; }
-
         public bool ScanSucceeded { get; set; }
 
         public bool InventoryWasEmpty { get; set; }

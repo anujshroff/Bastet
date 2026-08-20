@@ -19,8 +19,6 @@ public class AzureBulkImportTopUpTests
     private static BulkImportSelectionDto Selection(bool rename = false, params BulkImportSelectedSubnetDto[] subs) =>
         new()
         {
-            SubscriptionId = "sub-1",
-            SubscriptionName = "Test Sub",
             RenameMatchedBastetSubnets = rename,
             VNetPrefixes =
             [

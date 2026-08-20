@@ -3,10 +3,10 @@
     $(document).ready(function () {
 
         let selectedSubscriptionId = "";
-        let selectedSubscriptionName = "";
         let vnets = [];
         let lastSelection = null;
         let previewSeq = 0;
+        let vnetSeq = 0;
         let committing = false;
         let committed = false;
 
@@ -63,7 +63,6 @@
                         $.each(result.subscriptions, function (i, s) {
                             $dropdown.append($('<option></option>')
                                 .attr('value', s.subscriptionId)
-                                .attr('data-name', s.displayName)
                                 .text(s.displayName + ' (' + s.subscriptionId + ')'));
                         });
                         $("#bulk-subscription-selection").removeClass("d-none");
@@ -94,7 +93,6 @@
         $("#bulk-select-subscription-btn").on("click", function () {
             const $opt = $("#bulk-subscription-select option:selected");
             selectedSubscriptionId = $opt.val();
-            selectedSubscriptionName = $opt.attr("data-name") || "";
             if (!selectedSubscriptionId) return;
 
             activateTab("step2");
@@ -102,6 +100,8 @@
         });
 
         function loadVNets() {
+
+            const seq = ++vnetSeq;
             $.ajax({
                 url: '@Url.Action("BulkGetVNets", "Azure")',
                 type: "GET",
@@ -116,6 +116,9 @@
                     $("#bulk-no-vnets").addClass("d-none");
                 },
                 success: function (result) {
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     if (!result.success) {
                         $("#bulk-vnet-error-message").text(result.error || "Failed to load VNets");
                         $("#bulk-vnet-error").removeClass("d-none");
@@ -131,10 +134,18 @@
                     updateGoPreviewBtn();
                 },
                 error: function (xhr, status, error) {
+
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     $("#bulk-vnet-error-message").text("Error connecting to server: " + error);
                     $("#bulk-vnet-error").removeClass("d-none");
                 },
                 complete: function () {
+
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     $("#bulk-vnet-loading").addClass("d-none");
                 }
             });
@@ -441,8 +452,6 @@
             });
 
             return {
-                subscriptionId: selectedSubscriptionId,
-                subscriptionName: selectedSubscriptionName,
                 vNetPrefixes: prefixSelections,
                 renameMatchedBastetSubnets: renameMatched
             };

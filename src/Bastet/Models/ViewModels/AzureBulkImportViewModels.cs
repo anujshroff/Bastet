@@ -120,10 +120,6 @@ namespace Bastet.Models.ViewModels
 
     public class BulkImportSelectionDto
     {
-        public string SubscriptionId { get; set; } = string.Empty;
-
-        public string? SubscriptionName { get; set; }
-
         public List<BulkImportSelectedVNetPrefixDto> VNetPrefixes { get; set; } = [];
 
         public bool RenameMatchedBastetSubnets { get; set; }
@@ -207,10 +203,6 @@ namespace Bastet.Models.ViewModels
 
     public class BulkImportPlanViewModel
     {
-        public string SubscriptionId { get; set; } = string.Empty;
-        public string? SubscriptionName { get; set; }
-        public bool RenameMatchedBastetSubnets { get; set; }
-
         public List<BulkImportPlanItem> Items { get; set; } = [];
 
         public List<string> GlobalErrors { get; set; } = [];

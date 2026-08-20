@@ -6,9 +6,9 @@ public class SqliteSubnetLockingService : ISubnetLockingService
 
     private static readonly SemaphoreSlim _globalSubnetLock = new(1, 1);
 
-    public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null)
+    public async Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation)
     {
-        int timeoutMs = (int)(timeout?.TotalMilliseconds ?? DEFAULT_TIMEOUT_MS);
+        const int timeoutMs = DEFAULT_TIMEOUT_MS;
 
         if (!await _globalSubnetLock.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs)))
         {

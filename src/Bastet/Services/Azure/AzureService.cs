@@ -14,11 +14,11 @@ namespace Bastet.Services.Azure
         private readonly ArmClient? _armClient = armClientProvider.Client;
         private readonly ILogger<AzureService> _logger = logger;
 
-        public async Task<bool> IsCredentialValid()
+        public async Task<CredentialCheckResult> CheckCredential()
         {
             if (_armClient == null)
             {
-                return false;
+                return CredentialCheckResult.Failed;
             }
 
             try
@@ -29,15 +29,15 @@ namespace Bastet.Services.Azure
                 await foreach (SubscriptionResource? _ in subscriptions)
                 {
 
-                    return true;
+                    return CredentialCheckResult.Valid;
                 }
 
-                return false;
+                return CredentialCheckResult.NoVisibleSubscriptions;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Azure credential validation failed");
-                return false;
+                return CredentialCheckResult.Failed;
             }
         }
 

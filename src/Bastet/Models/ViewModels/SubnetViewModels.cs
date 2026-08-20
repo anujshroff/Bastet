@@ -13,7 +13,7 @@ public class CreateSubnetViewModel
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Network address is required")]
-    [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid network address format")]
+    [NetworkInput(ErrorMessage = "Invalid network address format")]
     [SanitizeNetworkInput]
     [Display(Name = "Network Address")]
     public string NetworkAddress { get; set; } = string.Empty;

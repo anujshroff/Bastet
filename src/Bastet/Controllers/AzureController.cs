@@ -42,9 +42,14 @@ namespace Bastet.Controllers
 
             try
             {
-                if (!await azureService.IsCredentialValid())
+                CredentialCheckResult credential = await azureService.CheckCredential();
+                if (credential == CredentialCheckResult.Failed)
                 {
                     ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                }
+                else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
+                {
+                    ModelState.AddModelError("", "Signed in to Azure, but this credential cannot see any subscriptions. Grant it access to a subscription and reload this page.");
                 }
             }
             catch (Exception ex)
@@ -132,9 +137,14 @@ namespace Bastet.Controllers
 
             try
             {
-                if (!await azureService.IsCredentialValid())
+                CredentialCheckResult credential = await azureService.CheckCredential();
+                if (credential == CredentialCheckResult.Failed)
                 {
                     ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                }
+                else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
+                {
+                    ModelState.AddModelError("", "Signed in to Azure, but this credential cannot see any subscriptions. Grant it access to a subscription and reload this page.");
                 }
             }
             catch (Exception ex)
@@ -150,7 +160,6 @@ namespace Bastet.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ReconcileScan(
             string subscriptionId,
-            string? subscriptionName,
             [FromServices] IAzureReconciler reconciler)
         {
             if (!IsAzureImportEnabled())
@@ -168,7 +177,7 @@ namespace Bastet.Controllers
                 AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
                 IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
 
-                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked);
+                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, inventory, linked);
 
                 await ConfirmProposedDeletionsAsync(plan, azureService, reconciler);
 

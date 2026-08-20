@@ -21,5 +21,5 @@ public interface ISubnetValidationService
         IEnumerable<Subnet>? children = null,
         IEnumerable<Subnet>? allOtherSubnets = null);
 
-    ValidationResult ValidateParentCanHaveChildSubnets(int parentId, IEnumerable<HostIpAssignment>? hostIps = null);
+    ValidationResult ValidateParentCanHaveChildSubnets(IEnumerable<HostIpAssignment> hostIps);
 }

@@ -1,47 +1,26 @@
+@inject Bastet.Services.IIpUtilityService IpUtility
+@{
+    string cidrInfoJson = System.Text.Json.JsonSerializer.Serialize(
+        Enumerable.Range(0, 33).Select(c => new
+        {
+            mask = IpUtility.CalculateSubnetMask(c),
+            total = IpUtility.CalculateTotalIpAddresses(c),
+            usable = IpUtility.CalculateUsableIpAddresses(c)
+        }));
+}
 <script>
 
-    function calculateSubnetMask(cidr) {
-        if (cidr < 0 || cidr > 32) return "Invalid CIDR";
-
-        if (cidr === 0) return "0.0.0.0";
-
-        const mask = ~((1 << (32 - cidr)) - 1);
-
-        return [
-            (mask >>> 24) & 255,
-            (mask >>> 16) & 255,
-            (mask >>> 8) & 255,
-            mask & 255
-        ].join('.');
-    }
-
-    function calculateTotalIPs(cidr) {
-        if (cidr < 0 || cidr > 32) return 0;
-        return Math.pow(2, 32 - cidr);
-    }
-
-    function calculateUsableIPs(cidr) {
-        if (cidr < 0 || cidr > 32) return 0;
-
-        if (cidr >= 31) {
-            return cidr === 31 ? 2 : 1;
-        }
-
-        return Math.pow(2, 32 - cidr) - 2;
-    }
+    const cidrInfo = @Html.Raw(cidrInfoJson);
 
     function updateSubnetInfo() {
         const cidrValue = parseInt($('#Cidr').val(), 10);
 
         if (!isNaN(cidrValue) && cidrValue >= 0 && cidrValue <= 32) {
+            const info = cidrInfo[cidrValue];
 
-            $('#subnetMaskDisplay').text(calculateSubnetMask(cidrValue));
-
-            const totalIPs = calculateTotalIPs(cidrValue);
-            const usableIPs = calculateUsableIPs(cidrValue);
-
-            $('#maxIpsDisplay').text(totalIPs.toLocaleString());
-            $('#usableIpsDisplay').text(usableIPs.toLocaleString());
+            $('#subnetMaskDisplay').text(info.mask);
+            $('#maxIpsDisplay').text(info.total.toLocaleString());
+            $('#usableIpsDisplay').text(info.usable.toLocaleString());
         } else {
             $('#subnetMaskDisplay').text('Invalid CIDR');
             $('#maxIpsDisplay').text('-');
@@ -51,12 +30,6 @@
 
     function initializeForm() {
         const cidrInput = $('#Cidr');
-
-        cidrInput.attr('max', '32');
-
-        $('#cidrRangeText').text('CIDR values: 0-32');
-        $('#networkAddressHelp').text('Enter the network address (e.g. 192.168.1.0)');
-        $('#NetworkAddress').attr('placeholder', '192.168.1.0');
 
         if (cidrInput.val() !== '') {
             updateSubnetInfo();

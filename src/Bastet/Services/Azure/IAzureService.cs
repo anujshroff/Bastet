@@ -3,10 +3,17 @@ using Bastet.Models.ViewModels;
 namespace Bastet.Services.Azure
 {
 
+    public enum CredentialCheckResult
+    {
+        Failed,
+        NoVisibleSubscriptions,
+        Valid
+    }
+
     public interface IAzureService
     {
 
-        Task<bool> IsCredentialValid();
+        Task<CredentialCheckResult> CheckCredential();
 
         Task<List<AzureSubscriptionViewModel>> GetSubscriptions();
 
