@@ -8,7 +8,6 @@ namespace Bastet.Tests.Azure;
 public class AzureBulkImportSelectabilityTests
 {
     private const string VNetA = "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-a";
-    private const string VNetB = "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-b";
 
     private readonly AzureBulkImportPlanner _planner =
         new(new IpUtilityService(), new InputSanitizationService());
