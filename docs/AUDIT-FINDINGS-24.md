@@ -64,25 +64,22 @@ _Verified: build 0/0, 882/882; reviewer reproduced the finding's stale-response 
 _Reviewed: independent reviewer PASS — probe proven non-vacuous against reverted code._
 **Residue of:** none
 
-## L8 — 23-L1's reworded noLongerStale 409 headline is pinned by no test — reverting it to the refuted false wording keeps the suite green `[x2]`
-**Where:** src/Bastet/Controllers/SubnetController.AzureReconcile.cs:102
-**Breaks:** Reverting the headline to the pre-23-L1 claim "no longer reported as deleted in Azure" (false for NotVisible/Unknown/cascade-withheld rows) turns nothing red: the noLongerStale conflict test (SubnetControllerAzureReconcileTests.cs:125) asserts only ConflictObjectResult and row survival; no test references either phrase.
-**Repro:** Verified: reverted :102-103 to the exact pre-23-L1 wording → dotnet test 881/881 green. The sibling verdictChanged and held 409s ARE message-pinned; noLongerStale is the sole unpinned headline.
-**Fix:** Extend the existing noLongerStale conflict test to assert Contains "no longer offered for deletion by the latest re-check" and DoesNotContain "no longer reported as deleted in Azure", mirroring the 21-L1/22-L2 pins.
+## L8 — 23-L1's reworded noLongerStale 409 headline is pinned by no test — reverting it to the refuted false wording keeps the suite green `[x2]` — FIXED
+_Fixed in round 24 (test-only). The noLongerStale conflict test now asserts Contains the new headline and DoesNotContain the refuted wording._
+_Verified: build 0/0, 888/888; reverting the headline reddens exactly this test (author + reviewer both ran the mutant)._
+_Reviewed: independent reviewer PASS._
 **Residue of:** 23-L1
 
-## L9 — 23-L4's held-row wording fix is unpinned on its subnet-level branch: the 'no longer exists' falsehood can reland with the suite green `[x2]`
-**Where:** src/Bastet/Services/Azure/AzureReconciler.cs:222
-**Breaks:** A subnet-linked held row absent from the listing must lead with the 23-L4 'could not be found in this subscription's listing' clause. Only the VNetDeleted branch of AbsentFromListingClause is pinned; the SubnetDeleted else-branch at :222 has no test — reverting it to the pre-fix falsehood 'The Azure subnet this was imported from no longer exists.' stays green, re-asserting a live RBAC-hidden subnet is gone on half the fix's domain.
-**Repro:** Verified: replaced the :222 string with the pre-fix falsehood (single occurrence) → dotnet test 881/881 passed; the one wording assertion (AzureReconcilerTests.cs:353) uses VNetId("vnet-a").
-**Fix:** Test-only: add a reconciler test mirroring AHeldRowWhoseVNetIsMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists but with a subnet-level resource id (SubnetId(...)) and manual content, asserting the held Reason contains 'could not be found in this subscription's listing' and not 'no longer exists'.
+## L9 — 23-L4's held-row wording fix is unpinned on its subnet-level branch: the 'no longer exists' falsehood can reland with the suite green `[x2]` — FIXED
+_Fixed in round 24 (test-only). AHeldSubnetRowMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists mirrors the VNet-branch pin with a subnet-level resource id and manual content._
+_Verified: build 0/0, 888/888; reverting the SubnetDeleted listing clause reddens exactly the new test while the VNet-branch pin stays green — the asymmetry the finding described._
+_Reviewed: independent reviewer PASS._
 **Residue of:** 23-L4
 
-## L10 — AzureResourceIdentity.IdComparer unpinned: Ordinal mutant survives 881/881 and would make reconcile offer deletion of a live, case-differently-linked row `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureResourceIdentity.cs:11; src/Bastet/Services/Azure/AzureReconciler.cs:38 and :39 (the consequential join); src/Bastet/Services/Azure/AzureService.cs:196,200,207,226 (same symbol, inert today)
-**Breaks:** 23-L6's ledger claims the 22-L1 casing tests pin every caller, but they exercise only IsSameResourceId; IdComparer → StringComparer.Ordinal passes the entire suite. IdComparer backs the reconciler's inventory join: under the mutant, a row whose stored id differs from ARM's casing is reported VNetDeleted/SubnetDeleted — reconcile offers to delete an allocation whose resource is live.
-**Repro:** Verified: IdComparer mutant → 881/881 green; a consequence probe (live subnet in inventory, snapshot linked with SubnetId(...).ToUpperInvariant()) fails Assert.Empty under the mutant and passes restored.
-**Fix:** Test-only: add reconciler casing tests mirroring the two 22-L1 planner tests — a subnet-linked row and a VNet-linked target row whose AzureResourceId casing differs from the inventory's must produce an empty plan — reddening the IdComparer→Ordinal mutant.
+## L10 — AzureResourceIdentity.IdComparer unpinned: Ordinal mutant survives 881/881 and would make reconcile offer deletion of a live, case-differently-linked row `[x1]` — FIXED
+_Fixed in round 24 (test-only). Two reconciler casing tests: a subnet-linked row and a VNet-linked target stored with upper-cased resource ids against a normally-cased live inventory must produce an empty plan._
+_Verified: build 0/0, 888/888; IdComparer→Ordinal full-suite run fails exactly the two new tests (886/888 otherwise green) — no pre-existing test caught the mutant; subscription-guid and recognition paths confirmed unable to mask the join._
+_Reviewed: independent reviewer PASS — the §1 rule-1 consequence (live row offered for deletion) is now pinned._
 **Residue of:** 23-L6
 
 # Info
@@ -132,11 +129,10 @@ _Verified: build 0/0, 881/881; all 13 call sites single-argument; SqlServer rema
 _Reviewed: independent reviewer PASS._
 **Residue of:** none
 
-## I8 — Unread 'prefix' local in the round-21 other-VNet-linked zero-work test drops the prefix-status assertion its sibling makes `[x1]`
-**Where:** test/Bastet.Tests/Azure/AzureBulkImportZeroWorkTests.cs:141
-**Breaks:** AWholePrefixSubnetOverAFullyAllocatedRowLinkedToAnotherVNet_IsNotBadgedAlreadyImported assigns 'prefix = Annotate(...)' and never reads it — the only IDE0051/52/59/60 hit in the solution. The sibling test (:124) asserts prefix.Status; this one asserts only the child row, so the 21-L1 prefix-level behavior (Blocked, not AlreadyImported) is unpinned by the very test covering it.
-**Repro:** Verified: blame → all lines 85b1819c (the 21-L1 fix commit); adding the two prefix assertions in a scratch copy → filtered dotnet test 1/1 Passed.
-**Fix:** Prefer asserting over deleting: add Assert.Equal(BulkImportAvailability.Blocked, prefix.Status) and Assert.False(prefix.IsSelectable) so the local is read and the 21-L1 prefix half is pinned (verified green).
+## I8 — Unread 'prefix' local in the round-21 other-VNet-linked zero-work test drops the prefix-status assertion its sibling makes `[x1]` — FIXED
+_Fixed in round 24 (test-only). Added Assert.Equal(Blocked, prefix.Status) and Assert.False(prefix.IsSelectable) — the local is now read and the 21-L1 prefix half pinned._
+_Verified: build 0/0, 888/888; disabling the planner's link-replacement refusal reddens the test at the new assertion._
+_Reviewed: independent reviewer PASS._
 **Residue of:** 21-L1
 
 ## I9 — NetworkInputAttribute's non-RequireValidIp branch and its 'false' default are production-dead — every application passes RequireValidIp = true `[x1]` — FIXED
