@@ -94,18 +94,17 @@ _Verified: build 0/0, 881/881; helper→Ordinal mutant now reddens exactly the t
 _Reviewed: independent reviewer PASS — semantics bit-identical, guard-folding trap confirmed avoided, propagation proven by mutation._
 **Residue of:** 23-L6
 
-## I2 — Locking-service registration dispatches on a provider that is constant; sqlite and default arms are dead dispatch `[x1]`
-**Where:** src/Bastet/Program.cs:115 (the switch inside the factory at :109-121)
-**Breaks:** BastetDbContext is registered with UseSqlServer only (Program.cs:50,55), so ProviderName is constant; the sqlite and "_" arms can never be selected and no test exercises Program.cs DI. Drift would select the wrong lock service unnoticed; §5 duplicated-decision class, closed by deletion.
-**Repro:** Verified: static grep as cited; live, a foreign session holding sp_getapplock 'Bastet:SubnetOperations' made POST /Subnet/Create stall exactly 30.055s and fail closed — behavior only SqlServerSubnetLockingService produces.
-**Fix:** Replace the switch with a direct `new SqlServerSubnetLockingService(context, lockLogger)` registration (or a plain AddScoped), keeping SqliteSubnetLockingService as the test double it already is.
+## I2 — Locking-service registration dispatches on a provider that is constant; sqlite and default arms are dead dispatch `[x1]` — FIXED
+_Fixed in round 24. Replaced the provider switch with a direct SqlServerSubnetLockingService registration; SqliteSubnetLockingService stays as the test double (live consumer: SubnetRaceConditionTests)._
+_Verified: build 0/0, 881/881; reviewer round-tripped a create through the new registration against real sp_getapplock._
+_Reviewed: independent reviewer PASS — UseSqlServer is the only provider, identical services resolved._
 **Residue of:** none
 
-## I3 — Inert client-JS scaffolding: empty handlers and vacuous re-assignments in three views `[x2]`
-**Where:** src/Bastet/Views/HostIp/Create/_FormScripts.cshtml:6-9; src/Bastet/Views/Subnet/Index.cshtml:52-55; src/Bastet/Views/Subnet/Create/_SubnetFormScripts.cshtml:55-58
-**Breaks:** (1) HostIp Create registers a submit listener with an empty body — dead since 841c272 (#18). (2) Subnet Index declares @section Scripts containing an empty <script></script> — round 16's comment ban left the husk. (3) Subnet Create initializeForm re-assigns values the markup carries verbatim (max='32' dup of _SubnetForm.cshtml:23, 'CIDR values: 0-32' dup of :25, networkAddressHelp dup of :17); the placeholder assignment on line 59 is NOT vacuous and stays.
-**Repro:** Not-runnable (code with no effect). Confirmed by reading the views; git show 841c272 (listener comments-only from birth), d18327e (removed exactly the placeholder comment), c103bdf (introduced the assignments).
-**Fix:** Delete the empty submit listener (and its form lookup), the empty @section Scripts block, and the three vacuous assignments in initializeForm (keep the line-59 placeholder assignment, or move placeholder='192.168.1.0' into the markup and delete it too).
+## I3 — Inert client-JS scaffolding: empty handlers and vacuous re-assignments in three views `[x2]` — FIXED
+_Fixed in round 24. Deleted the empty submit listener + form lookup (HostIp Create), the empty @section Scripts (Subnet Index), and the three vacuous initializeForm assignments; the placeholder moved into the markup (one implementation) and its JS assignment deleted._
+_Swept: the surviving ipInput input listener and updateSubnetInfo path intact; layout renders Scripts with required:false so the dropped empty section is safe._
+_Verified: build 0/0, 881/881; reviewer loaded /Subnet/Create live — help text, max attr, placeholder all render from markup, create round-trips._
+_Reviewed: independent reviewer PASS — deleted assignments duplicated markup verbatim._
 **Residue of:** none
 
 ## I4 — Write-only subscription/rename echo properties on both plan view models, plus the parameter and payload chain that exists only to feed them `[x2]` — FIXED
@@ -115,25 +114,22 @@ _Verified: build 0/0, 881/881; wire payloads captured live — selection POST ca
 _Reviewed: independent reviewer PASS — zero surviving reads in any casing, kept members' readers intact, full live drive of both wizards (discovery→preview→commit created a row; scan succeeded)._
 **Residue of:** none
 
-## I5 — ValidateParentCanHaveChildSubnets ignores its parentId parameter entirely, and its 'hostIps = null' default has no caller `[x2]`
-**Where:** src/Bastet/Services/Validation/SubnetValidationService.cs:270; src/Bastet/Services/Validation/ISubnetValidationService.cs:24; src/Bastet/Controllers/SubnetController.Helpers.cs:131
-**Breaks:** The method never reads parentId — the body is purely 'if (hostIps != null && hostIps.Any()) add PARENT_HAS_HOST_IPS error'. Its single caller passes parentSubnet.Id into the ignored slot and always supplies hostIps; zero test callers, so the '= null' default is equally dead (IDE0060 exempts interface implementations).
-**Repro:** Not-runnable (dead parameter surface). Body reads only hostIps; grep → 3 sites total; introduced in 841c272 with parentId already unread.
-**Fix:** Change the signature (interface and implementation) to ValidateParentCanHaveChildSubnets(IEnumerable<HostIpAssignment> hostIps) and update the single caller; the 'hostIps != null &&' clause collapses with the non-nullable parameter.
+## I5 — ValidateParentCanHaveChildSubnets ignores its parentId parameter entirely, and its 'hostIps = null' default has no caller `[x2]` — FIXED
+_Fixed in round 24. Signature collapsed to ValidateParentCanHaveChildSubnets(IEnumerable<HostIpAssignment> hostIps) on interface and implementation; single caller updated; null-guard dropped (the caller's EF collection is initialized)._
+_Verified: build 0/0, 881/881._
+_Reviewed: independent reviewer PASS — exactly 3 sites, non-null argument proven._
 **Residue of:** none
 
-## I6 — Dead data-ip-version attribute on the Create Subnet button in the unallocated-ranges table — no reader has ever existed `[x1]`
-**Where:** src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:66
-**Breaks:** The Create Subnet button in each unallocated-range row carries data-ip-version="4"; the click handler (_SubnetCalculationScripts.cshtml:22-25) reads network/parent-id/parent-cidr — never ip-version — and nothing else references the attribute. Not part of the 23-L2-remainder deferral — its reader never existed anywhere.
-**Repro:** Not-runnable (proven statically). grep -rniE 'ip-version|ipversion' src/ test/ → exactly one hit, the writer at :66; no wildcard .data()/dataset consumers; git history: only ac45ef3 and 46b3e69 (#17), no reader even at introduction.
-**Fix:** Delete the data-ip-version="4" line from the button markup at src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:66.
+## I6 — Dead data-ip-version attribute on the Create Subnet button in the unallocated-ranges table — no reader has ever existed `[x1]` — FIXED
+_Fixed in round 24. Deleted the data-ip-version="4" attribute._
+_Verified: build 0/0, 881/881; grep ip-version → zero hits; the click handler's three read attributes intact._
+_Reviewed: independent reviewer PASS._
 **Residue of:** none
 
-## I7 — ExecuteWithSubnetLockAsync's optional timeout parameter is never passed by any caller in the entire solution `[x1]`
-**Where:** src/Bastet/Services/Locking/ISubnetLockingService.cs:6; src/Bastet/Services/Locking/SqlServerSubnetLockingService.cs:32; src/Bastet/Services/Locking/SqliteSubnetLockingService.cs:9; test/Bastet.Tests/TestHelpers/ControllerTestHelper.cs:42; test/Bastet.Tests/SubnetManagement/SubnetLockTimeoutTests.cs:18
-**Breaks:** 'TimeSpan? timeout = null' is declared but every call site — 9 production controller sites and every test call — passes only the operation delegate. Both implementations carry '(int)(timeout?.TotalMilliseconds ?? DEFAULT_TIMEOUT_MS)' unwrap math for a value that is always null; both test doubles echo the dead signature.
-**Repro:** Not-runnable. grep → 14 rows, all call sites single-argument (SubnetController Create.cs:82/Edit.cs:69/Delete.cs:107/BulkAzure.cs:37/AzureReconcile.cs:129, HostIpController.cs:106/215/353/657). Applied the proposed fix in a scratch clone → build clean, tests 881/881. Introduced 9c243fc (#41), pre-round-4.
-**Fix:** Remove the timeout parameter from the interface, both implementations (keep DEFAULT_TIMEOUT_MS as the internal constant, used directly) and the two test doubles. No call site changes.
+## I7 — ExecuteWithSubnetLockAsync's optional timeout parameter is never passed by any caller in the entire solution `[x1]` — FIXED
+_Fixed in round 24. Removed the TimeSpan? timeout parameter from the interface, both implementations (timeoutMs now const DEFAULT_TIMEOUT_MS), and both test doubles; no call site changed._
+_Verified: build 0/0, 881/881; all 13 call sites single-argument; SqlServer remainingMs math unchanged; lock behaviour proven live via sp_getapplock round-trip._
+_Reviewed: independent reviewer PASS._
 **Residue of:** none
 
 ## I8 — Unread 'prefix' local in the round-21 other-VNet-linked zero-work test drops the prefix-status assertion its sibling makes `[x1]`
@@ -143,11 +139,10 @@ _Reviewed: independent reviewer PASS — zero surviving reads in any casing, kep
 **Fix:** Prefer asserting over deleting: add Assert.Equal(BulkImportAvailability.Blocked, prefix.Status) and Assert.False(prefix.IsSelectable) so the local is read and the 21-L1 prefix half is pinned (verified green).
 **Residue of:** 21-L1
 
-## I9 — NetworkInputAttribute's non-RequireValidIp branch and its 'false' default are production-dead — every application passes RequireValidIp = true `[x1]`
-**Where:** src/Bastet/Services/Security/ValidationAttributes.cs:29,51-59; src/Bastet/Models/ViewModels/HostIpViewModels.cs:18; src/Bastet/Models/ViewModels/SubnetViewModels.cs:16
-**Breaks:** The attribute declares 'RequireValidIp = false' plus an else branch validating input against SanitizeNetworkInput's output. Both applications pass RequireValidIp = true and no test instantiates the attribute, so the default and the else branch (:51-59, incl. the 'Input contains invalid characters for network input' message) are unreachable. Orphaned when e774d4f (#138) flipped the subnet application to true; live at introduction (3940c98 #43).
-**Repro:** Not-runnable (unreachable by construction). grep → exactly 2 applications, both RequireValidIp = true; zero test references; git log -S → only 3940c98 and e774d4f.
-**Fix:** Delete the RequireValidIp property and the else branch so the attribute always validates as an IP address, and drop the now-redundant 'RequireValidIp = true' from the two applications.
+## I9 — NetworkInputAttribute's non-RequireValidIp branch and its 'false' default are production-dead — every application passes RequireValidIp = true `[x1]` — FIXED
+_Fixed in round 24. Deleted the RequireValidIp property and the dead else branch; the attribute always validates as an IP; the two applications dropped the redundant RequireValidIp = true._
+_Verified: build 0/0, 881/881; reviewer POSTed invalid NetworkAddress live → the attribute's validation error still fires._
+_Reviewed: independent reviewer PASS — zero RequireValidIp refs, both applications behaviour-identical._
 **Residue of:** none
 
 # Refuted
