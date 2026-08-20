@@ -23,7 +23,6 @@ public class GeneratedNameSafeTextTests
         BulkImportPlanViewModel plan = planner.BuildPlan(
             new BulkImportSelectionDto
             {
-                SubscriptionId = "sub-1",
                 VNetPrefixes =
                 [
                     new BulkImportSelectedVNetPrefixDto

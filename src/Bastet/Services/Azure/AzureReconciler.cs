@@ -8,7 +8,6 @@ namespace Bastet.Services.Azure
 
         public AzureReconcilePlanViewModel BuildPlan(
             string subscriptionId,
-            string? subscriptionName,
             AzureVNetInventory inventory,
             IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets)
         {
@@ -17,8 +16,6 @@ namespace Bastet.Services.Azure
 
             AzureReconcilePlanViewModel plan = new()
             {
-                SubscriptionId = subscriptionId,
-                SubscriptionName = subscriptionName,
                 ScanSucceeded = inventory.Success
             };
 

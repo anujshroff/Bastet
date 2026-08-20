@@ -54,7 +54,7 @@ public class AzureReconcilerTests
     private AzureReconcilePlanViewModel Build(
         AzureVNetInventory inventory,
         AzureLinkedSubnetSnapshot[] linked) =>
-        _reconciler.BuildPlan(SubId, "Test Sub", inventory, linked);
+        _reconciler.BuildPlan(SubId, inventory, linked);
 
     // Rule: if it is gone from Azure, delete it here.
 
@@ -294,7 +294,7 @@ public class AzureReconcilerTests
     public void AFailedScan_ReportsNothingAsDeleted()
     {
         AzureReconcilePlanViewModel plan = _reconciler.BuildPlan(
-            SubId, "Test Sub",
+            SubId,
             new AzureVNetInventory { Success = false, ErrorMessage = "boom" },
             [Linked(1, "app", "10.22.1.0", 24, SubnetId("vnet-a", "sn-a"))]);
 

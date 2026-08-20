@@ -44,12 +44,7 @@ namespace Bastet.Services.Azure
             ArgumentNullException.ThrowIfNull(selection);
             ArgumentNullException.ThrowIfNull(existingSubnets);
 
-            BulkImportPlanViewModel plan = new()
-            {
-                SubscriptionId = selection.SubscriptionId,
-                SubscriptionName = selection.SubscriptionName,
-                RenameMatchedBastetSubnets = selection.RenameMatchedBastetSubnets
-            };
+            BulkImportPlanViewModel plan = new();
 
             if (selection.VNetPrefixes is null or { Count: 0 })
             {

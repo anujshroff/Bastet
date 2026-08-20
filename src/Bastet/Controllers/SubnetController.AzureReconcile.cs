@@ -48,7 +48,7 @@ public partial class SubnetController : Controller
 
         AzureVNetInventory inventory = await azureService.GetVNetInventory(request.SubscriptionId);
         IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
-        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, null, inventory, linked);
+        AzureReconcilePlanViewModel plan = reconciler.BuildPlan(request.SubscriptionId, inventory, linked);
 
         if (!plan.ScanSucceeded || plan.GlobalErrors.Count > 0)
         {

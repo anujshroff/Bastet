@@ -150,7 +150,6 @@ namespace Bastet.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ReconcileScan(
             string subscriptionId,
-            string? subscriptionName,
             [FromServices] IAzureReconciler reconciler)
         {
             if (!IsAzureImportEnabled())
@@ -168,7 +167,7 @@ namespace Bastet.Controllers
                 AzureVNetInventory inventory = await azureService.GetVNetInventory(subscriptionId);
                 IReadOnlyList<AzureLinkedSubnetSnapshot> linked = await snapshotService.GetAzureLinkedSubnetsAsync();
 
-                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, subscriptionName, inventory, linked);
+                AzureReconcilePlanViewModel plan = reconciler.BuildPlan(subscriptionId, inventory, linked);
 
                 await ConfirmProposedDeletionsAsync(plan, azureService, reconciler);
 

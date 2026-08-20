@@ -79,8 +79,6 @@ public class AzureMultiPrefixSubnetTests
     private static BulkImportSelectionDto Sel(params BulkImportSelectedSubnetDto[] subs) =>
         new()
         {
-            SubscriptionId = "sub-1",
-            SubscriptionName = "Test Sub",
             VNetPrefixes =
             [
                 new()
@@ -211,7 +209,7 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler().BuildPlan(SubId, inventory, linked);
 
         Assert.Empty(plan.Items);
     }
@@ -258,7 +256,7 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler().BuildPlan(SubId, inventory, linked);
 
         Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, Assert.Single(plan.Items).Status);
     }

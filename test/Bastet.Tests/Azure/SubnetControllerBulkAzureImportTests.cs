@@ -69,7 +69,6 @@ public class SubnetControllerBulkAzureImportTests : IDisposable
     private static BulkImportSelectionDto Selection(BulkImportExpectedTargetDto? expected, bool rename = false) =>
         new()
         {
-            SubscriptionId = SubId,
             VNetPrefixes =
             [
                 new BulkImportSelectedVNetPrefixDto

@@ -4,7 +4,6 @@
         "use strict";
 
         let selectedSubscriptionId = "";
-        let selectedSubscriptionName = "";
         let lastPlan = null;
         let scanSeq = 0;
 
@@ -94,7 +93,6 @@
                     subs.forEach(function (s) {
                         select.append($("<option></option>")
                             .attr("value", s.subscriptionId)
-                            .attr("data-name", s.displayName)
                             .text(s.displayName + " (" + s.subscriptionId + ")"));
                     });
 
@@ -115,7 +113,6 @@
         $("#rec-scan-btn").on("click", function () {
             const selected = $("#rec-subscription-select").find("option:selected");
             selectedSubscriptionId = selected.val();
-            selectedSubscriptionName = selected.attr("data-name") || "";
             invalidateScan();
             activateTab("rec-step2");
             runScan();
@@ -130,7 +127,7 @@
                 type: "POST",
                 dataType: "json",
                 headers: { "RequestVerificationToken": getAntiForgeryToken() },
-                data: { subscriptionId: selectedSubscriptionId, subscriptionName: selectedSubscriptionName },
+                data: { subscriptionId: selectedSubscriptionId },
                 beforeSend: function () {
                     $("#rec-scan-loading").removeClass("d-none");
                     $("#rec-scan-error").addClass("d-none");
