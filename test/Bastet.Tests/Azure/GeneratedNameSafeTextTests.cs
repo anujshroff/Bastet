@@ -52,7 +52,7 @@ public class GeneratedNameSafeTextTests
 
         foreach (string name in generated)
         {
-            Assert.True(_sanitizer.IsSafeText(name),
+            Assert.True(SafeTextOracle.IsSafe(name),
                 $"The planner generated '{name}', which the subnet naming rules reject.");
         }
     }
@@ -63,14 +63,14 @@ public class GeneratedNameSafeTextTests
     [InlineData("vnet-a (10.71.0.0-16)")]
     public void AGeneratedParentNameSurvivesThePrefillIntact(string generatedParentName)
     {
-        Assert.True(_sanitizer.IsSafeText(generatedParentName));
+        Assert.True(SafeTextOracle.IsSafe(generatedParentName));
         Assert.Equal(generatedParentName, SubnetNaming.ToSafeText(generatedParentName));
     }
 
     [Fact]
     public void TheForwardSlashIsStillForbidden_SoTheSeparatorMayNotGoBack()
     {
-        Assert.False(_sanitizer.IsSafeText("sn-multi (10.20.40.0/24)"));
+        Assert.False(SafeTextOracle.IsSafe("sn-multi (10.20.40.0/24)"));
         Assert.Equal("sn-multi (10.20.40.024)", SubnetNaming.ToSafeText("sn-multi (10.20.40.0/24)"));
     }
 }

@@ -91,11 +91,11 @@ _Verified statically: s.id is a Razor-emitted number, $('#parentId').val() is a 
 _Reviewed: independent reviewer PASS — proved the find never matched and the replacement is identical._
 **Residue of:** none
 
-## I5 — IsSafeText survives on IInputSanitizationService with zero production callers since 18-R21 deleted SafeTextAttribute `[x1]`
-**Where:** src/Bastet/Services/Security/InputSanitizationService.cs:33; also :10-11 (SafeTextPattern regex), :33-41; src/Bastet/Services/Security/IInputSanitizationService.cs:8
-**Breaks:** IsSafeText and its SafeTextPattern regex have no caller in src/. The last production caller, SafeTextAttribute, was deleted by 18-R21 (f2050fa), leaving the service method and interface member behind — a second, production-dead implementation of the safe-character-set rule (production twin: SubnetNaming.ToSafeText), alive only as a test oracle in four test suites.
-**Repro:** Verifier ran it: grep -> only the two declarations plus four test files. Deleted member and regex in a scratch copy: app builds 0 errors; test project fails CS1061 only at the four test files. git log -S "IsSafeText(" -> f2050fa, bf120d6, 3940c98; f2050fa^ confirms both production callers removed by f2050fa.
-**Fix:** Delete IsSafeText from both files (with the SafeTextPattern regex) and move the character-set oracle into the test tree (a one-line test-local regex or helper next to SubnetNamingSafeTextTests), preserving the generated-name-safety assertions unchanged.
+## I5 — IsSafeText survives on IInputSanitizationService with zero production callers since 18-R21 deleted SafeTextAttribute `[x1]` — FIXED
+_Fixed in round 23. Deleted IsSafeText and SafeTextPattern from InputSanitizationService.cs and the IsSafeText member from IInputSanitizationService.cs; relocated the character-set oracle to test/Bastet.Tests/SafeTextOracle.cs (identical regex + null/whitespace short-circuit) and re-pointed all four test suites to SafeTextOracle.IsSafe._
+_Swept: grep confirms zero IsSafeText anywhere in src/; removed orphaned _sanitizer/sanitizer locals where IsSafeText was their only use and the stranded Bastet.Services.Security using; renamed the direct test to SafeTextOracle_ValidatesCorrectly._
+_Verified: build 0/0, 880/880 (no test dropped); mutating the oracle regex reddens ToSafeText_KeepsExactlyTheCharactersSafeTextAccepts, restored green._
+_Reviewed: independent reviewer PASS — zero production callers, no implementer breaks, oracle behaviour-identical, discrimination reproduced._
 **Residue of:** 18-R21
 
 ## I6 — Orphaned single-VNet-wizard test scaffolding in AzureControllerTests `[x2]` — FIXED

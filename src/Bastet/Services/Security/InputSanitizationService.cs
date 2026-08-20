@@ -7,9 +7,6 @@ namespace Bastet.Services.Security;
 public partial class InputSanitizationService : IInputSanitizationService
 {
 
-    [GeneratedRegex(@"^[a-zA-Z0-9\s\-_.,!?@#$%&()+=]*$", RegexOptions.Compiled)]
-    private static partial Regex SafeTextPattern();
-
     [GeneratedRegex(@"</?[A-Za-z][^>]*>", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex HtmlTagPattern();
 
@@ -28,16 +25,6 @@ public partial class InputSanitizationService : IInputSanitizationService
         string stripped = HtmlTagPattern().Replace(input, string.Empty);
 
         return stripped.Trim();
-    }
-
-    public bool IsSafeText(string? input)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            return true;
-        }
-
-        return SafeTextPattern().IsMatch(input);
     }
 
     public string SanitizeNetworkInput(string? input)

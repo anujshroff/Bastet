@@ -89,10 +89,10 @@ public class InputSanitizationServiceTests
     [InlineData("Test\x00", false)]
     [InlineData("", true)]
     [InlineData(null, true)]
-    public void IsSafeText_ValidatesCorrectly(string? input, bool expected)
+    public void SafeTextOracle_ValidatesCorrectly(string? input, bool expected)
     {
 
-        bool result = _sanitizationService.IsSafeText(input);
+        bool result = SafeTextOracle.IsSafe(input);
 
         Assert.Equal(expected, result);
     }

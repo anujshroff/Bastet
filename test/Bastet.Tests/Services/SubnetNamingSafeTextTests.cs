@@ -1,12 +1,9 @@
 using Bastet.Services;
-using Bastet.Services.Security;
 
 namespace Bastet.Tests.Services;
 
 public class SubnetNamingSafeTextTests
 {
-    private readonly InputSanitizationService _sanitizer = new();
-
     [Fact]
     public void ToSafeText_KeepsExactlyTheCharactersSafeTextAccepts()
     {
@@ -17,7 +14,7 @@ public class SubnetNamingSafeTextTests
             char ch = (char)c;
 
             string probe = $"a{ch}a";
-            bool acceptedByRule = _sanitizer.IsSafeText(probe);
+            bool acceptedByRule = SafeTextOracle.IsSafe(probe);
             bool keptByFilter = SubnetNaming.ToSafeText(probe) == probe;
 
             if (acceptedByRule != keptByFilter)
@@ -27,7 +24,7 @@ public class SubnetNamingSafeTextTests
         }
 
         Assert.True(disagreements.Count == 0,
-            "ToSafeText and IsSafeText disagree on: " + string.Join(" ", disagreements));
+            "ToSafeText and the safe-text oracle disagree on: " + string.Join(" ", disagreements));
     }
 
     [Theory]

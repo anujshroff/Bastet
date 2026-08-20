@@ -115,9 +115,7 @@ public class AzureBulkImportTargetNameTests
             Prefix("vnet-a", VNetA, "10.71.0.0/16"),
             Prefix("vnet-a", VNetA, "10.72.0.0/16"));
 
-        InputSanitizationService sanitizer = new();
-
-        Assert.All(TargetNames(plan), n => Assert.True(sanitizer.IsSafeText(n!)));
+        Assert.All(TargetNames(plan), n => Assert.True(SafeTextOracle.IsSafe(n!)));
     }
 
     [Fact]
