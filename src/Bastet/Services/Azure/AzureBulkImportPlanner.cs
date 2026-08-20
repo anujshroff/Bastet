@@ -165,6 +165,8 @@ namespace Bastet.Services.Azure
                 foreach (BulkAzureSubnetViewModel subnet in vnet.Subnets)
                 {
                     AnnotateSubnet(subnet, vnet, existingSubnets);
+                    subnet.ContainingPrefixes =
+                        [.. vnet.Ipv4AddressPrefixes.Where(p => PrefixContainsSubnet(p, subnet.AddressPrefix))];
                 }
 
                 vnet.Prefixes = [.. vnet.Ipv4AddressPrefixes.Select(p => AnnotatePrefix(p, vnet, existingSubnets))];
@@ -450,10 +452,16 @@ namespace Bastet.Services.Azure
 
         private IEnumerable<BulkAzureSubnetViewModel> SubnetsWithinPrefix(
             BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
-            vnet.Subnets.Where(s =>
-                TryParseCidr(s.AddressPrefix, out string n, out int c)
-                && ((c == prefixCidr && string.Equals(n, prefixNetwork, StringComparison.OrdinalIgnoreCase))
-                    || ipUtilityService.IsSubnetContainedInParent(n, c, prefixNetwork, prefixCidr)));
+            vnet.Subnets.Where(s => IsWithin(s.AddressPrefix, prefixNetwork, prefixCidr));
+
+        private bool PrefixContainsSubnet(string prefix, string subnetAddressPrefix) =>
+            TryParseCidr(prefix, out string pNet, out int pCidr)
+            && IsWithin(subnetAddressPrefix, pNet, pCidr);
+
+        private bool IsWithin(string subnetAddressPrefix, string prefixNetwork, int prefixCidr) =>
+            TryParseCidr(subnetAddressPrefix, out string n, out int c)
+            && ((c == prefixCidr && string.Equals(n, prefixNetwork, StringComparison.OrdinalIgnoreCase))
+                || ipUtilityService.IsSubnetContainedInParent(n, c, prefixNetwork, prefixCidr));
 
         private bool AnySubnetCanBeAdded(BulkAzureVNetViewModel vnet, string prefixNetwork, int prefixCidr) =>
             SubnetsWithinPrefix(vnet, prefixNetwork, prefixCidr).Any(s => s.IsSelectable);
