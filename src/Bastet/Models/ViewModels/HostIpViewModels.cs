@@ -10,7 +10,6 @@ public class HostIpViewModel
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
     public DateTime? LastModifiedAt { get; set; }
-    public string? ModifiedBy { get; set; }
 }
 
 public class CreateHostIpViewModel
