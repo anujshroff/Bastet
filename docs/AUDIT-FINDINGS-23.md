@@ -13,11 +13,11 @@ Round 23 filed 17 findings, of which 2 are residue of previous rounds' own fixes
 
 # Medium
 
-## M1 — All client CSS/JS loads only from cdn.jsdelivr.net; air-gapped deployments lose the client layer `[x2]`
-**Where:** src/Bastet/Views/Shared/_Layout.cshtml:101; also _Layout.cshtml:10,12,103; src/Bastet/Views/Shared/_ValidationScriptsPartial.cshtml:6,8
-**Breaks:** PRODUCT-MODEL §6 requires air-gapped deployments to keep working. Without reach to cdn.jsdelivr.net, jQuery/Bootstrap/bootstrap-icons/jquery-validation all fail: every page throws '$ is not defined'; navbar dropdowns never open (Deleted Subnets, All Host IPs, All Deleted Host IPs, My Roles, Logout unreachable via UI); Details Create modal, tree expand/collapse, tooltips dead; both Azure wizards hang; app unstyled. CRUD forms still submit.
-**Repro:** Verifier: Playwright aborting cdn.jsdelivr.net vs unblocked control. Blocked: '$ is not defined' pageerrors, dropdown never gets .show, unstyled navbar, Details modal never shows, /Azure/BulkImport frozen. Control: all work. wwwroot holds only css/site.css and js/site.js — no local fallback. git log -S 'cdn.jsdelivr' -> e05c3b1 (#11), 73fc76f (#108), pre-audit.
-**Fix:** Vendor the five libraries (bootstrap 5.3.8 css+bundle js, bootstrap-icons 1.13.1 with font files, jquery 4.0.0, jquery-validation 1.21.0, jquery-validation-unobtrusive 4.0.0) into wwwroot/lib and point the six tags at the local copies (stock ASP.NET Core template layout). Cheaper interim: keep CDN tags with local fallbacks (window.jQuery || document.write, link-onerror for CSS).
+## M1 — All client CSS/JS loads only from cdn.jsdelivr.net; air-gapped deployments lose the client layer `[x2]` — FIXED
+_Fixed in round 23. Vendored the five libraries into src/Bastet/wwwroot/lib (bootstrap 5.3.8 css+bundle, bootstrap-icons 1.13.1 css+woff2/woff, jquery 4.0.0, jquery-validation 1.21.0, jquery-validation-unobtrusive 4.0.0) and repointed the six tags (4 in _Layout.cshtml, 2 in _ValidationScriptsPartial.cshtml) at ~/lib paths with asp-append-version, dropping the CDN integrity/crossorigin. Each vendored JS/CSS's sha384 matches the old tag's integrity hash exactly (untampered, audited version)._
+_Swept: no jsdelivr/cdn asset reference remains under Views/; bootstrap-icons.css's ./fonts/*.woff2/.woff both present; .gitignore does not ignore wwwroot/lib (files commit, not a no-op)._
+_Verified: build 0/0, 880/880; reviewer ran a live air-gapped browser drive aborting every non-localhost request — EXTERNAL_REQUESTS=[], every asset 200 from localhost, navbar styled, dropdown opens, modal machinery works, bootstrap-icons woff2 loads, /Azure/BulkImport interactive, no '$ is not defined'._
+_Reviewed: independent reviewer PASS — static + air-gapped drive; the one caveat (Details Create page 500s on OIDC-to-IdP in the rig) is an environmental artifact unrelated to M1, modal machinery proven from the vendored bundle separately._
 **Residue of:** none
 
 # Low
