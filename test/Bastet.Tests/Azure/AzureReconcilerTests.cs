@@ -341,6 +341,36 @@ public class AzureReconcilerTests
     }
 
     [Fact]
+    public void AHeldPrefixChangedVNetRow_DoesNotNameTheDeleteRemedyItIsWithheldFrom()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.60.0.0/16"])),
+            [Linked(1, "target", "10.61.0.0", 16, VNetId("vnet-a"), manualDescendants: 1)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.Contains("still exists but no longer has the address prefix", held.Reason);
+        Assert.DoesNotContain("Delete it here if you want to", held.Reason);
+        Assert.DoesNotContain("import wizard", held.Reason);
+        Assert.Contains("Delete it here first, then run the scan again.", held.Reason);
+    }
+
+    [Fact]
+    public void AHeldPrefixChangedSubnetRow_DoesNotNameTheDeleteRemedyItIsWithheldFrom()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.62.0.0/16"], AzSubnet("vnet-a", "sn-a", "10.62.9.0/24"))),
+            [Linked(1, "app", "10.62.1.0", 24, SubnetId("vnet-a", "sn-a"), hostIps: 2)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.Contains("still exists but its address prefix is now", held.Reason);
+        Assert.DoesNotContain("Delete it here if you want to", held.Reason);
+        Assert.DoesNotContain("import wizard", held.Reason);
+        Assert.Contains("Delete it here first, then run the scan again.", held.Reason);
+    }
+
+    [Fact]
     public void AHeldRowWhoseVNetIsMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists()
     {
         AzureReconcilePlanViewModel plan = Build(

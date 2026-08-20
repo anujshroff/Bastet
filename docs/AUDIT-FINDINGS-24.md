@@ -29,32 +29,32 @@ _Verified: build 0/0, 882/882; reviewer's 33/33 equivalence check against the ol
 _Reviewed: independent reviewer PASS._
 **Residue of:** none
 
-## L3 — Held prefix-changed reconcile rows tell the operator to delete a row the same sentence block says BASTET will not delete `[x2]` `strings`
-**Where:** src/Bastet/Services/Azure/AzureReconciler.cs:95 (assembly site 93-99); :293-300 (VNetPrefixRemoved reason); :320-327 (SubnetPrefixChanged reason — verifier-corrected from :330)
-**Breaks:** A row linked to a live VNet/subnet whose prefix changed, holding manual content, is HeldByManualContent; its lead is item.Reason, so the operator reads "...Delete it here if you want to... BASTET will not delete it... Delete it here first, then run the scan again." — a remedy this checkbox-less review row is withheld from, contradicted in the next sentence (rule 3; same-screen contradiction). Same for SubnetPrefixChanged.
-**Repro:** Verified live: rows linked to live rig-vnet-multi (re-ranged, manual child) and rig-sub-app (changed prefix, 2 host IPs); ReconcileScan → both held with the contradictory reasons; _ReconcileScripts.cshtml:247 renders item.reason verbatim. 23-L4 gave absence statuses a factual lead but kept the remedy-bearing Reason for prefix-changed.
-**Fix:** Split the Evaluate* reasons into fact ("VNet 'x' still exists but no longer has the address prefix P." / "The Azure subnet still exists but its address prefix is now X, not P.") and remedy sentences; the held branch uses only the fact — the existing tail already states the true remedy. Offered items keep fact+remedy unchanged.
+## L3 — Held prefix-changed reconcile rows tell the operator to delete a row the same sentence block says BASTET will not delete `[x2]` `strings` — FIXED
+_Fixed in round 24. Evaluate* gained out string fact; held prefix-changed rows lead with the fact only (absence rows keep the 23-L4 listing clause); offered rows' Reasons byte-identical (fact + remedy reproduces the old strings exactly)._
+_Swept: SubnetControllerReconcileApprovedVerdictTests (scan/delete reason equality) green — offered wording unchanged._
+_Verified: build 0/0, 885/885; two new held-wording tests red pre-fix, green post; reviewer's revert-check reddens exactly those two._
+_Reviewed: independent reviewer PASS — six offered strings diffed character-identical, held rows now state fact + the true held remedy only._
 **Residue of:** 23-L4
 
-## L4 — Valid credential with zero visible subscriptions reported as "Failed to authenticate with Azure" `[x1]` `strings`
-**Where:** src/Bastet/Services/Azure/AzureService.cs:29-35 (root cause; post-loop return false at :35); src/Bastet/Controllers/AzureController.cs:47 (BulkImport); src/Bastet/Controllers/AzureController.cs:137 (Reconcile)
-**Breaks:** A principal that authenticates but sees no subscriptions: IsCredentialValid returns false on the empty enumeration — same value as a failed login — so both pages render "Failed to authenticate with Azure. Please check your credentials." beside "No subscriptions found." (_StepSubscription.cshtml:36). Same-screen contradiction; wrong remedy (real one: a role assignment). Confidence: plausible — unestablished: that ARM returns an empty 200 enumeration rather than throwing.
-**Repro:** Not-runnable (a zero-subscription principal cannot be constructed on the shared rig). Static: :35 is `return false;` after the empty await foreach; ModelState strings at :47/:137, rendered at both pages' line 14. Both identifiers from 9f220e0 (#32).
-**Fix:** Have IsCredentialValid (or a small result enum) separate "could not authenticate" from "authenticated, zero subscriptions visible", and word the second branch truthfully on both pages (e.g. "Signed in to Azure, but this credential can see no subscriptions. Grant it access to a subscription and reload."), keeping the existing message for real auth failures.
+## L4 — Valid credential with zero visible subscriptions reported as "Failed to authenticate with Azure" `[x1]` `strings` — FIXED
+_Fixed in round 24. IsCredentialValid → CheckCredential returning CredentialCheckResult {Failed, NoVisibleSubscriptions, Valid}; the empty enumeration (reachable only after auth succeeded without throwing) now renders "Signed in to Azure, but this credential cannot see any subscriptions. Grant it access to a subscription and reload this page." on both pages; real failures keep the old message._
+_Swept: both page actions (BulkImport, Reconcile); MockAzureService mirrors real semantics; three AzureServiceTests updated/added._
+_Verified: build 0/0, 885/885; reviewer confirmed NoVisibleSubscriptions is auth-proven by construction and the remedy is operator-reachable._
+_Reviewed: independent reviewer PASS._
 **Residue of:** none
 
-## L5 — Bulk import commit banner prefixes the indeterminate-outcome message with a false "Commit failed:" `[x1]` `strings`
-**Where:** src/Bastet/Views/Azure/BulkImport/_StepCommit.cshtml:17
-**Breaks:** A severed-transaction commit (SubnetController.BulkAzure.cs:450-454) answers 500 with "BASTET could not confirm whether this import was applied. Reload the subnet list to see its current state before retrying."; showCommitError (_BulkScripts.cshtml:663-686) drops it after the static <strong>Commit failed:</strong> — one banner asserting a definite failure and an unknown outcome; an operator trusting the headline retries without reloading. The other indeterminate renders (_StepConfirm.cshtml:28-32, SubnetController.Delete.cs:168-171) are bare.
-**Repro:** Verified live (Playwright): routed the commit POST to fulfill 500 with the byte-exact JSON of the catch at :454 → banner: "Commit failed: BASTET could not confirm whether this import was applied. ..." Markup original (73fc76f); message from d18327e (round 16).
-**Fix:** Delete the static "Commit failed:" strong from _StepCommit.cshtml:17 so the banner shows the server's message alone. Genuine-failure payloads carry self-sufficient sentences, so nothing loses meaning.
+## L5 — Bulk import commit banner prefixes the indeterminate-outcome message with a false "Commit failed:" `[x1]` `strings` — FIXED
+_Fixed in round 24. Deleted the static Commit failed: strong from _StepCommit.cshtml; the banner shows the server's self-sufficient message alone._
+_Swept: fallback payloads ("The import failed.", "Server error: N") read as complete failure sentences on their own._
+_Verified: build 0/0, 885/885; reviewer drove the indeterminate 500 live — banner shows the could-not-confirm sentence with no false failure headline; genuine failures still read as failures._
+_Reviewed: independent reviewer PASS._
 **Residue of:** none
 
-## L6 — Reconcile review-section note claims 'The results below have been re-scanned' on the very first scan, set by JS as a constant `[x2]` `strings`
-**Where:** src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:259; src/Bastet/Views/Azure/Reconcile/_StepReview.cshtml:76
-**Breaks:** On the first-ever scan the Needs-review explainer ends '...then scan again. The results below have been re-scanned, so they reflect Azure as it is now.' — asserting a re-scan that never happened. renderPlan writes this constant on every successful scan; since 23-I3 deleted the only other branch it distinguishes nothing.
-**Repro:** Verified live (fresh catalog, no scan ever run; one UnrecognisedResourceId row to show the review section): first scan ever → #rec-rescan-note shows the false sentence; the only remaining assignment is the constant in renderPlan. Born 65d1fc6 (round 15), relocated by 23233f2, single-branched by 23-I3.
-**Fix:** Delete the $('#rec-rescan-note').text(...) assignment and the empty <span id="rec-rescan-note"> in _StepReview.cshtml:76, folding a tense-neutral sentence into the static explainer prose (e.g. 'The results below reflect Azure as of the latest scan.').
+## L6 — Reconcile review-section note claims 'The results below have been re-scanned' on the very first scan, set by JS as a constant `[x2]` `strings` — FIXED
+_Fixed in round 24. Deleted the renderPlan constant assignment and the rec-rescan-note span; the static explainer prose now ends "The results below reflect Azure as of the latest scan." — tense-neutral, true on every scan._
+_Swept: no rec-rescan-note reference remains anywhere._
+_Verified: build 0/0, 885/885; reviewer drove a first-ever scan live — the explainer shows the neutral sentence, "have been re-scanned" appears nowhere._
+_Reviewed: independent reviewer PASS._
 **Residue of:** none
 
 ## L7 — Bulk import wizard loadVNets has no supersession guard: a stale VNet response repaints the current tree `[x1]` — FIXED

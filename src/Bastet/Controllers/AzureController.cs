@@ -42,9 +42,14 @@ namespace Bastet.Controllers
 
             try
             {
-                if (!await azureService.IsCredentialValid())
+                CredentialCheckResult credential = await azureService.CheckCredential();
+                if (credential == CredentialCheckResult.Failed)
                 {
                     ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                }
+                else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
+                {
+                    ModelState.AddModelError("", "Signed in to Azure, but this credential cannot see any subscriptions. Grant it access to a subscription and reload this page.");
                 }
             }
             catch (Exception ex)
@@ -132,9 +137,14 @@ namespace Bastet.Controllers
 
             try
             {
-                if (!await azureService.IsCredentialValid())
+                CredentialCheckResult credential = await azureService.CheckCredential();
+                if (credential == CredentialCheckResult.Failed)
                 {
                     ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                }
+                else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
+                {
+                    ModelState.AddModelError("", "Signed in to Azure, but this credential cannot see any subscriptions. Grant it access to a subscription and reload this page.");
                 }
             }
             catch (Exception ex)

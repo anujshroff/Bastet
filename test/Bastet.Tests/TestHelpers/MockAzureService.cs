@@ -43,7 +43,10 @@ public class MockAzureService : IAzureService
         _ipUtilityService = new IpUtilityService();
     }
 
-    public Task<bool> IsCredentialValid() => Task.FromResult(_credentialValid);
+    public Task<CredentialCheckResult> CheckCredential() => Task.FromResult(
+        !_credentialValid
+            ? CredentialCheckResult.Failed
+            : _subscriptions.Count > 0 ? CredentialCheckResult.Valid : CredentialCheckResult.NoVisibleSubscriptions);
 
     public Task<List<AzureSubscriptionViewModel>> GetSubscriptions() => Task.FromResult(_subscriptions);
 
