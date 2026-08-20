@@ -22,11 +22,11 @@ Round 23 filed 17 findings, of which 2 are residue of previous rounds' own fixes
 
 # Low
 
-## L1 — Reconcile delete refusal falsely claims withheld rows are 'no longer reported as deleted in Azure' `[x1]` `strings`
-**Where:** src/Bastet/Controllers/SubnetController.AzureReconcile.cs:102
-**Breaks:** VNet-linked 'vnet-x' 10.0.0.0/16 with subnet-linked child 'sub-a' 10.0.1.0/24; VNet deleted in Azure; operator approves delete. The VNet re-confirms Deleted but the child's ARM read fails transiently (Unknown, AzureService.cs:275-279). ApplyConfirmations withholds sub-a, the cascade withhold removes vnet-x from plan.Items, so the 409 headline says "1 of the selected subnet(s) are no longer reported as deleted in Azure. Nothing was deleted. Re-run the scan..." — untrue (Azure still reports it deleted), contradicted by the same response's warnings on one screen (_ReconcileScripts.cshtml:417-432), and the named remedy reproduces the state.
-**Repro:** Verifier ran the finder's probe (real controller/reconciler/snapshot service, Sqlite, stub: empty inventory, {vnet: Deleted, subnet: Unknown}): HTTP 409 with that headline plus the two truthful withhold warnings; subnet still present.
-**Fix:** Reword the one string at SubnetController.AzureReconcile.cs:102 to what is established, e.g. "N of the selected subnet(s) are no longer offered for deletion by the re-check, so nothing was deleted. The warnings below say why; re-run the scan and review the results." — truthful for every noLongerStale bucket.
+## L1 — Reconcile delete refusal falsely claims withheld rows are 'no longer reported as deleted in Azure' `[x1]` `strings` — FIXED
+_Fixed in round 23. Reworded the noLongerStale 409 headline to "N of the selected subnet(s) are no longer offered for deletion by the latest re-check, so nothing was deleted. Re-run the scan and review the results and any warnings shown." — definitionally true for every bucket (not in plan.Items = not offered), where the old "no longer reported as deleted in Azure" was false for the NotVisible/Unknown/cascade-withhold cases._
+_Swept: all five paths that reach noLongerStale (Live/NotVisible/Unknown/cascade/never-in-plan); held rows return earlier and never surface here; no test pinned the string._
+_Verified: build 0/0, 880/880._
+_Reviewed: independent reviewer PASS — traced every path, confirmed the new wording is true in all and the old false in at least three, remedy reachable._
 **Residue of:** none
 
 ## L2 — Client-side second implementations of CIDR containment and IP-integer arithmetic `[x1]`
@@ -50,11 +50,11 @@ _Verified: build 0/0, 880/880; new test AHeldRowWhoseVNetIsMerelyAbsentFromTheLi
 _Reviewed: independent reviewer PASS — reproduced, confirmed truthfulness in both cases, no §1 Rule-1 over-withhold, no new machinery._
 **Residue of:** none
 
-## L5 — Rename toggle label says renames are 'to VNet names' but the feature also renames child subnets to Azure subnet names `[x1]` `strings`
-**Where:** src/Bastet/Views/Azure/BulkImport/_StepSelection.cshtml:53
-**Breaks:** Toggle reads 'Rename matched Bastet subnets to VNet names', but with it on the wizard renames drifted child subnets to their Azure SUBNET names. It is the sole discovery point for child-name repair, so an operator reading it literally never enables it for drifted children; one wanting only VNet-target renames gets child renames too. Per-row reasons contradict the label on the same screen.
-**Repro:** Verifier ran it live (Playwright): imported rig-vnet-multi, SQL-renamed a child; toggle OFF -> checkbox disabled, no rename offer; toggle ON -> preview 'Rename to rig-sub-a', commit 'renamed 1 child subnet(s)', DB Name back to 'rig-sub-a'. Child target from ProposedChildName (AzureBulkImportPlanner.cs:427-429); per-row reason at _BulkScripts.cshtml:263. String from 73fc76f (#108).
-**Fix:** One string: change the label to 'Rename matched Bastet subnets to their Azure names' (covers both halves; per-row reasons already say which name applies).
+## L5 — Rename toggle label says renames are 'to VNet names' but the feature also renames child subnets to Azure subnet names `[x1]` `strings` — FIXED
+_Fixed in round 23. Changed the toggle label to "Rename matched Bastet subnets to their Azure names" — accurate for both the VNet target (ProposedTargetName) and drifted child subnets (ProposedChildName), where "to VNet names" was false for the child rows._
+_Swept: confirmed via the planner and commit path that the toggle renames both target and child rows to their Azure names; no test pinned the label._
+_Verified: build 0/0, 880/880._
+_Reviewed: independent reviewer PASS — confirmed both halves rename to Azure names, §4 "the control says subnets and must mean it" satisfied._
 **Residue of:** none
 
 ## L6 — Azure resource-id case-insensitive equality inline at ~12 sites; Ordinal mutants at the 9 unpinned sites survive the suite `[x2]` — FIXED

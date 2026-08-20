@@ -99,8 +99,8 @@ public partial class SubnetController : Controller
             return Conflict(new
             {
                 success = false,
-                error = $"{noLongerStale.Count} of the selected subnet(s) are no longer reported as deleted in Azure. " +
-                        "Nothing was deleted. Re-run the scan and review the results.",
+                error = $"{noLongerStale.Count} of the selected subnet(s) are no longer offered for deletion by the latest re-check, " +
+                        "so nothing was deleted. Re-run the scan and review the results and any warnings shown.",
                 subnetIds = noLongerStale,
 
                 warnings = plan.Warnings
