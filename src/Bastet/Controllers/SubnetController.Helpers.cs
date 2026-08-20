@@ -129,7 +129,6 @@ public partial class SubnetController : Controller
             }
 
             ValidationResult hostIpValidation = subnetValidationService.ValidateParentCanHaveChildSubnets(
-                parentSubnet.Id,
                 parentSubnet.HostIpAssignments);
 
             if (!hostIpValidation.IsValid)
