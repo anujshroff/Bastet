@@ -52,12 +52,6 @@
     function initializeForm() {
         const cidrInput = $('#Cidr');
 
-        cidrInput.attr('max', '32');
-
-        $('#cidrRangeText').text('CIDR values: 0-32');
-        $('#networkAddressHelp').text('Enter the network address (e.g. 192.168.1.0)');
-        $('#NetworkAddress').attr('placeholder', '192.168.1.0');
-
         if (cidrInput.val() !== '') {
             updateSubnetInfo();
         } else {
