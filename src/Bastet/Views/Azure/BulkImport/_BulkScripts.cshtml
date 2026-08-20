@@ -6,6 +6,7 @@
         let vnets = [];
         let lastSelection = null;
         let previewSeq = 0;
+        let vnetSeq = 0;
         let committing = false;
         let committed = false;
 
@@ -99,6 +100,8 @@
         });
 
         function loadVNets() {
+
+            const seq = ++vnetSeq;
             $.ajax({
                 url: '@Url.Action("BulkGetVNets", "Azure")',
                 type: "GET",
@@ -113,6 +116,9 @@
                     $("#bulk-no-vnets").addClass("d-none");
                 },
                 success: function (result) {
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     if (!result.success) {
                         $("#bulk-vnet-error-message").text(result.error || "Failed to load VNets");
                         $("#bulk-vnet-error").removeClass("d-none");
@@ -128,10 +134,18 @@
                     updateGoPreviewBtn();
                 },
                 error: function (xhr, status, error) {
+
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     $("#bulk-vnet-error-message").text("Error connecting to server: " + error);
                     $("#bulk-vnet-error").removeClass("d-none");
                 },
                 complete: function () {
+
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     $("#bulk-vnet-loading").addClass("d-none");
                 }
             });
