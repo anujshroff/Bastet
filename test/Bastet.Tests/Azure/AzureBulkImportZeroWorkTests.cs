@@ -141,6 +141,9 @@ public class AzureBulkImportZeroWorkTests
         BulkAzurePrefixViewModel prefix = Annotate(vnet,
             Row(1, "other-owner", "10.55.0.0", 16, VNetId("vnet-other"), fullyAllocated: true));
 
+        Assert.Equal(BulkImportAvailability.Blocked, prefix.Status);
+        Assert.False(prefix.IsSelectable);
+
         BulkAzureSubnetViewModel whole = Assert.Single(vnet.Subnets);
         Assert.Equal(BulkImportAvailability.Blocked, whole.Status);
         Assert.False(whole.IsSelectable);
