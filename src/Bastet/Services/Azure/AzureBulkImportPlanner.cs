@@ -12,9 +12,7 @@ namespace Bastet.Services.Azure
         private const int MaxSubnetNameLength = 100;
 
         private static bool IsSameVNet(ExistingSubnetSnapshot existing, string? vnetResourceId) =>
-            !string.IsNullOrEmpty(existing.AzureResourceId)
-            && !string.IsNullOrEmpty(vnetResourceId)
-            && string.Equals(existing.AzureResourceId, vnetResourceId, StringComparison.OrdinalIgnoreCase);
+            AzureResourceIdentity.IsSameResourceId(existing.AzureResourceId, vnetResourceId);
 
         private static bool IsSameVNet(ExistingSubnetSnapshot existing, BulkAzureVNetViewModel vnet) =>
             IsSameVNet(existing, vnet.ResourceId);
@@ -26,7 +24,7 @@ namespace Bastet.Services.Azure
             IReadOnlyList<ExistingSubnetSnapshot> existingSubnets) =>
             !string.IsNullOrEmpty(azureResourceId)
             && existingSubnets.Any(e =>
-                string.Equals(e.AzureResourceId, azureResourceId, StringComparison.OrdinalIgnoreCase)
+                AzureResourceIdentity.IsSameResourceId(e.AzureResourceId, azureResourceId)
                 && !(e.Cidr == cidr
                      && string.Equals(e.NetworkAddress, network, StringComparison.OrdinalIgnoreCase)));
 
@@ -415,8 +413,7 @@ namespace Bastet.Services.Azure
                 return;
             }
 
-            bool sameAzureResource = !string.IsNullOrEmpty(exact.AzureResourceId)
-                && string.Equals(exact.AzureResourceId, subnet.ResourceId, StringComparison.OrdinalIgnoreCase);
+            bool sameAzureResource = AzureResourceIdentity.IsSameResourceId(exact.AzureResourceId, subnet.ResourceId);
 
             subnet.Status = sameAzureResource ? BulkImportAvailability.AlreadyImported : BulkImportAvailability.Blocked;
             subnet.Reason = sameAzureResource
@@ -436,8 +433,7 @@ namespace Bastet.Services.Azure
                 : existingSubnets.FirstOrDefault(e =>
                     e.Cidr == sub.Cidr
                     && string.Equals(e.NetworkAddress, sub.Network, StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrEmpty(e.AzureResourceId)
-                    && string.Equals(e.AzureResourceId, sub.Source.AzureResourceId, StringComparison.OrdinalIgnoreCase));
+                    && AzureResourceIdentity.IsSameResourceId(e.AzureResourceId, sub.Source.AzureResourceId));
 
         private string ProposedChildName(string? azureName, string network, int cidr, bool qualifyWithRange)
         {

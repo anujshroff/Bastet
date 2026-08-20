@@ -57,11 +57,11 @@ Round 23 filed 17 findings, of which 2 are residue of previous rounds' own fixes
 **Fix:** One string: change the label to 'Rename matched Bastet subnets to their Azure names' (covers both halves; per-row reasons already say which name applies).
 **Residue of:** none
 
-## L6 — Azure resource-id case-insensitive equality inline at ~12 sites; Ordinal mutants at the 9 unpinned sites survive the suite `[x2]`
-**Where:** src/Bastet/Controllers/SubnetController.BulkAzure.cs:245; also :359; src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:29,419,440; src/Bastet/Services/Azure/AzureReconciler.cs:38,39,343; src/Bastet/Services/Azure/AzureService.cs:196,200,207,226
-**Breaks:** ARM ids are case-variable. If any unpinned compare drifts to Ordinal the suite stays green while: BulkAzure.cs:245 — preview offers the import but commit 409s 'is already linked ... cannot be re-linked ... delete the Bastet subnet and import it again' (plan/commit contradiction, remedy is deleting a live allocation); AzureReconciler.cs:38-39 — id join misses, live linked row reported gone and offered for delete; planner :419 — already-imported subnet badged Blocked with a false reason; AzureService.cs:200/207/226 — second-look confirmation map no longer matches the queried ids.
-**Repro:** Verifier ran it on a scratch copy: baseline 878/878; control mutant planner:17 -> 877/878 (sole failure the 22-L1 casing test); all 12 unpinned sites mutated to Ordinal at once -> green; BulkAzure.cs:245 alone -> green; AzureReconciler.cs:38-39 alone -> green; baseline restored, green. git blame: sites predate per-finding ids (ff285cf, aedd0bd, 0de1293, 8afa2df).
-**Fix:** Delete the duplication: give AzureResourceIdentity a single public equality — static bool IsSameResourceId and a static StringComparer IdComparer (OrdinalIgnoreCase) — and point every listed compare and comparer at it (IsSameVNet collapses onto it); the 22-L1 tests then pin the one decision for all callers. Cheaper interim: mutation-verified pins at BulkAzure.cs:245 and AzureReconciler.cs:38-39.
+## L6 — Azure resource-id case-insensitive equality inline at ~12 sites; Ordinal mutants at the 9 unpinned sites survive the suite `[x2]` — FIXED
+_Fixed in round 23. Added AzureResourceIdentity.IsSameResourceId + IdComparer (both OrdinalIgnoreCase, null-guarded to match the old IsSameVNet); routed IsSameVNet, planner :29/sameAzureResource/LinkedRowForSameAzureSubnet, the two AzureReconciler dict comparers, the four AzureService comparers, and BulkAzure :73/:245/:359 through them._
+_Swept: every AzureResourceId/VNetResourceId equality in the Azure code; left planner :197 (present&&present&&≠, a different decision), BulkAzure :258 (deliberate Ordinal store), Reconciler :343 (StartsWith prefix) untouched; all NetworkAddress/name compares are IP/name strings, not ids._
+_Verified: build 0/0, dotnet test 878/878; mutating IsSameResourceId to Ordinal turns the 22-L1 casing test red (single helper now pins every caller), restored green._
+_Reviewed: independent reviewer PASS — confirmed every converted site preserves semantics (both-null flips unreachable or strictly safer), not-changed sites are genuinely different decisions, mutation pin reproduced._
 **Residue of:** none
 
 # Info

@@ -70,7 +70,7 @@ public partial class SubnetController : Controller
             }
 
             BulkImportPlanItem? item = plan.Items.FirstOrDefault(i =>
-                string.Equals(i.VNetResourceId, selected.VNetResourceId, StringComparison.OrdinalIgnoreCase)
+                AzureResourceIdentity.IsSameResourceId(i.VNetResourceId, selected.VNetResourceId)
                 && string.Equals(i.VNetPrefix, selected.AddressPrefix, StringComparison.OrdinalIgnoreCase));
 
             if (item is null)
@@ -242,7 +242,7 @@ public partial class SubnetController : Controller
                         bool alreadyLinked = !string.IsNullOrEmpty(targetSubnet.AzureResourceId);
 
                         if (alreadyLinked
-                            && !string.Equals(targetSubnet.AzureResourceId, sanitizedVNetResourceId, StringComparison.OrdinalIgnoreCase))
+                            && !AzureResourceIdentity.IsSameResourceId(targetSubnet.AzureResourceId, sanitizedVNetResourceId))
                         {
                             await transaction.RollbackAsync();
                             return Conflict(new
@@ -356,7 +356,7 @@ public partial class SubnetController : Controller
                         Subnet? existingChild = await context.Subnets.FindAsync(existingChildId);
 
                         if (existingChild is null
-                            || !string.Equals(existingChild.AzureResourceId, sanitizedChildResourceId, StringComparison.OrdinalIgnoreCase))
+                            || !AzureResourceIdentity.IsSameResourceId(existingChild.AzureResourceId, sanitizedChildResourceId))
                         {
                             await transaction.RollbackAsync();
                             return Conflict(new

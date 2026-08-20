@@ -35,8 +35,8 @@ namespace Bastet.Services.Azure
                 return plan;
             }
 
-            Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(AzureResourceIdentity.IdComparer);
+            Dictionary<string, List<string>> liveSubnetPrefixes = new(AzureResourceIdentity.IdComparer);
 
             List<AzureReconcileItem> heldByManualContent = [];
 
