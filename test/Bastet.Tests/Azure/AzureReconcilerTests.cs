@@ -371,6 +371,41 @@ public class AzureReconcilerTests
     }
 
     [Fact]
+    public void AHeldSubnetRowMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [Linked(1, "app", "10.63.1.0", 24, SubnetId("vnet-a", "sn-a"), manualDescendants: 1)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.DoesNotContain("no longer exists", held.Reason);
+        Assert.Contains("could not be found in this subscription's listing", held.Reason);
+    }
+
+    [Fact]
+    public void ASubnetRowLinkedWithDifferentIdCasing_IsNotReportedAsDeleted()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.64.0.0/16"], AzSubnet("vnet-a", "sn-a", "10.64.1.0/24"))),
+            [Linked(1, "app", "10.64.1.0", 24, SubnetId("vnet-a", "sn-a").ToUpperInvariant())]);
+
+        Assert.Empty(plan.Items);
+        Assert.Empty(plan.ReviewItems);
+    }
+
+    [Fact]
+    public void AVNetTargetLinkedWithDifferentIdCasing_IsNotReportedAsDeleted()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.65.0.0/16"])),
+            [Linked(1, "target", "10.65.0.0", 16, VNetId("vnet-a").ToUpperInvariant())]);
+
+        Assert.Empty(plan.Items);
+        Assert.Empty(plan.ReviewItems);
+    }
+
+    [Fact]
     public void AHeldRowWhoseVNetIsMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists()
     {
         AzureReconcilePlanViewModel plan = Build(
