@@ -66,11 +66,10 @@ _Reviewed: independent reviewer PASS — confirmed every converted site preserve
 
 # Info
 
-## I1 — BuildPlan's manual-content cascade-withhold call is provably dead machinery `[x1]`
-**Where:** src/Bastet/Services/Azure/AzureReconciler.cs:113
-**Breaks:** The WithholdTargetsWhoseCascadeIsBlocked call at :113-115 can never remove an item or emit its warning: GetAzureLinkedSubnetsAsync (AzureSubnetSnapshotService.cs:50-68) aggregates ManualDescendantCount/HostIpCount over the whole subtree, so any target with a held descendant is itself held at :91 and never reaches plan.Items — the set the call filters. Unreachable guard in the file the model says must stay small (live twin: ApplyConfirmations call at :209-211).
-**Repro:** Verifier ran probe tests at adebf6f, 2/2 passed: the real snapshot service over Sqlite (linked parent+child, manual grandchild + host IP) holds both rows HeldByManualContent, plan.Items empty, line-113 warning never appears; the branch fires only with hand-fabricated inconsistent snapshots the service cannot emit. Both production callers take snapshots straight from the service; no test pins the BuildPlan-side warning.
-**Fix:** Delete the call at AzureReconciler.cs:113-115 (the ApplyConfirmations call site stays). Optionally pin with a test asserting that a target whose descendant carries manual content is itself HeldByManualContent.
+## I1 — BuildPlan's manual-content cascade-withhold call is provably dead machinery `[x1]` — REFUTED
+_The finding's load-bearing claim is false: the call at :113-115 is NOT zero-coverage dead code. Deleting it turns two tests red — AzureReconcilerTests.AnAncestorOfAHeldSubnet_IsAlsoWithheld and .AnAncestorOfAManuallyCreatedDescendant_IsStillWithheld — which pin the Rule-2 manual-content ancestor-withhold at the BuildPlan boundary. The verifier's "no test pins the BuildPlan-side warning" is wrong._
+_It is redundant with the ApplyConfirmations :209 withhold in the full production flow (a parent confirmed Deleted is still withheld there because its held descendant sits in plan.ReviewItems), but that is belt-and-suspenders on the CORRECT (manual-content) axis — §3's one legitimate refusal — not the wrong-axis machinery §1/§3 want removed. Provenance 23233f2 (the mass revert that cleaned up the withhold mess) kept it deliberately._
+_Refuting, not converting into an invented harder fix (delete + rewrite two safety tests to the full flow), which for an Info line-count cleanup would risk a vacuous safety test — the residue pattern the skill exists to prevent._
 **Residue of:** none
 
 ## I2 — BASTET_AZURE_IMPORT flag decision re-implemented inline in two views instead of calling the single helper `[x1]`
