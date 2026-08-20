@@ -72,25 +72,23 @@ _It is redundant with the ApplyConfirmations :209 withhold in the full productio
 _Refuting, not converting into an invented harder fix (delete + rewrite two safety tests to the full flow), which for an Info line-count cleanup would risk a vacuous safety test — the residue pattern the skill exists to prevent._
 **Residue of:** none
 
-## I2 — BASTET_AZURE_IMPORT flag decision re-implemented inline in two views instead of calling the single helper `[x1]`
-**Where:** src/Bastet/Views/Shared/_Layout.cshtml:46; also src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml:5
-**Breaks:** The single implementation is AzureController.IsAzureImportEnabled() (AzureController.cs:201), called by every controller Azure surface and _EditForm.cshtml:28. Two views paste their own bool.TryParse over the env var: _Layout.cshtml:46 (nav links) and _UnallocatedRanges.cshtml:5 (the 'Run a Bulk Azure Import' remedy sentence). Per §5, if the helper's parse semantics change, nav link and remedy diverge from the endpoints they point at. All three parse identically today; the defect is the duplication.
-**Repro:** Verifier ran the filed grep: helper, the _EditForm.cshtml:28 helper call, and exactly two inline copies at the cited lines. git blame: _Layout.cshtml:46 <- 73fc76f (#108); _UnallocatedRanges.cshtml:5 <- f4a0a878 (Audit 17 merge, pre-ledger-ids). Live drift demo blocked by a toolchain fault independent of the finding; duplication and fix pattern verified in-tree at HEAD.
-**Fix:** Replace both inline parses with Bastet.Controllers.AzureController.IsAzureImportEnabled() (as _EditForm.cshtml:28 already does) and delete the local bool declarations.
+## I2 — BASTET_AZURE_IMPORT flag decision re-implemented inline in two views instead of calling the single helper `[x1]` — FIXED
+_Fixed in round 23. Replaced the inline bool.TryParse in _Layout.cshtml and _UnallocatedRanges.cshtml with Bastet.Controllers.AzureController.IsAzureImportEnabled() (as _EditForm.cshtml already does)._
+_Swept: grep confirms the only remaining BASTET_AZURE_IMPORT parse in src/ is the helper itself; no inline copy left under Views/._
+_Verified: build 0/0, 880/880; helper does the identical parse so nav-link/remedy gating is unchanged._
+_Reviewed: independent reviewer PASS — byte-identical parse, reachable from Razor, no inline copies remain._
 **Residue of:** none
 
-## I3 — Reconcile scan-failure branch writes a caveat into a section the failure path always hides `[x2]`
-**Where:** src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml:172
-**Breaks:** On scan failure showScanError sets #rec-rescan-note to "The results below could not be re-scanned, so they may not reflect Azure as it is now." — but every caller runs after runScan's beforeSend added d-none to #rec-scan-content (containing the note's span, _StepReview.cshtml:76) and showScanError never unhides it, so the sentence can never be seen. Visible behavior stays coherent; the assignment is dead mechanism.
-**Repro:** Verifier ran it (Playwright): aborted ReconcileScan, clicked Scan -> {errorVisible:true, contentHasDnone:true, noteText set, noteVisible:false}. Re-fulfilled ReconcileScan successfully -> {contentHasDnone:false, noteText:"...have been re-scanned...", noteVisible:true} — line 262/264 is the only path surfacing the note.
-**Fix:** Delete the unreachable assignment at _ReconcileScripts.cshtml:172-173. The success-path assignment at line 262 stays; optionally its text becomes the span's static content in _StepReview.cshtml since only one state remains.
+## I3 — Reconcile scan-failure branch writes a caveat into a section the failure path always hides `[x2]` — FIXED
+_Fixed in round 23. Deleted the unreachable #rec-rescan-note assignment in showScanError; the success-path assignment stays._
+_Verified statically: #rec-rescan-note lives inside #rec-scan-content, which runScan's beforeSend hides (d-none) and showScanError never unhides — the note could never be seen; build 0/0, 880/880._
+_Reviewed: independent reviewer PASS — proved unreachability from the DOM/handler structure; success path intact._
 **Residue of:** none
 
-## I4 — Dead parent lookup in CIDR-modal relocation can never match `[x1]`
-**Where:** src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml:224
-**Breaks:** In findCompatibleNetworkAddress the childSubnets.find(s => s.id === parentId) lookup is doubly dead: parentId is a string (hidden #parentId) while s.id is a Razor-emitted number, and childSubnets holds the current subnet's children while parentId names the current subnet itself. The || startingAddress fallback always runs and computes the right parent range — pure dead code, no operator-visible misbehavior.
-**Repro:** Verifier: not-runnable as a failure (no observable misbehavior). Node check with the file's own helpers: find -> undefined with string id and with Number(parentId); fallback boundaries from three different starts at /16 all -> 10.10.0.0 - 10.10.255.255. data-parent-id="@Model.Id" (_UnallocatedRanges.cshtml:65) is the only filler of #parentId. git log -S parentNetwork -> 46b3e69 (#17) only.
-**Fix:** Delete the find() lookup and derive parentBoundaries directly from the existing normalization: const parentBoundaries = getSubnetBoundaries(startingAddress, parentCidr); (identical behavior, one implementation instead of a dead one plus a fallback).
+## I4 — Dead parent lookup in CIDR-modal relocation can never match `[x1]` — FIXED
+_Fixed in round 23. Deleted the childSubnets.find(s => s.id === parentId) lookup and the dead parentId local; parentBoundaries now derives from startingAddress directly (behaviour-identical)._
+_Verified statically: s.id is a Razor-emitted number, $('#parentId').val() is a string, so the strict-equality find always returned undefined and the || startingAddress fallback always ran; the other #parentId uses (setter, Create URL) untouched; build 0/0, 880/880._
+_Reviewed: independent reviewer PASS — proved the find never matched and the replacement is identical._
 **Residue of:** none
 
 ## I5 — IsSafeText survives on IInputSanitizationService with zero production callers since 18-R21 deleted SafeTextAttribute `[x1]`

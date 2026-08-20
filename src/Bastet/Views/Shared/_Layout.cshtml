@@ -43,7 +43,7 @@
                             </ul>
                         </li>
                         @{
-                            bool bulkAzureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _enabled) && _enabled;
+                            bool bulkAzureImportEnabled = Bastet.Controllers.AzureController.IsAzureImportEnabled();
                         }
                         @if (bulkAzureImportEnabled && UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
                         {

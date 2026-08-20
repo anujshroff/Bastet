@@ -2,7 +2,7 @@
 @inject Bastet.Services.IUserContextService SubnetUserContext
 
 @{
-    bool azureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _azureEnabled) && _azureEnabled;
+    bool azureImportEnabled = Bastet.Controllers.AzureController.IsAzureImportEnabled();
 }
 
 @if (!Model.IsFullyAllocated && Model.UnallocatedRanges.Any())
