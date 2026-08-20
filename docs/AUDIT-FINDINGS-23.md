@@ -100,25 +100,22 @@ _Refuting, not converting into an invented harder fix (delete + rewrite two safe
 **Fix:** Delete IsSafeText from both files (with the SafeTextPattern regex) and move the character-set oracle into the test tree (a one-line test-local regex or helper next to SubnetNamingSafeTextTests), preserving the generated-name-safety assertions unchanged.
 **Residue of:** 18-R21
 
-## I6 — Orphaned single-VNet-wizard test scaffolding in AzureControllerTests `[x2]`
-**Where:** test/Bastet.Tests/Azure/AzureControllerTests.cs:240; also :246, :263, :316, :317
-**Breaks:** Five uncalled members: private ControllerWith(IAzureService) (:240), static Parse(IActionResult) (:246), ControllerWithSubnets(...) (:263, followed by a nine-blank-line gap), plus JsonResponse.vnets (:316) and .subnets (:317), never read by any assertion. At d18327e these had 4-6 references; the mass revert 23233f2 deleted the single-VNet wizard tests that called them and left the declarations, inviting a future test to resurrect the deleted wizard's testing style.
-**Repro:** Verifier ran it: grep of test/ -> only the declarations, no reads of vnets/subnets. Reference counts across bf120d6, d18327e, 23233f2, HEAD: ControllerWith/Parse 4,4,1,1; ControllerWithSubnets 0,6,1,1. Deleted all five plus the gap in a scratch export: build 0 errors; dotnet test 878/878 (with -p:UseSharedCompilation=false to dodge the box's poisoned shared Roslyn compiler).
-**Fix:** Delete ControllerWith, Parse, ControllerWithSubnets, the blank-line gap, and the vnets/subnets properties of the private JsonResponse class (the AzureVNetViewModel/AzureSubnetViewModel usings stay: MockAzureService still needs those types). Suite must stay 878 green.
+## I6 — Orphaned single-VNet-wizard test scaffolding in AzureControllerTests `[x2]` — FIXED
+_Fixed in round 23. Deleted the uncalled ControllerWith/Parse/ControllerWithSubnets helpers, the 9-blank gap, and the never-read JsonResponse.vnets/.subnets; kept success/error/subscriptions and the view-model usings MockAzureService needs._
+_Verified: build 0/0, 880/880 (no test removed); grep confirms zero references._
+_Reviewed: independent reviewer PASS — zero references tree-wide, kept members still used._
 **Residue of:** none
 
-## I7 — VNetB constant in AzureBulkImportSelectabilityTests dead on arrival `[x2]`
-**Where:** test/Bastet.Tests/Azure/AzureBulkImportSelectabilityTests.cs:11
-**Breaks:** The suite declares two VNet resource-id constants but every fixture builder keys off VNetA only; VNetB has exactly one occurrence — its declaration — at every revision since the file was created in the round-20 merge 6fb8557. It reads as if a second-VNet scenario is covered when none is.
-**Repro:** Verifier ran it: scratch clone; sed -i '11d' (grep -c VNetB -> 0); build 0 errors; filtered test run 16/16 green. git log --follow --diff-filter=A -> 6fb8557; occurrence count 1 at 6fb8557/85b1819/adebf6f; git blame -L11,11 -> 6fb85570.
-**Fix:** Delete the VNetB constant (one line).
+## I7 — VNetB constant in AzureBulkImportSelectabilityTests dead on arrival `[x2]` — FIXED
+_Fixed in round 23. Deleted the single unused VNetB const in AzureBulkImportSelectabilityTests.cs; the used VNetB consts in TopUpTests and TargetNameTests are untouched._
+_Verified: build 0/0, 880/880; grep confirms VNetB gone from the selectability file only._
+_Reviewed: independent reviewer PASS._
 **Residue of:** 18-R10
 
-## I8 — Three test classes keep a write-only _sanitizationService field since the global-sanitization-filter refactor `[x2]`
-**Where:** test/Bastet.Tests/HostIpManagement/SubnetHostIpInteractionTests.cs:23; also :36; test/Bastet.Tests/SubnetManagement/SubnetControllerCidrEditTests.cs:21,32; test/Bastet.Tests/SubnetManagement/SubnetRaceConditionTests.cs:24,35
-**Breaks:** Each class constructs an InputSanitizationService into a private readonly _sanitizationService field no test method reads. The reads were removed by pre-audit PR #44 (3e5360d, 'Use global action filter for sanitization'); dead weight since.
-**Repro:** Verifier ran it: grep -> exactly 6 hits at the cited lines, declaration + assignment only. git log -S -> 3e5360d, 3940c98 only; 3e5360d~1 vs 3e5360d: 15 -> 2 references. Applied the fix (6 lines deleted): filtered tests 51/51, full suite 878/878.
-**Fix:** Delete the field declaration and the constructor assignment in all three test classes (six lines total).
+## I8 — Three test classes keep a write-only _sanitizationService field since the global-sanitization-filter refactor `[x2]` — FIXED
+_Fixed in round 23. Deleted the write-only _sanitizationService field (declaration + ctor assignment) in SubnetRaceConditionTests, SubnetControllerCidrEditTests, SubnetHostIpInteractionTests; InputSanitizationServiceTests (which reads it) untouched._
+_Verified: build 0/0, 880/880; grep confirms zero references in the three files._
+_Reviewed: independent reviewer PASS._
 **Residue of:** none
 
 ## I9 — The three-argument CalculateUnallocatedRanges overload has no production caller `[x1]`
