@@ -189,7 +189,7 @@ public class SubnetPropertyCalculationTests
         int cidr = 24;
         List<Subnet> childSubnets = [];
 
-        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, [])];
 
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
@@ -209,7 +209,7 @@ public class SubnetPropertyCalculationTests
             new() { NetworkAddress = "10.0.0.0", Cidr = 25 }
         ];
 
-        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, [])];
 
         Assert.Single(result);
 
@@ -261,7 +261,7 @@ public class SubnetPropertyCalculationTests
             new() { NetworkAddress = "10.0.0.252", Cidr = 31 },
         ];
 
-        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 24, childSubnets)];
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 24, childSubnets, [])];
 
         IPRange last = Assert.Single(result);
         Assert.Equal("10.0.0.254", last.StartIp);
@@ -282,7 +282,7 @@ public class SubnetPropertyCalculationTests
             new() { NetworkAddress = "10.0.0.128", Cidr = 26 }
         ];
 
-        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, [])];
 
         Assert.Equal(2, result.Count);
 
@@ -305,7 +305,7 @@ public class SubnetPropertyCalculationTests
         int cidr = 31;
         List<Subnet> childSubnets = [];
 
-        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, [])];
 
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
@@ -321,7 +321,7 @@ public class SubnetPropertyCalculationTests
         int cidr = 32;
         List<Subnet> childSubnets = [];
 
-        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, [])];
 
         Assert.Single(result);
         Assert.Equal("10.0.0.1", result[0].StartIp);
@@ -340,7 +340,7 @@ public class SubnetPropertyCalculationTests
             new() { NetworkAddress = "10.0.0.0", Cidr = 24 }
         ];
 
-        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets)];
+        List<IPRange> result = [.. _ipUtilityService.CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, [])];
 
         Assert.Single(result);
         Assert.Equal("10.0.0.0", result[0].StartIp);
@@ -357,7 +357,7 @@ public class SubnetPropertyCalculationTests
         List<Subnet> childSubnets = [];
 
         Assert.Throws<ArgumentNullException>(() =>
-            _ipUtilityService.CalculateUnallocatedRanges(nullNetwork!, 24, childSubnets));
+            _ipUtilityService.CalculateUnallocatedRanges(nullNetwork!, 24, childSubnets, []));
     }
 
     [Fact]
@@ -367,10 +367,10 @@ public class SubnetPropertyCalculationTests
         List<Subnet> childSubnets = [];
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", -1, childSubnets));
+            _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", -1, childSubnets, []));
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 33, childSubnets));
+            _ipUtilityService.CalculateUnallocatedRanges("10.0.0.0", 33, childSubnets, []));
     }
 
     [Fact]
@@ -380,7 +380,7 @@ public class SubnetPropertyCalculationTests
         List<Subnet> childSubnets = [];
 
         Assert.ThrowsAny<Exception>(() =>
-            _ipUtilityService.CalculateUnallocatedRanges("invalid-ip", 24, childSubnets));
+            _ipUtilityService.CalculateUnallocatedRanges("invalid-ip", 24, childSubnets, []));
     }
 
     #endregion

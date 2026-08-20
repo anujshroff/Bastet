@@ -19,7 +19,5 @@ public interface IIpUtilityService
 
     bool IsIpInSubnet(string ip, string networkAddress, int cidr);
 
-    IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets);
-
     IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets, IEnumerable<HostIpAssignment> hostIpAssignments);
 }

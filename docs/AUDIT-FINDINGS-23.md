@@ -116,11 +116,12 @@ _Verified: build 0/0, 880/880; grep confirms zero references in the three files.
 _Reviewed: independent reviewer PASS._
 **Residue of:** none
 
-## I9 — The three-argument CalculateUnallocatedRanges overload has no production caller `[x1]`
-**Where:** src/Bastet/Services/IIpUtilityService.cs:22; also src/Bastet/Services/IpUtilityService.cs:175-176
-**Breaks:** The only production call site is SubnetController.Read.cs:97, using the four-argument form; the three-argument overload is called nowhere in src — superseded when host-IP awareness was added to Details. It survives only because 11 test call sites use it as shorthand for 'no host IPs'. Pre-audit (#11); the weakest item filed — filed for the verifier to weigh rather than silently skipped.
-**Repro:** Verifier ran it: deleted the overload at adebf6f; app builds 0 errors; test project fails with exactly 11 errors, all in SubnetPropertyCalculationTests.cs (192,212,264,285,308,324,343,360,370,373,383). Applied ', []' at those sites: 79/79 and 878/878 green. git log -S -> e05c3b1 (#11).
-**Fix:** Delete the three-argument overload from IIpUtilityService and IpUtilityService and append ', []' at the 11 test call sites; alternatively, if the owner prefers keeping the convenience overload as deliberate API surface, record that and close with no change.
+## I9 — The three-argument CalculateUnallocatedRanges overload has no production caller `[x1]` — FIXED
+_Fixed in round 23. Deleted the 3-arg CalculateUnallocatedRanges overload from IIpUtilityService and IpUtilityService (it only delegated to the 4-arg with []); appended ', []' at the 11 test call sites in SubnetPropertyCalculationTests.cs (behaviour-identical: no host IPs)._
+_Swept: the sole production caller (SubnetController.Read.cs:97) already used the 4-arg form; grep confirms no 3-arg call remains; the two genuine host-IP tests were left untouched._
+_Verified: build 0/0, 880/880 (no test dropped)._
+_Reviewed: independent reviewer PASS — zero production callers, all 11 sites equivalent, nothing else touched._
+_Product question (recorded, not blocking): the overload could instead be kept as deliberate convenience API surface; auto-mode deleted it per §5's one-implementation preference. Owner may re-add it if the convenience form is wanted._
 **Residue of:** none
 
 ## I10 — Twelve view-model properties mapped on every request but never rendered anywhere `[x1]`

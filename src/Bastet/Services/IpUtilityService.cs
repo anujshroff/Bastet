@@ -172,9 +172,6 @@ public class IpUtilityService : IIpUtilityService
         }
     }
 
-    public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets) =>
-        CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, []);
-
     public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets, IEnumerable<HostIpAssignment> hostIpAssignments)
     {
         if (string.IsNullOrEmpty(networkAddress))
