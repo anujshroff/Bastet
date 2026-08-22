@@ -246,6 +246,20 @@ status is added. It has already shipped once: "Only show what would change" test
   multi-prefix subnets, top-ups and re-carves are in scope. "Feature change, not a bug fix", "the
   data model does not support it" and "out of scope" describe work, not reasons to decline. One
   round used such a verdict and it shipped the bug for four more.
+- **A test gap is closed at fix time, never filed for the next round.** Every fix ships with the
+  test that fails against the unfixed code, wherever existing test infrastructure can reach the
+  behaviour. Where no seam exists (client-JS partials, framework internals, live Azure), the
+  surface is recorded once - in the fix's ledger row, which is durable, and as `/e2e` coverage,
+  which is executable; a FIXED entry is neither, because the findings file is deleted at
+  close-out. A recorded gap is settled and is never re-filed. The audit files a test finding only
+  where this rule was broken: a fix left both unpinned and unrecorded, or a test that stays green
+  with the code it guards broken. When reconcile does its job that class is structurally empty -
+  that, not ignoring tests, is how the loop converges.
+- **The loop's terminal state is a zero-finding round, and every round must move toward it.** A
+  finding is an operator-visible wrong behaviour reproducible at HEAD, or a broken-rule test
+  finding under the bullet above; nothing else. A fix is the minimal change that makes the wrong
+  behaviour right, plus its pin or its record - no hardening, no widening, no "while we're here"
+  work for later rounds to audit.
 - **Since round 1 there have been no intended product changes.** Everything filed is a defect
   against behaviour the product already promises — from the original implementation or introduced by
   a previous round's fixes. There is no third category.
@@ -288,3 +302,18 @@ summary, no reasoning added. Rulings made before this file existed are already f
   during the review window can slip. Owner: "Accept the count (Recommended)". Counter-test:
   `DeleteConfirmed_AHostIpAddedByAClockBehindWriter_StillRefusesTheDelete` pins the half that must
   refuse; the accepted swap residual is deliberate and must not be re-filed as a finding.
+
+- **26 (round-wide)** — on the finding classes the audit loop generates from its own fixes. Owner:
+  "at the end you need to update the skill to stop finding bullshit problems"; "this shit overall
+  needs to be such that we reduce shit found to 0, not go in fucking circles"; "so be sure the
+  logic behind how the audit and reconcile work support that"; "after you make the skill change,
+  apply it to this fucking audit". Enforced by the two convergence bullets in §5 (a finding is an
+  operator-visible wrong behaviour reproducible at HEAD; the loop's terminal state is a
+  zero-finding round). Counter-test: untestable (process rule, no code seam).
+- **26 (round-wide, second ruling)** — refining the first. Owner: "sigh, im so tired. i dont want
+  to ignore fucking test issues"; asked why prior rounds left the gaps, the record-keeping hole was
+  identified (unpinnable-fix records lived in the FIXED entry, which close-out deletes, and the
+  `/e2e` fallback was never enforced). Folded into §5: test gaps close at fix time — pin where a
+  seam exists, otherwise record once in the ledger row and `/e2e`; recorded gaps are never
+  re-filed; the audit files only broken-rule test findings. Counter-test: untestable (process
+  rule, no code seam).

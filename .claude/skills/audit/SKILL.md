@@ -83,6 +83,14 @@ skill returns without a findings file.
 
 # The round exists to reduce defects, not to produce findings
 
+**The loop's terminal state is a zero-finding round, and zero filed is the success condition.** A
+finding is an operator-visible wrong behaviour reproducible at HEAD, or a broken test rule
+(`docs/PRODUCT-MODEL.md` §5): test gaps are closed at fix time by reconcile, so the audit files a
+test finding only where that rule was broken — a fix left both unpinned and unrecorded, or a test
+that stays green with the code it guards broken. A gap already recorded in a ledger row or covered
+by `/e2e` is settled — never re-file it. Write the empty findings file, commit it, and report zero
+proudly.
+
 **Measure the residue rate and lead with it.** Every finding names the previous-round fix it came
 out of — by **ledger id** (`<round>-<finding>`, e.g. `18-R4`) from `docs/AUDIT-LEDGER.md` — or an
 explicit *none*. When most findings are residue, the audit is reporting the fix loop's own output,
@@ -329,7 +337,7 @@ surface, not the diff. (In a Regression-only round, beats 6 and 7 are the whole 
 4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
 5. **UI & client-JS** — the wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
 6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. The previous round's fixes are dense in defects; that is why this beat gets the Standard deep sweep, and not a reason to point other beats here.
-7. **Regression tests** — do the tests added alongside those commits fail against the unfixed code? Revert the fix hunk in a scratch copy and find out.
+7. **Regression tests** — do the tests added alongside those commits actually fail against the code they claim to guard? Revert the guarded hunk in a scratch copy and find out. A test that passes either way is a defect **in the test** — file it, with the mutation and the observed green run as the repro. A fix left **both unpinned and unrecorded** is filed once, Low, its fix being the pin or the ledger-row + `/e2e` record. A gap a ledger row or `/e2e` already records is settled — never re-file it (PRODUCT-MODEL §5).
 8. **Dead code & refactor residue** — orphans from earlier deletions.
 
 **Every worker prompt carries this:** write **nothing** into the repository directory — no PID
