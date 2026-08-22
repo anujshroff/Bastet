@@ -22,7 +22,9 @@ The fix process, not the codebase, was the main defect source, and the single bi
 that **every fix was verified only by its own author**, whose defects surfaced a full round later.
 Hence: independent review of every fix (step 8), a whole-diff gate before the round is declared
 done, a cap on how much churn one round may push into one file, and **a round must leave fewer
-defects than it found — nothing else here overrides that.**
+defects than it found — nothing else here overrides that.** The loop's terminal state is a
+zero-finding round (`docs/PRODUCT-MODEL.md` §5): a fix closes its defect without manufacturing the
+next round's audit surface.
 
 ## Mode
 
@@ -107,10 +109,15 @@ evidence and move on; do not invent a fix for a defect that is not there.
 ### 2. Reproduce the defect before fixing it
 
 *Prove it, don't assert it.* **Write the regression test first and confirm it fails against the
-unfixed code.** A new test that passes immediately proves nothing. To prove failure without
-dirtying the repo, `cp -r` the repo to scratch, revert only the fix there, and run. Where no test
-can reach it — client-side behaviour, framework internals, live Azure — use a rig and record the
-measurement in the entry.
+unfixed code** wherever existing test infrastructure can reach the behaviour — a new test that
+passes immediately proves nothing. To prove failure without dirtying the repo, `cp -r` the repo to
+scratch, revert only the fix there, and run. Where no seam exists — client-side behaviour,
+framework internals, live Azure — use a rig, record the measurement in the entry, **and record the
+surface durably: name it in the fix's ledger row and add the drive to `/e2e`'s coverage
+(PRODUCT-MODEL §5). The FIXED entry alone is not a record — the findings file is deleted at
+close-out, which is exactly how rounds 25-and-earlier leaked unpinned fixes into the next audit.**
+A recorded gap is settled; a fix left both unpinned and unrecorded is handing the next round a
+finding.
 
 ### 3. Apply the narrow fix — and split when it wants to grow
 
@@ -196,8 +203,10 @@ The verdict is typed, and the protocol is decidable:
 - **(b) product-model violation, sentence cited** — decided by the text. If the text is genuinely
   ambiguous, neither side wins: revert, defer, and record the one-line product question in the
   findings file for the owner.
-- **(c) "I would have fixed it differently"** — the author wins automatically. The reviewer's
-  schema must force verdicts into (a)/(b)/(c) so preference cannot masquerade as failure.
+- **(c) "I would have fixed it differently"** — the author wins automatically. Demands for
+  hardening or for coverage beyond the §5 test rule are this category; **a fix shipping neither
+  its pin nor its ledger + `/e2e` record is (b), §5 cited.** The reviewer's schema must force
+  verdicts into (a)/(b)/(c) so preference cannot masquerade as failure.
 
 One rebuttal each, no third round — if you believe a correction is wrong, **reproduce why before
 departing from it**: a past round shipped a defect by "improving" a reviewer's `ModelState.Remove`
@@ -253,7 +262,8 @@ is requested, and fixes that were each correct alone have failed to compose. In 
 7. **The whole-diff review.** Two fresh reviewer subagents audit the round's entire diff
    (`git diff <baseline>..HEAD`), one on correctness-and-regressions, one against the product
    model. Refutation-default: a review finding exists only if it demonstrates a concrete failure or
-   cites the violated model sentence — "I'd have done it differently" is not a finding. This is a
+   cites the violated model sentence — "I'd have done it differently" is not a finding; a fix
+   this round left both unpinned and unrecorded is one, citing §5. This is a
    **gate, not a queue**: at most **one** repair iteration (each repair through steps 1–10,
    WIP cap still enforced), then anything still standing is resolved by **reverting the offending
    fix commit and deferring its finding**. No second iteration, ever — the gate must terminate.
