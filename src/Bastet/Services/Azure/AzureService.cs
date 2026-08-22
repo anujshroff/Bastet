@@ -45,7 +45,7 @@ namespace Bastet.Services.Azure
         {
             if (_armClient == null)
             {
-                return [];
+                throw new InvalidOperationException("No Azure credential is available. Check the application's Azure authentication configuration.");
             }
 
             List<AzureSubscriptionViewModel> result = [];
