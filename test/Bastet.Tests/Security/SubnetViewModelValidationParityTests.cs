@@ -158,4 +158,17 @@ public class SubnetViewModelValidationParityTests
         AssertValid(new CreateSubnetViewModel { Name = "ok", NetworkAddress = "10.0.0.0", Cidr = 24, Description = description });
         AssertValid(new EditSubnetViewModel { Id = 1, Name = "ok", NetworkAddress = "10.0.0.0", Cidr = 24, Description = description });
     }
+
+    [Theory]
+    [InlineData("not-an-ip")]
+    [InlineData("10.0.0.999")]
+    public void MalformedNetworkAddress_RejectedAtTheAttributeLayer(string address) =>
+        AssertRejects(
+            new CreateSubnetViewModel { Name = "ok", NetworkAddress = address, Cidr = 24 },
+            nameof(CreateSubnetViewModel.NetworkAddress),
+            "Invalid network address format");
+
+    [Fact]
+    public void DottedQuadNetworkAddress_AcceptedAtTheAttributeLayer() =>
+        AssertValid(new CreateSubnetViewModel { Name = "ok", NetworkAddress = "192.168.10.0", Cidr = 24 });
 }
