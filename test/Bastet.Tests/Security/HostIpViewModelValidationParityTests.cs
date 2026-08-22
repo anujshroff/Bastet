@@ -62,4 +62,15 @@ public class HostIpViewModelValidationParityTests
         AssertRejects(new EditHostIpViewModel { IP = "10.0.0.5", SubnetId = 1, Name = name },
             "HTML tags are not allowed");
     }
+
+    [Theory]
+    [InlineData("not-an-ip")]
+    [InlineData("10.0.0.999")]
+    public void MalformedIp_RejectedAtTheAttributeLayer(string ip) =>
+        AssertRejects(new CreateHostIpViewModel { IP = ip, SubnetId = 1, Name = "ok" },
+            "Invalid IP address format");
+
+    [Fact]
+    public void DottedQuadIp_AcceptedAtTheAttributeLayer() =>
+        AssertValid(new CreateHostIpViewModel { IP = "192.168.10.5", SubnetId = 1, Name = "ok" });
 }
