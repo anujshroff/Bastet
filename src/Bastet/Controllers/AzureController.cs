@@ -45,7 +45,7 @@ namespace Bastet.Controllers
                 CredentialCheckResult credential = await azureService.CheckCredential();
                 if (credential == CredentialCheckResult.Failed)
                 {
-                    ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                    ModelState.AddModelError("", "Could not authenticate with Azure. Check the credentials and that Azure is reachable from this host.");
                 }
                 else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
                 {
@@ -140,7 +140,7 @@ namespace Bastet.Controllers
                 CredentialCheckResult credential = await azureService.CheckCredential();
                 if (credential == CredentialCheckResult.Failed)
                 {
-                    ModelState.AddModelError("", "Failed to authenticate with Azure. Please check your credentials.");
+                    ModelState.AddModelError("", "Could not authenticate with Azure. Check the credentials and that Azure is reachable from this host.");
                 }
                 else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
                 {

@@ -401,7 +401,12 @@
                 error: function (xhr) {
                     let payload = null;
                     try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
-                    showCommitError(payload || { error: "Server error: " + xhr.status });
+                    if (!payload) {
+                        payload = xhr.status === 0
+                            ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying." }
+                            : { error: "The server returned status " + xhr.status + "." };
+                    }
+                    showCommitError(payload);
                 }
             });
         });
