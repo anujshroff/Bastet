@@ -48,11 +48,9 @@ public class AzureWizardClientWordingTests
     {
         string view = ReadView(viewPath);
 
-        Assert.Contains("xhr.status === 0", view);
-        Assert.Contains(
-            "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying.",
+        Assert.Matches(
+            @"if \(!payload\)\s*\{\s*payload\s*=\s*xhr\.status\s*===\s*0\s*\?\s*\{\s*error:\s*""The server could not be reached, so it is unknown whether the change was applied\. Check the subnet list before retrying\.""\s*\}\s*:\s*\{\s*error:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*\}\s*;\s*\}",
             view);
-        Assert.Contains("The server returned status \" + xhr.status", view);
         Assert.DoesNotContain("Server error: ", view);
     }
 
