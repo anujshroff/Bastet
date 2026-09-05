@@ -13,7 +13,7 @@
                 <div class="card-body">
                     @if (!ViewData.ModelState.IsValid)
                     {
-                        @await Html.PartialAsync("Reconcile/_ErrorAlert")
+                        @await Html.PartialAsync("_ErrorAlert")
                     }
 
                     @Html.AntiForgeryToken()
