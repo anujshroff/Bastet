@@ -55,4 +55,21 @@ public class AzureWizardClientWordingTests
         Assert.Contains("The server returned status \" + xhr.status", view);
         Assert.DoesNotContain("Server error: ", view);
     }
+
+    [Fact]
+    public void WizardPages_RenderOneSharedErrorAlert_ThatCarriesNoConnectivityHeadline()
+    {
+        string bulkImportPage = ReadView("src/Bastet/Views/Azure/BulkImport.cshtml");
+        string reconcilePage = ReadView("src/Bastet/Views/Azure/Reconcile.cshtml");
+        string azureViews = Path.Combine(RepoRoot, "src", "Bastet", "Views", "Azure");
+        string[] errorAlertPartials = Directory.GetFiles(azureViews, "_ErrorAlert.cshtml", SearchOption.AllDirectories);
+
+        string sharedPartial = Assert.Single(errorAlertPartials);
+        Assert.Equal(Path.Combine(azureViews, "_ErrorAlert.cshtml"), sharedPartial);
+        Assert.Contains("Html.PartialAsync(\"_ErrorAlert\")", bulkImportPage);
+        Assert.Contains("Html.PartialAsync(\"_ErrorAlert\")", reconcilePage);
+        Assert.DoesNotContain("Could not connect to Azure.", File.ReadAllText(sharedPartial));
+        Assert.DoesNotContain("Could not connect to Azure.", bulkImportPage);
+        Assert.DoesNotContain("Could not connect to Azure.", reconcilePage);
+    }
 }
