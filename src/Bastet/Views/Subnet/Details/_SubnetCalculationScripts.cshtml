@@ -41,6 +41,8 @@
         }
 
         function refuse(message, sizeText) {
+            $('#networkAddressDisplay').val(activeSuggestion.startIp);
+            makeNetworkAddressReadOnly();
             $('#cidrInput').removeClass('is-valid').addClass('is-invalid');
             $('#createSubnetBtn').prop('disabled', true);
             $('#cidrValidationFeedback').text(message);
@@ -75,8 +77,6 @@
             const address = activeSuggestion.networkAddressByCidr[cidrValue];
 
             if (address === undefined) {
-                $('#networkAddressDisplay').val(activeSuggestion.startIp);
-                makeNetworkAddressReadOnly();
                 refuse('Please enter a valid CIDR value within the allowed range.', 'Invalid');
                 return;
             }

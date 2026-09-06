@@ -655,8 +655,9 @@ the browser actually sent against what was persisted.**
   > via `#networkAddressHelp` - accepting that is **correct**, not a missed overlap. To exercise the
   > refusal, carve the parent so no aligned block of the chosen size is free anywhere; the feedback then
   > reads *"No compatible network address found for this CIDR size."* Test both: an adjustment that lands
-  > somewhere genuinely free, and a size that has no home at all. After an adjustment, an out-of-range or
-  > empty CIDR resets the address to the range start and hides the warning. On a parent at the top of the address
+  > somewhere genuinely free, and a size that has no home at all. After an adjustment, an out-of-range,
+  > empty, or no-home CIDR resets the address to the range start and hides the warning (every refusal
+  > resets; the adjusted address and its note never outlive the size they were computed for). On a parent at the top of the address
   > space (`255.255.255.0/24` carved into two `/26`s) a `/25` must refuse, never offer `0.0.0.0`.
 
 Practical notes, all learned the hard way:

@@ -122,4 +122,15 @@ public class SubnetDetailsModalScriptTests
         Assert.Contains("if (info !== undefined) {", createFormScript);
         Assert.DoesNotContain("parseInt(", createFormScript);
     }
+
+    [Fact]
+    public void CidrModalScript_RefuseResetsTheNetworkAddressToTheRangeStart()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Match refuse = Regex.Match(script, @"function refuse\([^)]*\)\s*\{(?<body>[^}]*)\}");
+        Assert.True(refuse.Success);
+        Assert.Contains("$('#networkAddressDisplay').val(activeSuggestion.startIp);", refuse.Groups["body"].Value);
+        Assert.Contains("makeNetworkAddressReadOnly();", refuse.Groups["body"].Value);
+    }
 }
