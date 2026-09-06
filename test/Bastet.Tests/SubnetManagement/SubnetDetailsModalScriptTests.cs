@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Bastet.Tests.SubnetManagement;
 
 public class SubnetDetailsModalScriptTests
@@ -47,11 +49,17 @@ public class SubnetDetailsModalScriptTests
     {
         string script = ReadView(ScriptPartial);
 
-        Assert.DoesNotMatch(@"<<|>>>|Math\.pow|& ?255", script);
+        Assert.DoesNotMatch(@"<<|>>>|Math\.pow|& ?255|\*\*|16777216|65536|split\('\.'\)|[*/%] ?256", script);
         Assert.Contains("childSubnetSuggestions", script);
-        Assert.Contains("networkAddressByCidr", script);
+        Assert.Contains("const address = activeSuggestion.networkAddressByCidr[cidrValue];", script);
         Assert.Contains("Model.ChildSubnetSuggestions", script);
         Assert.Contains("IpUtility.CalculateUsableIpAddresses", script);
+
+        MatchCollection sizeWrites = Regex.Matches(script, @"#subnetSizeDisplay[""']\)\.text\(([^;]*)\);");
+        Assert.Equal(3, sizeWrites.Count);
+        Assert.All(sizeWrites, m => Assert.Matches(
+            @"^(usableByCidr\[(activeSuggestion\.recommendedCidr|cidrValue)\]\.toLocaleString\(\)|sizeText)$",
+            m.Groups[1].Value));
         Assert.Contains("No compatible network address found for this CIDR size.", script);
         Assert.Contains("This network address has been adjusted to avoid overlaps.", script);
     }
