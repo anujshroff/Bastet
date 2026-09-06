@@ -54,7 +54,7 @@ public class AzureReconcilerTests
     private AzureReconcilePlanViewModel Build(
         AzureVNetInventory inventory,
         AzureLinkedSubnetSnapshot[] linked) =>
-        _reconciler.BuildPlan(SubId, "Test Sub", inventory, linked);
+        _reconciler.BuildPlan(SubId, inventory, linked);
 
     // Rule: if it is gone from Azure, delete it here.
 
@@ -294,7 +294,7 @@ public class AzureReconcilerTests
     public void AFailedScan_ReportsNothingAsDeleted()
     {
         AzureReconcilePlanViewModel plan = _reconciler.BuildPlan(
-            SubId, "Test Sub",
+            SubId,
             new AzureVNetInventory { Success = false, ErrorMessage = "boom" },
             [Linked(1, "app", "10.22.1.0", 24, SubnetId("vnet-a", "sn-a"))]);
 
@@ -311,7 +311,111 @@ public class AzureReconcilerTests
             [Linked(1, "app", "10.23.1.0", 24, SubnetId("vnet-a", "sn-a"))]);
 
         Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [SubnetId("vnet-a", "sn-a")] = AzureResourceConfirmation.Deleted
+        });
+
+        Assert.Single(plan.Items);
         Assert.Contains(plan.Warnings, w => w.Contains("no VNets at all"));
+    }
+
+    [Fact]
+    public void AnEmptySubscription_WhereEveryFlaggedRowIsThenWithheld_DoesNotWarnThatRowsBelowAreGone()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(),
+            [Linked(1, "app", "10.23.1.0", 24, SubnetId("vnet-a", "sn-a"))]);
+
+        Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [SubnetId("vnet-a", "sn-a")] = AzureResourceConfirmation.NotVisible
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("no VNets at all"));
+        Assert.Contains(plan.Warnings, w => w.Contains("denied access"));
+    }
+
+    [Fact]
+    public void AHeldPrefixChangedVNetRow_DoesNotNameTheDeleteRemedyItIsWithheldFrom()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.60.0.0/16"])),
+            [Linked(1, "target", "10.61.0.0", 16, VNetId("vnet-a"), manualDescendants: 1)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.Contains("still exists but no longer has the address prefix", held.Reason);
+        Assert.DoesNotContain("Delete it here if you want to", held.Reason);
+        Assert.DoesNotContain("import wizard", held.Reason);
+        Assert.Contains("Delete it here first, then run the scan again.", held.Reason);
+    }
+
+    [Fact]
+    public void AHeldPrefixChangedSubnetRow_DoesNotNameTheDeleteRemedyItIsWithheldFrom()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.62.0.0/16"], AzSubnet("vnet-a", "sn-a", "10.62.9.0/24"))),
+            [Linked(1, "app", "10.62.1.0", 24, SubnetId("vnet-a", "sn-a"), hostIps: 2)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.Contains("still exists but its address prefix is now", held.Reason);
+        Assert.DoesNotContain("Delete it here if you want to", held.Reason);
+        Assert.DoesNotContain("import wizard", held.Reason);
+        Assert.Contains("Delete it here first, then run the scan again.", held.Reason);
+    }
+
+    [Fact]
+    public void AHeldSubnetRowMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [Linked(1, "app", "10.63.1.0", 24, SubnetId("vnet-a", "sn-a"), manualDescendants: 1)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.DoesNotContain("no longer exists", held.Reason);
+        Assert.Contains("could not be found in this subscription's listing", held.Reason);
+    }
+
+    [Fact]
+    public void ASubnetRowLinkedWithDifferentIdCasing_IsNotReportedAsDeleted()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.64.0.0/16"], AzSubnet("vnet-a", "sn-a", "10.64.1.0/24"))),
+            [Linked(1, "app", "10.64.1.0", 24, SubnetId("vnet-a", "sn-a").ToUpperInvariant())]);
+
+        Assert.Empty(plan.Items);
+        Assert.Empty(plan.ReviewItems);
+    }
+
+    [Fact]
+    public void AVNetTargetLinkedWithDifferentIdCasing_IsNotReportedAsDeleted()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.65.0.0/16"])),
+            [Linked(1, "target", "10.65.0.0", 16, VNetId("vnet-a").ToUpperInvariant())]);
+
+        Assert.Empty(plan.Items);
+        Assert.Empty(plan.ReviewItems);
+    }
+
+    [Fact]
+    public void AHeldRowWhoseVNetIsMerelyAbsentFromTheListing_DoesNotAssertItNoLongerExists()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [Linked(1, "target", "10.30.0.0", 16, VNetId("vnet-a"), manualDescendants: 1)]);
+
+        AzureReconcileItem held = Assert.Single(plan.ReviewItems);
+        Assert.Equal(AzureReconcileStatus.HeldByManualContent, held.Status);
+        Assert.DoesNotContain("no longer exists", held.Reason);
+        Assert.Contains("could not be found in this subscription's listing", held.Reason);
     }
 
     [Theory]

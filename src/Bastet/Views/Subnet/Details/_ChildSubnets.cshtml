@@ -3,17 +3,8 @@
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Child Subnets</h5>
-        @inject Bastet.Services.IUserContextService ChildSubnetsUserContext
 
-        @if (Model.CanAddChildSubnet && ChildSubnetsUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit))
-        {
-            <div>
-                <a asp-action="Create" asp-route-parentId="@Model.Id" class="btn btn-sm btn-primary">
-                    <i class="bi bi-plus-circle"></i> Add Child Subnet
-                </a>
-            </div>
-        }
-        else if (Model.IsFullyAllocated)
+        @if (Model.IsFullyAllocated)
         {
             <span class="badge bg-warning text-dark">Fully Allocated</span>
         }

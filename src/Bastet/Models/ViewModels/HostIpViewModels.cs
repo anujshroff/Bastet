@@ -10,13 +10,12 @@ public class HostIpViewModel
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
     public DateTime? LastModifiedAt { get; set; }
-    public string? ModifiedBy { get; set; }
 }
 
 public class CreateHostIpViewModel
 {
     [Required(ErrorMessage = "IP address is required")]
-    [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid IP address format")]
+    [NetworkInput(ErrorMessage = "Invalid IP address format")]
     [SanitizeNetworkInput]
     [Display(Name = "IP Address")]
     public string IP { get; set; } = string.Empty;

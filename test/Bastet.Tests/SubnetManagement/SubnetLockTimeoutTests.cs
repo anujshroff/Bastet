@@ -15,7 +15,7 @@ public class SubnetLockTimeoutTests : IDisposable
 
     private sealed class AlwaysTimingOutLockService : ISubnetLockingService
     {
-        public Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation, TimeSpan? timeout = null) =>
+        public Task<T> ExecuteWithSubnetLockAsync<T>(Func<Task<T>> operation) =>
             throw new TimeoutException("Could not acquire subnet operation lock");
     }
 

@@ -172,9 +172,6 @@ public class IpUtilityService : IIpUtilityService
         }
     }
 
-    public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets) =>
-        CalculateUnallocatedRanges(networkAddress, cidr, childSubnets, []);
-
     public IEnumerable<IPRange> CalculateUnallocatedRanges(string networkAddress, int cidr, IEnumerable<Subnet> childSubnets, IEnumerable<HostIpAssignment> hostIpAssignments)
     {
         if (string.IsNullOrEmpty(networkAddress))
@@ -310,6 +307,49 @@ public class IpUtilityService : IIpUtilityService
         return unallocatedRanges;
     }
 
+    public IReadOnlyList<ChildSubnetSuggestion> SuggestChildSubnets(int parentCidr, IReadOnlyList<IPRange> unallocatedRanges)
+    {
+        if (parentCidr is < 0 or > 31)
+        {
+            throw new ArgumentOutOfRangeException(nameof(parentCidr), "Parent CIDR must be between 0 and 31");
+        }
+
+        List<(long Start, long End)> ranges = [.. unallocatedRanges.Select(r => (ParseIpv4(r.StartIp), ParseIpv4(r.EndIp)))];
+        List<ChildSubnetSuggestion> suggestions = [.. unallocatedRanges.Select(r => new ChildSubnetSuggestion { StartIp = r.StartIp })];
+        int?[] recommended = new int?[ranges.Count];
+
+        for (int cidr = parentCidr + 1; cidr <= 32; cidr++)
+        {
+            long size = 1L << (32 - cidr);
+            long? lowestBlockAtOrAfter = null;
+
+            for (int i = ranges.Count - 1; i >= 0; i--)
+            {
+                long aligned = AlignUp(ranges[i].Start, size);
+
+                if (aligned + size - 1 <= ranges[i].End)
+                {
+                    lowestBlockAtOrAfter = aligned;
+
+                    if (aligned == ranges[i].Start)
+                    {
+                        recommended[i] ??= cidr;
+                    }
+                }
+
+                suggestions[i].NetworkAddressByCidr[cidr] = lowestBlockAtOrAfter is long block ? UIntToIpString((uint)block) : null;
+            }
+        }
+
+        for (int i = 0; i < suggestions.Count; i++)
+        {
+            suggestions[i].RecommendedCidr = recommended[i]
+                ?? throw new ArgumentException($"Range {unallocatedRanges[i].StartIp}-{unallocatedRanges[i].EndIp} holds no address", nameof(unallocatedRanges));
+        }
+
+        return suggestions;
+    }
+
     public bool IsIpInSubnet(string ip, string networkAddress, int cidr)
     {
         if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(networkAddress))
@@ -356,6 +396,20 @@ public class IpUtilityService : IIpUtilityService
         byte[] bytes = [(byte)(ipInt >> 24), (byte)(ipInt >> 16), (byte)(ipInt >> 8), (byte)ipInt];
         return new IPAddress(bytes).ToString();
     }
+
+    private static long ParseIpv4(string ip)
+    {
+        byte[] bytes = IPAddress.Parse(ip).GetAddressBytes();
+
+        if (bytes.Length != 4)
+        {
+            throw new ArgumentException("Only IPv4 addresses are supported", nameof(ip));
+        }
+
+        return BitConverter.ToUInt32([.. bytes.Reverse()], 0);
+    }
+
+    private static long AlignUp(long value, long size) => (value + size - 1) / size * size;
 
     #endregion
 

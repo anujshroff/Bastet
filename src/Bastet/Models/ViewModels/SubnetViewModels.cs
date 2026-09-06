@@ -13,7 +13,7 @@ public class CreateSubnetViewModel
     public string Name { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Network address is required")]
-    [NetworkInput(RequireValidIp = true, ErrorMessage = "Invalid network address format")]
+    [NetworkInput(ErrorMessage = "Invalid network address format")]
     [SanitizeNetworkInput]
     [Display(Name = "Network Address")]
     public string NetworkAddress { get; set; } = string.Empty;
@@ -95,6 +95,8 @@ public class SubnetDetailsViewModel
     public bool CanMarkFullyAllocated => HostIpAssignments.Count == 0 && ChildSubnets.Count == 0 && !IsFullyAllocated;
 
     public List<IPRange> UnallocatedRanges { get; set; } = [];
+
+    public List<ChildSubnetSuggestion> ChildSubnetSuggestions { get; set; } = [];
 
     public string? ParentSubnetName { get; set; }
     public string? ParentNetworkAddress { get; set; }

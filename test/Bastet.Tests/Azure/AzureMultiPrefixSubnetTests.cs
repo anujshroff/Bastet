@@ -79,8 +79,6 @@ public class AzureMultiPrefixSubnetTests
     private static BulkImportSelectionDto Sel(params BulkImportSelectedSubnetDto[] subs) =>
         new()
         {
-            SubscriptionId = "sub-1",
-            SubscriptionName = "Test Sub",
             VNetPrefixes =
             [
                 new()
@@ -211,9 +209,29 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler().BuildPlan(SubId, inventory, linked);
 
         Assert.Empty(plan.Items);
+    }
+
+    [Fact]
+    public void AnnotateAvailability_StampsEachSubnetWithOnlyTheVNetPrefixThatContainsIt()
+    {
+        BulkAzureSubnetViewModel a = new() { ResourceId = SubnetId("mp", "a"), Name = "a", AddressPrefix = "10.50.1.0/24" };
+        BulkAzureSubnetViewModel b = new() { ResourceId = SubnetId("mp", "b"), Name = "b", AddressPrefix = "10.60.2.0/24" };
+
+        BulkAzureVNetViewModel vnet = new()
+        {
+            ResourceId = VNetId("mp"),
+            Name = "mp",
+            Ipv4AddressPrefixes = ["10.50.0.0/16", "10.60.0.0/16"],
+            Subnets = [a, b]
+        };
+
+        _planner.AnnotateAvailability([vnet], []);
+
+        Assert.Equal(["10.50.0.0/16"], a.ContainingPrefixes);
+        Assert.Equal(["10.60.0.0/16"], b.ContainingPrefixes);
     }
 
     [Fact]
@@ -238,7 +256,7 @@ public class AzureMultiPrefixSubnetTests
         ];
 
         AzureReconcilePlanViewModel plan =
-            new AzureReconciler().BuildPlan(SubId, "Test Sub", inventory, linked);
+            new AzureReconciler().BuildPlan(SubId, inventory, linked);
 
         Assert.Equal(AzureReconcileStatus.SubnetPrefixChanged, Assert.Single(plan.Items).Status);
     }

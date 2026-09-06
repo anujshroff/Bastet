@@ -4,7 +4,6 @@
         "use strict";
 
         let selectedSubscriptionId = "";
-        let selectedSubscriptionName = "";
         let lastPlan = null;
         let scanSeq = 0;
 
@@ -16,6 +15,12 @@
 
         function getAntiForgeryToken() {
             return $("input[name='__RequestVerificationToken']").first().val();
+        }
+
+        function readErrorMessage(xhr) {
+            return xhr.status === 0
+                ? "The server could not be reached."
+                : "The server returned status " + xhr.status + ".";
         }
 
         function escapeHtml(text) {
@@ -94,14 +99,13 @@
                     subs.forEach(function (s) {
                         select.append($("<option></option>")
                             .attr("value", s.subscriptionId)
-                            .attr("data-name", s.displayName)
                             .text(s.displayName + " (" + s.subscriptionId + ")"));
                     });
 
                     $("#rec-subscription-selection").removeClass("d-none");
                 },
                 error: function (xhr, status, error) {
-                    $("#rec-subscription-error-message").text("Error connecting to server: " + error);
+                    $("#rec-subscription-error-message").text(readErrorMessage(xhr));
                     $("#rec-subscription-error").removeClass("d-none");
                 }
             });
@@ -115,7 +119,6 @@
         $("#rec-scan-btn").on("click", function () {
             const selected = $("#rec-subscription-select").find("option:selected");
             selectedSubscriptionId = selected.val();
-            selectedSubscriptionName = selected.attr("data-name") || "";
             invalidateScan();
             activateTab("rec-step2");
             runScan();
@@ -130,7 +133,7 @@
                 type: "POST",
                 dataType: "json",
                 headers: { "RequestVerificationToken": getAntiForgeryToken() },
-                data: { subscriptionId: selectedSubscriptionId, subscriptionName: selectedSubscriptionName },
+                data: { subscriptionId: selectedSubscriptionId },
                 beforeSend: function () {
                     $("#rec-scan-loading").removeClass("d-none");
                     $("#rec-scan-error").addClass("d-none");
@@ -159,7 +162,7 @@
                     if (seq !== scanSeq) {
                         return;
                     }
-                    showScanError("Error connecting to server: " + error);
+                    showScanError(readErrorMessage(xhr));
                 }
             });
         }
@@ -168,9 +171,6 @@
             invalidateScan();
             $("#rec-scan-error-message").text(message);
             $("#rec-scan-error").removeClass("d-none");
-
-            $("#rec-rescan-note").text(
-                "The results below could not be re-scanned, so they may not reflect Azure as it is now.");
         }
 
         function statusLabel(statusName) {
@@ -259,8 +259,6 @@
 
             $("#rec-scan-error").addClass("d-none");
 
-            $("#rec-rescan-note").text(
-                "The results below have been re-scanned, so they reflect Azure as it is now.");
             $("#rec-scan-content").removeClass("d-none");
         }
 
@@ -409,7 +407,12 @@
                 error: function (xhr) {
                     let payload = null;
                     try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
-                    showCommitError(payload || { error: "Server error: " + xhr.status });
+                    if (!payload) {
+                        payload = xhr.status === 0
+                            ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying." }
+                            : { error: "The server returned status " + xhr.status + "." };
+                    }
+                    showCommitError(payload);
                 }
             });
         });

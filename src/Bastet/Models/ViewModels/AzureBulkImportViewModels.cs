@@ -24,6 +24,8 @@ namespace Bastet.Models.ViewModels
 
         public List<string> Ipv4AddressPrefixes { get; set; } = [];
 
+        public List<string> ContainingPrefixes { get; set; } = [];
+
         public BulkImportAvailability Status { get; set; } = BulkImportAvailability.Available;
 
         public string StatusName => Status.ToString();
@@ -118,10 +120,6 @@ namespace Bastet.Models.ViewModels
 
     public class BulkImportSelectionDto
     {
-        public string SubscriptionId { get; set; } = string.Empty;
-
-        public string? SubscriptionName { get; set; }
-
         public List<BulkImportSelectedVNetPrefixDto> VNetPrefixes { get; set; } = [];
 
         public bool RenameMatchedBastetSubnets { get; set; }
@@ -205,10 +203,6 @@ namespace Bastet.Models.ViewModels
 
     public class BulkImportPlanViewModel
     {
-        public string SubscriptionId { get; set; } = string.Empty;
-        public string? SubscriptionName { get; set; }
-        public bool RenameMatchedBastetSubnets { get; set; }
-
         public List<BulkImportPlanItem> Items { get; set; } = [];
 
         public List<string> GlobalErrors { get; set; } = [];

@@ -3,11 +3,6 @@
     document.addEventListener('DOMContentLoaded', function () {
         const ipInput = document.getElementById('IP');
 
-        const form = ipInput?.closest('form');
-        form?.addEventListener('submit', function (e) {
-
-        });
-
         ipInput?.addEventListener('input', function() {
             validateIpFormat(this);
         });

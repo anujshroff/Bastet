@@ -3,10 +3,10 @@
     $(document).ready(function () {
 
         let selectedSubscriptionId = "";
-        let selectedSubscriptionName = "";
         let vnets = [];
         let lastSelection = null;
         let previewSeq = 0;
+        let vnetSeq = 0;
         let committing = false;
         let committed = false;
 
@@ -24,6 +24,12 @@
             committed = false;
             $("#step3-tab, #step4-tab").addClass("disabled");
             $("#bulk-go-commit-btn").prop("disabled", true);
+        }
+
+        function readErrorMessage(xhr) {
+            return xhr.status === 0
+                ? "The server could not be reached."
+                : "The server returned status " + xhr.status + ".";
         }
 
         function escapeHtml(s) {
@@ -63,7 +69,6 @@
                         $.each(result.subscriptions, function (i, s) {
                             $dropdown.append($('<option></option>')
                                 .attr('value', s.subscriptionId)
-                                .attr('data-name', s.displayName)
                                 .text(s.displayName + ' (' + s.subscriptionId + ')'));
                         });
                         $("#bulk-subscription-selection").removeClass("d-none");
@@ -75,7 +80,7 @@
                     }
                 },
                 error: function (xhr, status, error) {
-                    $("#bulk-subscription-error-message").text("Error connecting to server: " + error);
+                    $("#bulk-subscription-error-message").text(readErrorMessage(xhr));
                     $("#bulk-subscription-error").removeClass("d-none");
                 },
                 complete: function () {
@@ -94,7 +99,6 @@
         $("#bulk-select-subscription-btn").on("click", function () {
             const $opt = $("#bulk-subscription-select option:selected");
             selectedSubscriptionId = $opt.val();
-            selectedSubscriptionName = $opt.attr("data-name") || "";
             if (!selectedSubscriptionId) return;
 
             activateTab("step2");
@@ -102,6 +106,8 @@
         });
 
         function loadVNets() {
+
+            const seq = ++vnetSeq;
             $.ajax({
                 url: '@Url.Action("BulkGetVNets", "Azure")',
                 type: "GET",
@@ -116,6 +122,9 @@
                     $("#bulk-no-vnets").addClass("d-none");
                 },
                 success: function (result) {
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     if (!result.success) {
                         $("#bulk-vnet-error-message").text(result.error || "Failed to load VNets");
                         $("#bulk-vnet-error").removeClass("d-none");
@@ -131,10 +140,18 @@
                     updateGoPreviewBtn();
                 },
                 error: function (xhr, status, error) {
-                    $("#bulk-vnet-error-message").text("Error connecting to server: " + error);
+
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
+                    $("#bulk-vnet-error-message").text(readErrorMessage(xhr));
                     $("#bulk-vnet-error").removeClass("d-none");
                 },
                 complete: function () {
+
+                    if (seq !== vnetSeq) {
+                        return;
+                    }
                     $("#bulk-vnet-loading").addClass("d-none");
                 }
             });
@@ -193,7 +210,7 @@
                 $.each(vnet.prefixes, function (pIdx, prefixInfo) {
                     const prefix = prefixInfo.addressPrefix;
                     const contained = vnet.subnets.filter(function (s) {
-                        return prefixContainsCidr(prefix, s.addressPrefix);
+                        return (s.containingPrefixes || []).indexOf(prefix) !== -1;
                     });
 
                     if (hideImported && !prefixHasWork(prefixInfo, contained, renameOn)) {
@@ -219,8 +236,7 @@
 
                     $prefixDiv.append($prefixCheckbox).append($prefixLabel);
                     $prefixDiv.append(reasonHtml(renameOnly
-                        ? "Everything in this prefix is already imported. The only change would be renaming the "
-                          + "Bastet subnet to match the VNet name."
+                        ? `${prefixInfo.reason} The only change would be renaming the Bastet subnet to match the VNet name.`
                         : prefixInfo.reason));
 
                     const containedSubnets = contained;
@@ -384,33 +400,6 @@
             activateTab("step1");
         });
 
-        function ipToInt(ip) {
-            const parts = ip.split('.');
-            if (parts.length !== 4) return null;
-            let n = 0;
-            for (let i = 0; i < 4; i++) {
-                const octet = parseInt(parts[i], 10);
-                if (isNaN(octet) || octet < 0 || octet > 255) return null;
-                n = (n * 256) + octet;
-            }
-            return n >>> 0;
-        }
-
-        function prefixContainsCidr(parentCidr, childCidr) {
-            const pp = parentCidr.split('/');
-            const cp = childCidr.split('/');
-            if (pp.length !== 2 || cp.length !== 2) return false;
-            const pc = parseInt(pp[1], 10);
-            const cc = parseInt(cp[1], 10);
-            if (isNaN(pc) || isNaN(cc)) return false;
-
-            if (cc < pc) return false;
-            const pInt = ipToInt(pp[0]);
-            const cInt = ipToInt(cp[0]);
-            if (pInt === null || cInt === null) return false;
-            const mask = pc === 0 ? 0 : (~((1 << (32 - pc)) - 1)) >>> 0;
-            return ((pInt & mask) >>> 0) === ((cInt & mask) >>> 0);
-        }
 
         $("#bulk-go-preview-btn").on("click", function () {
             const selection = buildSelectionFromUI();
@@ -468,8 +457,6 @@
             });
 
             return {
-                subscriptionId: selectedSubscriptionId,
-                subscriptionName: selectedSubscriptionName,
                 vNetPrefixes: prefixSelections,
                 renameMatchedBastetSubnets: renameMatched
             };
@@ -508,7 +495,7 @@
                     if (seq !== previewSeq) {
                         return;
                     }
-                    $("#bulk-preview-error-message").text("Error connecting to server: " + error);
+                    $("#bulk-preview-error-message").text(readErrorMessage(xhr));
                     $("#bulk-preview-error").removeClass("d-none");
                 },
                 complete: function () {
@@ -678,7 +665,12 @@
                 error: function (xhr) {
                     let payload = null;
                     try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
-                    showCommitError(payload || { error: "Server error: " + xhr.status });
+                    if (!payload) {
+                        payload = xhr.status === 0
+                            ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying." }
+                            : { error: "The server returned status " + xhr.status + "." };
+                    }
+                    showCommitError(payload);
                 },
                 complete: function () {
                     committing = false;

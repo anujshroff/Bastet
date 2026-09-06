@@ -8,3 +8,10 @@ public class IPRange
 
     public long UsableCount { get; set; }
 }
+
+public class ChildSubnetSuggestion
+{
+    public string StartIp { get; set; } = string.Empty;
+    public int RecommendedCidr { get; set; }
+    public Dictionary<int, string?> NetworkAddressByCidr { get; set; } = [];
+}

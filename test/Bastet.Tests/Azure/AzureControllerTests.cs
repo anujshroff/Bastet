@@ -237,38 +237,6 @@ public class AzureControllerTests : IDisposable
         Assert.DoesNotContain("secret", resultObj.error);
     }
 
-    private AzureController ControllerWith(IAzureService service) =>
-        new(service, new AzureSubnetSnapshotService(_context), NullLogger<AzureController>.Instance)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
-        };
-
-    private static JsonResponse Parse(IActionResult result)
-    {
-        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
-        JsonResponse? parsed = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(jsonResult.Value));
-        Assert.NotNull(parsed);
-        return parsed;
-    }
-
-
-
-
-
-
-
-
-
-
-    private AzureController ControllerWithSubnets(
-        List<AzureVNetViewModel> vnets, List<AzureSubnetViewModel> subnets) =>
-        new(new MockAzureService(true, CreateTestSubscriptions(), vnets, subnets),
-            new AzureSubnetSnapshotService(_context),
-            NullLogger<AzureController>.Instance)
-        {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
-        };
-
     [Fact]
     public async Task BulkGetVNets_AzureReadFails_ReportsFailureNotEmptySubscription()
     {
@@ -313,8 +281,6 @@ public class AzureControllerTests : IDisposable
         public bool success { get; set; }
         public string? error { get; set; }
         public List<AzureSubscriptionViewModel>? subscriptions { get; set; }
-        public List<AzureVNetViewModel>? vnets { get; set; }
-        public List<AzureSubnetViewModel>? subnets { get; set; }
     }
 #pragma warning restore IDE1006
 

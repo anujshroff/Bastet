@@ -14,11 +14,11 @@ namespace Bastet.Services.Azure
         private readonly ArmClient? _armClient = armClientProvider.Client;
         private readonly ILogger<AzureService> _logger = logger;
 
-        public async Task<bool> IsCredentialValid()
+        public async Task<CredentialCheckResult> CheckCredential()
         {
             if (_armClient == null)
             {
-                return false;
+                return CredentialCheckResult.Failed;
             }
 
             try
@@ -29,15 +29,15 @@ namespace Bastet.Services.Azure
                 await foreach (SubscriptionResource? _ in subscriptions)
                 {
 
-                    return true;
+                    return CredentialCheckResult.Valid;
                 }
 
-                return false;
+                return CredentialCheckResult.NoVisibleSubscriptions;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Azure credential validation failed");
-                return false;
+                return CredentialCheckResult.Failed;
             }
         }
 
@@ -45,7 +45,7 @@ namespace Bastet.Services.Azure
         {
             if (_armClient == null)
             {
-                return [];
+                throw new InvalidOperationException("No Azure credential is available. Check the application's Azure authentication configuration.");
             }
 
             List<AzureSubscriptionViewModel> result = [];
@@ -193,18 +193,18 @@ namespace Bastet.Services.Azure
 
             List<string> distinct = [.. resourceIds
                 .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)];
+                .Distinct(AzureResourceIdentity.IdComparer)];
 
             if (distinct.Count == 0)
             {
-                return new Dictionary<string, AzureResourceConfirmation>(StringComparer.OrdinalIgnoreCase);
+                return new Dictionary<string, AzureResourceConfirmation>(AzureResourceIdentity.IdComparer);
             }
 
             if (_armClient == null)
             {
 
                 return distinct.ToDictionary(
-                    id => id, _ => AzureResourceConfirmation.Unknown, StringComparer.OrdinalIgnoreCase);
+                    id => id, _ => AzureResourceConfirmation.Unknown, AzureResourceIdentity.IdComparer);
             }
 
             using SemaphoreSlim gate = new(MaxConcurrentResourceChecks);
@@ -223,7 +223,7 @@ namespace Bastet.Services.Azure
             });
 
             KeyValuePair<string, AzureResourceConfirmation>[] results = await Task.WhenAll(checks);
-            return new Dictionary<string, AzureResourceConfirmation>(results, StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, AzureResourceConfirmation>(results, AzureResourceIdentity.IdComparer);
         }
 
         private const int MaxConcurrentResourceChecks = 8;

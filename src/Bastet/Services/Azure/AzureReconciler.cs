@@ -8,7 +8,6 @@ namespace Bastet.Services.Azure
 
         public AzureReconcilePlanViewModel BuildPlan(
             string subscriptionId,
-            string? subscriptionName,
             AzureVNetInventory inventory,
             IReadOnlyList<AzureLinkedSubnetSnapshot> linkedSubnets)
         {
@@ -17,8 +16,6 @@ namespace Bastet.Services.Azure
 
             AzureReconcilePlanViewModel plan = new()
             {
-                SubscriptionId = subscriptionId,
-                SubscriptionName = subscriptionName,
                 ScanSucceeded = inventory.Success
             };
 
@@ -35,8 +32,8 @@ namespace Bastet.Services.Azure
                 return plan;
             }
 
-            Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(StringComparer.OrdinalIgnoreCase);
-            Dictionary<string, List<string>> liveSubnetPrefixes = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, BulkAzureVNetViewModel> liveVNets = new(AzureResourceIdentity.IdComparer);
+            Dictionary<string, List<string>> liveSubnetPrefixes = new(AzureResourceIdentity.IdComparer);
 
             List<AzureReconcileItem> heldByManualContent = [];
 
@@ -80,8 +77,8 @@ namespace Bastet.Services.Azure
                 }
 
                 AzureReconcileItem? item = AzureResourceIdentity.IsAzureSubnet(snapshot.AzureResourceId)
-                    ? EvaluateSubnetLevel(snapshot, liveSubnetPrefixes)
-                    : EvaluateVNetLevel(snapshot, liveVNets);
+                    ? EvaluateSubnetLevel(snapshot, liveSubnetPrefixes, out string fact)
+                    : EvaluateVNetLevel(snapshot, liveVNets, out fact);
 
                 if (item is null)
                 {
@@ -90,8 +87,11 @@ namespace Bastet.Services.Azure
 
                 if (snapshot.ManualDescendantCount > 0 || snapshot.HostIpCount > 0)
                 {
+                    string lead = IsAbsenceStatus(item.Status)
+                        ? AbsentFromListingClause(item.Status)
+                        : fact;
                     item.Status = AzureReconcileStatus.HeldByManualContent;
-                    item.Reason = $"{item.Reason} {DescribeManualContent(snapshot)} "
+                    item.Reason = $"{lead} {DescribeManualContent(snapshot)} "
                         + "BASTET will not delete it, because Azure has no record of that and it would be "
                         + "destroyed with no way to restore it. Delete it here first, then run the scan again.";
                     plan.ReviewItems.Add(item);
@@ -114,12 +114,7 @@ namespace Bastet.Services.Azure
                 plan, [.. heldByManualContent.Select(i => i.SubnetId)],
                 "archiving them would also archive subnet(s) beneath them that hold manually created content");
 
-            if (inventory.VNets.Count == 0 && plan.Items.Count > 0)
-            {
-                plan.Warnings.Add(
-                    $"Azure reported no VNets at all in this subscription, so every one of the {plan.Items.Count} Azure-linked subnet(s) below is flagged as deleted. " +
-                    "Confirm the subscription is the right one and really is empty before deleting anything.");
-            }
+            plan.InventoryWasEmpty = inventory.VNets.Count == 0;
 
             return plan;
         }
@@ -209,7 +204,19 @@ namespace Bastet.Services.Azure
             WithholdTargetsWhoseCascadeIsBlocked(
                 plan, withheld,
                 "archiving them would also archive subnet(s) beneath them that were withheld from deletion");
+
+            if (plan.InventoryWasEmpty && plan.Items.Count > 0)
+            {
+                plan.Warnings.Add(
+                    $"Azure reported no VNets at all in this subscription, so every one of the {plan.Items.Count} Azure-linked subnet(s) below is flagged as deleted. " +
+                    "Confirm the subscription is the right one and really is empty before deleting anything.");
+            }
         }
+
+        private static string AbsentFromListingClause(AzureReconcileStatus status) =>
+            status == AzureReconcileStatus.VNetDeleted
+                ? "The VNet this subnet was imported from could not be found in this subscription's listing."
+                : "The Azure subnet this was imported from could not be found in this subscription's listing.";
 
         private static string DescribeManualContent(AzureLinkedSubnetSnapshot snapshot)
         {
@@ -264,57 +271,68 @@ namespace Bastet.Services.Azure
 
         private static AzureReconcileItem? EvaluateVNetLevel(
             AzureLinkedSubnetSnapshot snapshot,
-            Dictionary<string, BulkAzureVNetViewModel> liveVNets)
+            Dictionary<string, BulkAzureVNetViewModel> liveVNets,
+            out string fact)
         {
             string prefix = $"{snapshot.NetworkAddress}/{snapshot.Cidr}";
 
             if (!liveVNets.TryGetValue(snapshot.AzureResourceId, out BulkAzureVNetViewModel? vnet))
             {
-
-                return Item(snapshot, AzureReconcileStatus.VNetDeleted,
-                    "The VNet this subnet was imported from no longer exists in Azure.");
+                fact = "The VNet this subnet was imported from no longer exists in Azure.";
+                return Item(snapshot, AzureReconcileStatus.VNetDeleted, fact);
             }
 
             if (vnet.Ipv4AddressPrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
             {
+                fact = string.Empty;
                 return null;
             }
 
-            return vnet.Ipv4AddressPrefixes.Count > 0
-                ? Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved,
-                    $"VNet '{vnet.Name}' still exists but no longer has the address prefix {prefix}. "
-                    + "Delete it here if you want to, then use the Azure import wizard to bring in the "
-                    + "VNet's current address space.")
-                : Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved,
-                    $"VNet '{vnet.Name}' still exists but no longer has any IPv4 address space, so there "
-                    + "is nothing to re-import. Delete it here if you want to.");
+            if (vnet.Ipv4AddressPrefixes.Count > 0)
+            {
+                fact = $"VNet '{vnet.Name}' still exists but no longer has the address prefix {prefix}.";
+                return Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved,
+                    $"{fact} Delete it here if you want to, then use the Azure import wizard to bring in the "
+                    + "VNet's current address space.");
+            }
+
+            fact = $"VNet '{vnet.Name}' still exists but no longer has any IPv4 address space, so there "
+                + "is nothing to re-import.";
+            return Item(snapshot, AzureReconcileStatus.VNetPrefixRemoved,
+                $"{fact} Delete it here if you want to.");
         }
 
         private static AzureReconcileItem? EvaluateSubnetLevel(
             AzureLinkedSubnetSnapshot snapshot,
-            Dictionary<string, List<string>> liveSubnetPrefixes)
+            Dictionary<string, List<string>> liveSubnetPrefixes,
+            out string fact)
         {
             string prefix = $"{snapshot.NetworkAddress}/{snapshot.Cidr}";
 
             if (!liveSubnetPrefixes.TryGetValue(snapshot.AzureResourceId, out List<string>? livePrefixes))
             {
-                return Item(snapshot, AzureReconcileStatus.SubnetDeleted,
-                    "The Azure subnet this was imported from no longer exists.");
+                fact = "The Azure subnet this was imported from no longer exists.";
+                return Item(snapshot, AzureReconcileStatus.SubnetDeleted, fact);
             }
 
             if (livePrefixes.Contains(prefix, StringComparer.OrdinalIgnoreCase))
             {
+                fact = string.Empty;
                 return null;
             }
 
-            return livePrefixes.Count > 0
-                ? Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged,
-                    $"The Azure subnet still exists but its address prefix is now {string.Join(", ", livePrefixes)}, not {prefix}. "
-                    + "Delete it here if you want to, then use the Azure import wizard to bring in its "
-                    + "current prefix.")
-                : Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged,
-                    $"The Azure subnet still exists but no longer has an IPv4 address prefix, so there "
-                    + "is nothing to re-import. Delete it here if you want to.");
+            if (livePrefixes.Count > 0)
+            {
+                fact = $"The Azure subnet still exists but its address prefix is now {string.Join(", ", livePrefixes)}, not {prefix}.";
+                return Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged,
+                    $"{fact} Delete it here if you want to, then use the Azure import wizard to bring in its "
+                    + "current prefix.");
+            }
+
+            fact = "The Azure subnet still exists but no longer has an IPv4 address prefix, so there "
+                + "is nothing to re-import.";
+            return Item(snapshot, AzureReconcileStatus.SubnetPrefixChanged,
+                $"{fact} Delete it here if you want to.");
         }
 
         private static List<string> Ipv4PrefixesOf(BulkAzureSubnetViewModel subnet) =>

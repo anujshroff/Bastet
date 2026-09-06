@@ -8,6 +8,13 @@ namespace Bastet.Services.Azure
         private const string SubnetResourceType = "Microsoft.Network/virtualNetworks/subnets";
         private const string VNetResourceType = "Microsoft.Network/virtualNetworks";
 
+        public static readonly StringComparer IdComparer = StringComparer.OrdinalIgnoreCase;
+
+        public static bool IsSameResourceId(string? a, string? b) =>
+            !string.IsNullOrEmpty(a)
+            && !string.IsNullOrEmpty(b)
+            && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
         public static bool IsAzureSubnet(string? resourceId) =>
             IsResourceType(resourceId, SubnetResourceType);
 

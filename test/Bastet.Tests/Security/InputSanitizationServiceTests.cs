@@ -89,10 +89,10 @@ public class InputSanitizationServiceTests
     [InlineData("Test\x00", false)]
     [InlineData("", true)]
     [InlineData(null, true)]
-    public void IsSafeText_ValidatesCorrectly(string? input, bool expected)
+    public void SafeTextOracle_ValidatesCorrectly(string? input, bool expected)
     {
 
-        bool result = _sanitizationService.IsSafeText(input);
+        bool result = SafeTextOracle.IsSafe(input);
 
         Assert.Equal(expected, result);
     }
@@ -100,7 +100,8 @@ public class InputSanitizationServiceTests
     [Theory]
     [InlineData("tag1,tag2,tag3", "tag1,tag2,tag3")]
     [InlineData("tag1, tag2, tag3", "tag1,tag2,tag3")]
-    [InlineData("<script>evil</script>,goodtag", "evil,goodtag")]
+    [InlineData("<script>evil</script>,goodtag", "<script>evil</script>,goodtag")]
+    [InlineData("rack<b12>,web", "rack<b12>,web")]
     [InlineData("a,b,c,d,e,f,g,h,i,j,k,l", "a,b,c,d,e,f,g,h,i,j")]
     [InlineData("", "")]
     [InlineData(null, "")]

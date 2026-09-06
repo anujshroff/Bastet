@@ -137,7 +137,9 @@ public class SubnetControllerAzureReconcileTests : IDisposable
 
         IActionResult result = await Delete(Request("approved", 1), new MockAzureService(true, null, vnets));
 
-        _ = Assert.IsType<ConflictObjectResult>(result);
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Contains("no longer offered for deletion by the latest re-check", conflict.Value?.ToString());
+        Assert.DoesNotContain("no longer reported as deleted in Azure", conflict.Value?.ToString());
         Assert.NotNull(await _context.Subnets.FindAsync([1], TestContext.Current.CancellationToken));
     }
 

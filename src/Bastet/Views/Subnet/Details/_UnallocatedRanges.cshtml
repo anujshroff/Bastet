@@ -2,7 +2,7 @@
 @inject Bastet.Services.IUserContextService SubnetUserContext
 
 @{
-    bool azureImportEnabled = bool.TryParse(Environment.GetEnvironmentVariable("BASTET_AZURE_IMPORT"), out bool _azureEnabled) && _azureEnabled;
+    bool azureImportEnabled = Bastet.Controllers.AzureController.IsAzureImportEnabled();
 }
 
 @if (!Model.IsFullyAllocated && Model.UnallocatedRanges.Any())
@@ -61,10 +61,7 @@
                                     @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.CanAddChildSubnet)
                                     {
                                         <button type="button" class="btn btn-sm btn-success create-subnet-btn"
-                                                data-network="@range.StartIp"
-                                                data-parent-id="@Model.Id"
-                                                data-ip-version="4"
-                                                data-parent-cidr="@Model.Cidr">
+                                                data-network="@range.StartIp">
                                             <i class="bi bi-plus-circle"></i> Create Subnet
                                         </button>
                                     }

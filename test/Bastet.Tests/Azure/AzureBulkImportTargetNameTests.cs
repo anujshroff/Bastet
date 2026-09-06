@@ -32,7 +32,7 @@ public class AzureBulkImportTargetNameTests
     private BulkImportPlanViewModel Plan(
         IReadOnlyList<ExistingSubnetSnapshot> existing, params BulkImportSelectedVNetPrefixDto[] prefixes) =>
         _planner.BuildPlan(
-            new BulkImportSelectionDto { SubscriptionId = "sub-1", VNetPrefixes = [.. prefixes] },
+            new BulkImportSelectionDto { VNetPrefixes = [.. prefixes] },
             existing);
 
     private static List<string?> TargetNames(BulkImportPlanViewModel plan) =>
@@ -115,9 +115,7 @@ public class AzureBulkImportTargetNameTests
             Prefix("vnet-a", VNetA, "10.71.0.0/16"),
             Prefix("vnet-a", VNetA, "10.72.0.0/16"));
 
-        InputSanitizationService sanitizer = new();
-
-        Assert.All(TargetNames(plan), n => Assert.True(sanitizer.IsSafeText(n!)));
+        Assert.All(TargetNames(plan), n => Assert.True(SafeTextOracle.IsSafe(n!)));
     }
 
     [Fact]
@@ -168,7 +166,6 @@ public class AzureBulkImportTargetNameTests
         BulkImportPlanViewModel plan = _planner.BuildPlan(
             new BulkImportSelectionDto
             {
-                SubscriptionId = "sub-1",
                 RenameMatchedBastetSubnets = true,
                 VNetPrefixes = [Prefix("vnet-a", VNetA, "10.71.0.0/16", ["10.71.0.0/16", "10.72.0.0/16"])]
             },

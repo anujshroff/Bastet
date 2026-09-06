@@ -258,12 +258,10 @@ public partial class SubnetController : Controller
 
         List<DeletedSubnetsViewModel> viewModels = [.. deletedSubnets.Select(ds => new DeletedSubnetsViewModel
         {
-            OriginalId = ds.OriginalId,
             Name = ds.Name,
             NetworkAddress = ds.NetworkAddress,
             Cidr = ds.Cidr,
             Description = ds.Description,
-            OriginalParentId = ds.OriginalParentId,
             DeletedAt = ds.DeletedAt,
             DeletedBy = ds.DeletedBy,
             CreatedAt = ds.CreatedAt,

@@ -143,6 +143,10 @@ public class IpArithmeticPropertyTests
         { "10.20.0.0", 16, ["10.20.4.0/22"] },
         { "0.0.0.0", 0, ["64.0.0.0/2"] },
         { "255.255.255.0", 24, ["255.255.255.128/25"] },
+        { "10.0.0.0", 24, ["10.0.0.32/27", "10.0.0.128/26"] },
+        { "10.0.0.0", 24, ["10.0.0.0/25", "10.0.0.129/32"] },
+        { "255.255.255.0", 24, ["255.255.255.0/26", "255.255.255.128/26"] },
+        { "10.0.0.0", 24, ["10.0.0.128/26", "10.0.0.240/29"] },
     };
 
     [Theory]
@@ -192,6 +196,96 @@ public class IpArithmeticPropertyTests
 
         long allocated = children.Sum(c => 1L << (32 - c.Cidr));
         Assert.Equal(_svc.CalculateTotalIpAddresses(cidr), freeTotal + allocated);
+    }
+
+    [Theory]
+    [MemberData(nameof(Layouts))]
+    public void ChildSubnetSuggestions_AreAligned_Free_Lowest_AndRecommendedIsTheSmallestCidrThatFitsAtTheStart(
+        string net, int cidr, string[] kids)
+    {
+        List<Subnet> children = [.. kids.Select(k => new Subnet
+        {
+            NetworkAddress = k.Split('/')[0],
+            Cidr = int.Parse(k.Split('/')[1])
+        })];
+
+        List<IPRange> ranges = [.. _svc.CalculateUnallocatedRanges(net, cidr, children, [])];
+
+        if (cidr == 32)
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => _svc.SuggestChildSubnets(cidr, ranges));
+            return;
+        }
+
+        IReadOnlyList<ChildSubnetSuggestion> suggestions = _svc.SuggestChildSubnets(cidr, ranges);
+
+        Assert.Equal(ranges.Select(r => r.StartIp), suggestions.Select(s => s.StartIp));
+
+        long parentEnd = ToUint(_svc.CalculateBroadcastAddress(net, cidr));
+        List<(long Start, long End)> free = [.. ranges.Select(r => ((long)ToUint(r.StartIp), (long)ToUint(r.EndIp)))];
+        int[] childCidrs = [.. Enumerable.Range(cidr + 1, 32 - cidr)];
+
+        for (int i = 0; i < ranges.Count; i++)
+        {
+            ChildSubnetSuggestion suggestion = suggestions[i];
+            long start = ToUint(ranges[i].StartIp);
+            long end = ToUint(ranges[i].EndIp);
+
+            Assert.Equal(childCidrs, suggestion.NetworkAddressByCidr.Keys.Order());
+
+            int expectedRecommended = childCidrs.First(c =>
+            {
+                long size = 1L << (32 - c);
+                return start % size == 0 && start + size - 1 <= end;
+            });
+            Assert.Equal(expectedRecommended, suggestion.RecommendedCidr);
+
+            foreach (int c in childCidrs)
+            {
+                long size = 1L << (32 - c);
+                long? oracle = null;
+                for (long candidate = (start + size - 1) / size * size; candidate + size - 1 <= parentEnd; candidate += size)
+                {
+                    long candidateEnd = candidate + size - 1;
+                    if (free.Any(f => f.Start <= candidate && candidateEnd <= f.End))
+                    {
+                        oracle = candidate;
+                        break;
+                    }
+                }
+
+                string? actual = suggestion.NetworkAddressByCidr[c];
+
+                if (oracle is null)
+                {
+                    Assert.Null(actual);
+                    continue;
+                }
+
+                Assert.NotNull(actual);
+                Assert.Equal(ToIp((uint)oracle.Value), actual);
+                Assert.True(_svc.IsValidSubnet(actual, c), $"{actual}/{c} is not aligned");
+                Assert.True(_svc.IsSubnetContainedInParent(actual, c, net, cidr), $"{actual}/{c} escapes {net}/{cidr}");
+                Assert.True(oracle.Value >= start, $"{actual}/{c} lies before the range start {ranges[i].StartIp}");
+
+                foreach (Subnet child in children)
+                {
+                    long cs = ToUint(child.NetworkAddress);
+                    long ce = cs + (1L << (32 - child.Cidr)) - 1;
+                    Assert.False(oracle.Value <= ce && cs <= oracle.Value + size - 1,
+                        $"suggested {actual}/{c} overlaps allocated {child.NetworkAddress}/{child.Cidr}");
+                }
+
+                if (c >= suggestion.RecommendedCidr)
+                {
+                    Assert.Equal(ranges[i].StartIp, actual);
+                }
+                else
+                {
+                    Assert.NotEqual(ranges[i].StartIp, actual);
+                }
+            }
+        }
     }
 
     [Fact]

@@ -40,8 +40,6 @@ public class AzureBulkImportPlannerTests
         params BulkImportSelectedVNetPrefixDto[] prefixes) =>
         new()
         {
-            SubscriptionId = "sub-1",
-            SubscriptionName = "Test Sub",
             RenameMatchedBastetSubnets = rename,
             VNetPrefixes = [.. prefixes]
         };
@@ -74,8 +72,6 @@ public class AzureBulkImportPlannerTests
     {
         BulkImportSelectionDto selection = new()
         {
-            SubscriptionId = "sub-1",
-            SubscriptionName = "Test Sub",
             VNetPrefixes = null!
         };
 

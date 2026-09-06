@@ -1,3 +1,4 @@
+using Bastet.Services.Azure;
 using Bastet.Models.ViewModels;
 using Bastet.Tests.TestHelpers;
 
@@ -43,23 +44,34 @@ public class AzureServiceTests
     }
 
     [Fact]
-    public async Task IsCredentialValid_WithValidCredential_ReturnsTrue()
+    public async Task CheckCredential_WithValidCredentialAndSubscriptions_ReturnsValid()
     {
 
-        bool result = await _mockAzureService.IsCredentialValid();
+        CredentialCheckResult result = await _mockAzureService.CheckCredential();
 
-        Assert.True(result);
+        Assert.Equal(CredentialCheckResult.Valid, result);
     }
 
     [Fact]
-    public async Task IsCredentialValid_WithInvalidCredential_ReturnsFalse()
+    public async Task CheckCredential_WithInvalidCredential_ReturnsFailed()
     {
 
         MockAzureService service = new(false);
 
-        bool result = await service.IsCredentialValid();
+        CredentialCheckResult result = await service.CheckCredential();
 
-        Assert.False(result);
+        Assert.Equal(CredentialCheckResult.Failed, result);
+    }
+
+    [Fact]
+    public async Task CheckCredential_AuthenticatedButNoVisibleSubscriptions_IsNotReportedAsAFailure()
+    {
+
+        MockAzureService service = new(true);
+
+        CredentialCheckResult result = await service.CheckCredential();
+
+        Assert.Equal(CredentialCheckResult.NoVisibleSubscriptions, result);
     }
 
     [Fact]

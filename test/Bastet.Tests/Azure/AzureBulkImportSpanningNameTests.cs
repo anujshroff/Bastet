@@ -45,8 +45,6 @@ public class AzureBulkImportSpanningNameTests
         _planner.BuildPlan(
             new BulkImportSelectionDto
             {
-                SubscriptionId = "sub-1",
-                SubscriptionName = "Test Sub",
                 RenameMatchedBastetSubnets = renameMatched,
                 VNetPrefixes = [.. prefixes]
             },

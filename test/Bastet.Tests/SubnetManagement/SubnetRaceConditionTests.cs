@@ -21,7 +21,6 @@ public class SubnetRaceConditionTests : IDisposable
     private readonly SubnetValidationService _subnetValidationService;
     private readonly HostIpValidationService _hostIpValidationService;
     private readonly ISubnetLockingService _lockingService;
-    private readonly IInputSanitizationService _sanitizationService;
 
     public SubnetRaceConditionTests()
     {
@@ -32,7 +31,6 @@ public class SubnetRaceConditionTests : IDisposable
         _ipUtilityService = new IpUtilityService();
         _subnetValidationService = new SubnetValidationService(_ipUtilityService);
         _hostIpValidationService = new HostIpValidationService(_ipUtilityService, _context);
-        _sanitizationService = new InputSanitizationService();
 
         _lockingService = new SqliteSubnetLockingService();
 
