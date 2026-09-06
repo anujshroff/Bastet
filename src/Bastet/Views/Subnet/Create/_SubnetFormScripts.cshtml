@@ -13,11 +13,9 @@
     const cidrInfo = @Html.Raw(cidrInfoJson);
 
     function updateSubnetInfo() {
-        const cidrValue = parseInt($('#Cidr').val(), 10);
+        const info = cidrInfo[$('#Cidr').prop('valueAsNumber')];
 
-        if (!isNaN(cidrValue) && cidrValue >= 0 && cidrValue <= 32) {
-            const info = cidrInfo[cidrValue];
-
+        if (info !== undefined) {
             $('#subnetMaskDisplay').text(info.mask);
             $('#maxIpsDisplay').text(info.total.toLocaleString());
             $('#usableIpsDisplay').text(info.usable.toLocaleString());

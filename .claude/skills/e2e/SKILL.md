@@ -644,7 +644,9 @@ the browser actually sent against what was persisted.**
   at the range's first address, then submit the modal's Create and follow the redirect to
   `/Subnet/Create`; assert the URL was built from the route table with every value URL-encoded, the form
   arrives prefilled, and the POST is **accepted** - a suggestion the app then refuses is the defect this
-  table exists to prevent. Assert the Child Subnets card header carries no separate "Add Child Subnet"
+  table exists to prevent. The modal reads its number input as a number (`valueAsNumber`, never
+  `parseInt`): typing `24.5` is refused (Create disabled, size "Invalid") and `2e1` is accepted as `/20`
+  (URL `cidr=20`, POST accepted); the Create form's own CIDR preview reads `#Cidr` the same way. Assert the Child Subnets card header carries no separate "Add Child Subnet"
   link (the range buttons are the only entry point) and that the console prints no `[SUBNET DEBUG]`.
 
   > **The modal ADJUSTS before it refuses, so pick a size with nowhere to go.** Given a CIDR larger than

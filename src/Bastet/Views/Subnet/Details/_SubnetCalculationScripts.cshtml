@@ -71,7 +71,7 @@
         });
 
         $('#cidrInput').on('input', function() {
-            const cidrValue = parseInt($(this).val());
+            const cidrValue = this.valueAsNumber;
             const address = activeSuggestion.networkAddressByCidr[cidrValue];
 
             if (address === undefined) {
@@ -103,7 +103,7 @@
         $('#createSubnetBtn').click(function() {
             const query = new URLSearchParams({
                 networkAddress: $('#networkAddressDisplay').val(),
-                cidr: $('#cidrInput').val(),
+                cidr: $('#cidrInput').prop('valueAsNumber'),
                 parentId: parentId
             });
 

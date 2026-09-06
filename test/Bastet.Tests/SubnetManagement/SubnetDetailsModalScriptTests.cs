@@ -106,4 +106,20 @@ public class SubnetDetailsModalScriptTests
         Assert.Contains("Has Host IPs", children);
         Assert.Contains("No child subnets have been created yet.", children);
     }
+
+    [Fact]
+    public void CidrModalScript_ReadsTheCidrInputAsANumber()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Assert.Contains("const cidrValue = this.valueAsNumber;", script);
+        Assert.Contains("cidr: $('#cidrInput').prop('valueAsNumber'),", script);
+        Assert.DoesNotContain("parseInt(", script);
+        Assert.DoesNotContain("$('#cidrInput').val()", script);
+
+        string createFormScript = ReadView("src/Bastet/Views/Subnet/Create/_SubnetFormScripts.cshtml");
+        Assert.Contains("const info = cidrInfo[$('#Cidr').prop('valueAsNumber')];", createFormScript);
+        Assert.Contains("if (info !== undefined) {", createFormScript);
+        Assert.DoesNotContain("parseInt(", createFormScript);
+    }
 }
