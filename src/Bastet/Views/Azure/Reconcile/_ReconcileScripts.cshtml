@@ -17,6 +17,12 @@
             return $("input[name='__RequestVerificationToken']").first().val();
         }
 
+        function readErrorMessage(xhr) {
+            return xhr.status === 0
+                ? "The server could not be reached."
+                : "The server returned status " + xhr.status + ".";
+        }
+
         function escapeHtml(text) {
             if (text === null || text === undefined) {
                 return "";
@@ -99,7 +105,7 @@
                     $("#rec-subscription-selection").removeClass("d-none");
                 },
                 error: function (xhr, status, error) {
-                    $("#rec-subscription-error-message").text("Error connecting to server: " + error);
+                    $("#rec-subscription-error-message").text(readErrorMessage(xhr));
                     $("#rec-subscription-error").removeClass("d-none");
                 }
             });
@@ -156,7 +162,7 @@
                     if (seq !== scanSeq) {
                         return;
                     }
-                    showScanError("Error connecting to server: " + error);
+                    showScanError(readErrorMessage(xhr));
                 }
             });
         }

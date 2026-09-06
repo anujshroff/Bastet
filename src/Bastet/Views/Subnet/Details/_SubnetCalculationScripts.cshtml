@@ -41,6 +41,8 @@
         }
 
         function refuse(message, sizeText) {
+            $('#networkAddressDisplay').val(activeSuggestion.startIp);
+            makeNetworkAddressReadOnly();
             $('#cidrInput').removeClass('is-valid').addClass('is-invalid');
             $('#createSubnetBtn').prop('disabled', true);
             $('#cidrValidationFeedback').text(message);
@@ -71,18 +73,16 @@
         });
 
         $('#cidrInput').on('input', function() {
-            const cidrValue = parseInt($(this).val());
+            const cidrValue = this.valueAsNumber;
             const address = activeSuggestion.networkAddressByCidr[cidrValue];
 
             if (address === undefined) {
-                $('#networkAddressDisplay').val(activeSuggestion.startIp);
-                makeNetworkAddressReadOnly();
                 refuse('Please enter a valid CIDR value within the allowed range.', 'Invalid');
                 return;
             }
 
             if (address === null) {
-                refuse('No compatible network address found for this CIDR size.', 'Invalid - No compatible address');
+                refuse(`No free /${cidrValue} block starts at or after ${activeSuggestion.startIp}.`, 'Invalid - none free at or after this range');
                 return;
             }
 
@@ -103,7 +103,7 @@
         $('#createSubnetBtn').click(function() {
             const query = new URLSearchParams({
                 networkAddress: $('#networkAddressDisplay').val(),
-                cidr: $('#cidrInput').val(),
+                cidr: $('#cidrInput').prop('valueAsNumber'),
                 parentId: parentId
             });
 

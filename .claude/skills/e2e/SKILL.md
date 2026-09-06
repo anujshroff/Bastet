@@ -533,6 +533,12 @@ the browser actually sent against what was persisted.**
   subnets are all recorded says "already recorded"; one where any contained subnet is refused says
   "either already recorded or cannot be imported". Assert the two separately in one scan, or the
   wording drifts back to claiming completeness over a row rendered directly beneath it saying otherwise.
+- **Rename-only keeps the planner's reason.** With rename on, a linked target whose Bastet name drifted
+  is badged `Rename only` and its reason is the planner's own sentence ("Already imported as Bastet
+  subnet ..." or "... either already recorded or cannot be imported ...") followed by "The only change
+  would be renaming the Bastet subnet to match the VNet name." Assert the prefix reason with rename on
+  and off differ only by that appended sentence; the client must never substitute "Everything in this
+  prefix is already imported", which once sat directly above a row badged `Cannot import`.
 - **The rename toggle re-renders the tree whether or not the filter is on.** It changes the badge and
   the checkbox, not just visibility. Assert `Rename only` appears with the filter **off** too, or a
   regression that gates the re-render on the filter passes unnoticed.
@@ -644,17 +650,22 @@ the browser actually sent against what was persisted.**
   at the range's first address, then submit the modal's Create and follow the redirect to
   `/Subnet/Create`; assert the URL was built from the route table with every value URL-encoded, the form
   arrives prefilled, and the POST is **accepted** - a suggestion the app then refuses is the defect this
-  table exists to prevent. Assert the Child Subnets card header carries no separate "Add Child Subnet"
+  table exists to prevent. The modal reads its number input as a number (`valueAsNumber`, never
+  `parseInt`): typing `24.5` is refused (Create disabled, size "Invalid") and `2e1` is accepted as `/20`
+  (URL `cidr=20`, POST accepted); the Create form's own CIDR preview reads `#Cidr` the same way. Assert the Child Subnets card header carries no separate "Add Child Subnet"
   link (the range buttons are the only entry point) and that the console prints no `[SUBNET DEBUG]`.
 
   > **The modal ADJUSTS before it refuses, so pick a size with nowhere to go.** Given a CIDR larger than
   > the recommendation, the table points at the lowest free aligned block of that size at or after the
   > range start (possibly in a later range) and the modal moves the network address there, announcing it
   > via `#networkAddressHelp` - accepting that is **correct**, not a missed overlap. To exercise the
-  > refusal, carve the parent so no aligned block of the chosen size is free anywhere; the feedback then
-  > reads *"No compatible network address found for this CIDR size."* Test both: an adjustment that lands
-  > somewhere genuinely free, and a size that has no home at all. After an adjustment, an out-of-range or
-  > empty CIDR resets the address to the range start and hides the warning. On a parent at the top of the address
+  > refusal, carve the parent so no aligned block of the chosen size is free **at or after the clicked
+  > range's start**; the feedback then reads *"No free /N block starts at or after A.B.C.D."* (the table
+  > only searches forward from the clicked range, so a block free in an earlier range is still a refusal
+  > from this row - and the row for that earlier range offers it). Test both: an adjustment that lands
+  > somewhere genuinely free, and a size that has no home at or after the range. After an adjustment, an out-of-range,
+  > empty, or no-home CIDR resets the address to the range start and hides the warning (every refusal
+  > resets; the adjusted address and its note never outlive the size they were computed for). On a parent at the top of the address
   > space (`255.255.255.0/24` carved into two `/26`s) a `/25` must refuse, never offer `0.0.0.0`.
 
 Practical notes, all learned the hard way:

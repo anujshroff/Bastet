@@ -17,17 +17,7 @@ else
 }
 
 <div class="mt-4">
-    @inject Bastet.Services.IUserContextService DeletedHostIpsUserContext
-    @if (DeletedHostIpsUserContext.UserHasRole(Bastet.Models.ApplicationRoles.View))
-    {
-        <a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId" class="btn btn-secondary">
-            <i class="bi bi-arrow-left"></i> Back to Host IPs
-        </a>
-    }
-    else
-    {
-        <a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId" class="btn btn-secondary">
-            <i class="bi bi-arrow-left"></i> Back to Subnet
-        </a>
-    }
+    <a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Back to Subnet
+    </a>
 </div>

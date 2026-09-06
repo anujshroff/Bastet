@@ -26,6 +26,12 @@
             $("#bulk-go-commit-btn").prop("disabled", true);
         }
 
+        function readErrorMessage(xhr) {
+            return xhr.status === 0
+                ? "The server could not be reached."
+                : "The server returned status " + xhr.status + ".";
+        }
+
         function escapeHtml(s) {
             if (s === null || s === undefined) {
                 return "";
@@ -74,7 +80,7 @@
                     }
                 },
                 error: function (xhr, status, error) {
-                    $("#bulk-subscription-error-message").text("Error connecting to server: " + error);
+                    $("#bulk-subscription-error-message").text(readErrorMessage(xhr));
                     $("#bulk-subscription-error").removeClass("d-none");
                 },
                 complete: function () {
@@ -138,7 +144,7 @@
                     if (seq !== vnetSeq) {
                         return;
                     }
-                    $("#bulk-vnet-error-message").text("Error connecting to server: " + error);
+                    $("#bulk-vnet-error-message").text(readErrorMessage(xhr));
                     $("#bulk-vnet-error").removeClass("d-none");
                 },
                 complete: function () {
@@ -230,8 +236,7 @@
 
                     $prefixDiv.append($prefixCheckbox).append($prefixLabel);
                     $prefixDiv.append(reasonHtml(renameOnly
-                        ? "Everything in this prefix is already imported. The only change would be renaming the "
-                          + "Bastet subnet to match the VNet name."
+                        ? `${prefixInfo.reason} The only change would be renaming the Bastet subnet to match the VNet name.`
                         : prefixInfo.reason));
 
                     const containedSubnets = contained;
@@ -490,7 +495,7 @@
                     if (seq !== previewSeq) {
                         return;
                     }
-                    $("#bulk-preview-error-message").text("Error connecting to server: " + error);
+                    $("#bulk-preview-error-message").text(readErrorMessage(xhr));
                     $("#bulk-preview-error").removeClass("d-none");
                 },
                 complete: function () {

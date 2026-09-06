@@ -102,6 +102,23 @@ public partial class SubnetController : Controller
     private Task<List<Subnet>> LoadSubnetTreeForBatchAsync() =>
         context.Subnets.AsNoTracking().ToListAsync();
 
+    private async Task<bool> RefuseWhenContainerCannotHoldChildren(Subnet container)
+    {
+        string? reason = await context.HostIpAssignments.AnyAsync(h => h.SubnetId == container.Id)
+            ? "has host IP assignments"
+            : container.IsFullyAllocated ? "is marked fully allocated" : null;
+
+        if (reason == null)
+        {
+            return false;
+        }
+
+        ModelState.AddModelError("NetworkAddress",
+            $"This subnet falls inside {container.Name} ({container.NetworkAddress}/{container.Cidr}), " +
+            $"which {reason}, so it cannot be created.");
+        return true;
+    }
+
     private async Task<bool> ValidateSubnetCreation(CreateSubnetViewModel viewModel, List<Subnet>? treeCache = null)
     {
 
@@ -216,6 +233,10 @@ public partial class SubnetController : Controller
         {
             if (!viewModel.ParentSubnetId.HasValue)
             {
+                if (await RefuseWhenContainerCannotHoldChildren(bestParent))
+                {
+                    return false;
+                }
 
                 ModelState.AddModelError("ParentSubnetId",
                     $"This subnet must be a child of subnet {bestParent.Name} " +
@@ -229,6 +250,10 @@ public partial class SubnetController : Controller
 
                 if (selectedParent != null && bestParent.Cidr > selectedParent.Cidr)
                 {
+                    if (await RefuseWhenContainerCannotHoldChildren(bestParent))
+                    {
+                        return false;
+                    }
 
                     ModelState.AddModelError("ParentSubnetId",
                         $"A more specific parent subnet exists: {bestParent.Name} " +

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Bastet.Tests.SubnetManagement;
 
 public class SubnetDetailsModalScriptTests
@@ -47,12 +49,19 @@ public class SubnetDetailsModalScriptTests
     {
         string script = ReadView(ScriptPartial);
 
-        Assert.DoesNotMatch(@"<<|>>>|Math\.pow|& ?255", script);
+        Assert.DoesNotMatch(@"<<|>>>|Math\.pow|& ?255|\*\*|16777216|65536|split\('\.'\)|[*/%] ?256", script);
         Assert.Contains("childSubnetSuggestions", script);
-        Assert.Contains("networkAddressByCidr", script);
+        Assert.Contains("const address = activeSuggestion.networkAddressByCidr[cidrValue];", script);
         Assert.Contains("Model.ChildSubnetSuggestions", script);
         Assert.Contains("IpUtility.CalculateUsableIpAddresses", script);
-        Assert.Contains("No compatible network address found for this CIDR size.", script);
+
+        MatchCollection sizeWrites = Regex.Matches(script, @"#subnetSizeDisplay[""']\)\.text\(([^;]*)\);");
+        Assert.Equal(3, sizeWrites.Count);
+        Assert.All(sizeWrites, m => Assert.Matches(
+            @"^(usableByCidr\[(activeSuggestion\.recommendedCidr|cidrValue)\]\.toLocaleString\(\)|sizeText)$",
+            m.Groups[1].Value));
+        Assert.Contains("No free /${cidrValue} block starts at or after ${activeSuggestion.startIp}.", script);
+        Assert.DoesNotContain("No compatible network address found", script);
         Assert.Contains("This network address has been adjusted to avoid overlaps.", script);
     }
 
@@ -97,5 +106,32 @@ public class SubnetDetailsModalScriptTests
         Assert.Contains("Fully Allocated", children);
         Assert.Contains("Has Host IPs", children);
         Assert.Contains("No child subnets have been created yet.", children);
+    }
+
+    [Fact]
+    public void CidrModalScript_ReadsTheCidrInputAsANumber()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Assert.Contains("const cidrValue = this.valueAsNumber;", script);
+        Assert.Contains("cidr: $('#cidrInput').prop('valueAsNumber'),", script);
+        Assert.DoesNotContain("parseInt(", script);
+        Assert.DoesNotContain("$('#cidrInput').val()", script);
+
+        string createFormScript = ReadView("src/Bastet/Views/Subnet/Create/_SubnetFormScripts.cshtml");
+        Assert.Contains("const info = cidrInfo[$('#Cidr').prop('valueAsNumber')];", createFormScript);
+        Assert.Contains("if (info !== undefined) {", createFormScript);
+        Assert.DoesNotContain("parseInt(", createFormScript);
+    }
+
+    [Fact]
+    public void CidrModalScript_RefuseResetsTheNetworkAddressToTheRangeStart()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Match refuse = Regex.Match(script, @"function refuse\([^)]*\)\s*\{(?<body>[^}]*)\}");
+        Assert.True(refuse.Success);
+        Assert.Contains("$('#networkAddressDisplay').val(activeSuggestion.startIp);", refuse.Groups["body"].Value);
+        Assert.Contains("makeNetworkAddressReadOnly();", refuse.Groups["body"].Value);
     }
 }
