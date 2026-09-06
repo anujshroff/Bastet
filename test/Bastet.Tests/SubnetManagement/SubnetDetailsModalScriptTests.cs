@@ -60,7 +60,8 @@ public class SubnetDetailsModalScriptTests
         Assert.All(sizeWrites, m => Assert.Matches(
             @"^(usableByCidr\[(activeSuggestion\.recommendedCidr|cidrValue)\]\.toLocaleString\(\)|sizeText)$",
             m.Groups[1].Value));
-        Assert.Contains("No compatible network address found for this CIDR size.", script);
+        Assert.Contains("No free /${cidrValue} block starts at or after ${activeSuggestion.startIp}.", script);
+        Assert.DoesNotContain("No compatible network address found", script);
         Assert.Contains("This network address has been adjusted to avoid overlaps.", script);
     }
 

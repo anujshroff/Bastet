@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Bastet.Tests.Azure;
 
 public class AzureWizardClientWordingTests
@@ -69,5 +71,30 @@ public class AzureWizardClientWordingTests
         Assert.DoesNotContain("Could not connect to Azure.", File.ReadAllText(sharedPartial));
         Assert.DoesNotContain("Could not connect to Azure.", bulkImportPage);
         Assert.DoesNotContain("Could not connect to Azure.", reconcilePage);
+    }
+
+    [Theory]
+    [MemberData(nameof(WizardScriptPartials))]
+    public void ReadErrorHandlers_BranchOnUnreachableServer_AndNeverBlameTheConnectionForAnHttpAnswer(string viewPath)
+    {
+        string view = ReadView(viewPath);
+
+        Assert.Matches(
+            @"function readErrorMessage\(xhr\)\s*\{\s*return xhr\.status\s*===\s*0\s*\?\s*""The server could not be reached\.""\s*:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*;\s*\}",
+            view);
+        Assert.DoesNotContain("Error connecting to server", view);
+
+        int readHandlers = viewPath.Contains("BulkImport") ? 3 : 2;
+        Assert.Equal(readHandlers, Regex.Matches(view, @"(?<!function )readErrorMessage\(xhr\)").Count);
+    }
+
+    [Fact]
+    public void ReconcileScanError_DoesNotBlameAzureForEveryFailure()
+    {
+        string stepReview = ReadView("src/Bastet/Views/Azure/Reconcile/_StepReview.cshtml");
+
+        Assert.DoesNotContain("Because Azure could not be read", stepReview);
+        Assert.DoesNotContain("Fix the connection", stepReview);
+        Assert.Contains("Fix the problem shown", stepReview);
     }
 }

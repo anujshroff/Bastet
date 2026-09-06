@@ -82,7 +82,7 @@
             }
 
             if (address === null) {
-                refuse('No compatible network address found for this CIDR size.', 'Invalid - No compatible address');
+                refuse(`No free /${cidrValue} block starts at or after ${activeSuggestion.startIp}.`, 'Invalid - none free at or after this range');
                 return;
             }
 
