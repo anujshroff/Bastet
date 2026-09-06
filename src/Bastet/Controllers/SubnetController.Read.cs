@@ -100,6 +100,10 @@ public partial class SubnetController : Controller
                 subnet.HostIpAssignments)]
         };
 
+        viewModel.ChildSubnetSuggestions = viewModel.CanAddChildSubnet
+            ? [.. ipUtilityService.SuggestChildSubnets(subnet.Cidr, viewModel.UnallocatedRanges)]
+            : [];
+
         if (subnet.ParentSubnetId.HasValue)
         {
             Subnet? parentSubnet = await context.Subnets.FindAsync(subnet.ParentSubnetId.Value);

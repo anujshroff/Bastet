@@ -61,9 +61,7 @@
                                     @if (SubnetUserContext.UserHasRole(Bastet.Models.ApplicationRoles.Edit) && Model.CanAddChildSubnet)
                                     {
                                         <button type="button" class="btn btn-sm btn-success create-subnet-btn"
-                                                data-network="@range.StartIp"
-                                                data-parent-id="@Model.Id"
-                                                data-parent-cidr="@Model.Cidr">
+                                                data-network="@range.StartIp">
                                             <i class="bi bi-plus-circle"></i> Create Subnet
                                         </button>
                                     }

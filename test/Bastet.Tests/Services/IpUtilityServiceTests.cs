@@ -197,4 +197,98 @@ public class IpUtilityServiceTests
         string[] o = ip.Split('.');
         return (long.Parse(o[0]) << 24) | (long.Parse(o[1]) << 16) | (long.Parse(o[2]) << 8) | long.Parse(o[3]);
     }
+
+    private static IReadOnlyList<ChildSubnetSuggestion> SuggestionsFor(IpUtilityService svc, string net, int cidr, params string[] kids)
+    {
+        List<Subnet> children = [.. kids.Select(k => new Subnet
+        {
+            NetworkAddress = k.Split('/')[0],
+            Cidr = int.Parse(k.Split('/')[1])
+        })];
+
+        return svc.SuggestChildSubnets(cidr, [.. svc.CalculateUnallocatedRanges(net, cidr, children, [])]);
+    }
+
+    [Fact]
+    public void SuggestChildSubnets_SlashZeroParent_OffersTheOtherHalfForASlashOne()
+    {
+        IReadOnlyList<ChildSubnetSuggestion> suggestions = SuggestionsFor(_svc, "0.0.0.0", 0, "64.0.0.0/2");
+
+        Assert.Equal(2, suggestions.Count);
+        Assert.Equal("0.0.0.0", suggestions[0].StartIp);
+        Assert.Equal(2, suggestions[0].RecommendedCidr);
+        Assert.Equal("128.0.0.0", suggestions[0].NetworkAddressByCidr[1]);
+        Assert.Equal("0.0.0.0", suggestions[0].NetworkAddressByCidr[2]);
+        Assert.Equal("128.0.0.0", suggestions[1].StartIp);
+        Assert.Equal(1, suggestions[1].RecommendedCidr);
+        Assert.Equal("128.0.0.0", suggestions[1].NetworkAddressByCidr[1]);
+    }
+
+    [Fact]
+    public void SuggestChildSubnets_AtTheTopOfTheAddressSpace_DoesNotWrapToZero()
+    {
+        IReadOnlyList<ChildSubnetSuggestion> suggestions =
+            SuggestionsFor(_svc, "255.255.255.0", 24, "255.255.255.0/26", "255.255.255.128/26");
+
+        Assert.Equal(2, suggestions.Count);
+        Assert.Equal("255.255.255.64", suggestions[0].StartIp);
+        Assert.Equal("255.255.255.192", suggestions[1].StartIp);
+
+        foreach (ChildSubnetSuggestion suggestion in suggestions)
+        {
+            Assert.Null(suggestion.NetworkAddressByCidr[25]);
+            Assert.Equal(26, suggestion.RecommendedCidr);
+            Assert.DoesNotContain("0.0.0.0", suggestion.NetworkAddressByCidr.Values);
+        }
+
+        Assert.Equal("255.255.255.192", suggestions[1].NetworkAddressByCidr[26]);
+        Assert.Equal("255.255.255.192", suggestions[1].NetworkAddressByCidr[32]);
+    }
+
+    [Fact]
+    public void SuggestChildSubnets_SlashThirtyOneParent_OffersOnlySlashThirtyTwo()
+    {
+        IReadOnlyList<ChildSubnetSuggestion> suggestions = SuggestionsFor(_svc, "10.0.0.0", 31, "10.0.0.0/32");
+
+        ChildSubnetSuggestion suggestion = Assert.Single(suggestions);
+        Assert.Equal("10.0.0.1", suggestion.StartIp);
+        Assert.Equal(32, suggestion.RecommendedCidr);
+        Assert.Equal([32], suggestion.NetworkAddressByCidr.Keys);
+        Assert.Equal("10.0.0.1", suggestion.NetworkAddressByCidr[32]);
+    }
+
+    [Fact]
+    public void SuggestChildSubnets_UnalignedRangeStart_SlidesToTheNextAlignedBlock()
+    {
+        IReadOnlyList<ChildSubnetSuggestion> suggestions =
+            SuggestionsFor(_svc, "10.0.0.0", 24, "10.0.0.0/25", "10.0.0.129/32");
+
+        Assert.Equal(2, suggestions.Count);
+
+        ChildSubnetSuggestion single = suggestions[0];
+        Assert.Equal("10.0.0.128", single.StartIp);
+        Assert.Equal(32, single.RecommendedCidr);
+        Assert.Equal("10.0.0.192", single.NetworkAddressByCidr[26]);
+        Assert.Equal("10.0.0.130", single.NetworkAddressByCidr[31]);
+        Assert.Null(single.NetworkAddressByCidr[25]);
+
+        ChildSubnetSuggestion tail = suggestions[1];
+        Assert.Equal("10.0.0.130", tail.StartIp);
+        Assert.Equal(31, tail.RecommendedCidr);
+        Assert.Equal("10.0.0.192", tail.NetworkAddressByCidr[26]);
+        Assert.Equal("10.0.0.130", tail.NetworkAddressByCidr[31]);
+        Assert.Equal("10.0.0.130", tail.NetworkAddressByCidr[32]);
+        Assert.Null(tail.NetworkAddressByCidr[25]);
+    }
+
+    [Fact]
+    public void SuggestChildSubnets_NoRanges_ReturnsNothing() =>
+        Assert.Empty(_svc.SuggestChildSubnets(24, []));
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(32)]
+    [InlineData(33)]
+    public void SuggestChildSubnets_ParentCidrOutsideZeroToThirtyOne_Throws(int parentCidr) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => _svc.SuggestChildSubnets(parentCidr, []));
 }
