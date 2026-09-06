@@ -25,7 +25,7 @@ test/Bastet.Tests/SubnetManagement/SubnetDetailsModalScriptTests.cs: 101 lines (
 _Fixed in this commit (strings batch with L3, L4, L8, L10). ValidateSubnetCreation now asks, before naming bestParent as the remedy in either branch, whether it holds host IPs or is marked fully allocated (one private helper, RefuseWhenContainerCannotHoldChildren); if so the NetworkAddress error states the fact and no remedy: "This subnet falls inside X (net/cidr), which has host IP assignments | is marked fully allocated, so it cannot be created."_
 _Swept: the selected-parent gates (:131-149) and the bulk import planner (per-subnet refusals) are unchanged; no other Create/Edit message names a parent as a remedy._
 _Verified: pin SubnetCreateContainerRefusalTests (4 refusal rows red before, green after; 2 control rows keep the existing remedies where the container can hold children); full suite 969/969, 0 warnings. Browser: host-IP container and fully-allocated container, parent omitted and parent = grandparent, all four show the fact sentence; selecting the container itself still shows the existing refusal._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer drove nested containers (the innermost container is named at every depth), the selected-container case (existing refusals only), the bulk path's treeCache call, and four mutations each reddening the expected rows._
 
 ## L2 - HostIp Edit redisplay renders a blank Subnet and 'Created 1/1/0001 12:00 AM' after a lock timeout, validation failure or save error `[x1]` — FIXED
 _Fixed in this commit. One private `RedisplayEditAsync(ip, viewModel)` reloads the host IP with its subnet (AsNoTracking), returns NotFound when it is gone, stamps SubnetInfo/CreatedAt/LastModifiedAt and returns the view; all four redisplay returns (validation errors incl. the conflict branch, lock timeout, DbUpdateConcurrencyException, indeterminate/generic save error) use it and the inline reload in the conflict branch is deleted._
@@ -37,13 +37,13 @@ _Reviewed: (c) acceptable. Reviewer rebuilt 6ce5d27, drove the property-error, s
 _Fixed in this commit (strings batch). The rename-only prefix path now appends "The only change would be renaming the Bastet subnet to match the VNet name." to the planner's reason, the shape the subnet-row path already used, instead of replacing it with "Everything in this prefix is already imported."_
 _Swept: the subnet-row rename-only path (:273-275) already appends; no other client string overrides a planner reason._
 _Verified: no unit seam (client-side render of a live plan) - recorded in the ledger row and as an /e2e phase F assertion. Browser against live Azure (rig-28r-simple 10.61.0.0/16): imported the target and s1, hand-carved 10.61.2.0/25 inside s2, renamed the target to drifted-simple; rename off: "Already imported as Bastet subnet 'drifted-simple'. Every Azure subnet in this prefix is either already recorded or cannot be imported, so there is nothing to add."; rename on: same sentence + the rename sentence, badge Rename only, s2 badged Cannot import beneath; with the filter on the hidden-row count line follows the same reason._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer drove the drifted, undrifted, host-IP and fully-allocated rename-only branches against live Azure: rename-on reason equals rename-off plus the appended sentence in every branch; the substituted text never renders._
 
 ## L4 - Edit sidebar tells the operator CIDR is the modifiable value on an Azure-linked row whose form has fixed it `[x1]` `strings` — FIXED
 _Fixed in this commit (strings batch). Edit/_InformationSidebar.cshtml declares `@model EditSubnetViewModel` and branches on the same Model.IsAzureLinked the form uses: linked rows lose the CIDR bullet and the rules block and read "Network address and CIDR cannot be changed here."; unlinked rows render the previous text._
 _Swept: HostIp Edit's sidebar ("Host IP addresses cannot be changed") is true; no other static sidebar describes a gated field as editable._
 _Verified: pin SubnetEditViewSourceTests red before, green after; full suite 969/969. Browser: a row with AzureResourceId set renders the readonly+disabled CIDR input and the linked sidebar text with no CIDR bullet or rules; an unlinked row renders the CIDR bullet and rules._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer confirmed the sidebar and form branch on the same IsAzureLinked (null and empty AzureResourceId both unlinked), including validation-error redisplay and a tampered hidden Cidr._
 
 ## L5 - CIDR modal validates a number-input string with parseInt, so 24.5 is approved and handed to a Create form that refuses it (and 2e1 = /20 is refused) `[x1]` — FIXED
 _Fixed in this commit. The modal reads `this.valueAsNumber` and posts `prop('valueAsNumber')`, so the table lookup decides (24.5 and NaN index nothing and fall into the existing refuse branch; 2e1 is 20); no integer check, no step attribute._
@@ -67,7 +67,7 @@ _Reviewed: (c) acceptable. Reviewer drove child-subnet, fully-allocated, plain a
 _Fixed in this commit (strings batch). Both wizard scripts define readErrorMessage(xhr) - "The server could not be reached." for status 0, otherwise "The server returned status N." - and the five read-path handlers (bulk subscriptions, VNets, preview; reconcile subscriptions, scan) use it; _StepReview.cshtml's static paragraph no longer blames Azure: "BASTET cannot tell which resources still exist, so nothing is offered for deletion. Fix the problem shown above and scan again."_
 _Swept: the two commit handlers keep 25-L3's outcome-unknown wording; no other handler prints errorThrown; "Error connecting to server" is gone from both scripts._
 _Verified: pins in AzureWizardClientWordingTests (function shape, exactly 3/2 call sites, old text absent, _StepReview wording) red before, green after; full suite 969/969. Browser: aborted GetSubscriptions on both wizards -> "The server could not be reached."; 503/500 -> "The server returned status 503/500."; BulkGetVNets 503 -> status 503; reconcile scan with the database OFFLINE -> "The reconcile scan failed. Details have been logged." followed by the new paragraph; aborted ReconcileScan -> could not be reached._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer drove abort, 503, 500, 401, 403 and an off-origin 302 on every read handler of both wizards plus the offline-database scan; commit handlers keep 25-L3's outcome-unknown wording._
 
 ## L9 - CIDR modal keeps the adjusted address and its "adjusted to avoid overlaps" note on screen while refusing with "No compatible network address found" `[x1]` — FIXED
 _Fixed in this commit. `refuse()` now resets the network address to `activeSuggestion.startIp` and clears the adjustment note itself; the duplicate reset in the undefined branch is deleted, so every refusal (out of range, empty, no home) shows the clicked range start._
@@ -79,7 +79,7 @@ _Reviewed: (c) acceptable. Reviewer drove the single- and two-range layouts incl
 _Fixed in this commit (strings batch). The null-branch refusal reads "No free /N block starts at or after A.B.C.D." with size text "Invalid - none free at or after this range"; no arithmetic change and the at-or-after axis is kept._
 _Swept: SubnetDetailsModalScriptTests pins the new sentence and rejects the old; /e2e phase F now records the refusal as range-scoped and that the earlier range's row offers the block._
 _Verified: pin red before, green after; full suite 969/969. Browser on 10.1.0.0/24 carved /26 + /27 + /26: the 10.1.0.128 row with /26 reads "No free /26 block starts at or after 10.1.0.128." with Create disabled._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer confirmed the range-scoped sentence, that NaN never reaches the template (the undefined branch fires first), and that a top-of-space parent never offers 0.0.0.0._
 
 ## L11 - Suggestion property suite has no layout with a short tail range, so a scope-hoist mutant of SuggestChildSubnets stays green `[x2]` — FIXED
 _Fixed in this commit. Test-only: appended the Layouts row `{ "10.0.0.0", 24, ["10.0.0.128/26", "10.0.0.240/29"] }` so the suggestion theory covers a tail free range shorter than a block an earlier range holds._
