@@ -96,6 +96,8 @@ public class SubnetDetailsViewModel
 
     public List<IPRange> UnallocatedRanges { get; set; } = [];
 
+    public List<ChildSubnetSuggestion> ChildSubnetSuggestions { get; set; } = [];
+
     public string? ParentSubnetName { get; set; }
     public string? ParentNetworkAddress { get; set; }
 }

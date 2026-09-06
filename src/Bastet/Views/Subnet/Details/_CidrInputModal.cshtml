@@ -1,6 +1,5 @@
 @model SubnetDetailsViewModel
 
-<!-- CIDR Input Modal -->
 <div class="modal fade" id="cidrInputModal" tabindex="-1" aria-labelledby="cidrInputModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -26,11 +25,6 @@
                             Please enter a valid CIDR value within the allowed range.
                         </div>
                     </div>
-                    <input type="hidden" id="parentId">
-                    <!-- IPv4 only system -->
-                    <input type="hidden" id="parentCidr">
-                    <input type="hidden" id="originalNetworkAddress">
-                    <input type="hidden" id="recommendedCidr">
                 </form>
             </div>
             <div class="modal-footer">

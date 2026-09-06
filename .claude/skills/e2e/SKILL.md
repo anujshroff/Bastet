@@ -636,15 +636,26 @@ the browser actually sent against what was persisted.**
   state; the review table rendering status and reason with **no action column**; the typed `approved` confirmation; the
   `deleting` flag preventing a second POST; and that the commit posts `confirmedIds` /
   `confirmedVerdicts` from the confirmation snapshot rather than live checkbox state.
-- **Subnet details** (`_SubnetCalculationScripts.cshtml`): the CIDR modal's overlap detection and
-  network-address adjustment against rendered siblings.
+- **Subnet details** (`_SubnetCalculationScripts.cshtml`): the CIDR modal does no arithmetic. The
+  Details action stamps `ChildSubnetSuggestions` on the view model - one entry per unallocated range,
+  with `recommendedCidr` and a `networkAddressByCidr` table computed by
+  `IpUtilityService.SuggestChildSubnets` - and the script only indexes that table by the typed CIDR.
+  Drive: open the modal from a range, assert the prefilled CIDR is the largest aligned block that starts
+  at the range's first address, then submit the modal's Create and follow the redirect to
+  `/Subnet/Create`; assert the URL was built from the route table with every value URL-encoded, the form
+  arrives prefilled, and the POST is **accepted** - a suggestion the app then refuses is the defect this
+  table exists to prevent. Assert the Child Subnets card header carries no separate "Add Child Subnet"
+  link (the range buttons are the only entry point) and that the console prints no `[SUBNET DEBUG]`.
 
-  > **The modal ADJUSTS before it refuses, so pick a size with nowhere to go.** Given a CIDR that would
-  > overlap, it searches for a free aligned block of that size and moves the network address there,
-  > announcing it via `#networkAddressHelp` - accepting that is **correct**, not a missed overlap. To
-  > exercise the refusal, carve the parent so no aligned block of the chosen size is free anywhere; the
-  > feedback then reads *"No compatible network address found for this CIDR size."* Test both: an
-  > adjustment that lands somewhere genuinely free, and a size that has no home at all.
+  > **The modal ADJUSTS before it refuses, so pick a size with nowhere to go.** Given a CIDR larger than
+  > the recommendation, the table points at the lowest free aligned block of that size at or after the
+  > range start (possibly in a later range) and the modal moves the network address there, announcing it
+  > via `#networkAddressHelp` - accepting that is **correct**, not a missed overlap. To exercise the
+  > refusal, carve the parent so no aligned block of the chosen size is free anywhere; the feedback then
+  > reads *"No compatible network address found for this CIDR size."* Test both: an adjustment that lands
+  > somewhere genuinely free, and a size that has no home at all. After an adjustment, an out-of-range or
+  > empty CIDR resets the address to the range start and hides the warning. On a parent at the top of the address
+  > space (`255.255.255.0/24` carved into two `/26`s) a `/25` must refuse, never offer `0.0.0.0`.
 
 Practical notes, all learned the hard way:
 
