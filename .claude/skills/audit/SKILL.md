@@ -446,7 +446,7 @@ Each finding is a heading and these fields, nothing else:
 **No Verdict essay, no funnel table, no watch list.** A watch-list item is settled into a finding or
 dropped — the watch list was a graveyard where real defects sat unexamined for rounds. A round that
 finds nothing still writes and commits the file — header, empty sections, and the Refuted table.
-Under 25 KB for a full round, or the round has confused volume with rigour.
+Under 50 KB for a full round, or the round has confused volume with rigour. Do not spend agent time tightening a file that is already under the limit.
 
 ## Severity is graded on consequence
 
