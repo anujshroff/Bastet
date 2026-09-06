@@ -53,7 +53,7 @@ test/Bastet.Tests/SubnetManagement/SubnetDetailsModalScriptTests.cs: 101 lines (
 _Fixed in this commit. The modal reads `this.valueAsNumber` and posts `prop('valueAsNumber')`, so the table lookup decides (24.5 and NaN index nothing and fall into the existing refuse branch; 2e1 is 20); no integer check, no step attribute._
 _Swept: `parseInt` over number inputs - one sibling in Create/_SubnetFormScripts.cshtml (the CIDR preview) now indexes `cidrInfo` by `valueAsNumber` and branches on the lookup, so 24.5 shows "Invalid CIDR" instead of the /24 preview; the reconcile checkbox and bulk data-attribute parseInt calls read ids, not number inputs, and are untouched._
 _Verified: pin CidrModalScript_ReadsTheCidrInputAsANumber red before, green after; full suite 953/953, 0 warnings; browser on the rebuilt app: 24.5 refused (Create disabled, "Invalid"), 2e1 accepted as /20 (URL cidr=20, POST created the subnet), 24 unchanged, empty and 40 refused; Create form preview 24.5 -> "Invalid CIDR", 2e1 -> 255.255.240.0, no page errors. Recorded in /e2e phase F._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer rebuilt b3f82d4, drove 21 modal inputs plus keyboard stepping and the Create-form preview including `?cidr=` prefills, reverted each changed line and confirmed the pin fails; judged the Create-form sibling a within-finding sweep that deletes a second copy of the valid-CIDR decision._
 
 ## L6 - HostIp Create renders every model-level error twice, and HostIp Edit shows an empty 'Error' alert for property-level errors `[x2]`
 **Where:** src/Bastet/Views/HostIp/Create/_HostIpForm.cshtml:15; src/Bastet/Views/HostIp/Create.cshtml:8, src/Bastet/Views/HostIp/Edit/_Header.cshtml:8, src/Bastet/Views/HostIp/Create/_ErrorAlert.cshtml:1
@@ -78,9 +78,9 @@ _Reviewed: batch review pending._
 
 ## L9 - CIDR modal keeps the adjusted address and its "adjusted to avoid overlaps" note on screen while refusing with "No compatible network address found" `[x1]` — FIXED
 _Fixed in this commit. `refuse()` now resets the network address to `activeSuggestion.startIp` and clears the adjustment note itself; the duplicate reset in the undefined branch is deleted, so every refusal (out of range, empty, no home) shows the clicked range start._
-_Swept: the three refuse() callers (undefined, null, and none other) all reset now; the click handler's own `val(activeSuggestion.startIp)` is the modal-open path and is unchanged._
+_Swept: both refuse() call sites (the undefined and null branches) reset now; the click handler's own `val(activeSuggestion.startIp)` is the modal-open path and is unchanged._
 _Verified: pin CidrModalScript_RefuseResetsTheNetworkAddressToTheRangeStart red before, green after; full suite 954/954, 0 warnings; browser on 10.11.0.0/24 carved 10.11.0.0/32 + 10.11.0.128/25: 26 -> 10.11.0.64 adjusted with note; 25 -> refused, address 10.11.0.1, no warning border, note hidden, Create disabled; 27 -> 10.11.0.32 adjusted again; empty -> reset. L5 re-driven green. /e2e phase F sentence extended._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer drove the single- and two-range layouts including cancel-and-reopen and an adjusted Create round trip; reverting the reset into the undefined branch fails the pin. Correction adopted: the sweep line above now says two call sites._
 
 ## L10 - Refusal sentence "No compatible network address found for this CIDR size." asserts a parent-wide absence, but the table only searched at or after the clicked range `[x1]` `strings`
 **Where:** src/Bastet/Views/Subnet/Details/_SubnetCalculationScripts.cshtml:85; .claude/skills/e2e/SKILL.md:654 (record says the refusal fires only when no block is free anywhere), test/Bastet.Tests/SubnetManagement/SubnetDetailsModalScriptTests.cs:55 (pins the parent-wide wording)
@@ -93,13 +93,13 @@ _Reviewed: batch review pending._
 _Fixed in this commit. Test-only: appended the Layouts row `{ "10.0.0.0", 24, ["10.0.0.128/26", "10.0.0.240/29"] }` so the suggestion theory covers a tail free range shorter than a block an earlier range holds._
 _Swept: the ranges theory shares the row and stays green; no production change._
 _Verified: scratch tree pristine 38/38; hoisting `lowestBlockAtOrAfter` above the cidr loop fails exactly the new row ("Assert.Null() Failure: Value is not null"); restored 38/38._
-_Reviewed: batch review pending (recorded in the L11 entry when the batch reviewer returns)._
+_Reviewed: (c) acceptable. Reviewer reproduced 38/38 pristine and the single-row failure under the hoist mutant._
 
 ## L12 - CidrModalScript_OnlyIndexesTheServerSuggestionTable binds token presence, not the lookups: a client-side usable-count or address re-derivation in the modal stays green `[x2]` — FIXED
 _Fixed in this commit. Test-only: CidrModalScript_OnlyIndexesTheServerSuggestionTable now binds the two use sites (the `const address = activeSuggestion.networkAddressByCidr[cidrValue];` lookup and every `#subnetSizeDisplay` write, exactly three, each `usableByCidr[...]` or `sizeText`) and widens the client-arithmetic denylist to `**`, `16777216`, `65536`, `split('.')` and `[*/%] 256`._
 _Swept: the ClientArithmeticIdentifiers theory kept as the literal-revert guard; denylist has zero hits on the pristine script._
 _Verified: scratch tree pristine 15/15; mutant P6 (usable count re-derived with `2 ** (32 - cidrValue)`) and P7 (address re-derived from the start IP) each fail exactly this test._
-_Reviewed: batch review pending._
+_Reviewed: (c) acceptable. Reviewer reproduced P6 and P7 each failing exactly the bound test, zero pristine hits on the widened denylist._
 
 # Info
 
