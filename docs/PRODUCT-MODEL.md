@@ -325,3 +325,10 @@ summary, no reasoning added. Rulings made before this file existed are already f
   product defects only and no test findings; test quality is reconcile's fix-time duty under its
   proof rule, enforced by its fix review and whole-diff gate. Counter-test: untestable (process
   rule); the audit skill's beat list no longer has a regression-tests beat.
+- **29 (round-wide, second ruling)** — after the round's reconcile turned out to be nothing but test
+  work. Owner: "edit the audit skill and add an absolute rule that that skill shall NOT READ
+  ANYTHING IN THE TESTS AT ALL. NO CODE FROM THE FUCKING TESTS SHOULD ENTER THE CONTEXT FOR THE
+  AUDIT SKILL"; "that rule supercedes all other rules"; "Make it as clear as can be". Written as
+  the first section of `.claude/skills/audit/SKILL.md`, superseding every other rule there and in
+  this file's §5 for the audit. Counter-test: untestable (process rule); a candidate citing `test/`
+  is refuted on sight.

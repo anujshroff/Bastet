@@ -3,6 +3,41 @@ name: audit
 description: Run a fresh multi-agent security and correctness audit of the Bastet codebase, producing a numbered findings file in docs/. Use when asked to "run an audit", "start a new audit round", "audit the codebase", or "find bugs across the whole app". For reviewing a single PR or working diff use the built-in /code-review instead; to fix findings from an audit that already exists use /audit-reconcile.
 ---
 
+# THE ABSOLUTE RULE. READ THIS FIRST. IT SUPERSEDES EVERY OTHER RULE IN THIS FILE.
+
+**THE AUDIT DOES NOT FUCKING READ THE TESTS. EVER.**
+
+Nothing under `test/` — no test file, no test helper, no test fixture, no test project file, no
+test name, no test output beyond a pass/fail count — is opened, read, grepped, listed, diffed,
+blamed, quoted, cited, summarised or reasoned about by ANY agent this skill launches: not the
+briefing agent, not the rig agent, not a finder, not the merge, not a verifier, not the scribe, not
+the committer, and not the operator running the round. **NO CODE FROM THE FUCKING TESTS ENTERS THE
+CONTEXT OF THE AUDIT SKILL. NONE. NOT ONE FUCKING LINE.** The audit looks at the product — `src/` —
+and at what an operator can see. Tests serve the product, never the other way around. Whether a
+test is good, weak, missing or decorative is reconcile's fucking problem, at fix time, and is never
+an audit finding.
+
+Consequences, so nobody has to think:
+
+- **The briefing's codebase map describes `src/` only.** As far as this skill is concerned the test
+  project does not fucking exist.
+- **The one permitted contact with tests is the baseline `dotnet test` in Phase 1**, run for its
+  pass/fail count and nothing else. Its output is a number. If it prints test names because
+  something failed, the round stops anyway.
+- **Every `git log -p`, `git diff`, `git show` and `git blame` is scoped `-- src/`** (or another
+  non-test path). A delta beat that wants "the whole commit" gets the commit without `test/`.
+- **Every worker prompt carries this rule verbatim.** A worker that touches `test/` has its output
+  discarded. A candidate that cites a test file, names a test, quotes a test, or argues from what a
+  test does or does not cover is **refuted on sight** and is never written to the findings file.
+- **If following any other rule in this file, in `docs/PRODUCT-MODEL.md`, or in a worker's own
+  judgement would require reading a test, that other rule fucking loses.** This rule supersedes
+  all of them.
+
+Owner, round 29, verbatim: "edit the audit skill and add an absolute rule that that skill shall NOT
+READ ANYTHING IN THE TESTS AT ALL. NO CODE FROM THE FUCKING TESTS SHOULD ENTER THE CONTEXT FOR THE
+AUDIT SKILL"; "that rule supercedes all other rules"; "all we're doing is fucking around with
+tests"; "Make it as clear as can be".
+
 # Run an audit round
 
 A round is **one `Workflow` call** that you launch and then actively operate. It always runs the
@@ -226,7 +261,7 @@ one structured payload; the id-based version landed in under four minutes.
 
 Both write files into the scratchpad; every later agent is handed the **paths**, never the contents.
 
-**Briefing agent** → `BRIEF.md`, built from: `docs/PRODUCT-MODEL.md` **whole** (finders never see
+**Briefing agent** → `BRIEF.md` (which never mentions `test/` — see the ABSOLUTE RULE), built from: `docs/PRODUCT-MODEL.md` **whole** (finders never see
 the skill file — the brief carries the model, the finding format, and the constraints); the Rounds
 and Findings tables of `docs/AUDIT-LEDGER.md` (what the last reconcile fixed, by id, so the
 regression beats know where to look — this replaces reconstructing history from squashed `git log`);
@@ -335,14 +370,14 @@ surface, not the diff. (In a Regression-only round, beat 6 is the whole round.)
 3. **Azure integration** — the bulk import wizard, its planner, and the reconciler. Highest stakes: the only code that *deletes* on the strength of what an external system reports. Work partial visibility hard — throttling, an empty page, a 403 on one group, a token expiring mid-enumeration, a paged response whose second page fails. Which of those does it treat as "absent, therefore delete"?
 4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
 5. **UI & client-JS** — the wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
-6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. The previous round's fixes are dense in defects; that is why this beat gets the Standard deep sweep, and not a reason to point other beats here.
+6. **Regression correctness** — every commit since the last audit, diffed against what it replaced, **production files only (`git log -p <base>..HEAD -- src/`)**. The previous round's fixes are dense in defects; that is why this beat gets the Standard deep sweep, and not a reason to point other beats here.
 7. **Dead code & refactor residue** — orphans from earlier deletions.
 
 There is no regression-tests beat. Whether last round's pins bind is reconcile's question, answered
 at fix time under its proof rule; a beat that files it here is the round-26-to-29 churn the owner
 ended (PRODUCT-MODEL §8, round 29).
 
-**Every worker prompt carries this:** write **nothing** into the repository directory — no PID
+**Every worker prompt carries this:** the ABSOLUTE RULE at the top of this file, verbatim — no agent reads, greps, lists or cites anything under `test/`; and: write **nothing** into the repository directory — no PID
 files, no logs, no scratch; everything under the rig directory. "Do not modify the working tree" is
 not enough: beats have read it as "do not edit source" and left `.pid` files in the root, and one
 untracked file makes Phase 5 refuse the commit. Also: own port, own catalog, kill only by captured
@@ -414,7 +449,7 @@ tree is clean. A round once satisfied none of these and reported success anyway.
 
 ## What every finding must carry
 
-- **File and line citation**, re-checked against the working tree.
+- **File and line citation under `src/`**, re-checked against the working tree. A citation under `test/` is refuted, not filed.
 - **Confidence: confirmed or plausible.** *Plausible* names the load-bearing step that could not be
   established. It is not a hedge.
 - **A concrete failure scenario** with real inputs and the wrong output.
