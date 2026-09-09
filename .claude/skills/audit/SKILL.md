@@ -5,6 +5,8 @@ description: Run a fresh multi-agent security and correctness audit of the Baste
 
 # THE ABSOLUTE RULE. READ THIS FIRST. IT SUPERSEDES EVERY OTHER RULE IN THIS FILE.
 
+**DO NOT FUCKING READ A GOD DAMN FUCKING TEST FILE.**
+
 **THE AUDIT DOES NOT FUCKING READ THE TESTS. EVER.**
 
 Nothing under `test/` — no test file, no test helper, no test fixture, no test project file, no
@@ -36,7 +38,8 @@ Consequences, so nobody has to think:
 Owner, round 29, verbatim: "edit the audit skill and add an absolute rule that that skill shall NOT
 READ ANYTHING IN THE TESTS AT ALL. NO CODE FROM THE FUCKING TESTS SHOULD ENTER THE CONTEXT FOR THE
 AUDIT SKILL"; "that rule supercedes all other rules"; "all we're doing is fucking around with
-tests"; "Make it as clear as can be".
+tests"; "Make it as clear as can be"; "MAKE IT CLEAR IN THE SKILL VERBATIM: DO NOT FUCKING READ A GOD
+DAMN FUCKING TEST FILE".
 
 # Run an audit round
 
