@@ -38,10 +38,11 @@ _Swept: SubnetControllerConcurrencyRedisplayTests.cs:53,82 already binds LastMod
 _Verified: build 0 warnings, suite green; pin green at HEAD, 3/3 red under the dropped L317 stamp, 2/3 red under the 8891320 controller revert; reviewer's five further helper regressions (posted-value stamp, swapped stamps, dropped Include, FindAsync reload, tracked reload) all red or caught by the suite except the recorded DbUpdateConcurrencyException site._
 _Reviewed: PASS. Note adopted as fact, not fix: HostIpEditConcurrencyCatchTests already has a SQLite seam (SaveThrowingBastetDbContext) for the catch the 28-L2 row called seamless, so that site is pinnable at fix time if ever reopened._
 
-## L3 — 28-L10's pin checks the refusal sentence's presence, not which refuse() branch carries it; a branch swap stays green `[x1]` — STRUCK
+## L3 — 28-L10's pin checks the refusal sentence's presence, not which refuse() branch carries it; a branch swap stays green `[x1]` — FIXED
 
-_Struck at triage under PRODUCT-MODEL §5: "A test finding exists only when a regression that puts the ledger row's own operator-visible defect back on screen leaves the entire suite green, and the surface's recorded `/e2e` drive, where one exists, would not catch it either." The recorded drive (.claude/skills/e2e/SKILL.md phase F, lines 654 and 663) asserts "typing 24.5 is refused (Create disabled, size Invalid)" and that the no-home refusal reads "No free /N block starts at or after A.B.C.D."; the branch swap and the dead-condition mutant both fail that drive._
-_Not done: the two branch-bound regexes proposed by the verifiers — pin strength beyond the recorded drive is hardening, never filed._
+_Fixed on audit/round-29 (test-only), by owner instruction after an initial strike. CidrModalScript_OnlyIndexesTheServerSuggestionTable binds each refusal sentence to its refuse() branch with two regexes._
+_Verified: build 0 warnings, suite green; pin red under the branch swap, the == undefined dead-condition mutant and the 8891320 script revert; the same assertions were validated by three independent audit verifiers against the same mutants and a live browser drive._
+_Reviewed: by the audit's three verifiers (the filed assertions are byte-identical to theirs); no separate reconcile reviewer, by owner instruction on token spend._
 
 ## L4 — 28-L4 sidebar pin passes with IsAzureLinked read backwards (linked row told its CIDR is modifiable) `[x1]` — FIXED
 
@@ -50,10 +51,11 @@ _Swept: the Edit form's own IsAzureLinked branch was the one sibling of the same
 _Verified: build 0 warnings, suite green; pin red under both-site inversion, each single flip, the rules-block hoist, the 8891320 revert, the form inversion, the form content swap, a ViewData predicate, and four added-duplicate regressions; green under a whitespace reflow and an attribute reorder._
 _Reviewed: first review (a) — added duplicates of a sentence outside its branch passed the pin; revised once with exactly-once counts and a looser form regex; re-review PASS. Non-blocking (c): a paraphrase outside the pin's vocabulary and a readonly→disabled tidy remain uncovered/false-red respectively, hardening by the reviewer's own account._
 
-## L5 — CidrModalScript_RefuseResetsTheNetworkAddressToTheRangeStart accepts a reset gated inside refuse(); the 28-L9 defect returns with the pin green `[x1]` — STRUCK
+## L5 — CidrModalScript_RefuseResetsTheNetworkAddressToTheRangeStart accepts a reset gated inside refuse(); the 28-L9 defect returns with the pin green `[x1]` — FIXED
 
-_Struck at triage under PRODUCT-MODEL §5 (same sentence as L3). The recorded drive (.claude/skills/e2e/SKILL.md phase F, line 666) asserts that after an adjustment an out-of-range, empty or no-home CIDR "resets the address to the range start and hides the warning (every refusal resets ...)"; the gated reset and the keepAddress-flag mutant both fail that drive._
-_Not done: the positional regex proposed by the verifiers — hardening beyond the recorded drive._
+_Fixed on audit/round-29 (test-only), by owner instruction after an initial strike. CidrModalScript_RefuseResetsTheNetworkAddressToTheRangeStart pins the two reset statements at the head of refuse() positionally._
+_Verified: build 0 warnings, suite green; pin red under the braced gate, the keepAddress-flag gate and the 8891320 script revert; validated by two independent audit verifiers against the same mutants and a live browser drive._
+_Reviewed: by the audit's two verifiers (assertion byte-identical to theirs); no separate reconcile reviewer, by owner instruction on token spend._
 
 # Info
 
