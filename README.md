@@ -85,11 +85,7 @@ BASTET uses OpenID Connect (OIDC) for authentication in production environments.
     - `BASTET_OIDC_CLIENT_ID`: Client ID registered with your provider
   - Set optional environment variables based on your authentication flow:
     - `BASTET_OIDC_RESPONSE_TYPE`: Set to `code` (default) for authorization code flow with PKCE, or `id_token` for implicit flow
-    - `BASTET_OIDC_CLIENT_SECRET`: Required when using authorization code flow with identity providers that require client authentication (e.g., Microsoft Entra ID)
-
-- **Provider-Specific Notes**:
-  - **Auth0**: Supports authorization code flow with PKCE without requiring a client secret
-  - **Microsoft Entra ID**: Requires a client secret when using authorization code flow, even with PKCE
+    - `BASTET_OIDC_CLIENT_SECRET`: Set this when your client registration is configured for client authentication. Leave it unset to register BASTET as a public client and rely on PKCE alone.
 
 In development environments, authentication is automatically handled by `DevAuthHandler`, which provides a simulated user with all roles.
 
@@ -135,7 +131,7 @@ BASTET supports configuration through environment variables:
 | Server Configuration | **AZURE_TOKEN_CREDENTIALS** | Restricts which credentials DefaultAzureCredential will try | `dev`, `prod`, or a credential name such as `AzureCliCredential` | - | Local development only. Set to `dev` to authenticate with `az login`; leave unset when deployed so Managed Identity is used. See [Local development](#local-development). |
 | Authentication Configuration | **BASTET_OIDC_CLIENT_ID** | OpenID Connect client ID | `mvc_client` or `0e0e7c73-5fce-45c1-be7c-0161f462fd9d` | `mvc_client` | Required in non-development environments. Authentication is disabled in development environments. |
 | Authentication Configuration | **BASTET_OIDC_AUTHORITY** | OpenID Connect authority URL | `https://identity.your-domain.com` or `https://login.microsoftonline.com/0af80680-dd36-43bf-bf53-b951b9fdd68b` | `https://localhost` | Required in non-development environments. Authentication is disabled in development environments. |
-| Authentication Configuration | **BASTET_OIDC_CLIENT_SECRET** | Client secret for authentication with the OIDC provider | `your-client-secret` | - | Required when using authorization code flow with providers that require client authentication (e.g., Microsoft Entra ID). Not needed for providers that support PKCE without client authentication (e.g., Auth0). |
+| Authentication Configuration | **BASTET_OIDC_CLIENT_SECRET** | Client secret for authentication with the OIDC provider | `your-client-secret` | - | Optional. Set this when your client registration is configured for client authentication; leave it unset to register BASTET as a public client and rely on PKCE alone. When a secret is used, configure the provider to accept credentials in the request body (`client_secret_post`). |
 | Authentication Configuration | **BASTET_OIDC_RESPONSE_TYPE** | OIDC response type | `id_token` or `code` | `code` | Controls the authentication flow: `id_token` for implicit flow, `code` for authorization code flow. Set to `code` when using PKCE. |
 | Logging Configuration | **BASTET_LOG_LEVEL_DEFAULT** | Default logging level for all categories | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. The standard `Logging__LogLevel__Default` variable outranks this one if both are set. |
 | Logging Configuration | **BASTET_LOG_LEVEL_ASPNETCORE** | Logging level for ASP.NET Core components | `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Warning` | Only applied in non-development environments; in development the levels come from `appsettings.Development.json`. The standard `Logging__LogLevel__Microsoft.AspNetCore` variable outranks this one if both are set. |
