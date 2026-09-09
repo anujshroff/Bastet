@@ -33,7 +33,11 @@ Consequences, so nobody has to think:
   test does or does not cover is **refuted on sight** and is never written to the findings file.
 - **If following any other rule in this file, in `docs/PRODUCT-MODEL.md`, or in a worker's own
   judgement would require reading a test, that other rule fucking loses.** This rule supersedes
-  all of them.
+  all of them, and `docs/PRODUCT-MODEL.md` §5 says so in its own words.
+- **Test names inside documents the audit legitimately reads are not "reading a test".**
+  `docs/AUDIT-LEDGER.md` rows and `docs/PRODUCT-MODEL.md` §8 mention test names in prose; a
+  worker passes over them. The prohibition is on the `test/` tree itself and on reasoning from
+  what a test does or does not cover.
 
 Owner, round 29, verbatim: "edit the audit skill and add an absolute rule that that skill shall NOT
 READ ANYTHING IN THE TESTS AT ALL. NO CODE FROM THE FUCKING TESTS SHOULD ENTER THE CONTEXT FOR THE
@@ -48,7 +52,8 @@ same shape against the same rig and commits the same way.
 
 **What Bastet is, what counts as a finding, and what must never be filed live in
 `docs/PRODUCT-MODEL.md` — the single copy, shared with `/audit-reconcile`. Read it before doing
-anything else. Nothing in this file overrides it.** `docs/AUDIT-LEDGER.md` is the loop's memory
+anything else. Nothing in this file overrides it, except the ABSOLUTE RULE above, which §5 of the
+model itself places over everything for the audit.** `docs/AUDIT-LEDGER.md` is the loop's memory
 (main is squash-merged, so commit history is not): round outcomes, finding verdicts, residue rates.
 
 ## The scale gate
@@ -400,8 +405,7 @@ two independent end-to-end reproductions.
 
 **Reproduce it or kill it.** The rig is live. The verifier drives the failure and records
 `reproduced` as `yes-ran-it` (with the actual command and observed result), `no-could-not`
-(**refuted**), or `not-runnable` (the narrow exception for dead code and missing assertions, reason
-stated). A finding nobody executed is how a hallucinated defect reaches a human; this routinely
+(**refuted**), or `not-runnable` (the narrow exception for dead code, reason stated). A finding nobody executed is how a hallucinated defect reaches a human; this routinely
 kills a fifth to a quarter of candidates. A verifier may also correct rather than refute: kill a
 proposed *fix* while keeping the finding, correct a severity, correct a citation. **If a finding's
 own failure scenario opens with "not a runtime defect", it is refuted.**

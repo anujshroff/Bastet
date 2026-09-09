@@ -116,8 +116,8 @@ framework internals, live Azure — use a rig, record the measurement in the ent
 surface durably: name it in the fix's ledger row and add the drive to `/e2e`'s coverage
 (PRODUCT-MODEL §5). The FIXED entry alone is not a record — the findings file is deleted at
 close-out, which is exactly how rounds 25-and-earlier leaked unpinned fixes into the next audit.**
-A recorded gap is settled; a fix left both unpinned and unrecorded is handing the next round a
-finding.
+A recorded gap is settled; a fix left both unpinned and unrecorded is a round-end gate violation
+(step 7), repaired before this round closes — the next audit never sees it (PRODUCT-MODEL §5).
 
 ### 3. Apply the narrow fix — and split when it wants to grow
 
@@ -174,8 +174,8 @@ already made this round.
 
 **Prove every new test discriminates, by breaking the code it guards.** Revert the specific line
 the test exists for, confirm the test fails, restore. If it still passes, the test is decoration.
-**A pin binds the row's defect, not the tokens of the diff.** Prove it the way the audit's
-verifiers will (PRODUCT-MODEL §5): restore the defect — the full revert, and the one-edit
+**A pin binds the row's defect, not the tokens of the diff.** Prove it the §5 way, and go one
+step further: restore the defect — the full revert, and the one-edit
 regressions a maintainer could make (an inverted condition, a dropped stamp, a gated statement, a
 sentence moved to the other branch) — confirm the suite, or the recorded `/e2e` drive where no
 unit seam exists, goes red, and confirm the defect is visibly back in the running build. Round 29
@@ -211,7 +211,7 @@ The verdict is typed, and the protocol is decidable:
   ambiguous, neither side wins: revert, defer, and record the one-line product question in the
   findings file for the owner.
 - **(c) "I would have fixed it differently"** — the author wins automatically. Demands for
-  hardening or for coverage beyond the §5 test rule are this category; **a fix shipping neither
+  hardening or for coverage beyond the §5 proof are this category; **a fix shipping neither
   its pin nor its ledger + `/e2e` record is (b), §5 cited.** The reviewer's schema must force
   verdicts into (a)/(b)/(c) so preference cannot masquerade as failure.
 

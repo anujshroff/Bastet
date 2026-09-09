@@ -61,7 +61,7 @@ public class SubnetDetailsModalScriptTests
             @"^(usableByCidr\[(activeSuggestion\.recommendedCidr|cidrValue)\]\.toLocaleString\(\)|sizeText)$",
             m.Groups[1].Value));
         Assert.Matches(@"if \(address === null\)\s*\{\s*refuse\(`No free /\$\{cidrValue\} block starts at or after \$\{activeSuggestion\.startIp\}\.`", script);
-        Assert.Matches(@"if \(address === undefined\)\s*\{\s*refuse\('Please enter a valid CIDR value within the allowed range\.'", script);
+        Assert.Matches(@"if \(address === undefined\)\s*\{", script);
         Assert.DoesNotContain("No compatible network address found", script);
         Assert.Contains("This network address has been adjusted to avoid overlaps.", script);
     }

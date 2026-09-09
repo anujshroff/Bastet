@@ -255,7 +255,9 @@ status is added. It has already shipped once: "Only show what would change" test
   recorded once - in the fix's ledger row, which is durable, and as `/e2e` coverage, which is
   executable; a FIXED entry is neither, because the findings file is deleted at close-out.
   Reconcile's independent fix review and its whole-diff gate enforce the proof and repair a fix
-  shipped without it in the same round; the next audit never inherits it as a finding.
+  shipped without it in the same round; the next audit never inherits it as a finding. **For the
+  audit, the absolute rule at the top of `.claude/skills/audit/SKILL.md` — no audit agent reads
+  anything under `test/` — outranks this bullet and every other rule in this file.**
 - **The loop's terminal state is a zero-finding round, and every round must move toward it.** A
   finding is an operator-visible wrong behaviour reproducible at HEAD; nothing else. A fix is the
   minimal change that makes the wrong
@@ -328,7 +330,11 @@ summary, no reasoning added. Rulings made before this file existed are already f
 - **29 (round-wide, second ruling)** — after the round's reconcile turned out to be nothing but test
   work. Owner: "edit the audit skill and add an absolute rule that that skill shall NOT READ
   ANYTHING IN THE TESTS AT ALL. NO CODE FROM THE FUCKING TESTS SHOULD ENTER THE CONTEXT FOR THE
-  AUDIT SKILL"; "that rule supercedes all other rules"; "Make it as clear as can be". Written as
-  the first section of `.claude/skills/audit/SKILL.md`, superseding every other rule there and in
-  this file's §5 for the audit. Counter-test: untestable (process rule); a candidate citing `test/`
-  is refuted on sight.
+  AUDIT SKILL"; "that rule supercedes all other rules"; "all we're doing is fucking around with
+  tests"; "Make it as clear as can be"; "MAKE IT CLEAR IN THE SKILL VERBATIM: DO NOT FUCKING READ
+  A GOD DAMN FUCKING TEST FILE". Written as the first section of `.claude/skills/audit/SKILL.md`,
+  superseding every other rule there and in this file's §5 for the audit. Counter-test: untestable
+  (process rule); a candidate citing `test/` is refuted on sight. In the same round the owner
+  reversed the triage strike of 29-L3 and 29-L5: "lol, you fixed l1 which was just fucking
+  testswhy not just fix l3 l5 then"; "i mean if we're going to obsess with bullshit tests"; "l4
+  was tests too"; both were fixed.

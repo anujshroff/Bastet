@@ -41,6 +41,7 @@ _Reviewed: PASS. Note adopted as fact, not fix: HostIpEditConcurrencyCatchTests 
 ## L3 — 28-L10's pin checks the refusal sentence's presence, not which refuse() branch carries it; a branch swap stays green `[x1]` — FIXED
 
 _Fixed on audit/round-29 (test-only), by owner instruction after an initial strike. CidrModalScript_OnlyIndexesTheServerSuggestionTable binds each refusal sentence to its refuse() branch with two regexes._
+_Swept: the sibling refusal branch is bound only by its strict-equality condition, not its wording, after the gate's product-model reviewer flagged the wording pin as beyond the 28-L10 row._
 _Verified: build 0 warnings, suite green; pin red under the branch swap, the == undefined dead-condition mutant and the 8891320 script revert; the same assertions were validated by three independent audit verifiers against the same mutants and a live browser drive._
 _Reviewed: by the audit's three verifiers (the filed assertions are byte-identical to theirs); no separate reconcile reviewer, by owner instruction on token spend._
 
