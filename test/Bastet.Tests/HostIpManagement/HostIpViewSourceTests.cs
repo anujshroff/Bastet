@@ -22,22 +22,27 @@ public class HostIpViewSourceTests
 
     private static string ReadView(string relativePath) => File.ReadAllText(ViewPath(relativePath));
 
-    private static int ModelOnlySummaries(string view) =>
-        Regex.Matches(view, @"asp-validation-summary=""ModelOnly""").Count;
+    private static int ModelLevelRenderings(string view) =>
+        Regex.Matches(view, @"asp-validation-summary=|Html\.ValidationSummary\(|ModelState").Count;
+
+    private static IEnumerable<string> ViewsAHostIpPageCanComposeFrom() =>
+        Directory.GetFiles(ViewPath("src/Bastet/Views"), "*.cshtml", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.GetFiles(ViewPath("src/Bastet/Views/Shared"), "*.cshtml", SearchOption.AllDirectories))
+            .Concat(Directory.GetFiles(ViewPath("src/Bastet/Views/HostIp"), "*.cshtml", SearchOption.AllDirectories));
 
     [Fact]
-    public void HostIpCreateAndEdit_RenderModelLevelErrorsExactlyOnce()
+    public void HostIpPages_RenderModelLevelErrorsExactlyOnceEach_AcrossEveryViewTheyCanComposeFrom()
     {
-        string hostIpViews = ViewPath("src/Bastet/Views/HostIp");
+        Assert.Equal(2, ViewsAHostIpPageCanComposeFrom().Sum(view => ModelLevelRenderings(File.ReadAllText(view))));
+    }
 
-        Assert.Empty(Directory.GetFiles(hostIpViews, "_ErrorAlert.cshtml", SearchOption.AllDirectories));
-        Assert.Equal(0, ModelOnlySummaries(ReadView("src/Bastet/Views/HostIp/Create.cshtml")));
-        Assert.DoesNotContain("_ErrorAlert", ReadView("src/Bastet/Views/HostIp/Create.cshtml"));
-        Assert.Equal(1, ModelOnlySummaries(ReadView("src/Bastet/Views/HostIp/Create/_HostIpForm.cshtml")));
-
-        string editHeader = ReadView("src/Bastet/Views/HostIp/Edit/_Header.cshtml");
-        Assert.Equal(1, ModelOnlySummaries(editHeader));
-        Assert.DoesNotContain("ModelState.ErrorCount", editHeader);
-        Assert.DoesNotContain("alert-heading", editHeader);
+    [Theory]
+    [InlineData("Create/_HostIpForm.cshtml", "<div asp-validation-summary=\"ModelOnly\" class=\"alert alert-danger\" role=\"alert\"></div>")]
+    [InlineData("Edit/_Header.cshtml", "<div asp-validation-summary=\"ModelOnly\" class=\"alert alert-danger mb-4\" role=\"alert\"></div>")]
+    public void HostIpPage_RendersItsModelLevelErrors_ThroughOneUnwrappedSummary(string owner, string summaryLine)
+    {
+        string ownerView = ReadView("src/Bastet/Views/HostIp/" + owner);
+        Assert.Contains(summaryLine, ownerView);
+        Assert.Single(Regex.Matches(ownerView, "alert-danger"));
     }
 }
