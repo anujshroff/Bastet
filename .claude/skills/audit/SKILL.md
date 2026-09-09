@@ -76,7 +76,7 @@ skill returns without a findings file.
 
 | | |
 |---|---|
-| Verification | 1 adversarial verifier per candidate; a 2nd for every `[x1]`; a 3rd only to break a tie |
+| Verification | 2 adversarial verifiers per candidate, `[x2]` included (truth lens + reachability lens); a 3rd only to break a tie; two surviving votes to file |
 | Rig | Always live: database, application, browser, Azure fixtures in both resource groups |
 | Branch | `audit/round-<N>`, created in Phase 1 **before any work runs**. **`main` is never touched** |
 | Output | `docs/AUDIT-FINDINGS-<N>.md`, committed, never pushed |
@@ -349,12 +349,14 @@ PID — never `pkill -f "Bastet.dll"`, which has killed other agents' applicatio
 Tag `[x2]` (both passes, independently) or `[x1]`. **Absence is weak evidence** — a `[x1]` deserves
 *more* scrutiny, not less. The deep sweep is a third population and does not make anything `[x2]`.
 
-## Phase 3 — adversarial verification (1-2 agents per candidate)
+## Phase 3 — adversarial verification (2-3 agents per candidate)
 
-Every candidate goes to a verifier prompted to **refute** it, defaulting to "not real" when
-uncertain. `[x2]` gets one verifier and that verdict stands. `[x1]` gets a second on a
-reachability-and-consequence lens; if the two disagree, a third breaks the tie and the majority
-wins.
+Every candidate — `[x2]` included — goes to two verifiers prompted to **refute** it, defaulting
+to "not real" when uncertain: one on a truth lens, one on a reachability-and-consequence lens. If
+they disagree, a third breaks the tie. **A finding needs two surviving votes to be filed; a single
+verdict never carries one.** Round 29 ran this shape after the owner asked for certainty: two
+ephemeral audits of the same delta had filed nothing, and every candidate that survived did so on
+two independent end-to-end reproductions.
 
 **Reproduce it or kill it.** The rig is live. The verifier drives the failure and records
 `reproduced` as `yes-ran-it` (with the actual command and observed result), `no-could-not`
@@ -363,6 +365,25 @@ stated). A finding nobody executed is how a hallucinated defect reaches a human;
 kills a fifth to a quarter of candidates. A verifier may also correct rather than refute: kill a
 proposed *fix* while keeping the finding, correct a severity, correct a citation. **If a finding's
 own failure scenario opens with "not a runtime defect", it is refuted.**
+
+**The test-pin protocol, every step executed in a fresh archive copy.** This class is the loop's
+entire residue history, and a verifier that reads instead of runs is how it perpetuates:
+
+1. **HEAD control** — the named test is green.
+2. **Full revert** — restore the guarded production file to its pre-fix version and run the
+   **entire suite**. Anything red means the fix is pinned somewhere; a candidate resting on the
+   revert is refuted.
+3. **The finder's mutation** — apply it exactly, run the entire suite again, and where the surface
+   has a recorded `/e2e` drive, run that drive too. Anything red: refuted.
+4. **Consequence** — build and run the mutated application and show the ledger row's **own**
+   operator-visible defect back on screen, by HTTP or browser, with a HEAD control beside it. A
+   mutation the operator cannot see is refuted.
+5. **Settled-gap check** — a surface a ledger row records as unpinnable, with its `/e2e` drive, is
+   settled.
+
+`docs/PRODUCT-MODEL.md` §5 states the rule these steps decide. The verifier's `reproduced` is
+`yes-ran-it` only when it executed steps 1–4 itself, and its repro carries the verbatim summary
+line of every test run, the mutation diff, and the step-4 evidence.
 
 ## Phase 4 — the scribe (2 agents, sequential)
 

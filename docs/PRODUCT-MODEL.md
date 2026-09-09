@@ -253,8 +253,12 @@ status is added. It has already shipped once: "Only show what would change" test
   which is executable; a FIXED entry is neither, because the findings file is deleted at
   close-out. A recorded gap is settled and is never re-filed. The audit files a test finding only
   where this rule was broken: a fix left both unpinned and unrecorded, or a test that stays green
-  with the code it guards broken. When reconcile does its job that class is structurally empty -
-  that, not ignoring tests, is how the loop converges.
+  with the code it guards broken. **A test finding exists only when a regression that puts the
+  ledger row's own operator-visible defect back on screen leaves the entire suite green, and the
+  surface's recorded `/e2e` drive, where one exists, would not catch it either. Both halves are
+  demonstrated by running the broken build, not by reading. Anything else about a pin's strength
+  is hardening, and hardening is never filed.** When reconcile does its job that class is
+  structurally empty - that, not ignoring tests, is how the loop converges.
 - **The loop's terminal state is a zero-finding round, and every round must move toward it.** A
   finding is an operator-visible wrong behaviour reproducible at HEAD, or a broken-rule test
   finding under the bullet above; nothing else. A fix is the minimal change that makes the wrong

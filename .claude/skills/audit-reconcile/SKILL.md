@@ -174,6 +174,13 @@ already made this round.
 
 **Prove every new test discriminates, by breaking the code it guards.** Revert the specific line
 the test exists for, confirm the test fails, restore. If it still passes, the test is decoration.
+**A pin binds the row's defect, not the tokens of the diff.** Prove it the way the audit's
+verifiers will (PRODUCT-MODEL §5): restore the defect — the full revert, and the one-edit
+regressions a maintainer could make (an inverted condition, a dropped stamp, a gated statement, a
+sentence moved to the other branch) — confirm the suite, or the recorded `/e2e` drive where no
+unit seam exists, goes red, and confirm the defect is visibly back in the running build. Round 29
+found five round-28 pins that bound file names, incidental tokens or a sentence's presence and
+accepted every one of those regressions with the suite green.
 Three separate times in one round a test looked right and proved nothing:
 
 - an invariant over free-space ranges whose generated fixtures all began at the parent's network
