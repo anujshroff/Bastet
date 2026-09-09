@@ -203,6 +203,12 @@ and is prompted to **refute the fix**: re-run the repro, probe what the diff bre
 sibling surfaces, check the model. A reviewer without the rig degenerates into code-reading, which
 is near worthless for client-JS — hand over ports, catalog names and fixture ids.
 
+**Effort and model are the UI's, never the skill's.** The owner sets them in the UI; every
+subagent spawned in this skill — the per-fix reviewers and the two whole-diff reviewers alike —
+inherits them. **Never pass `model` or an effort setting to `Agent`**, and never change the
+session's effort yourself. Choosing a tier on the owner's behalf is not a judgement call this skill
+is allowed to make.
+
 The verdict is typed, and the protocol is decidable:
 
 - **(a) demonstrated failure** — the reviewer ran something and it went wrong. The fix loses.
