@@ -3,6 +3,48 @@ name: audit
 description: Run a fresh multi-agent security and correctness audit of the Bastet codebase, producing a numbered findings file in docs/. Use when asked to "run an audit", "start a new audit round", "audit the codebase", or "find bugs across the whole app". For reviewing a single PR or working diff use the built-in /code-review instead; to fix findings from an audit that already exists use /audit-reconcile.
 ---
 
+# THE ABSOLUTE RULE. READ THIS FIRST. IT SUPERSEDES EVERY OTHER RULE IN THIS FILE.
+
+**DO NOT FUCKING READ A GOD DAMN FUCKING TEST FILE.**
+
+**THE AUDIT DOES NOT FUCKING READ THE TESTS. EVER.**
+
+Nothing under `test/` — no test file, no test helper, no test fixture, no test project file, no
+test name, no test output beyond a pass/fail count — is opened, read, grepped, listed, diffed,
+blamed, quoted, cited, summarised or reasoned about by ANY agent this skill launches: not the
+briefing agent, not the rig agent, not a finder, not the merge, not a verifier, not the scribe, not
+the committer, and not the operator running the round. **NO CODE FROM THE FUCKING TESTS ENTERS THE
+CONTEXT OF THE AUDIT SKILL. NONE. NOT ONE FUCKING LINE.** The audit looks at the product — `src/` —
+and at what an operator can see. Tests serve the product, never the other way around. Whether a
+test is good, weak, missing or decorative is reconcile's fucking problem, at fix time, and is never
+an audit finding.
+
+Consequences, so nobody has to think:
+
+- **The briefing's codebase map describes `src/` only.** As far as this skill is concerned the test
+  project does not fucking exist.
+- **The one permitted contact with tests is the baseline `dotnet test` in Phase 1**, run for its
+  pass/fail count and nothing else. Its output is a number. If it prints test names because
+  something failed, the round stops anyway.
+- **Every `git log -p`, `git diff`, `git show` and `git blame` is scoped `-- src/`** (or another
+  non-test path). A delta beat that wants "the whole commit" gets the commit without `test/`.
+- **Every worker prompt carries this rule verbatim.** A worker that touches `test/` has its output
+  discarded. A candidate that cites a test file, names a test, quotes a test, or argues from what a
+  test does or does not cover is **refuted on sight** and is never written to the findings file.
+- **If following any other rule in this file, in `docs/PRODUCT-MODEL.md`, or in a worker's own
+  judgement would require reading a test, that other rule fucking loses.** This rule supersedes
+  all of them, and `docs/PRODUCT-MODEL.md` §5 says so in its own words.
+- **Test names inside documents the audit legitimately reads are not "reading a test".**
+  `docs/AUDIT-LEDGER.md` rows and `docs/PRODUCT-MODEL.md` §8 mention test names in prose; a
+  worker passes over them. The prohibition is on the `test/` tree itself and on reasoning from
+  what a test does or does not cover.
+
+Owner, round 29, verbatim: "edit the audit skill and add an absolute rule that that skill shall NOT
+READ ANYTHING IN THE TESTS AT ALL. NO CODE FROM THE FUCKING TESTS SHOULD ENTER THE CONTEXT FOR THE
+AUDIT SKILL"; "that rule supercedes all other rules"; "all we're doing is fucking around with
+tests"; "Make it as clear as can be"; "MAKE IT CLEAR IN THE SKILL VERBATIM: DO NOT FUCKING READ A GOD
+DAMN FUCKING TEST FILE".
+
 # Run an audit round
 
 A round is **one `Workflow` call** that you launch and then actively operate. It always runs the
@@ -10,7 +52,8 @@ same shape against the same rig and commits the same way.
 
 **What Bastet is, what counts as a finding, and what must never be filed live in
 `docs/PRODUCT-MODEL.md` — the single copy, shared with `/audit-reconcile`. Read it before doing
-anything else. Nothing in this file overrides it.** `docs/AUDIT-LEDGER.md` is the loop's memory
+anything else. Nothing in this file overrides it, except the ABSOLUTE RULE above, which §5 of the
+model itself places over everything for the audit.** `docs/AUDIT-LEDGER.md` is the loop's memory
 (main is squash-merged, so commit history is not): round outcomes, finding verdicts, residue rates.
 
 ## The scale gate
@@ -43,9 +86,9 @@ Always needed:
 
   | | finders | verifiers | total |
   |---|---|---|---|
-  | Regression-only | beats 6+7, 2 passes = 4 | ~8 | ~15 |
-  | Standard (default) | 8 beats x 2 passes + deep sweep on beat 6 = 18 | ~30 | ~50 |
-  | Deep | 8 beats x 2 passes + deep sweep on beats 1, 3, 6, 7 = 21 | ~36 | ~62 |
+  | Regression-only | beat 6, 2 passes = 2 | ~4 | ~9 |
+  | Standard (default) | 7 beats x 2 passes + deep sweep on beat 6 = 16 | ~30 | ~48 |
+  | Deep | 7 beats x 2 passes + deep sweep on beats 1, 3, 6 = 18 | ~36 | ~58 |
 
   **Every scale keeps two independent passes** — the `[x2]`/`[x1]` signal drives verification depth
   and is the most useful thing the round produces. Shrink beats or deep sweeps, never passes.
@@ -76,7 +119,7 @@ skill returns without a findings file.
 
 | | |
 |---|---|
-| Verification | 1 adversarial verifier per candidate; a 2nd for every `[x1]`; a 3rd only to break a tie |
+| Verification | 2 adversarial verifiers per candidate, `[x2]` included (truth lens + reachability lens); a 3rd only to break a tie; two surviving votes to file |
 | Rig | Always live: database, application, browser, Azure fixtures in both resource groups |
 | Branch | `audit/round-<N>`, created in Phase 1 **before any work runs**. **`main` is never touched** |
 | Output | `docs/AUDIT-FINDINGS-<N>.md`, committed, never pushed |
@@ -84,11 +127,10 @@ skill returns without a findings file.
 # The round exists to reduce defects, not to produce findings
 
 **The loop's terminal state is a zero-finding round, and zero filed is the success condition.** A
-finding is an operator-visible wrong behaviour reproducible at HEAD, or a broken test rule
-(`docs/PRODUCT-MODEL.md` §5): test gaps are closed at fix time by reconcile, so the audit files a
-test finding only where that rule was broken — a fix left both unpinned and unrecorded, or a test
-that stays green with the code it guards broken. A gap already recorded in a ledger row or covered
-by `/e2e` is settled — never re-file it. Write the empty findings file, commit it, and report zero
+finding is an operator-visible wrong behaviour reproducible at HEAD — a product defect — and
+nothing else. **The audit files no test findings** (`docs/PRODUCT-MODEL.md` §5, owner ruling in
+§8, round 29): a missing, weak or unrecorded pin is reconcile's fix-time duty and its gate's
+violation, never a finding here. Write the empty findings file, commit it, and report zero
 proudly.
 
 **Measure the residue rate and lead with it.** Every finding names the previous-round fix it came
@@ -227,7 +269,7 @@ one structured payload; the id-based version landed in under four minutes.
 
 Both write files into the scratchpad; every later agent is handed the **paths**, never the contents.
 
-**Briefing agent** → `BRIEF.md`, built from: `docs/PRODUCT-MODEL.md` **whole** (finders never see
+**Briefing agent** → `BRIEF.md` (which never mentions `test/` — see the ABSOLUTE RULE), built from: `docs/PRODUCT-MODEL.md` **whole** (finders never see
 the skill file — the brief carries the model, the finding format, and the constraints); the Rounds
 and Findings tables of `docs/AUDIT-LEDGER.md` (what the last reconcile fixed, by id, so the
 regression beats know where to look — this replaces reconstructing history from squashed `git log`);
@@ -324,23 +366,26 @@ inventory is what Phase 5 deletes.
 
 ## Phase 2 — the beats, twice (+ 1 merge)
 
-**Beats 1–5 and 8 audit the WHOLE APPLICATION. Only beats 6 and 7 are scoped to the delta since the
-last audit, and that is the only reason they exist.** Do not point the other beats at what changed
+**Beats 1–5 and 7 audit the WHOLE APPLICATION. Only beat 6 is scoped to the delta since the last
+audit, and that is the only reason it exists.** Do not point the other beats at what changed
 recently, however tempting — an audit that only re-examines the last round's diff cannot find the
 long-standing defect, and recently-changed code is neither weighted nor exempt in the full beats. A
 beat prompt that names specific recent findings as "the focus" has been written wrong: name the
-surface, not the diff. (In a Regression-only round, beats 6 and 7 are the whole round.)
+surface, not the diff. (In a Regression-only round, beat 6 is the whole round.)
 
 1. **Security / web** — authorization coverage, antiforgery, XSS, injection, SSRF, headers, log forging, secrets.
 2. **Logic & data integrity** — subnet/CIDR arithmetic, containment and overlap, host-IP validation, any path that persists a state the validated path would reject.
 3. **Azure integration** — the bulk import wizard, its planner, and the reconciler. Highest stakes: the only code that *deletes* on the strength of what an external system reports. Work partial visibility hard — throttling, an empty page, a 403 on one group, a token expiring mid-enumeration, a paged response whose second page fails. Which of those does it treat as "absent, therefore delete"?
 4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
 5. **UI & client-JS** — the wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
-6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. The previous round's fixes are dense in defects; that is why this beat gets the Standard deep sweep, and not a reason to point other beats here.
-7. **Regression tests** — do the tests added alongside those commits actually fail against the code they claim to guard? Revert the guarded hunk in a scratch copy and find out. A test that passes either way is a defect **in the test** — file it, with the mutation and the observed green run as the repro. A fix left **both unpinned and unrecorded** is filed once, Low, its fix being the pin or the ledger-row + `/e2e` record. A gap a ledger row or `/e2e` already records is settled — never re-file it (PRODUCT-MODEL §5).
-8. **Dead code & refactor residue** — orphans from earlier deletions.
+6. **Regression correctness** — every commit since the last audit, diffed against what it replaced, **production files only (`git log -p <base>..HEAD -- src/`)**. The previous round's fixes are dense in defects; that is why this beat gets the Standard deep sweep, and not a reason to point other beats here.
+7. **Dead code & refactor residue** — orphans from earlier deletions.
 
-**Every worker prompt carries this:** write **nothing** into the repository directory — no PID
+There is no regression-tests beat. Whether last round's pins bind is reconcile's question, answered
+at fix time under its proof rule; a beat that files it here is the round-26-to-29 churn the owner
+ended (PRODUCT-MODEL §8, round 29).
+
+**Every worker prompt carries this:** the ABSOLUTE RULE at the top of this file, verbatim — no agent reads, greps, lists or cites anything under `test/`; and: write **nothing** into the repository directory — no PID
 files, no logs, no scratch; everything under the rig directory. "Do not modify the working tree" is
 not enough: beats have read it as "do not edit source" and left `.pid` files in the root, and one
 untracked file makes Phase 5 refuse the commit. Also: own port, own catalog, kill only by captured
@@ -349,20 +394,24 @@ PID — never `pkill -f "Bastet.dll"`, which has killed other agents' applicatio
 Tag `[x2]` (both passes, independently) or `[x1]`. **Absence is weak evidence** — a `[x1]` deserves
 *more* scrutiny, not less. The deep sweep is a third population and does not make anything `[x2]`.
 
-## Phase 3 — adversarial verification (1-2 agents per candidate)
+## Phase 3 — adversarial verification (2-3 agents per candidate)
 
-Every candidate goes to a verifier prompted to **refute** it, defaulting to "not real" when
-uncertain. `[x2]` gets one verifier and that verdict stands. `[x1]` gets a second on a
-reachability-and-consequence lens; if the two disagree, a third breaks the tie and the majority
-wins.
+Every candidate — `[x2]` included — goes to two verifiers prompted to **refute** it, defaulting
+to "not real" when uncertain: one on a truth lens, one on a reachability-and-consequence lens. If
+they disagree, a third breaks the tie. **A finding needs two surviving votes to be filed; a single
+verdict never carries one.** Round 29 ran this shape after the owner asked for certainty: two
+ephemeral audits of the same delta had filed nothing, and every candidate that survived did so on
+two independent end-to-end reproductions.
 
 **Reproduce it or kill it.** The rig is live. The verifier drives the failure and records
 `reproduced` as `yes-ran-it` (with the actual command and observed result), `no-could-not`
-(**refuted**), or `not-runnable` (the narrow exception for dead code and missing assertions, reason
-stated). A finding nobody executed is how a hallucinated defect reaches a human; this routinely
+(**refuted**), or `not-runnable` (the narrow exception for dead code, reason stated). A finding nobody executed is how a hallucinated defect reaches a human; this routinely
 kills a fifth to a quarter of candidates. A verifier may also correct rather than refute: kill a
 proposed *fix* while keeping the finding, correct a severity, correct a citation. **If a finding's
 own failure scenario opens with "not a runtime defect", it is refuted.**
+
+**A test-only candidate is refuted on sight**, citing `docs/PRODUCT-MODEL.md` §5: the audit files
+product defects only. A verifier does not run its mutation, judge its pin or propose a better one.
 
 ## Phase 4 — the scribe (2 agents, sequential)
 
@@ -407,7 +456,7 @@ tree is clean. A round once satisfied none of these and reported success anyway.
 
 ## What every finding must carry
 
-- **File and line citation**, re-checked against the working tree.
+- **File and line citation under `src/`**, re-checked against the working tree. A citation under `test/` is refuted, not filed.
 - **Confidence: confirmed or plausible.** *Plausible* names the load-bearing step that could not be
   established. It is not a hedge.
 - **A concrete failure scenario** with real inputs and the wrong output.

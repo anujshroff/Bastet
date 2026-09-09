@@ -25,6 +25,7 @@ public class HostIpEditRedisplayTests : IDisposable
     private readonly BastetDbContext _context;
     private readonly IIpUtilityService _ip = new IpUtilityService();
     private readonly DateTime _storedCreatedAt;
+    private readonly DateTime? _storedLastModifiedAt;
 
     public HostIpEditRedisplayTests()
     {
@@ -34,9 +35,11 @@ public class HostIpEditRedisplayTests : IDisposable
         _context.Database.EnsureCreated();
 
         _context.Subnets.Add(new Subnet { Id = 1, Name = "leaf", NetworkAddress = "10.0.9.0", Cidr = 24, CreatedAt = DateTime.UtcNow, CreatedBy = "t" });
-        _context.HostIpAssignments.Add(new HostIpAssignment { IP = "10.0.9.5", Name = "host", SubnetId = 1, CreatedAt = DateTime.UtcNow, CreatedBy = "t" });
+        _context.HostIpAssignments.Add(new HostIpAssignment { IP = "10.0.9.5", Name = "host", SubnetId = 1, CreatedAt = DateTime.UtcNow, CreatedBy = "t", LastModifiedAt = DateTime.UtcNow, ModifiedBy = "t" });
         _context.SaveChanges();
-        _storedCreatedAt = _context.HostIpAssignments.AsNoTracking().Single(h => h.IP == "10.0.9.5").CreatedAt;
+        HostIpAssignment stored = _context.HostIpAssignments.AsNoTracking().Single(h => h.IP == "10.0.9.5");
+        _storedCreatedAt = stored.CreatedAt;
+        _storedLastModifiedAt = stored.LastModifiedAt;
     }
 
     public void Dispose()
@@ -63,7 +66,7 @@ public class HostIpEditRedisplayTests : IDisposable
     };
 
     [Fact]
-    public async Task Edit_LockTimesOut_RedisplaysTheStoredSubnetAndCreatedAt()
+    public async Task Edit_LockTimesOut_RedisplaysTheStoredSubnetAndDates()
     {
         HostIpController controller = CreateController(new AlwaysTimingOutLockService());
 
@@ -73,10 +76,11 @@ public class HostIpEditRedisplayTests : IDisposable
         Assert.Contains(view.ViewData.ModelState[""]!.Errors, e => e.ErrorMessage.Contains("timed out"));
         Assert.Equal("leaf (10.0.9.0/24)", model.SubnetInfo);
         Assert.Equal(_storedCreatedAt, model.CreatedAt);
+        Assert.Equal(_storedLastModifiedAt, model.LastModifiedAt);
     }
 
     [Fact]
-    public async Task Edit_ModelStateInvalid_RedisplaysTheStoredSubnetAndCreatedAt()
+    public async Task Edit_ModelStateInvalid_RedisplaysTheStoredSubnetAndDates()
     {
         HostIpController controller = CreateController(ControllerTestHelper.CreateMockSubnetLockingService());
         controller.ModelState.AddModelError("Name", "HTML tags are not allowed in host names");
@@ -86,10 +90,11 @@ public class HostIpEditRedisplayTests : IDisposable
 
         Assert.Equal("leaf (10.0.9.0/24)", model.SubnetInfo);
         Assert.Equal(_storedCreatedAt, model.CreatedAt);
+        Assert.Equal(_storedLastModifiedAt, model.LastModifiedAt);
     }
 
     [Fact]
-    public async Task Edit_StaleRowVersion_RedisplaysTheStoredSubnetAndCreatedAt()
+    public async Task Edit_StaleRowVersion_RedisplaysTheStoredSubnetAndDates()
     {
         HostIpController controller = CreateController(ControllerTestHelper.CreateMockSubnetLockingService());
 
@@ -99,5 +104,6 @@ public class HostIpEditRedisplayTests : IDisposable
         Assert.False(view.ViewData.ModelState.IsValid);
         Assert.Equal("leaf (10.0.9.0/24)", model.SubnetInfo);
         Assert.Equal(_storedCreatedAt, model.CreatedAt);
+        Assert.Equal(_storedLastModifiedAt, model.LastModifiedAt);
     }
 }

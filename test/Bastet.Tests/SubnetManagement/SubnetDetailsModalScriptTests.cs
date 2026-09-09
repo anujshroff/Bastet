@@ -60,7 +60,8 @@ public class SubnetDetailsModalScriptTests
         Assert.All(sizeWrites, m => Assert.Matches(
             @"^(usableByCidr\[(activeSuggestion\.recommendedCidr|cidrValue)\]\.toLocaleString\(\)|sizeText)$",
             m.Groups[1].Value));
-        Assert.Contains("No free /${cidrValue} block starts at or after ${activeSuggestion.startIp}.", script);
+        Assert.Matches(@"if \(address === null\)\s*\{\s*refuse\(`No free /\$\{cidrValue\} block starts at or after \$\{activeSuggestion\.startIp\}\.`", script);
+        Assert.Matches(@"if \(address === undefined\)\s*\{", script);
         Assert.DoesNotContain("No compatible network address found", script);
         Assert.Contains("This network address has been adjusted to avoid overlaps.", script);
     }
@@ -129,9 +130,6 @@ public class SubnetDetailsModalScriptTests
     {
         string script = ReadView(ScriptPartial);
 
-        Match refuse = Regex.Match(script, @"function refuse\([^)]*\)\s*\{(?<body>[^}]*)\}");
-        Assert.True(refuse.Success);
-        Assert.Contains("$('#networkAddressDisplay').val(activeSuggestion.startIp);", refuse.Groups["body"].Value);
-        Assert.Contains("makeNetworkAddressReadOnly();", refuse.Groups["body"].Value);
+        Assert.Matches(@"function refuse\([^)]*\)\s*\{\s*\$\('#networkAddressDisplay'\)\.val\(activeSuggestion\.startIp\);\s*makeNetworkAddressReadOnly\(\);", script);
     }
 }

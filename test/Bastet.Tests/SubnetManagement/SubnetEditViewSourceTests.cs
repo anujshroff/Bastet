@@ -18,6 +18,8 @@ public class SubnetEditViewSourceTests
     private static string ReadView(string relativePath) =>
         File.ReadAllText(Path.Combine(RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
+    private static int Occurrences(string text, string needle) => text.Split(needle).Length - 1;
+
     [Fact]
     public void EditInformationSidebar_DescribesCidrAsModifiableOnlyWhenTheFormAllowsIt()
     {
@@ -25,16 +27,13 @@ public class SubnetEditViewSourceTests
         string form = ReadView("src/Bastet/Views/Subnet/Edit/_EditForm.cshtml");
 
         Assert.StartsWith("@model EditSubnetViewModel", sidebar);
-        Assert.Contains("Model.IsAzureLinked", form);
+        Assert.Matches(@"@if \(Model\.IsAzureLinked\)\s*\{[^}]*<input[^>]*readonly[^>]*>", form);
 
-        int linkedBranch = sidebar.IndexOf("@if (Model.IsAzureLinked)", StringComparison.Ordinal);
-        int linkedText = sidebar.IndexOf("Network address and CIDR cannot be changed here.", StringComparison.Ordinal);
-        int elseBranch = sidebar.IndexOf("else", linkedBranch, StringComparison.Ordinal);
-        int unlinkedText = sidebar.IndexOf("Only the CIDR value can be modified.", StringComparison.Ordinal);
-        int rules = sidebar.IndexOf("CIDR Modification Rules", StringComparison.Ordinal);
-
-        Assert.True(linkedBranch >= 0 && linkedText > linkedBranch && elseBranch > linkedText && unlinkedText > elseBranch && rules > elseBranch);
-        Assert.Equal(1, sidebar.Split("Only the CIDR value can be modified.").Length - 1);
-        Assert.Contains("@if (!Model.IsAzureLinked)", sidebar);
+        Assert.Matches(@"@if \(!Model\.IsAzureLinked\)\s*\{\s*<li><strong>CIDR</strong>[^}]*\}", sidebar);
+        Assert.Matches(@"@if \(Model\.IsAzureLinked\)\s*\{[^}]*Network address and CIDR cannot be changed here\.[^}]*\}\s*else\s*\{[^}]*Only the CIDR value can be modified\.[^}]*CIDR Modification Rules[^}]*\}", sidebar);
+        Assert.Equal(1, Occurrences(sidebar, "<li><strong>CIDR</strong>"));
+        Assert.Equal(1, Occurrences(sidebar, "Network address and CIDR cannot be changed here."));
+        Assert.Equal(1, Occurrences(sidebar, "Only the CIDR value can be modified."));
+        Assert.Equal(1, Occurrences(sidebar, "CIDR Modification Rules"));
     }
 }
