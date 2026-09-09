@@ -43,9 +43,9 @@ Always needed:
 
   | | finders | verifiers | total |
   |---|---|---|---|
-  | Regression-only | beats 6+7, 2 passes = 4 | ~8 | ~15 |
-  | Standard (default) | 8 beats x 2 passes + deep sweep on beat 6 = 18 | ~30 | ~50 |
-  | Deep | 8 beats x 2 passes + deep sweep on beats 1, 3, 6, 7 = 21 | ~36 | ~62 |
+  | Regression-only | beat 6, 2 passes = 2 | ~4 | ~9 |
+  | Standard (default) | 7 beats x 2 passes + deep sweep on beat 6 = 16 | ~30 | ~48 |
+  | Deep | 7 beats x 2 passes + deep sweep on beats 1, 3, 6 = 18 | ~36 | ~58 |
 
   **Every scale keeps two independent passes** — the `[x2]`/`[x1]` signal drives verification depth
   and is the most useful thing the round produces. Shrink beats or deep sweeps, never passes.
@@ -84,11 +84,10 @@ skill returns without a findings file.
 # The round exists to reduce defects, not to produce findings
 
 **The loop's terminal state is a zero-finding round, and zero filed is the success condition.** A
-finding is an operator-visible wrong behaviour reproducible at HEAD, or a broken test rule
-(`docs/PRODUCT-MODEL.md` §5): test gaps are closed at fix time by reconcile, so the audit files a
-test finding only where that rule was broken — a fix left both unpinned and unrecorded, or a test
-that stays green with the code it guards broken. A gap already recorded in a ledger row or covered
-by `/e2e` is settled — never re-file it. Write the empty findings file, commit it, and report zero
+finding is an operator-visible wrong behaviour reproducible at HEAD — a product defect — and
+nothing else. **The audit files no test findings** (`docs/PRODUCT-MODEL.md` §5, owner ruling in
+§8, round 29): a missing, weak or unrecorded pin is reconcile's fix-time duty and its gate's
+violation, never a finding here. Write the empty findings file, commit it, and report zero
 proudly.
 
 **Measure the residue rate and lead with it.** Every finding names the previous-round fix it came
@@ -324,12 +323,12 @@ inventory is what Phase 5 deletes.
 
 ## Phase 2 — the beats, twice (+ 1 merge)
 
-**Beats 1–5 and 8 audit the WHOLE APPLICATION. Only beats 6 and 7 are scoped to the delta since the
-last audit, and that is the only reason they exist.** Do not point the other beats at what changed
+**Beats 1–5 and 7 audit the WHOLE APPLICATION. Only beat 6 is scoped to the delta since the last
+audit, and that is the only reason it exists.** Do not point the other beats at what changed
 recently, however tempting — an audit that only re-examines the last round's diff cannot find the
 long-standing defect, and recently-changed code is neither weighted nor exempt in the full beats. A
 beat prompt that names specific recent findings as "the focus" has been written wrong: name the
-surface, not the diff. (In a Regression-only round, beats 6 and 7 are the whole round.)
+surface, not the diff. (In a Regression-only round, beat 6 is the whole round.)
 
 1. **Security / web** — authorization coverage, antiforgery, XSS, injection, SSRF, headers, log forging, secrets.
 2. **Logic & data integrity** — subnet/CIDR arithmetic, containment and overlap, host-IP validation, any path that persists a state the validated path would reject.
@@ -337,8 +336,11 @@ surface, not the diff. (In a Regression-only round, beats 6 and 7 are the whole 
 4. **Locking & lifecycle** — `sp_getapplock`, the migration lock, transaction boundaries, check-then-act, EF pooling.
 5. **UI & client-JS** — the wizards' state machines and emitted payloads. What gets POSTed is decided by `disabled` attributes, and jQuery's `.prop()` fires no `change`. Drive it in the browser; reading alone is near worthless here.
 6. **Regression correctness** — every commit since the last audit, diffed against what it replaced. The previous round's fixes are dense in defects; that is why this beat gets the Standard deep sweep, and not a reason to point other beats here.
-7. **Regression tests** — do the tests added alongside those commits actually fail against the code they claim to guard? Revert the guarded hunk in a scratch copy and find out. A test that passes either way is a defect **in the test** — file it, with the mutation and the observed green run as the repro. A fix left **both unpinned and unrecorded** is filed once, Low, its fix being the pin or the ledger-row + `/e2e` record. A gap a ledger row or `/e2e` already records is settled — never re-file it (PRODUCT-MODEL §5).
-8. **Dead code & refactor residue** — orphans from earlier deletions.
+7. **Dead code & refactor residue** — orphans from earlier deletions.
+
+There is no regression-tests beat. Whether last round's pins bind is reconcile's question, answered
+at fix time under its proof rule; a beat that files it here is the round-26-to-29 churn the owner
+ended (PRODUCT-MODEL §8, round 29).
 
 **Every worker prompt carries this:** write **nothing** into the repository directory — no PID
 files, no logs, no scratch; everything under the rig directory. "Do not modify the working tree" is
@@ -366,24 +368,8 @@ kills a fifth to a quarter of candidates. A verifier may also correct rather tha
 proposed *fix* while keeping the finding, correct a severity, correct a citation. **If a finding's
 own failure scenario opens with "not a runtime defect", it is refuted.**
 
-**The test-pin protocol, every step executed in a fresh archive copy.** This class is the loop's
-entire residue history, and a verifier that reads instead of runs is how it perpetuates:
-
-1. **HEAD control** — the named test is green.
-2. **Full revert** — restore the guarded production file to its pre-fix version and run the
-   **entire suite**. Anything red means the fix is pinned somewhere; a candidate resting on the
-   revert is refuted.
-3. **The finder's mutation** — apply it exactly, run the entire suite again, and where the surface
-   has a recorded `/e2e` drive, run that drive too. Anything red: refuted.
-4. **Consequence** — build and run the mutated application and show the ledger row's **own**
-   operator-visible defect back on screen, by HTTP or browser, with a HEAD control beside it. A
-   mutation the operator cannot see is refuted.
-5. **Settled-gap check** — a surface a ledger row records as unpinnable, with its `/e2e` drive, is
-   settled.
-
-`docs/PRODUCT-MODEL.md` §5 states the rule these steps decide. The verifier's `reproduced` is
-`yes-ran-it` only when it executed steps 1–4 itself, and its repro carries the verbatim summary
-line of every test run, the mutation diff, and the step-4 evidence.
+**A test-only candidate is refuted on sight**, citing `docs/PRODUCT-MODEL.md` §5: the audit files
+product defects only. A verifier does not run its mutation, judge its pin or propose a better one.
 
 ## Phase 4 — the scribe (2 agents, sequential)
 

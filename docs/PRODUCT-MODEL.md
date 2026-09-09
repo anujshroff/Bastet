@@ -246,22 +246,19 @@ status is added. It has already shipped once: "Only show what would change" test
   multi-prefix subnets, top-ups and re-carves are in scope. "Feature change, not a bug fix", "the
   data model does not support it" and "out of scope" describe work, not reasons to decline. One
   round used such a verdict and it shipped the bug for four more.
-- **A test gap is closed at fix time, never filed for the next round.** Every fix ships with the
-  test that fails against the unfixed code, wherever existing test infrastructure can reach the
-  behaviour. Where no seam exists (client-JS partials, framework internals, live Azure), the
-  surface is recorded once - in the fix's ledger row, which is durable, and as `/e2e` coverage,
-  which is executable; a FIXED entry is neither, because the findings file is deleted at
-  close-out. A recorded gap is settled and is never re-filed. The audit files a test finding only
-  where this rule was broken: a fix left both unpinned and unrecorded, or a test that stays green
-  with the code it guards broken. **A test finding exists only when a regression that puts the
-  ledger row's own operator-visible defect back on screen leaves the entire suite green, and the
-  surface's recorded `/e2e` drive, where one exists, would not catch it either. Both halves are
-  demonstrated by running the broken build, not by reading. Anything else about a pin's strength
-  is hardening, and hardening is never filed.** When reconcile does its job that class is
-  structurally empty - that, not ignoring tests, is how the loop converges.
+- **Tests serve the product, never the other way around. The audit files product defects only,
+  and no test finding of any kind** - not a missing pin, not a weak pin, not an unrecorded gap.
+  Test quality is reconcile's duty at fix time: every fix ships with the test that fails against
+  the unfixed code, proven the reconcile way (the full revert reds the suite, or the recorded
+  `/e2e` drive where no unit seam exists, and the defect is visibly back in the running build).
+  Where no seam exists (client-JS partials, framework internals, live Azure), the surface is
+  recorded once - in the fix's ledger row, which is durable, and as `/e2e` coverage, which is
+  executable; a FIXED entry is neither, because the findings file is deleted at close-out.
+  Reconcile's independent fix review and its whole-diff gate enforce the proof and repair a fix
+  shipped without it in the same round; the next audit never inherits it as a finding.
 - **The loop's terminal state is a zero-finding round, and every round must move toward it.** A
-  finding is an operator-visible wrong behaviour reproducible at HEAD, or a broken-rule test
-  finding under the bullet above; nothing else. A fix is the minimal change that makes the wrong
+  finding is an operator-visible wrong behaviour reproducible at HEAD; nothing else. A fix is the
+  minimal change that makes the wrong
   behaviour right, plus its pin or its record - no hardening, no widening, no "while we're here"
   work for later rounds to audit.
 - **Since round 1 there have been no intended product changes.** Everything filed is a defect
@@ -321,3 +318,10 @@ summary, no reasoning added. Rulings made before this file existed are already f
   seam exists, otherwise record once in the ledger row and `/e2e`; recorded gaps are never
   re-filed; the audit files only broken-rule test findings. Counter-test: untestable (process
   rule, no code seam).
+- **29 (round-wide)** — on test-only findings, after round 29 filed five of them (all round-28 pins)
+  as its entire output. Owner: "i only care about the fucking producti dont care about the tests";
+  "the test serve to make the product betternot the other way around"; "i need this stupid shit to
+  not pop up in the audit itself"; "its a waste of fucking tokens". Folded into §5: the audit files
+  product defects only and no test findings; test quality is reconcile's fix-time duty under its
+  proof rule, enforced by its fix review and whole-diff gate. Counter-test: untestable (process
+  rule); the audit skill's beat list no longer has a regression-tests beat.
