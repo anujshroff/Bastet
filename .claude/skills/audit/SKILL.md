@@ -254,6 +254,12 @@ the service principal secrets. **If the residue rate is high, it is the headline
 
 # The script
 
+**Effort and model are the UI's, never the script's.** The owner sets effort and model in the
+UI before the round; every agent inherits them. **No `agent()` call ever passes `effort` or
+`model`**, at any phase, for any reason — not "low for the mechanical stages", not "max for the
+verifiers". A script carrying either option is wrong and is fixed before launch. The same holds for
+the operator: never change the session's effort, and never choose a tier on the owner's behalf.
+
 `meta.phases` must match the `phase()` calls. `pipeline()` by default. Only two genuine barriers:
 Phase 1 (nothing starts until the baseline is known good) and the merge (telling `[x2]` from `[x1]`
 needs every beat's output at once). Put a `schema` on every agent the script branches on. **The
