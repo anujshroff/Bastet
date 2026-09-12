@@ -30,18 +30,16 @@ runs:
         tenant-id: ${{ inputs.AZURE_TENANT_ID }}
         subscription-id: ${{ inputs.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Install Sign CLI
-      run: dotnet tool install --global sign --prerelease
-      shell: pwsh
-
-    - name: Sign Bastet.dll
-      run: |
-        sign code artifact-signing `
-          -ase "${{ inputs.TRUSTED_SIGNING_ENDPOINT }}" `
-          -asa "${{ inputs.TRUSTED_SIGNING_ACCOUNT }}" `
-          -ascp "${{ inputs.TRUSTED_SIGNING_CERTIFICATE_PROFILE }}" `
-          "${{ github.workspace }}/to-sign/Bastet.dll"
-      shell: pwsh
+    - name: Sign files with Artifact Signing
+      uses: azure/artifact-signing-action@v2
+      with:
+        endpoint: ${{ inputs.TRUSTED_SIGNING_ENDPOINT }}
+        signing-account-name: ${{ inputs.TRUSTED_SIGNING_ACCOUNT }}
+        certificate-profile-name: ${{ inputs.TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+        files: ${{ github.workspace }}/to-sign/Bastet.dll
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
 
     - name: Upload Signed Bastet.dll
       uses: actions/upload-artifact@v7
