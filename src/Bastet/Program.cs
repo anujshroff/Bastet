@@ -385,6 +385,8 @@ if (dataProtectionTableExists)
     try
     {
         using SqlConnection keyRingLockConnection = new(connectionString);
+
+        SqlConnection.ClearPool(keyRingLockConnection);
         keyRingLockConnection.Open();
 
         using SqlCommand acquireKeyRingLock = new("sp_getapplock", keyRingLockConnection);
