@@ -246,6 +246,11 @@ public class AzureWizardClientWordingTests
         string body = ShowCommitErrorBody("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
 
         Assert.Contains("updateGoConfirmBtn();", body);
+
+        Assert.True(
+            body.IndexOf("lastPlan = null;", StringComparison.Ordinal)
+                < body.IndexOf("updateGoConfirmBtn();", StringComparison.Ordinal),
+            "the snapshot must be voided before the forward button is re-evaluated");
     }
 
     private static string ShowCommitErrorBody(string script)
