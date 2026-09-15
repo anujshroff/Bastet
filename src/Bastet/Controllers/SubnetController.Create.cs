@@ -53,12 +53,8 @@ public partial class SubnetController : Controller
             if (parentSubnet != null && !string.IsNullOrEmpty(networkAddress) && hasUsableCidr)
             {
 
-                string safeParentName = SubnetNaming.ToSafeText(parentSubnet.Name);
-
-                viewModel.Name = string.IsNullOrEmpty(safeParentName)
-                    ? $"{networkAddress}-{cidr}"
-                    : SubnetNaming.WithSuffix(
-                        safeParentName, $"-{networkAddress}-{cidr}", MaxSubnetNameLength);
+                viewModel.Name = SubnetNaming.WithSuffix(
+                    parentSubnet.Name, $"-{networkAddress}-{cidr}", MaxSubnetNameLength);
             }
         }
 

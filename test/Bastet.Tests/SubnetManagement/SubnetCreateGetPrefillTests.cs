@@ -117,11 +117,13 @@ public class SubnetCreateGetPrefillTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Prod/Web", "ProdWeb-10.7.1.0-24")]
-    [InlineData("Bob's Lab", "Bobs Lab-10.7.1.0-24")]
-    [InlineData("DC1:Core", "DC1Core-10.7.1.0-24")]
-    [InlineData("/ / /", "10.7.1.0-24")]
-    public async Task Create_ParentNameWithStrippedCharacters_PrefillStillPassesThePost(
+    [InlineData("Prod/Web", "Prod/Web-10.7.1.0-24")]
+    [InlineData("Bob's Lab", "Bob's Lab-10.7.1.0-24")]
+    [InlineData("DC1:Core", "DC1:Core-10.7.1.0-24")]
+    [InlineData("/ / /", "/ / /-10.7.1.0-24")]
+    [InlineData("R\u00e9seau Z\u00fcrich \"Ost\"", "R\u00e9seau Z\u00fcrich \"Ost\"-10.7.1.0-24")]
+    [InlineData("\u6771\u4eac", "\u6771\u4eac-10.7.1.0-24")]
+    public async Task Create_ParentNameWithUnusualCharacters_IsSeededVerbatimAndStillPassesThePost(
         string parentName, string expectedName)
     {
         _context.Subnets.Add(new Subnet

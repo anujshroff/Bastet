@@ -165,6 +165,14 @@ public partial class SubnetController : Controller
                 return false;
             }
 
+            if (viewModel.Cidr <= parentSubnet.Cidr)
+            {
+                ModelState.AddModelError("Cidr",
+                    "Child subnet CIDR must be larger than parent subnet CIDR. " +
+                    $"Parent subnet CIDR is {parentSubnet.Cidr}");
+                return false;
+            }
+
             if (!ipUtilityService.IsSubnetContainedInParent(
                 viewModel.NetworkAddress, viewModel.Cidr,
                 parentSubnet.NetworkAddress, parentSubnet.Cidr))
@@ -172,14 +180,6 @@ public partial class SubnetController : Controller
                 ModelState.AddModelError("NetworkAddress",
                     $"Child subnet must be contained within the parent subnet range. " +
                     $"Parent subnet is {parentSubnet.NetworkAddress}/{parentSubnet.Cidr}");
-                return false;
-            }
-
-            if (viewModel.Cidr <= parentSubnet.Cidr)
-            {
-                ModelState.AddModelError("Cidr",
-                    "Child subnet CIDR must be larger than parent subnet CIDR. " +
-                    $"Parent subnet CIDR is {parentSubnet.Cidr}");
                 return false;
             }
         }
