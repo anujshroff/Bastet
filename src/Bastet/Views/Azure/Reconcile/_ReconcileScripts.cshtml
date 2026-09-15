@@ -49,11 +49,15 @@
             invalidateConfirmation();
         }
 
-        function invalidateConfirmation() {
+        function voidConfirmation() {
             confirmedIds = null;
             confirmedVerdicts = null;
             $("#rec-step3-tab").addClass("disabled");
             refreshDeleteButton();
+        }
+
+        function invalidateConfirmation() {
+            voidConfirmation();
 
             if ($("#rec-step3").hasClass("active")) {
                 activateTab("rec-step2");
@@ -192,6 +196,7 @@
         }
 
         function renderPlan(plan) {
+            $("#rec-commit-error").addClass("d-none");
             lastPlan = plan;
 
             if (!plan.scanSucceeded) {
@@ -344,7 +349,6 @@
 
             $("#rec-confirmation").val("");
             $("#rec-confirm-delete-btn").prop("disabled", true);
-            $("#rec-commit-error").addClass("d-none");
             $("#rec-commit-success").addClass("d-none");
 
             activateTab("rec-step3");
@@ -389,7 +393,7 @@
                 },
                 success: function (result) {
                     if (!result.success) {
-                        showCommitError(result);
+                        showCommitError(result, 0);
                         return;
                     }
 
@@ -412,12 +416,12 @@
                             ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying; if you are asked to sign in, sign in and scan again." }
                             : { error: "The server returned status " + xhr.status + "." };
                     }
-                    showCommitError(payload);
+                    showCommitError(payload, xhr.status);
                 }
             });
         });
 
-        function showCommitError(payload) {
+        function showCommitError(payload, status) {
             $("#rec-commit-error-message").text(payload.error || "The deletion failed.");
 
             const list = $("#rec-commit-error-list").empty();
@@ -430,6 +434,13 @@
             });
 
             $("#rec-commit-error").removeClass("d-none");
+
+            if (status === 409) {
+                lastPlan = null;
+                voidConfirmation();
+                updateGoConfirmBtn();
+                return;
+            }
 
             refreshDeleteButton();
         }
