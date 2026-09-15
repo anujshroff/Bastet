@@ -387,3 +387,13 @@ summary, no reasoning added. Rulings made before this file existed are already f
   Standing instruction for both skills, wider than this finding: a proposal that adds, widens or
   branches a mechanism is presumed wrong; prefer leaving deliberate behaviour alone. Counter-test:
   untestable (process rule); the sentence is unchanged in AzureBulkImportPlanner.cs.
+- **31-L12** — the round proposed confirming absence-led held rows (rows whose Bastet subtree holds
+  hand-made content) against Azure by resource id before reporting them, so an RBAC-hidden resource
+  is reported as hidden rather than as gone. Reproduced: an operator who follows the held row's
+  "Delete it here first, then run the scan again" destroys their manual records, and the rescan
+  withholds the row anyway. The owner struck it because the fix adds a field and three bucketing
+  changes to AzureReconciler. Owner: "DO NOT BLOAT THE CORE LOGIC"; "NO OVERCOMPLICATED FIXING
+  BULLSHIT"; "STOP BEING OPPORTUNISTIC IT LEADS TO FEATURE BLOAT". The behaviour stands as
+  deliberate: reconcile withholds on manual content without a direct check, and the operator reads
+  the denied-access warning on the same screen to tell hidden from gone. Not to be re-filed.
+  Counter-test: untestable (a declined fix); the existing held-row tests pin current behaviour.
