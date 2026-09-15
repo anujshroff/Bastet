@@ -210,7 +210,13 @@ status is added. It has already shipped once: "Only show what would change" test
   tree the app itself populated but its own form will not re-enter. Check the attribute sets side by
   side, not the error messages — the divergence that shipped was `[SafeText]` on the Create view
   model and not the Edit one.
-- **A validation rule that refuses ordinary operator text is a defect, not caution.** Output
+- **A validation rule that refuses ordinary operator text is a defect, not caution** — **except the
+  HTML-tag refusal on Name and Description, which the owner has ruled stays (§8, round 31).** That
+  one is settled: `[NoHtml]` and the `ContainsHtmlTags` predicate behind it are deliberate, are not
+  a defect, and are never to be filed, widened or deleted. What §5 still requires of it is
+  **parity**: every write path must answer that question the same way, which is why the bulk import
+  commit refuses the names the form refuses instead of silently stripping them. For every *other*
+  input filter the bullet stands as written. Output
   encoding is what makes the app safe — Razor encodes at every sink and the wizard's client escapes
   before it builds HTML — so an input filter is a usability rule wearing a security badge.
   `<[^>]*>` treated "temp < 5 and load > 3" as a tag. When tightening one, prove the change against
@@ -281,7 +287,7 @@ status is added. It has already shipped once: "Only show what would change" test
 
 ## 7. Accepted findings — never re-file
 
-Accepted and still open, deliberately: ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
+Accepted and still open, deliberately: the **HTML-tag refusal on subnet and host-IP Name and on Description** (`NoHtmlAttribute`; owner ruling §8 round 31 — keep it, and never re-file its refusal of angle-bracketed operator text as a defect), ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
 Development-only `DevAuthHandler` bypass, `GlobalSanitizationFilter` skipping nested `System.*`
 collections, `CollectDescendants` lacking a cycle guard, the unreachable IP-change branch in
 `ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and the bounded
@@ -338,3 +344,18 @@ summary, no reasoning added. Rulings made before this file existed are already f
   reversed the triage strike of 29-L3 and 29-L5: "lol, you fixed l1 which was just fucking
   testswhy not just fix l3 l5 then"; "i mean if we're going to obsess with bullshit tests"; "l4
   was tests too"; both were fixed.
+- **31-L1** — the round proposed deleting the HTML-tag refusal outright (the filter refuses
+  "Contact: NOC <noc@example.com>" on the form while the bulk import silently strips it, and §5 as
+  written called the filter a defect). The deletion was made and then reverted on the owner's
+  ruling. Owner: "why are we removing the html tag restriction ?"; "what was the purpose of deleting
+  the html tag restrictions"; "actually, i think we should leave the html tag restriction on"; "and
+  edit the product model"; "this just feels wrong and problematic removing it". On the remaining
+  parity half, after being told Azure resource names cannot contain angle brackets at all: "and did
+  i see prior to revert some fuckery with description?"; "like if azure cant have < and > then this
+  is basically a bunch of stupid shit"; "but its nothing to actually worry about"; "i mean continue".
+  Folded into §5 (the refusal is exempt from the ordinary-text bullet; only write-path parity is
+  still required) and into §7 (closed list). Implemented as one shared `ContainsHtmlTags` predicate
+  on `IInputSanitizationService`, used by both `NoHtmlAttribute` and a single up-front guard in
+  `BulkCreateFromAzurePlan`. Counter-test: `BulkImportNameParityTests` — a name the form refuses is
+  refused by the bulk commit with nothing written, a name the form accepts still imports, and the
+  predicate and the form agree on every case.
