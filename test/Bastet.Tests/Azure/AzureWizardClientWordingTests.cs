@@ -51,7 +51,7 @@ public class AzureWizardClientWordingTests
         string view = ReadView(viewPath);
 
         Assert.Matches(
-            @"if \(!payload\)\s*\{\s*payload\s*=\s*xhr\.status\s*===\s*0\s*\?\s*\{\s*error:\s*""The server could not be reached, so it is unknown whether the change was applied\. Check the subnet list before retrying\.""\s*\}\s*:\s*\{\s*error:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*\}\s*;\s*\}",
+            @"if \(!payload\)\s*\{\s*payload\s*=\s*xhr\.status\s*===\s*0\s*\?\s*\{\s*error:\s*""The server could not be reached, so it is unknown whether the change was applied\. Check the subnet list before retrying; if you are asked to sign in, sign in and [^""]+\.""\s*\}\s*:\s*\{\s*error:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*\}\s*;\s*\}",
             view);
         Assert.DoesNotContain("Server error: ", view);
     }
@@ -80,7 +80,7 @@ public class AzureWizardClientWordingTests
         string view = ReadView(viewPath);
 
         Assert.Matches(
-            @"function readErrorMessage\(xhr\)\s*\{\s*return xhr\.status\s*===\s*0\s*\?\s*""The server could not be reached\.""\s*:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*;\s*\}",
+            @"function readErrorMessage\(xhr\)\s*\{\s*return xhr\.status\s*===\s*0\s*\?\s*""The server could not be reached, or your sign-in has expired\. Reload this page and try again\.""\s*:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*;\s*\}",
             view);
         Assert.DoesNotContain("Error connecting to server", view);
 
@@ -96,5 +96,47 @@ public class AzureWizardClientWordingTests
         Assert.DoesNotContain("Because Azure could not be read", stepReview);
         Assert.DoesNotContain("Fix the connection", stepReview);
         Assert.Contains("Fix the problem shown", stepReview);
+    }
+
+    public static TheoryData<string> WizardScripts => new()
+    {
+        "src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml",
+        "src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml",
+    };
+
+    [Theory]
+    [MemberData(nameof(WizardScripts))]
+    public void StatusZeroBanner_NamesTheSignInCause_AndARemedyTheReaderCanReach(string script)
+    {
+        string text = ReadView(script);
+
+        Assert.Contains(
+            "\"The server could not be reached, or your sign-in has expired. Reload this page and try again.\"",
+            text);
+        Assert.DoesNotContain("\"The server could not be reached.\"", text);
+    }
+
+    [Theory]
+    [MemberData(nameof(WizardScripts))]
+    public void OutcomeUnknownBanner_KeepsItsHedge_AndAddsTheSignInStep(string script)
+    {
+        string text = ReadView(script);
+
+        Assert.Contains("so it is unknown whether the change was applied", text);
+        Assert.Contains("if you are asked to sign in, sign in and", text);
+        Assert.DoesNotContain("Check the subnet list before retrying.\"", text);
+    }
+
+    [Fact]
+    public void EachWizard_NamesItsOwnNextStep_NeverTheOtherWizards()
+    {
+        string bulk = ReadView("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml");
+        string reconcile = ReadView("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
+
+        Assert.Contains("sign in and run the import again", bulk);
+        Assert.DoesNotContain("sign in and scan again", bulk);
+
+        Assert.Contains("sign in and scan again", reconcile);
+        Assert.DoesNotContain("sign in and run the import again", reconcile);
     }
 }

@@ -28,7 +28,7 @@
 
         function readErrorMessage(xhr) {
             return xhr.status === 0
-                ? "The server could not be reached."
+                ? "The server could not be reached, or your sign-in has expired. Reload this page and try again."
                 : "The server returned status " + xhr.status + ".";
         }
 
@@ -667,7 +667,7 @@
                     try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
                     if (!payload) {
                         payload = xhr.status === 0
-                            ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying." }
+                            ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying; if you are asked to sign in, sign in and run the import again." }
                             : { error: "The server returned status " + xhr.status + "." };
                     }
                     showCommitError(payload);
