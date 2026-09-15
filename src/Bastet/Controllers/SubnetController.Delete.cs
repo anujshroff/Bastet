@@ -20,7 +20,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
+            return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
         }
 
         int descendantCount = await CountAllDescendants(id);
@@ -87,6 +87,10 @@ public partial class SubnetController : Controller
     public async Task<IActionResult> DeleteConfirmed(
         int id, string confirmation, int? confirmedMaxSubnetId, int? confirmedHostIpCount, byte[]? rowVersion = null)
     {
+        if (!SubnetExists(id))
+        {
+            return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
+        }
 
         if (confirmation != "approved")
         {
@@ -114,6 +118,9 @@ public partial class SubnetController : Controller
         }
     }
 
+    private static string SubnetNotFoundMessage(int id) =>
+        $"The subnet with ID {id} could not be found or may have been deleted.";
+
     private async Task<IActionResult> DeleteConfirmedCore(
         int id, int confirmedMaxSubnetId, int confirmedHostIpCount, byte[]? rowVersion)
     {
@@ -125,7 +132,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
+            return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
         }
 
         if (subnet.RowVersion is not null

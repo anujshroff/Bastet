@@ -351,6 +351,11 @@ public class HostIpController(
     [Authorize(Policy = "RequireDeleteRole")]
     public async Task<IActionResult> DeleteConfirmed(string ip, string confirmation)
     {
+        if (!HostIpExists(ip))
+        {
+            return NotFound();
+        }
+
         if (confirmation != "approved")
         {
             TempData["ErrorMessage"] = "You must type 'approved' to confirm deletion.";
@@ -361,17 +366,6 @@ public class HostIpController(
         {
             return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
             {
-
-                ValidationResult validationResult = hostIpValidationService.ValidateHostIpDeletion(ip);
-                if (!validationResult.IsValid)
-                {
-                    foreach (ValidationError error in validationResult.Errors)
-                    {
-                        TempData["ErrorMessage"] = error.Message;
-                    }
-
-                    return RedirectToAction(nameof(Delete), new { ip });
-                }
 
                 using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
@@ -713,6 +707,11 @@ public class HostIpController(
         }
         catch (TimeoutException)
         {
+            if (!context.Subnets.Any(s => s.Id == dto.SubnetId))
+            {
+                return NotFound();
+            }
+
             TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
             return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
         }
