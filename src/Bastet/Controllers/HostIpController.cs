@@ -85,6 +85,7 @@ public class HostIpController(
         {
             SubnetId = subnetId,
             SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})",
+            SubnetName = subnet.Name,
             NetworkAddress = subnet.NetworkAddress,
             Cidr = subnet.Cidr,
             SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}"
@@ -118,6 +119,7 @@ public class HostIpController(
                         if (subnet != null)
                         {
                             viewModel.SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})";
+                            viewModel.SubnetName = subnet.Name;
                             viewModel.NetworkAddress = subnet.NetworkAddress;
                             viewModel.Cidr = subnet.Cidr;
                             viewModel.SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}";
@@ -164,6 +166,7 @@ public class HostIpController(
         if (subnetForError != null)
         {
             viewModel.SubnetInfo = $"{subnetForError.Name} ({subnetForError.NetworkAddress}/{subnetForError.Cidr})";
+            viewModel.SubnetName = subnetForError.Name;
             viewModel.NetworkAddress = subnetForError.NetworkAddress;
             viewModel.Cidr = subnetForError.Cidr;
             viewModel.SubnetRange = $"{subnetForError.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnetForError.NetworkAddress, subnetForError.Cidr)}";
@@ -529,7 +532,6 @@ public class HostIpController(
             {
                 OriginalIP = deletedHostIp.OriginalIP,
                 Name = deletedHostIp.Name,
-                OriginalSubnetId = deletedHostIp.OriginalSubnetId,
                 CreatedAt = deletedHostIp.CreatedAt,
                 DeletedAt = deletedHostIp.DeletedAt,
                 DeletedBy = deletedHostIp.DeletedBy
@@ -552,7 +554,7 @@ public class HostIpController(
                 else
                 {
 
-                    viewModel.SubnetName = "Unknown";
+                    viewModel.SubnetName = $"Unknown (Original Subnet ID: {deletedHostIp.OriginalSubnetId})";
                 }
             }
 
