@@ -166,6 +166,12 @@ condition is that the row **already carries the Azure resource id** it is being 
 "Only show what would change" hides exactly the rows that would change nothing, which is only
 correct while those cases are classified correctly.
 
+**A row holding host IP assignments is never a VNet target.** A row with host IPs cannot hold child
+subnets, and a VNet exists to hold subnets, so linking the two asserts a containment the model
+forbids and leaves the next import with nowhere to put the Azure subnets. That refusal is
+deliberate, is not an asymmetry to be repaired against the fully-allocated branch, and is never to
+be re-filed (owner ruling, §8 round 31).
+
 **A row the operator built by hand can be adopted by the VNet it matches.** Linking a not-yet-linked
 target is real work and stays offered **whether or not that row already has children** — the
 operator may well have carved the space by hand first and now want Bastet to track it against Azure.
@@ -287,7 +293,7 @@ status is added. It has already shipped once: "Only show what would change" test
 
 ## 7. Accepted findings — never re-file
 
-Accepted and still open, deliberately: the **HTML-tag refusal on subnet and host-IP Name and on Description** (`NoHtmlAttribute`; owner ruling §8 round 31 — keep it, and never re-file its refusal of angle-bracketed operator text as a defect), ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
+Accepted and still open, deliberately: the **import wizard's "Azure has no such subnet" middle-man sentence** (owner ruling §8 round 31 — an edited prefix means the recorded range is gone, so the sentence is true and the delete-and-re-import it names is the operation), the **bulk import wizard refusing a host-IP-holding row as a VNet target** (owner ruling §8 round 31 — it is not an asymmetry against the fully-allocated branch and must never be re-filed as one), the **HTML-tag refusal on subnet and host-IP Name and on Description** (`NoHtmlAttribute`; owner ruling §8 round 31 — keep it, and never re-file its refusal of angle-bracketed operator text as a defect), ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
 Development-only `DevAuthHandler` bypass, `GlobalSanitizationFilter` skipping nested `System.*`
 collections, `CollectDescendants` lacking a cycle guard, the unreachable IP-change branch in
 `ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and the bounded
@@ -359,3 +365,25 @@ summary, no reasoning added. Rulings made before this file existed are already f
   `BulkCreateFromAzurePlan`. Counter-test: `BulkImportNameParityTests` — a name the form refuses is
   refused by the bulk commit with nothing written, a name the form accepts still imports, and the
   predicate and the form agree on every case.
+- **31-L3** — the round proposed offering link-only adoption for an unlinked hand-built row holding
+  host IPs that exactly matches a VNet prefix, mirroring the fully-allocated branch that 18-R4 added
+  in round 20, on the §4 grounds that linking creates nothing inside and that refusing on what a row
+  already holds keys on provenance. It was implemented, driven live, and then reverted on the
+  owner's ruling. The reconciler had offered the wrong reason for the danger (that linking is a
+  one-way door with no unlink control); the owner supplied the real one. Owner: "if the bastet subnet
+  matches an azure vnet and the subnet has host ips, this should be rejected. fixing l3 is
+  dangerous"; "there's a reason its this way"; "thats not the danger, having host IPs on a bastet
+  subnet that then gets linked to an azure vnet that could have subnets under it breaks the bastet
+  model". Folded into §4 (a host-IP row is never a VNet target) and §7 (closed list). The
+  fully-allocated branch is untouched: that flag can be cleared, host IP records cannot. Counter-test:
+  the existing selectability tests pin the Blocked status and its sentence.
+- **31-L2** — the round proposed rewording the wizard's middle-man refusal, on the grounds that for a
+  row carrying the re-carved Azure subnet's own resource id "Azure has no such subnet" is false and
+  "re-carve" is a remedy Edit refuses. The owner struck it: Bastet tracks ranges, and an edited prefix
+  means the recorded range is gone whatever the resource id says. Owner: "THAT SUBNET DOES NOT EXIST
+  ANYMORE. THE FUCKTARD EDITED IT AND NOW ITS SOMETHING ELSE"; "IF A FUCKFACE EDITS THE FUCKING SUBNET
+  ADDRESS, THE BASTET OPERATION SHOULD BE DELETE WHAT WE HAVE AND RE FUCKING IMPORT"; "WE ARENT GETTING
+  INTO COMPLICATED BULLSHIT OF \"FIXING\""; "STOP BEING OPPORTUNISTIC IT LEADS TO FEATURE BLOAT".
+  Standing instruction for both skills, wider than this finding: a proposal that adds, widens or
+  branches a mechanism is presumed wrong; prefer leaving deliberate behaviour alone. Counter-test:
+  untestable (process rule); the sentence is unchanged in AzureBulkImportPlanner.cs.
