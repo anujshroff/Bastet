@@ -60,16 +60,53 @@ public class GeneratedNameSafeTextTests
     [Theory]
     [InlineData("sn-multi (10.20.40.0-24)")]
     [InlineData("vnet-a (10.71.0.0-16)")]
-    public void AGeneratedParentNameSurvivesThePrefillIntact(string generatedParentName)
+    [InlineData("R\u00e9seau Z\u00fcrich \"Ost\"")]
+    [InlineData("\u6771\u4eac")]
+    [InlineData("S\u00e3o Paulo/DC1")]
+    public void AParentNameSurvivesThePrefillIntact(string parentName)
     {
-        Assert.True(SafeTextOracle.IsSafe(generatedParentName));
-        Assert.Equal(generatedParentName, SubnetNaming.ToSafeText(generatedParentName));
+        string prefill = SubnetNaming.WithSuffix(parentName, "-10.20.40.0-24", 100);
+
+        Assert.Equal($"{parentName}-10.20.40.0-24", prefill);
     }
 
     [Fact]
-    public void TheForwardSlashIsStillForbidden_SoTheSeparatorMayNotGoBack()
+    public void ThePlannerNeverMintsAForwardSlash_SoTheSeparatorMayNotGoBack()
     {
-        Assert.False(SafeTextOracle.IsSafe("sn-multi (10.20.40.0/24)"));
-        Assert.Equal("sn-multi (10.20.40.024)", SubnetNaming.ToSafeText("sn-multi (10.20.40.0/24)"));
+        AzureBulkImportPlanner planner = new(new IpUtilityService(), _sanitizer);
+
+        BulkImportPlanViewModel plan = planner.BuildPlan(
+            new BulkImportSelectionDto
+            {
+                VNetPrefixes =
+                [
+                    new BulkImportSelectedVNetPrefixDto
+                    {
+                        VNetName = "vnet-a",
+                        VNetResourceId = VNetA,
+                        AddressPrefix = "10.71.0.0/16",
+                        VNetIpv4AddressPrefixes = ["10.71.0.0/16", "10.72.0.0/16"],
+                        Subnets = [Sub("sn-multi", "10.71.1.0/24")]
+                    },
+                    new BulkImportSelectedVNetPrefixDto
+                    {
+                        VNetName = "vnet-a",
+                        VNetResourceId = VNetA,
+                        AddressPrefix = "10.72.0.0/16",
+                        VNetIpv4AddressPrefixes = ["10.71.0.0/16", "10.72.0.0/16"],
+                        Subnets = [Sub("sn-other", "10.72.1.0/24")]
+                    }
+                ]
+            },
+            []);
+
+        List<string> minted =
+        [
+            .. plan.Items.Select(i => i.AutoCreateTargetName ?? string.Empty),
+            .. plan.Items.SelectMany(i => i.ChildSubnets).Select(c => c.Name)
+        ];
+
+        Assert.NotEmpty(minted);
+        Assert.All(minted, name => Assert.DoesNotContain("/", name));
     }
 }

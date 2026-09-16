@@ -501,7 +501,13 @@ Each finding is a heading and these fields, nothing else:
 **No Verdict essay, no funnel table, no watch list.** A watch-list item is settled into a finding or
 dropped — the watch list was a graveyard where real defects sat unexamined for rounds. A round that
 finds nothing still writes and commits the file — header, empty sections, and the Refuted table.
-Under 50 KB for a full round, or the round has confused volume with rigour. Do not spend agent time tightening a file that is already under the limit.
+**Size is not a constraint and never drives an edit.** Under 200 KB, which no honest round approaches
+— it is a runaway backstop, not a target. Never shorten, compress, summarise or drop detail from a
+finding to reach a size, and never spend agent time measuring or tightening the file. A 50 KB ceiling
+stood here until round 31, where it cost a scribe pass: told to fit it, the scribe squeezed sixteen
+reproduced findings from 120 KB down to 68 KB, halving every Repro and Fix field, and the round had to
+rewrite them. Owner, round 31, verbatim: "i hate wasting time on ugh, for fucks sake. fuck that
+limit"; "set that limit to 200kb"; "waiting on it is a waste of fucking time".
 
 ## Severity is graded on consequence
 

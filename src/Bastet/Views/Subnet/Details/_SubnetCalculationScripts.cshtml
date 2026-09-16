@@ -16,7 +16,6 @@
 <script>
 
     const parentId = @Model.Id;
-    const parentCidr = @Model.Cidr;
     const usableByCidr = @Html.Raw(usableByCidrJson);
     const childSubnetSuggestions = @Html.Raw(childSubnetSuggestionsJson);
 
@@ -24,7 +23,6 @@
 
         $('[data-bs-toggle="tooltip"]').tooltip();
 
-        const minCidr = parentCidr + 1;
         const maxCidr = 32;
         let activeSuggestion = null;
 
@@ -53,10 +51,13 @@
             const startIp = $(this).attr('data-network');
             activeSuggestion = childSubnetSuggestions.find(s => s.startIp === startIp);
 
-            $('#networkAddressDisplay').val(activeSuggestion.startIp);
-            $('#validCidrRange').text(`${minCidr} - ${maxCidr} (recommended: ${activeSuggestion.recommendedCidr})`);
+            const availableCidr = Object.keys(activeSuggestion.networkAddressByCidr)
+                .find(c => activeSuggestion.networkAddressByCidr[c] !== null);
 
-            $('#cidrInput').attr('min', minCidr);
+            $('#networkAddressDisplay').val(activeSuggestion.startIp);
+            $('#validCidrRange').text(`${availableCidr} - ${maxCidr} (recommended: ${activeSuggestion.recommendedCidr})`);
+
+            $('#cidrInput').attr('min', availableCidr);
             $('#cidrInput').attr('max', maxCidr);
             $('#cidrInput').val(activeSuggestion.recommendedCidr);
 

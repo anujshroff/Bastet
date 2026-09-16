@@ -1,4 +1,5 @@
 @model EditHostIpViewModel
+@inject Bastet.Services.IUserContextService UserContextService
 
 <div class="card mb-4">
     <div class="card-header">
@@ -19,7 +20,14 @@
         <div class="alert alert-info mt-3">
             <small>
                 <i class="bi bi-info-circle me-1"></i>
-                Host IP addresses cannot be changed. If you need a different IP, delete this one and create a new host IP assignment.
+                @if (UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Delete))
+                {
+                    <text>Host IP addresses cannot be changed. If you need a different IP, delete this one and create a new host IP assignment.</text>
+                }
+                else
+                {
+                    <text>Host IP addresses cannot be changed. If you need a different IP, ask someone with the Delete role to delete this one, then create a new host IP assignment.</text>
+                }
             </small>
         </div>
 

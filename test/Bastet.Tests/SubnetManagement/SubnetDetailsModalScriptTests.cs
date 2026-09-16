@@ -132,4 +132,27 @@ public class SubnetDetailsModalScriptTests
 
         Assert.Matches(@"function refuse\([^)]*\)\s*\{\s*\$\('#networkAddressDisplay'\)\.val\(activeSuggestion\.startIp\);\s*makeNetworkAddressReadOnly\(\);", script);
     }
+
+    [Fact]
+    public void CidrModal_TakesItsLowerBoundFromTheRangesOwnTable_NotFromTheParent()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Assert.Matches(
+            new Regex(
+                @"Object\.keys\(activeSuggestion\.networkAddressByCidr\)\s*\.find\(c\s*=>\s*activeSuggestion\.networkAddressByCidr\[c\]\s*!==\s*null\)",
+                RegexOptions.Singleline),
+            script);
+        Assert.Contains("$('#validCidrRange').text(`${availableCidr} - ${maxCidr}", script);
+        Assert.Contains("$('#cidrInput').attr('min', availableCidr)", script);
+    }
+
+    [Fact]
+    public void CidrModal_NoLongerDerivesABoundFromTheParentCidr()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Assert.DoesNotContain("parentCidr", script);
+        Assert.DoesNotContain("minCidr", script);
+    }
 }

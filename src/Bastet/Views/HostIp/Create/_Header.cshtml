@@ -4,7 +4,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a asp-controller="Subnet" asp-action="Index">Subnets</a></li>
-            <li class="breadcrumb-item"><a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId">@Model.SubnetInfo.Split('(')[0].Trim()</a></li>
+            <li class="breadcrumb-item"><a asp-controller="Subnet" asp-action="Details" asp-route-id="@Model.SubnetId">@Model.SubnetName</a></li>
             <li class="breadcrumb-item"><a asp-controller="HostIp" asp-action="Index" asp-route-subnetId="@Model.SubnetId">Host IP Assignments</a></li>
             <li class="breadcrumb-item active" aria-current="page">Add Host IP</li>
         </ol>

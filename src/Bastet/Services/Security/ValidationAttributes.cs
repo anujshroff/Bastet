@@ -17,8 +17,7 @@ public class NoHtmlAttribute : ValidationAttribute
             return new ValidationResult("Input sanitization service not available");
         }
 
-        string stripped = sanitizationService.StripHtml(stringValue);
-        return stripped != stringValue.Trim()
+        return sanitizationService.ContainsHtmlTags(stringValue)
             ? new ValidationResult(ErrorMessage ?? "HTML tags are not allowed in this field")
             : ValidationResult.Success;
     }
