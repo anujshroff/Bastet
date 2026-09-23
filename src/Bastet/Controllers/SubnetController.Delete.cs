@@ -113,6 +113,11 @@ public partial class SubnetController : Controller
         }
         catch (TimeoutException)
         {
+            if (!SubnetExists(id))
+            {
+                return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
+            }
+
             TempData["ErrorMessage"] = "The operation timed out because another subnet operation is in progress. Please try again.";
             return RedirectToAction(nameof(Delete), new { id });
         }
