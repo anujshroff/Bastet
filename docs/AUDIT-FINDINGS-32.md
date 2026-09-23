@@ -441,108 +441,11 @@ Attribution note: blame on the cited lines gives 6edef5c (#134) and 841c272 (#18
 
 **Residue of:** none
 
-## L4 — Create's seeded child name can cut the parent's real name inside a surrogate pair, pre-filling and saving U+FFFD `[x1]`
-**Where:** src/Bastet/Controllers/SubnetController.Create.cs:56, src/Bastet/Services/SubnetNaming.cs:14, src/Bastet/Services/SubnetNaming.cs:14 (the UTF-16 cut itself, from bf120d6 round 4; the fix goes here), src/Bastet/Controllers/SubnetController.Create.cs:57 (second line of the same seed statement), Not reachable, checked: src/Bastet/Services/Azure/AzureBulkImportPlanner.cs:444, :475, :902 (vnetSuffix[..20]), :905/:913/:920. They take only Azure names, and ARM refuses astral characters in VNet and subnet names (InvalidResourceName, probed live), Not reachable, checked: src/Bastet/Services/Security/InputSanitizationService.cs:87 and :105 and src/Bastet/Services/FullyAllocatedNote.cs:35/:41 truncate at or above the [StringLength] limits of the form, so accepted input is never cut
-**Breaks:** The parent subnet's name is 84×'A' + '🐱' + 14×'B'. That is 100 UTF-16 units, and the form accepts it. The operator uses Create Subnet on its free range and picks /26 at 10.102.20.0, which opens /Subnet/Create?networkAddress=10.102.20.0&cidr=26&parentId=N. The suffix '-10.102.20.0-26' leaves room for 85 units, so WithSuffix cuts the raw name after the emoji's high surrogate. The Name field is pre-filled 'AAAA…A�-10.102.20.0-26' (rendered as &#xFFFD;), and submitting it saves a replacement character the parent never had. The same happens with any astral-plane character at the cut, such as emoji or CJK Extension-B letters. Before 31-L8 the seed went through ToSafeText, which removed all non-ASCII text, so the cut could never land inside a surrogate pair. 31-L8 made the seed the parent's raw stored name without making the truncation code-point safe.
-**Repro:** *Truth lens (yes-ran-it) — ran:* All work in rig/work/a22; nothing written to the repo, which is still clean. No test/ contact: archives excluded test/.
-
-1) HEAD f8d1d7a: `start-app.sh 5320 audit32_a22_head none`, then `python repro_http.py 5320 10.122.20.0`:
-   - GET /Subnet/Create, harvest the form with bs4.
-   - POST parent Name='A'*84+U+1F431+'B'*14 (100 UTF-16 units) at 10.122.20.0/24.
-   - GET /Subnet/Create?networkAddress=10.122.20.0&cidr=26&parentId=1.
-   - POST the form exactly as rendered.
-2) `sql.sh -d audit32_a22_head "SELECT Id, LEN(Name), UNICODE(SUBSTRING(Name,85,1)), UNICODE(SUBSTRING(Name,86,1)), CHARINDEX(NCHAR(65533) COLLATE Latin1_General_BIN2, Name COLLATE Latin1_General_BIN2) FROM Subnets"`
-3) Operator path in headless Chromium: `python repro_browser.py 5320 10.122.21.0`.
-   - Create the parent through the form.
-   - On Details, click .create-subnet-btn[data-network=10.122.21.0], fill #cidrInput=26, dispatch input, click #createSubnetBtn.
-   - Read input[name=Name], take screenshots, submit, then read the child's Details page and /Subnet.
-4) Control at the round-31 base: `git archive b406c60 -- . ':(exclude)test/'` → `dotnet publish` (0 warnings, 0 errors) → `start-app.sh 5321 audit32_a22_base none app-base` → `repro_http.py 5321 10.122.20.0`.
-5) ARM name probe as SP1 in bastet-visible:
-   - `az network vnet create -n "rig-32-a22-cat🐱x"` and `-n "rig-32-a22-cjk𠀀x"`.
-   - `az network vnet subnet create --vnet-name rig-32-a22-probe -n "s🐱x"`. The probe VNet was inventoried, then deleted; a listing showed no a22 VNets left.
-6) Fix check:
-   - `git archive HEAD -- . ':(exclude)test/'`, applied the candidate's 4-line change to SubnetNaming.cs, `dotnet publish` (0 warnings, 0 errors).
-   - `start-app.sh 5322 audit32_a22_fix none app-fix`.
-   - `matrix.py 5320 30` and `matrix.py 5322 30`: 5 parent names on each build, seeded at /26; the first case is also posted.
-7) Cleanup: stopped PIDs 22738, 25412 and 31439 through stop-app.sh, dropped all 3 catalogs, ran az logout.
-
-*Truth lens — came back:* HEAD:
-- The 100-unit parent was accepted (302 to /Subnet/Details/1).
-- The seed's raw attribute is `value="AAAA…(84×A)&#xFFFD;-10.122.20.0-26"`. The parsed seed is 100 units, and its only non-ASCII code point is U+FFFD; the parent's only one is U+1F431.
-- Posting the form as rendered returned 302 to /Subnet/Details/2.
-- Database:
-  - parent: characters 85/86 = 55357/56369 (the surrogate pair).
-  - child: LEN 100, UNICODE(char 85) = 65533; a binary-collation CHARINDEX finds U+FFFD at 85.
-  - Note: the default collation's CHARINDEX misses U+FFFD, so it cannot be used as proof.
-
-Browser:
-- The modal read "25 - 32 (recommended: 25)"; /26 navigated to /Subnet/Create?networkAddress=10.122.21.0&cidr=26&parentId=3.
-- The Name field value ends `…A�-10.122.21.0-26` (JS length 100). The replacement glyph is visible at the end of the field (screenshot).
-- Submit landed on /Subnet/Details/4. U+FFFD shows in the Details heading and in two /Subnet tree rows. No JS errors.
-
-Control b406c60: seed `…AAAB-10.122.20.0-26`, with no non-ASCII; the child saved clean.
-
-Matrix, HEAD:
-- emoji split at the cut → U+FFFD
-- CJK Ext-B (U+20000) split at the cut → U+FFFD
-- 100-unit ASCII → clean
-- emoji ending exactly at the cut → kept whole
-- flag cut between its two regional indicators → lone U+1F1EC (valid text, no U+FFFD)
-
-Matrix, fixed build:
-- both split cases seed 99 units with no U+FFFD; the posted child saved as LEN 99 with no U+FFFD.
-- the other three cases are byte-identical to HEAD.
-
-ARM refused both astral VNet names and the astral subnet name: InvalidResourceName, "must begin with a word character… may contain word characters or '.', '-', '_'".
-
-Both HEAD and fixed logs: 0 fail/crit lines.
-
-*Reach lens (yes-ran-it) — ran:* Work dir /tmp/claude-1000/-home-anuj-code-Bastet/6f80fefd-4268-4c27-8569-c92f1e2329cd/scratchpad/rig/work/a23 (driver: drive_seed.py).
-1) HEAD f8d1d7a, unmodified: start-app.sh 5330 audit32_a23_head none. Headless Chromium (Playwright): /Subnet/Create, Name = 84x'A' + U+1F431 + 14x'B' (100 UTF-16 units), 10.123.20.0/24, submit -> /Subnet/Details/1. Click .create-subnet-btn[data-network=10.123.20.0], set #cidrInput to 26, click #createSubnetBtn -> /Subnet/Create?networkAddress=10.123.20.0&cidr=26&parentId=1. Read input[name=Name]; also a raw GET of the same URL. Submit the form as rendered. Then sql.sh -d audit32_a23_head "SELECT ... UNICODE(SUBSTRING(Name,85,1)) ...".
-2) Control: git archive b406c60 -- . ':(exclude)test/' copied into the work dir, dotnet publish --disable-build-servers (0 warnings, 0 errors), start-app.sh 5331 audit32_a23_base none, same drive.
-3) Fix check: HEAD copy with the proposed line added to SubnetNaming.WithSuffix, published (0 warnings, 0 errors), start-app.sh 5332 audit32_a23_fix none, same drive.
-4) Screenshots at a 1280x800 viewport of the pre-filled Name input and of the saved child's Details heading.
-5) Reachability of the planner cut sites, live ARM as the visible SP from my own AZURE_CONFIG_DIR: az network vnet create with names rig-32-a23-e<U+1F431>x and rig-32-a23-c<U+20000>x. Then an ASCII VNet rig-32-a23-probe 10.123.66.0/24 (added to the inventory, then deleted) and az network vnet subnet create with names s<U+1F431>x and s<U+20000>x.
-6) Git: git blame -s -L 53,58 origin/audit/round-31 -- src/Bastet/Controllers/SubnetController.Create.cs; git blame -s -L 6,19 origin/audit/round-31 -- src/Bastet/Services/SubnetNaming.cs; git log -L 56,57:src/Bastet/Controllers/SubnetController.Create.cs b406c60..origin/audit/round-31; git show c18a2e6 -- src/...; git show b406c60:src/Bastet/Services/SubnetNaming.cs.
-Cleanup: all three instances stopped by pidfile, all three catalogs dropped, probe VNet deleted (none of my VNets remain), az logout and config dir removed, repo porcelain empty.
-
-*Reach lens — came back:* HEAD: the parent was accepted by the form. The modal navigated to /Subnet/Create?networkAddress=10.123.20.0&cidr=26&parentId=1 ("Create Subnet - BASTET"). The pre-filled Name was 84x'A' + U+FFFD + '-10.123.20.0-26' (100 units, U+FFFD at unit 85). The raw attribute tail was '…AAAA&#xFFFD;-10.123.20.0-26'. Submitting as rendered returned 302 to /Subnet/Details/2. The success banner "Subnet 'AAAA…A�-10.123.20.0-26' was created successfully." and the Details heading both show the replacement glyph. DB: child Id 2 has LEN 100 and UNICODE(SUBSTRING(Name,85,1)) = 65533. The parent at 85/86 holds 55357/56369, the emoji's surrogate pair. There were no page JS errors and no fail/crit log lines.
-Screenshot at 1280px: the Create screen's Name input shows only the leading A's, so the U+FFFD is off the visible end of the field and the operator is unlikely to see it before saving. It becomes visible only after save, on the banner and heading.
-Control b406c60: the seed was 84x'A' + 'B-10.123.20.0-26', with no U+FFFD, because ToSafeText's regex removed the emoji before the cut.
-Proposed fix: the seed was 84x'A' + '-10.123.20.0-26' (99 units), with no U+FFFD, and the create succeeded.
-ARM: every astral name was refused with InvalidResourceName, for both VNet and subnet names ("must begin with a word character … may contain word characters or '.', '-', '_'").
-Blame: Create.cs:56-57 comes from c18a2e6 (the only round-31 commit on those lines). The cut at SubnetNaming.cs:14 comes from bf120d6 (round 4) and is unchanged since.
-
-**Fix:** In SubnetNaming.WithSuffix, after cutting the base, drop a trailing lone high surrogate: `if (trimmedBase.Length > 0 && char.IsHighSurrogate(trimmedBase[^1])) trimmedBase = trimmedBase[..^1];`. The helper is shared with the planner's name builders, where the guard is harmless.
-
-*Verifiers:* both judged the filed fix sound.
-
-*Truth verifier:* I applied the proposed fix verbatim in a copy of HEAD with test/ excluded. It built with 0 warnings and 0 errors, and I drove it live.
-- It removes U+FFFD for both emoji and CJK Ext-B cuts: the seed is 84×A plus the suffix, 99 units, and the saved row is clean.
-- ASCII names, an astral character ending exactly at the cut, and the flag case give output byte-identical to HEAD.
-
-Why it is safe:
-- It needs no comment and does not affect plain-HTTP or air-gapped deployments.
-- It adds no guard, withhold, refusal or status; it only moves the one cut 31-L8 exposed to a code-point boundary.
-- Planner output cannot change, because ARM refuses astral names. Preview/commit `Expected` parity and rename offers are unaffected.
-- Putting it in the shared helper is right: one site, and every caller is covered.
-
-Not covered, and not this defect:
-- A cut inside a multi-code-point grapheme (a flag, a ZWJ sequence, a combining mark) leaves valid text the parent does contain, for example a lone regional indicator. A grapheme-aware StringInfo cut would widen the fix, so it should not be filed.
-- The line-18 cut `combined[..maxLength]` fires only when the suffix alone fills maxLength, which the modal never produces.
-
-*Truth verifier's betterFix:* File the candidate's fix unchanged, in the helper rather than at the Create caller. In SubnetNaming.WithSuffix, immediately after `trimmedBase` is computed (after line 14): `if (trimmedBase.Length > 0 && char.IsHighSurrogate(trimmedBase[^1])) { trimmedBase = trimmedBase[..^1]; }`. No interim is needed. Do not widen it to grapheme-aware truncation, and do not add the same check to the planner or sanitizer cuts, which real input cannot reach.
-
-*Reach verifier:* I built and drove the proposed one-line guard in WithSuffix (after the cut, drop a trailing char.IsHighSurrogate). It turned the seed into 84x'A' + '-10.123.20.0-26' (99 units), with no U+FFFD, and the create succeeded.
-It introduces no new defect. The planner's WithSuffix callers never reach the guard, because ARM refuses astral characters in VNet and subnet names (proven live). The plan-divergence comparison derives both sides from the same function, so it cannot diverge.
-An equivalent form without the second slice is to decrement room when baseName[room-1] is a high surrogate before cutting.
-Leave line 18's combined[..maxLength] alone: every caller's suffix is at most about 25 ASCII characters, so that cut is unreachable.
-A grapheme-cluster-aware cut (StringInfo) would also stop splitting combining marks, ZWJ sequences and flags. Those splits yield valid, merely truncated text rather than U+FFFD. That would widen the fix beyond the defect, so it is not recommended.
-There is no cheaper interim: the fix is already one line.
-
-*Reach verifier's betterFix:* None needed. Placing the guard in SubnetNaming.WithSuffix is correct and minimal. An equivalent is to adjust room before the slice (if baseName.Length > room && room > 0 && char.IsHighSurrogate(baseName[room - 1])) room--;), which avoids re-slicing.
-
-**Residue of:** 31-L8
+## L4 — Create's seeded child name can cut the parent's real name inside a surrogate pair, pre-filling and saving U+FFFD `[x1]` — FIXED
+_Fixed in this commit (subject "L4: Create's seeded child name no longer cuts a character in half"). `SubnetNaming.WithSuffix` drops a trailing lone high surrogate after the cut, so the Create seed ends on a character boundary._
+_Swept: every `WithSuffix` caller (the Create seed; the planner's name builders, which take only Azure names that ARM refuses to make astral) and every other name, description and note cut in src/ (all fire only above the form's own limits); nothing else reachable._
+_Verified: `APrefillCutNeverSplitsACharacterInTwo` red on HEAD and green fixed; revert plus three one-edit mutants red; suite 1040/1040, 0 warnings; live Create seed 100 units ending U+FFFD on HEAD, 99 units clean on the fix._
+_Reviewed: PASS by an independent reviewer on the live operator path through the CIDR modal (12 mutants; the three survivors cannot split a character on reachable input). It also showed the fix closes a planner preview/commit name-parity break on crafted astral input._
 
 # Info
 

@@ -70,6 +70,42 @@ public class GeneratedNameSafeTextTests
         Assert.Equal($"{parentName}-10.20.40.0-24", prefill);
     }
 
+    [Theory]
+    [InlineData("\U0001F431")]
+    [InlineData("\U00020000")]
+    public void APrefillCutNeverSplitsACharacterInTwo(string astral)
+    {
+        const string suffix = "-10.102.20.0-26";
+        string parentName = new string('A', 84) + astral + new string('B', 14);
+
+        Assert.Equal(new string('A', 84) + suffix, SubnetNaming.WithSuffix(parentName, suffix, 100));
+
+        for (int maxLength = suffix.Length; maxLength <= parentName.Length + suffix.Length; maxLength++)
+        {
+            string prefill = SubnetNaming.WithSuffix(parentName, suffix, maxLength);
+
+            Assert.True(HasNoLoneSurrogate(prefill), $"maxLength {maxLength} pre-filled half a character: {prefill}");
+            Assert.StartsWith(prefill[..^suffix.Length], parentName, StringComparison.Ordinal);
+        }
+    }
+
+    private static bool HasNoLoneSurrogate(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(text[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     [Fact]
     public void ThePlannerNeverMintsAForwardSlash_SoTheSeparatorMayNotGoBack()
     {
