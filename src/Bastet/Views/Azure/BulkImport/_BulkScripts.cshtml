@@ -663,6 +663,11 @@
                     }
                 },
                 error: function (xhr) {
+                    if (selection !== lastSelection) {
+                        $("#bulk-confirm-commit-btn").prop("disabled", false);
+                        return;
+                    }
+
                     let payload = null;
                     try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
                     if (!payload) {

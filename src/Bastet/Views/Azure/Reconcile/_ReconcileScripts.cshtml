@@ -409,6 +409,10 @@
                     }
                 },
                 error: function (xhr) {
+                    if (ids !== confirmedIds) {
+                        return;
+                    }
+
                     let payload = null;
                     try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
                     if (!payload) {

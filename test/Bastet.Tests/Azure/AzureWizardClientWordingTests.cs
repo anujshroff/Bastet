@@ -253,6 +253,16 @@ public class AzureWizardClientWordingTests
             "the snapshot must be voided before the forward button is re-evaluated");
     }
 
+    [Theory]
+    [InlineData("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml",
+        @"error:\s*function\s*\(xhr\)\s*\{\s*if\s*\(selection\s*!==\s*lastSelection\)\s*\{\s*\$\(""#bulk-confirm-commit-btn""\)\.prop\(""disabled"",\s*false\);\s*return;\s*\}")]
+    [InlineData("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml",
+        @"error:\s*function\s*\(xhr\)\s*\{\s*if\s*\(ids\s*!==\s*confirmedIds\)\s*\{\s*return;\s*\}")]
+    public void AnAnswerToASupersededSnapshot_IsDroppedBeforeItCanVoidTheFreshOne(string script, string guard)
+    {
+        Assert.Matches(new Regex(guard, RegexOptions.Singleline), ReadView(script));
+    }
+
     private static string ShowCommitErrorBody(string script)
     {
         Match handler = Regex.Match(
