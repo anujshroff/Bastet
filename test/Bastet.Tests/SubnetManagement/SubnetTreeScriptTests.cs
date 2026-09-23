@@ -22,15 +22,17 @@ public class SubnetTreeScriptTests
     private static string ReadScript() =>
         File.ReadAllText(Path.Combine(RepoRoot, SiteScript.Replace('/', Path.DirectorySeparatorChar)));
 
-    private static string CollapseAllHandler()
+    private static string CollapseAllHandler() => ClickHandlerBody("collapse-all");
+
+    private static string ClickHandlerBody(string buttonId)
     {
         string script = ReadScript();
         Match match = Regex.Match(
             script,
-            @"\$\('#collapse-all'\)\.on\('click',\s*function\s*\(\)\s*\{(?<body>.*?)\n\s*\}\);",
+            @"\$\('#" + buttonId + @"'\)\.on\('click',\s*function\s*\(\)\s*\{(?<body>.*?)\n\s*\}\);",
             RegexOptions.Singleline);
 
-        Assert.True(match.Success, "The #collapse-all click handler was not found in site.js");
+        Assert.True(match.Success, $"The #{buttonId} click handler was not found in site.js");
         return match.Groups["body"].Value;
     }
 
@@ -39,7 +41,15 @@ public class SubnetTreeScriptTests
     {
         string body = Regex.Replace(CollapseAllHandler(), @"\s+", " ").Trim();
 
-        Assert.Equal("$('.subnet-children').slideUp(200, updateToggleIcons);", body);
+        Assert.Equal("$('.subnet-children').slideUp(200).promise().done(updateToggleIcons);", body);
+    }
+
+    [Fact]
+    public void ExpandAll_RepaintsTheIconsOnce_AfterEveryContainerHasFinished()
+    {
+        string body = Regex.Replace(ClickHandlerBody("expand-all"), @"\s+", " ").Trim();
+
+        Assert.Equal("$('.subnet-children').slideDown(200).promise().done(updateToggleIcons);", body);
     }
 
     [Fact]

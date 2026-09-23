@@ -496,6 +496,21 @@ the browser actually sent against what was persisted.**
   re-locking steps 3-4 on any selection change; Select All not submitting rows the server marked
   un-importable (jQuery `:checked` matches disabled inputs - `:not(:disabled)` is load-bearing); going
   back and changing an earlier step; the `previewSeq` out-of-order guard; double-commit.
+- **A failure answering a superseded snapshot never touches the fresh one** (both wizards, round 32). Hold the
+  product's lock from a sqlcmd session (`sp_getapplock 'Bastet:SubnetOperations'`, Exclusive/Session)
+  and insert a hand-made row on the target's exact range, so Confirm Import waits and then answers 409.
+  While it waits, go Back to Selection and preview again. When the 409 lands, the fresh plan must still
+  commit: Continue enabled, and Confirm sends **one** request answered 200. Run it with the operator
+  already on the fresh step 4 (Confirm re-enabled, not left dead), and with `page.route` holding the
+  fresh preview until the 409 is processed. Also hold the lock 36 s with no insert: the superseded 503
+  must not appear on the fresh plan's step 4. Reconcile: confirm row 1, add a hand-made child under
+  it, click Delete with `page.route` holding the 409, then go Back to Review, swap the tick to row 2,
+  confirm, and release: row 2 must delete (200). A superseded **success** did apply, so its summary,
+  the hidden Confirm or Delete and the redirect correctly stand; do not report them. "Superseded" is by
+  identity, not content: re-previewing or re-confirming the same ticks makes a new snapshot, the old
+  request's failure is dropped, and the next click gets its own answer. **The positive control is mandatory**: a 409 that
+  answers the snapshot still on screen must still void it (Continue/Confirm disabled, refusal shown),
+  in both wizards — dropping every 409 would pass the other checks.
 - **Every badge, with the filter OFF.** All rows show, so every label must be true. Build one scan
   carrying all five and assert the badge, the reason **and** the checkbox's `disabled` state together -
   a truthful label on an unusable control is still a defect:
@@ -754,6 +769,12 @@ Every non-Azure action driven as a request, not asserted in a unit test:
 - validation as requests: overlap, containment, parent fit, CIDR boundaries, a host IP on the network
   or broadcast address, a host IP on a subnet that has children (refused)
 - every page asserted on **rendered content and title**, never a bare HTTP 200
+- **Expand All / Collapse All on a large tree, in the browser** (round 32). Seed 250 /24 roots with two
+  /25 children each (the bulk-import shape) and time each click until `$('.subnet-children').promise()`
+  resolves: it must stay near the 200 ms animation, not grow with the square of the root count (the
+  per-container repaint took ~6.5 s here). After every click assert the end state too — every container
+  hidden or shown, one `bi-plus-square` or `bi-dash-square` per parent, leaf dashes untouched — and
+  repeat after collapsing one root by hand, so a faster handler that paints the wrong icons fails.
 
 ## H - Authorization, antiforgery, headers, locking
 

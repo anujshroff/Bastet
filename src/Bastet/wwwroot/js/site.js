@@ -19,12 +19,12 @@ $(document).ready(function () {
     
     // Expand all subnets
     $('#expand-all').on('click', function () {
-        $('.subnet-children').slideDown(200, updateToggleIcons);
+        $('.subnet-children').slideDown(200).promise().done(updateToggleIcons);
     });
     
     // Collapse all subnets
     $('#collapse-all').on('click', function () {
-        $('.subnet-children').slideUp(200, updateToggleIcons);
+        $('.subnet-children').slideUp(200).promise().done(updateToggleIcons);
     });
     
     // Function to update toggle icons

@@ -430,6 +430,11 @@ public class HostIpController(
         }
         catch (TimeoutException)
         {
+            if (!HostIpExists(ip))
+            {
+                return NotFound();
+            }
+
             TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
             return RedirectToAction(nameof(Delete), new { ip });
         }

@@ -13,6 +13,11 @@ public static class SubnetNaming
             ? string.Empty
             : baseName.Length > room ? baseName[..room] : baseName;
 
+        if (trimmedBase.Length > 0 && char.IsHighSurrogate(trimmedBase[^1]))
+        {
+            trimmedBase = trimmedBase[..^1];
+        }
+
         string combined = trimmedBase + suffix;
 
         return combined.Length > maxLength ? combined[..maxLength] : combined;
