@@ -208,112 +208,11 @@ Product question (unchanged from the candidate): the guard also drops a supersed
 
 **Residue of:** 31-L13
 
-## L2 — Expand All / Collapse All repaint every toggle once per container, freezing the Subnet Hierarchy tab for seconds to tens of seconds `[x1]`
-**Where:** src/Bastet/wwwroot/js/site.js:22, src/Bastet/wwwroot/js/site.js:27, src/Bastet/wwwroot/js/site.js:31-50 (updateToggleIcons: the full walk each callback repeats), src/Bastet/wwwroot/js/site.js:27 (Collapse All; same per-element callback), src/Bastet/wwwroot/js/site.js:31-50 (updateToggleIcons: the whole-tree read/write walk that each per-element callback repeats; not itself changed by the fix), src/Bastet/wwwroot/js/site.js:27 (Collapse All: the same per-element callback, quadratic when the parent rows are visible siblings, as with root-level VNet rows), src/Bastet/wwwroot/js/site.js:31-50 (updateToggleIcons: each per-element callback repeats this whole-tree walk; the :visible read at :44 alternating with the .html() writes at :45/:47 forces one layout per parent row)
-**Breaks:** The operator's tree has the shape the bulk import produces: N VNet rows at the root, each holding its subnets. They click Expand All or Collapse All on /Subnet. Since 31-L14, both handlers pass updateToggleIcons as the slideDown/slideUp completion callback on the whole `.subnet-children` set. jQuery runs that callback once per element, so it runs N times in the tick where the animations finish. Each run walks every `.subnet-toggle`, alternating an `.is(':visible')` read (which forces layout) with an `.html()` write. That is N x N forced layouts in one main-thread task. Measured freezes on every click of either button: ~0.75 s at 100 VNet rows (300 rows), ~5.9 s at 250 (750 rows), ~41-42 s at 500 (1,500 rows). Before 31-L14, Expand All repainted once: 44 ms at 250 roots, 100 ms at 500. On a three-level tree the old Collapse All was already this slow (6.1 s), because its deeper-level callback had the same per-element shape; 31-L14 carried that shape to Expand All and to the root level. The final icons are correct; the defect is the hang, which grows with the square of the number of parent rows.
-**Repro:** *Truth lens (yes-ran-it) — ran:* Work dir: /tmp/claude-1000/-home-anuj-code-Bastet/6f80fefd-4268-4c27-8569-c92f1e2329cd/scratchpad/rig/work/a10 (called WD below). I created no Azure resources.
-1. Started the HEAD build (<rig>/app) twice from WD: `<rig>/bin/start-app.sh 5200 audit32_a10_tree none` and `<rig>/bin/start-app.sh 5201 audit32_a10_seq none`.
-2. Seeded the catalogs with WD/seed.sh, which pipes T-SQL through `<rig>/bin/sql.sh`. Shape `two N` is N /24 roots, each with two /25 children (the bulk-import shape). Shape `three N` is one /16 root with N /24 children, each holding two /25s. Seeds run: two 100, two 250, two 500, three 250, two 6 and three 4. I also made a leaf-only tree and an empty tree by hand-written SQL.
-3. Made three versions of site.js: `git show dd48723^:src/Bastet/wwwroot/js/site.js > WD/site-pre.js` (before the 31-L14 fix), `git show HEAD:src/Bastet/wwwroot/js/site.js > WD/site-head.js`, and WD/site-fix.js, which is site-head.js with sed rewriting line 22 to `$('.subnet-children').slideDown(200).promise().done(updateToggleIcons);` and line 27 to `...slideUp(200).promise().done(updateToggleIcons);`.
-4. `<rig>/azcli/bin/python WD/drive.py <port> {head|pre|fix} <steps> [count]` runs Playwright Chromium against /Subnet. The page.route override serves the pre or fix script at **/js/site.js*. For each click it records:
-   - the time from the click until `$('.subnet-children').promise()` resolves;
-   - long tasks, from a PerformanceObserver;
-   - optionally, the number of `$.fn.html` setter calls;
-   - the final state of each toggle and each `.subnet-children` container.
-   A `hide` step gives a like-for-like Expand All starting from a collapsed tree.
-5. WD/seq.py ran 7 click sequences on HEAD and on the fix. WD/edge.py checked the leaf-only and empty trees. WD/realinput.py made real `page.click` presses and then timed a `page.evaluate('1')` sent 350 ms later. I ran it on the headless shell and again on `channel=chromium`.
-6. Attribution: `git blame -s -L 20,28 origin/audit/round-31 -- src/Bastet/wwwroot/js/site.js`; `git log -S'slideUp(200, updateToggleIcons)' -- src/`; `git log -S'slideDown(200, updateToggleIcons)' -- src/`; `git show 8cefc64 -- src/Bastet/wwwroot/js/site.js`.
-7. Cleanup: stopped both instances with `stop-app.sh <pidfile>`, ran `drop-catalog.sh` on audit32_a10_tree and audit32_a10_seq, and confirmed `git status --porcelain` is empty.
-
-*Truth lens — came back:* **HEAD, two-level trees.**
-- 100 roots (300 rows): each click took 723–757 ms, with one long task of 512–548 ms.
-- 250 roots (750 rows): Collapse All took 6235 ms (task 6029). Expand All took 6153 ms (task 5939). Expand All from a collapsed tree took 6425 ms (task 6214).
-- Each click at 250 roots made 62,500 icon `.html()` writes, which is 250 callbacks × 250 parent toggles. The fix makes 250.
-- The freeze does not depend on anything changing. Expand All on a tree that was already expanded froze for 5485 ms, and a second Collapse All on a collapsed tree froze for 6446 ms.
-- 500 roots (1,500 rows): Collapse All took 45,537 ms (task 45,317). Expand All took 43,212 ms (task 42,907).
-- Real mouse clicks at 250 roots: the page stayed blocked for 5.70 s and 5.46 s on the headless shell, and 5.47 s and 5.51 s on full Chromium.
-- Final icons and display were correct in every HEAD run, with 0 page errors.
-
-**Before 31-L14 (site.js from `dd48723^`).**
-- On a two-level tree, Collapse All did nothing: all rows stayed expanded (the 31-L14 defect).
-- Expand All from a collapsed tree took 217 ms at 250 roots and 306 ms at 500, including the 200 ms animation. The candidate's 44 ms and 100 ms were measured on a tree that was already expanded, so its slideDown did nothing. This does not change the finding.
-
-**Three-level tree (1 + 250 + 500 rows).**
-- HEAD: Collapse All 755 ms; Expand All 6369 ms (task 6133).
-- Before 31-L14: Collapse All 6422 ms (task 6209), which confirms the older per-element callback; Expand All 211 ms.
-- Fix: 228 ms and 249 ms.
-
-**The proposed fix.**
-- Timings: 211–224 ms at 100 roots, 236–253 ms at 250 and 298–321 ms at 500, with correct final state each time.
-- In all 7 sequences on a two-level and a three-level tree, HEAD and the fix ended in identical display and icon states. The sequences were: a root collapsed by hand then Collapse All; Collapse+Expand back-to-back; Expand+Collapse back-to-back; Collapse then Expand; a row toggle 80 ms into Expand All; a row toggle 80 ms into Collapse All; and Expand All clicked three times.
-- Leaf-only and empty trees: no errors, and the leaf dashes were untouched.
-
-*Reach lens (yes-ran-it) — ran:* All work in rig/work/a11 (ports 5210-5212, catalogs audit32_a11_tree / _three / _edge, principal none, HEAD build rig/app, site.js byte-identical to HEAD).
-1. start-app.sh 5210 audit32_a11_tree none. seed.py posts the real Create form (POST /Subnet/Create, antiforgery token harvested with bs4, ParentSubnetId taken from the 302 Location). It built two-level trees in steps: 100, then 250, then 500 roots of /24, each with two /25 children. SQL check at the end: 1500 rows, 500 roots.
-2. measure.py (Playwright, headless Chromium): a real page.click on #collapse-all and #expand-all, a capture-phase click timestamp, a longtask PerformanceObserver, then await $('.subnet-children').promise(). Comparison variants were served with page.route('**/js/site.js*'): the pre-31-L14 file (git show dd48723^:src/Bastet/wwwroot/js/site.js) and the candidate's fix (lines 22 and 27 changed to .slideDown(200).promise().done(updateToggleIcons) and .slideUp(200).promise().done(updateToggleIcons)).
-3. count.py: a MutationObserver on each .subnet-toggle counts icon rewrites per click.
-4. blocked.py: page.mouse.click on the first root's Details link 0.4 s after Collapse All, timing how long until the navigation request is sent. It also times Expand All on a freshly loaded tree.
-5. start-app.sh 5211 audit32_a11_three none. seed3.py through the form: one /16 root, 250 /24 children, 500 /25 grandchildren (751 rows, 251 parent rows). Then measure.py for HEAD, the fix and pre-31-L14, and seq.py (8 sequence scenarios, HEAD vs fix, targeting both a deep row and the root row). The two-level 500-root tree also ran seq.py with the fix.
-6. The same HEAD timing rerun in full Chrome 153 (channel=chromium). edge.py on 5212 audit32_a11_edge checks an empty tree and a leaf-only tree, HEAD vs fix.
-7. Attribution: git blame -s -L 20,50 origin/audit/round-31 -- src/Bastet/wwwroot/js/site.js; git log -L 20,29:src/Bastet/wwwroot/js/site.js -s b406c60..origin/audit/round-31; git blame -s -L 26,36 b406c60 -- src/Bastet/wwwroot/js/site.js.
-Cleanup: stop-app.sh on each of the three captured pidfiles and drop-catalog.sh on each catalog. No a11 catalog remains, 0 fail/crit log lines, git status --porcelain is empty, no Azure resources were created.
-
-*Reach lens — came back:* Mechanism, proven directly. At 100 parent rows, HEAD rewrites the toggle icons 10,000 times per click of either button (100 per-element callbacks x 100 parent toggles). The fix and the pre-31-L14 code each rewrite them 100 times.
-
-Timings, HEAD Collapse All / Expand All (click until the promise resolves, with the single longest task):
-- 100 roots (300 rows): 842/855 ms, tasks 629/642 ms. A repeat gave 1008/822 ms.
-- 250 roots (750 rows): 5904/6232 ms, tasks 5692/6019 ms. The fix: 244/249 ms, tasks 53/67 ms.
-- 500 roots (1,500 rows): 46.8/44.2 s, tasks 46.6/44.0 s. The fix: 323/336 ms.
-- Pre-31-L14 at 250 roots: Collapse All is the old no-op (all 250 containers stay displayed); Expand All takes 37 ms.
-
-What the operator gets at 250 roots:
-- Expand All on a freshly loaded, already-expanded tree, where nothing animates: HEAD 6.02 s (task 5958 ms), the fix 0.09 s.
-- A click on a subnet's Details link 0.4 s after Collapse All is not processed until 5.84 s later at HEAD, 0.01 s with the fix. The tab ignores input for the whole freeze.
-
-Three-level tree (251 parent rows):
-- HEAD Expand All: 6076 ms (task 5862 ms). Pre-31-L14: 221 ms. The fix: 252 ms.
-- HEAD Collapse All: only 737 ms (task 525 ms). The root container finishes first and hides the whole subtree, so the later callbacks lay out nothing.
-- Pre-31-L14 Collapse All was already 6615 ms (task 6403 ms), because of the round-5 deeper-level callback.
-- Full Chrome 153: HEAD Expand All 7.2 s (task 6945 ms).
-
-Correctness:
-- HEAD ended with correct icons and display in every run: 0 icon/display mismatches, leaves kept the flat dash, 0 page errors.
-- The per-row toggle at 500 roots takes 0.35 s (task 96 ms), which is linear and not affected.
-- With the fix, all 8 scenarios ended in states identical to HEAD with 0 mismatches and 0 errors, on both tree shapes and both target modes. The scenarios: a row collapsed by hand then Collapse All; a row collapsed by hand then Expand All; Collapse then Expand back-to-back; Expand then Collapse back-to-back; a row toggle during a Collapse All animation; a row toggle once and twice; Expand All on a fresh page.
-- Empty tree and leaf-only tree: no errors, and the fix behaves the same as HEAD.
-
-**Fix:** Repaint once, after every container has finished, keeping 31-L14's repaint-after-animation rule. site.js:22 becomes `$('.subnet-children').slideDown(200).promise().done(updateToggleIcons);` and site.js:27 becomes `$('.subnet-children').slideUp(200).promise().done(updateToggleIcons);`. `.promise()` resolves only when every element's fx queue is empty, including animations queued by back-to-back clicks. On an empty set it resolves at once, and the repaint is then a no-op. No new mechanism. The per-row toggle (one element, one callback) is already linear and stays as it is.
-
-*Interim:* On large trees, use the per-row toggles instead of Expand All / Collapse All.
-
-*Verifiers:* both judged the filed fix sound.
-
-*Truth verifier:* The fix is sound, and I tested it live.
-
-**Behaviour.**
-- `.promise()` resolves only once every element's fx queue is empty, so the rule that 31-L14 added (repaint after the animation) still holds.
-- The fix only reduces the number of repaints, from P to one. HEAD and the fix ended in the same final state in all 7 sequences on both tree depths, including back-to-back clicks and a row toggle queued behind the bulk animation.
-- On an empty set the promise resolves immediately and the repaint does nothing, as the leaf-only and empty trees showed with no errors.
-- `.done` runs synchronously when the promise resolves, so no frame is painted with stale icons.
-
-**Constraints.**
-- The vendored jQuery 4.0.0 has `.promise()`, confirmed in the minified source. It needs no CDN, so plain-HTTP and air-gapped deployments are unaffected.
-- No `.cs` or `.cshtml` file is touched and no comment is needed.
-- It adds, widens or branches no guard, withhold, refusal, special case or status. Two call expressions change, and the row toggle at `:17` stays as it is.
-
-*Truth verifier's betterFix:* Keep the filed fix. site.js:22 becomes `$('.subnet-children').slideDown(200).promise().done(updateToggleIcons);` and site.js:27 becomes `$('.subnet-children').slideUp(200).promise().done(updateToggleIcons);`. Use `.done` rather than `.then`, because jQuery 4's `.then` is asynchronous and would let a frame render stale icons. Leave the row toggle at :17 and the startup repaint at :7 unchanged. Interim: use the per-row toggles on large trees.
-
-*Reach verifier:* Sound. The candidate's fix was served live over /js/site.js: line 22 becomes $('.subnet-children').slideDown(200).promise().done(updateToggleIcons); and line 27 becomes $('.subnet-children').slideUp(200).promise().done(updateToggleIcons);.
-- It repaints once. Icon rewrites per click drop from N squared to N (100 instead of 10,000 at 100 parents), and the wait falls to 221-336 ms, most of which is the 200 ms animation.
-- .promise() waits until every element's animation queue is empty, including animations queued by back-to-back clicks and by a row toggle clicked mid-animation. The repaint therefore always reads the settled state.
-- In all 8 sequence scenarios on both tree shapes, the final states were identical to HEAD, with no icon/display mismatch.
-- On an empty or leaf-only set the promise resolves at once, the repaint is a no-op, and no error occurs.
-- Line 17 (the per-row slideToggle) animates at most one element per click, so it fires one callback and must stay as it is.
-No guard, status or branch is added, and no product question arises. Interim: use the per-row toggles on large trees.
-
-*Reach verifier's betterFix:* None better. The candidate's two-line change is the narrowest correct fix. Two alternatives were considered and are worse. Batching the reads and writes inside updateToggleIcons would still run it once per element and rewrite icons N squared times. Painting known end-state icons synchronously would reintroduce the pre-31-L14 wrong icons after back-to-back clicks.
-
-**Residue of:** 31-L14
+## L2 — Expand All / Collapse All repaint every toggle once per container, freezing the Subnet Hierarchy tab for seconds to tens of seconds `[x1]` — FIXED
+_Fixed in this commit (subject "L2: Expand All and Collapse All repaint the tree icons once per click, not once per container"). Both handlers attach `updateToggleIcons` to the whole set's `promise()` instead of each container's completion callback, keeping 31-L14's repaint-after-animation rule._
+_Swept: every animated call with a completion callback in the client JS and inline scripts; only site.js:22 and :27 animate many elements (the row toggle at :17 animates one and stays as it is)._
+_Verified: SubnetTreeScriptTests exact-statement pins (Collapse All updated, Expand All added) red then green; revert, one-handler revert, `.then` and synchronous-repaint mutants red; suite green, 0 warnings; live at 250 roots: HEAD about 6.5 s per click, the fix about 240 ms with an identical end state. Recorded in /e2e phase G._
+_Reviewed: PASS by an independent reviewer (real clicks, 53 click sequences on four tree shapes with zero end-state differences, 11 mutants); it noted that the exact-statement pins also reject equivalent rewrites, as the round-31 pin beside them already does._
 
 ## L3 — Both DeleteConfirmed timeout arms still stash TempData for a Delete page that answers 404, stranding 'Please try again' on the next page `[x1]` — FIXED
 _Fixed in this commit (subject "L3: a delete that times out after its row is gone answers 404, stranding no retry banner"). Both DeleteConfirmed timeout arms check the row still exists before stashing the retry message, the same check each action's pre-lock gate and SetAllocationStatus's timeout arm already make._

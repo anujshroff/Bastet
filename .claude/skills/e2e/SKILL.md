@@ -754,6 +754,12 @@ Every non-Azure action driven as a request, not asserted in a unit test:
 - validation as requests: overlap, containment, parent fit, CIDR boundaries, a host IP on the network
   or broadcast address, a host IP on a subnet that has children (refused)
 - every page asserted on **rendered content and title**, never a bare HTTP 200
+- **Expand All / Collapse All on a large tree, in the browser** (round 32). Seed 250 /24 roots with two
+  /25 children each (the bulk-import shape) and time each click until `$('.subnet-children').promise()`
+  resolves: it must stay near the 200 ms animation, not grow with the square of the root count (the
+  per-container repaint took ~6.5 s here). After every click assert the end state too — every container
+  hidden or shown, one `bi-plus-square` or `bi-dash-square` per parent, leaf dashes untouched — and
+  repeat after collapsing one root by hand, so a faster handler that paints the wrong icons fails.
 
 ## H - Authorization, antiforgery, headers, locking
 
