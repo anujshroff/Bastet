@@ -891,6 +891,10 @@ looks exactly like a defect, and three separate ones did:
   `confirmedHostIpCount` (a subtree host-IP count; the old `confirmedMaxHostIpTicks` watermark is
   gone). A hand-built delete POST that sends only `Id` and `confirmation` returns **302 and archives
   nothing**, which reads exactly like a broken delete path. Harvest the form.
+- **The host IP delete form carries the reviewed row's `rowVersion`** as well as `ip` and
+  `confirmation`. A hand-built POST without it, or one whose row was renamed or re-created after the
+  page was loaded, returns **302 back to the Delete page** with "This host IP changed since you
+  reviewed it. Nothing was deleted." and archives nothing. Harvest the form.
 
 Harvest forms with a real HTML parser over `input`/`textarea`/`select`, not a regex: a regex that
 assumes `name` precedes `value` silently drops `RowVersion`, and the POST then redisplays the form as

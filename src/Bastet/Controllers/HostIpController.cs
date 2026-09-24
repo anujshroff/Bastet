@@ -340,7 +340,8 @@ public class HostIpController(
             SubnetInfo = $"{hostIp.Subnet.Name} ({hostIp.Subnet.NetworkAddress}/{hostIp.Subnet.Cidr})",
             SubnetId = hostIp.SubnetId,
             CreatedAt = hostIp.CreatedAt,
-            CreatedBy = hostIp.CreatedBy
+            CreatedBy = hostIp.CreatedBy,
+            RowVersion = hostIp.RowVersion
         };
 
         return View(viewModel);
@@ -349,7 +350,7 @@ public class HostIpController(
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
-    public async Task<IActionResult> DeleteConfirmed(string ip, string confirmation)
+    public async Task<IActionResult> DeleteConfirmed(string ip, string confirmation, byte[]? rowVersion = null)
     {
         if (!HostIpExists(ip))
         {
@@ -378,6 +379,15 @@ public class HostIpController(
                     if (hostIp == null)
                     {
                         return NotFound();
+                    }
+
+                    if (hostIp.RowVersion is not null
+                        && (rowVersion is null || !rowVersion.SequenceEqual(hostIp.RowVersion)))
+                    {
+                        TempData["ErrorMessage"] =
+                            "This host IP changed since you reviewed it. Nothing was deleted. "
+                            + "Review its current details and confirm again.";
+                        return RedirectToAction(nameof(Delete), new { ip });
                     }
 
                     int subnetId = hostIp.SubnetId;
