@@ -27,6 +27,10 @@ public partial class InputSanitizationService : IInputSanitizationService
         return stripped.Trim();
     }
 
+    public bool ContainsHtmlTags(string? input) =>
+        !string.IsNullOrWhiteSpace(input)
+        && !string.Equals(StripHtml(input), input.Trim(), StringComparison.Ordinal);
+
     public string SanitizeNetworkInput(string? input)
     {
         if (string.IsNullOrWhiteSpace(input))

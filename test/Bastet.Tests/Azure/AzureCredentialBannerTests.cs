@@ -14,7 +14,8 @@ namespace Bastet.Tests.Azure;
 public class AzureCredentialBannerTests : IDisposable
 {
     private const string FailedMessage =
-        "Could not authenticate with Azure. Check the credentials and that Azure is reachable from this host.";
+        "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, "
+        + "or Azure may have refused, throttled or failed the request. Reload this page once the cause is resolved.";
 
     private const string NoSubscriptionsMessage =
         "Signed in to Azure, but this credential cannot see any subscriptions. Grant it access to a subscription and reload this page.";

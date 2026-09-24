@@ -83,6 +83,41 @@ public class SubnetControllerConcurrencyRedisplayTests : IDisposable
     }
 
     [Fact]
+    public async Task Edit_POST_ConcurrencyConflict_NamesAStepThatLoadsTheCurrentValues()
+    {
+        _context.Subnets.Add(new Subnet
+        {
+            Id = 53,
+            Name = "reload-test",
+            NetworkAddress = "10.53.0.0",
+            Cidr = 24,
+            CreatedAt = new DateTime(2026, 01, 01, 00, 00, 00, DateTimeKind.Utc),
+            CreatedBy = "test-admin"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        _context.ChangeTracker.Clear();
+
+        await _controller.Edit(53, new EditSubnetViewModel
+        {
+            Id = 53,
+            Name = "reload-test",
+            NetworkAddress = "10.53.0.0",
+            Cidr = 24,
+            OriginalCidr = 24,
+            Description = "mine",
+            RowVersion = [9, 9, 9, 9, 9, 9, 9, 9]
+        });
+
+        string message = Assert.Single(
+            _controller.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
+        Assert.EndsWith(
+            "Use Cancel, then Edit, to load the current values, then re-apply the changes that still make sense.",
+            message);
+        Assert.DoesNotContain("Reload", message);
+    }
+
+    [Fact]
     public async Task Edit_POST_ConcurrencyConflict_NamesTheStoredValuesThatDiffer()
     {
         _context.Subnets.Add(new Subnet

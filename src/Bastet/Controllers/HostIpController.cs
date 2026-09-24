@@ -85,6 +85,7 @@ public class HostIpController(
         {
             SubnetId = subnetId,
             SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})",
+            SubnetName = subnet.Name,
             NetworkAddress = subnet.NetworkAddress,
             Cidr = subnet.Cidr,
             SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}"
@@ -118,6 +119,7 @@ public class HostIpController(
                         if (subnet != null)
                         {
                             viewModel.SubnetInfo = $"{subnet.Name} ({subnet.NetworkAddress}/{subnet.Cidr})";
+                            viewModel.SubnetName = subnet.Name;
                             viewModel.NetworkAddress = subnet.NetworkAddress;
                             viewModel.Cidr = subnet.Cidr;
                             viewModel.SubnetRange = $"{subnet.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnet.NetworkAddress, subnet.Cidr)}";
@@ -164,6 +166,7 @@ public class HostIpController(
         if (subnetForError != null)
         {
             viewModel.SubnetInfo = $"{subnetForError.Name} ({subnetForError.NetworkAddress}/{subnetForError.Cidr})";
+            viewModel.SubnetName = subnetForError.Name;
             viewModel.NetworkAddress = subnetForError.NetworkAddress;
             viewModel.Cidr = subnetForError.Cidr;
             viewModel.SubnetRange = $"{subnetForError.NetworkAddress} - {ipUtilityService.CalculateBroadcastAddress(subnetForError.NetworkAddress, subnetForError.Cidr)}";
@@ -234,7 +237,7 @@ public class HostIpController(
                         {
                             ModelState.AddModelError("",
                                 "This host IP was modified by another user while you were editing it, so it was not saved. " +
-                                "Reload the page to see the current values, then re-apply the changes that still make sense.");
+                                "Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense.");
                         }
                         else
                         {
@@ -280,7 +283,7 @@ public class HostIpController(
 
                 ModelState.AddModelError("",
                     "This host IP was modified by another user while you were editing it, so it was not saved. " +
-                    "Reload the page to see the current values, then re-apply the changes that still make sense.");
+                    "Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense.");
                 return await RedisplayEditAsync(ip, viewModel);
             }
             catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
@@ -288,7 +291,7 @@ public class HostIpController(
                 logger.LogError(ex, "Host IP edit outcome unknown");
                 ModelState.AddModelError("",
                     "BASTET could not confirm whether this change was applied. "
-                    + "Reload the host IP to see its current state before retrying.");
+                    + "Use Cancel, then Edit on this host IP, to see its current state before retrying.");
             }
             catch (Exception ex)
             {
@@ -312,6 +315,7 @@ public class HostIpController(
             return NotFound();
         }
 
+        viewModel.SubnetId = hostIp.SubnetId;
         viewModel.SubnetInfo = $"{hostIp.Subnet.Name} ({hostIp.Subnet.NetworkAddress}/{hostIp.Subnet.Cidr})";
         viewModel.CreatedAt = hostIp.CreatedAt;
         viewModel.LastModifiedAt = hostIp.LastModifiedAt;
@@ -337,7 +341,8 @@ public class HostIpController(
             SubnetInfo = $"{hostIp.Subnet.Name} ({hostIp.Subnet.NetworkAddress}/{hostIp.Subnet.Cidr})",
             SubnetId = hostIp.SubnetId,
             CreatedAt = hostIp.CreatedAt,
-            CreatedBy = hostIp.CreatedBy
+            CreatedBy = hostIp.CreatedBy,
+            RowVersion = hostIp.RowVersion
         };
 
         return View(viewModel);
@@ -346,8 +351,13 @@ public class HostIpController(
     [HttpPost, ActionName("Delete")]
     [ValidateAntiForgeryToken]
     [Authorize(Policy = "RequireDeleteRole")]
-    public async Task<IActionResult> DeleteConfirmed(string ip, string confirmation)
+    public async Task<IActionResult> DeleteConfirmed(string ip, string confirmation, byte[]? rowVersion = null)
     {
+        if (!HostIpExists(ip))
+        {
+            return NotFound();
+        }
+
         if (confirmation != "approved")
         {
             TempData["ErrorMessage"] = "You must type 'approved' to confirm deletion.";
@@ -358,17 +368,6 @@ public class HostIpController(
         {
             return await subnetLockingService.ExecuteWithSubnetLockAsync<IActionResult>(async () =>
             {
-
-                ValidationResult validationResult = hostIpValidationService.ValidateHostIpDeletion(ip);
-                if (!validationResult.IsValid)
-                {
-                    foreach (ValidationError error in validationResult.Errors)
-                    {
-                        TempData["ErrorMessage"] = error.Message;
-                    }
-
-                    return RedirectToAction(nameof(Delete), new { ip });
-                }
 
                 using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await context.Database.BeginTransactionAsync();
 
@@ -381,6 +380,15 @@ public class HostIpController(
                     if (hostIp == null)
                     {
                         return NotFound();
+                    }
+
+                    if (hostIp.RowVersion is not null
+                        && (rowVersion is null || !rowVersion.SequenceEqual(hostIp.RowVersion)))
+                    {
+                        TempData["ErrorMessage"] =
+                            "This host IP changed since you reviewed it. Nothing was deleted. "
+                            + "Review its current details and confirm again.";
+                        return RedirectToAction(nameof(Delete), new { ip });
                     }
 
                     int subnetId = hostIp.SubnetId;
@@ -433,6 +441,11 @@ public class HostIpController(
         }
         catch (TimeoutException)
         {
+            if (!HostIpExists(ip))
+            {
+                return NotFound();
+            }
+
             TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
             return RedirectToAction(nameof(Delete), new { ip });
         }
@@ -529,7 +542,6 @@ public class HostIpController(
             {
                 OriginalIP = deletedHostIp.OriginalIP,
                 Name = deletedHostIp.Name,
-                OriginalSubnetId = deletedHostIp.OriginalSubnetId,
                 CreatedAt = deletedHostIp.CreatedAt,
                 DeletedAt = deletedHostIp.DeletedAt,
                 DeletedBy = deletedHostIp.DeletedBy
@@ -552,7 +564,7 @@ public class HostIpController(
                 else
                 {
 
-                    viewModel.SubnetName = "Unknown";
+                    viewModel.SubnetName = $"Unknown (Original Subnet ID: {deletedHostIp.OriginalSubnetId})";
                 }
             }
 
@@ -711,6 +723,11 @@ public class HostIpController(
         }
         catch (TimeoutException)
         {
+            if (!context.Subnets.Any(s => s.Id == dto.SubnetId))
+            {
+                return NotFound();
+            }
+
             TempData["ErrorMessage"] = "The operation timed out due to high concurrency. Please try again.";
             return RedirectToAction("Details", "Subnet", new { id = dto.SubnetId });
         }

@@ -699,7 +699,8 @@ public class SubnetControllerCidrEditTests : IDisposable
             _ = Assert.IsType<ViewResult>(flagOnResult);
             string flagOnMessage = _controller.ModelState["Cidr"]?.Errors.First().ErrorMessage ?? string.Empty;
             Assert.Contains("Azure", flagOnMessage);
-            Assert.Contains("ask an administrator to re-import it", flagOnMessage);
+            Assert.Contains("ask an administrator to delete this subnet and import it again", flagOnMessage);
+            Assert.DoesNotContain("re-import", flagOnMessage);
 
             _controller.ModelState.Clear();
             Environment.SetEnvironmentVariable("BASTET_AZURE_IMPORT", null);

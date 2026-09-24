@@ -9,6 +9,8 @@
     <p class="lead">View all host IP assignments across all subnets</p>
 </div>
 
+@await Html.PartialAsync("_TempDataAlerts")
+
 @if (Model.TotalCount == 0)
 {
     <div class="alert alert-info">

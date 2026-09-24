@@ -378,6 +378,48 @@ if (!dataProtectionTableExists)
         "without session affinity. Run the 2.5.sql or higher migration script or enable BASTET_AUTO_MIGRATE=true to resolve this.");
 }
 
+if (dataProtectionTableExists)
+{
+    string keyRingLockResource = $"Bastet:DataProtection:{new SqlConnectionStringBuilder(connectionString).InitialCatalog}";
+
+    try
+    {
+        using SqlConnection keyRingLockConnection = new(connectionString);
+
+        SqlConnection.ClearPool(keyRingLockConnection);
+        keyRingLockConnection.Open();
+
+        using SqlCommand acquireKeyRingLock = new("sp_getapplock", keyRingLockConnection);
+        acquireKeyRingLock.CommandType = System.Data.CommandType.StoredProcedure;
+        acquireKeyRingLock.Parameters.AddWithValue("@Resource", keyRingLockResource);
+        acquireKeyRingLock.Parameters.AddWithValue("@LockMode", "Exclusive");
+        acquireKeyRingLock.Parameters.AddWithValue("@LockOwner", "Session");
+        acquireKeyRingLock.Parameters.AddWithValue("@LockTimeout", 30000);
+        acquireKeyRingLock.ExecuteNonQuery();
+
+        try
+        {
+            app.Services.GetRequiredService<IDataProtectionProvider>()
+                .CreateProtector("Bastet.KeyRingStartup")
+                .Protect(new byte[1]);
+        }
+        finally
+        {
+            using SqlCommand releaseKeyRingLock = new("sp_releaseapplock", keyRingLockConnection);
+            releaseKeyRingLock.CommandType = System.Data.CommandType.StoredProcedure;
+            releaseKeyRingLock.Parameters.AddWithValue("@Resource", keyRingLockResource);
+            releaseKeyRingLock.Parameters.AddWithValue("@LockOwner", "Session");
+            releaseKeyRingLock.ExecuteNonQuery();
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex,
+            "Could not serialise the first Data Protection key-ring load across replicas. Startup continues; "
+            + "replicas that minted keys simultaneously may reject each other's forms until they are restarted.");
+    }
+}
+
 app.UseForwardedHeaders();
 
 string? configuredFrameAncestors = Environment.GetEnvironmentVariable("BASTET_FRAME_ANCESTORS")?.Trim();

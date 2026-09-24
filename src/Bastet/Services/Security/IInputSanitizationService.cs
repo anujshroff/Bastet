@@ -5,6 +5,8 @@ public interface IInputSanitizationService
 
     string StripHtml(string? input);
 
+    bool ContainsHtmlTags(string? input);
+
     string SanitizeNetworkInput(string? input);
 
     bool IsValidIpAddress(string? ipAddress);

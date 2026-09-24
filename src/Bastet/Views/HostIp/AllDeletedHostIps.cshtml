@@ -59,17 +59,7 @@ else
                             <tr>
                                 <td><code>@hostIp.OriginalIP</code></td>
                                 <td>@(string.IsNullOrEmpty(hostIp.Name) ? "-" : hostIp.Name)</td>
-                                <td>
-
-                                    @if (hostIp.SubnetName != "Unknown")
-                                    {
-                                        <text>@hostIp.SubnetName</text>
-                                    }
-                                    else
-                                    {
-                                        <text>Unknown (Original Subnet ID: @hostIp.OriginalSubnetId)</text>
-                                    }
-                                </td>
+                                <td>@hostIp.SubnetName</td>
                                 <td>@hostIp.DeletedAt.ToString("g")</td>
                                 <td>@(string.IsNullOrEmpty(hostIp.DeletedBy) ? "-" : hostIp.DeletedBy)</td>
                                 <td>@hostIp.CreatedAt.ToString("g")</td>

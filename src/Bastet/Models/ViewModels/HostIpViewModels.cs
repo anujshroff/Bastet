@@ -30,6 +30,7 @@ public class CreateHostIpViewModel
     public int SubnetId { get; set; }
 
     public string SubnetInfo { get; set; } = string.Empty;
+    public string SubnetName { get; set; } = string.Empty;
     public string NetworkAddress { get; set; } = string.Empty;
     public int Cidr { get; set; }
     public string SubnetRange { get; set; } = string.Empty;
@@ -65,4 +66,5 @@ public class DeleteHostIpViewModel
     public int SubnetId { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
+    public byte[]? RowVersion { get; set; }
 }

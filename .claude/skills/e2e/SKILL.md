@@ -496,6 +496,21 @@ the browser actually sent against what was persisted.**
   re-locking steps 3-4 on any selection change; Select All not submitting rows the server marked
   un-importable (jQuery `:checked` matches disabled inputs - `:not(:disabled)` is load-bearing); going
   back and changing an earlier step; the `previewSeq` out-of-order guard; double-commit.
+- **A failure answering a superseded snapshot never touches the fresh one** (both wizards, round 32). Hold the
+  product's lock from a sqlcmd session (`sp_getapplock 'Bastet:SubnetOperations'`, Exclusive/Session)
+  and insert a hand-made row on the target's exact range, so Confirm Import waits and then answers 409.
+  While it waits, go Back to Selection and preview again. When the 409 lands, the fresh plan must still
+  commit: Continue enabled, and Confirm sends **one** request answered 200. Run it with the operator
+  already on the fresh step 4 (Confirm re-enabled, not left dead), and with `page.route` holding the
+  fresh preview until the 409 is processed. Also hold the lock 36 s with no insert: the superseded 503
+  must not appear on the fresh plan's step 4. Reconcile: confirm row 1, add a hand-made child under
+  it, click Delete with `page.route` holding the 409, then go Back to Review, swap the tick to row 2,
+  confirm, and release: row 2 must delete (200). A superseded **success** did apply, so its summary,
+  the hidden Confirm or Delete and the redirect correctly stand; do not report them. "Superseded" is by
+  identity, not content: re-previewing or re-confirming the same ticks makes a new snapshot, the old
+  request's failure is dropped, and the next click gets its own answer. **The positive control is mandatory**: a 409 that
+  answers the snapshot still on screen must still void it (Continue/Confirm disabled, refusal shown),
+  in both wizards — dropping every 409 would pass the other checks.
 - **Every badge, with the filter OFF.** All rows show, so every label must be true. Build one scan
   carrying all five and assert the badge, the reason **and** the checkbox's `disabled` state together -
   a truthful label on an unusable control is still a defect:
@@ -631,6 +646,14 @@ the browser actually sent against what was persisted.**
   > Poll until acquired before driving the write, and poll until clear before the control - killing the
   > holder does not release it immediately. **Two checks failed this way in one run, both of them the
   > instrument rather than the application.**
+- **Both Edit pages classify an indeterminate save, and name a step that works.** Hold an exclusive
+  lock on the edited row from a sqlcmd session (`BEGIN TRAN; UPDATE Subnets SET Description =
+  Description WHERE Id = <id>; WAITFOR DELAY '00:00:40'; ROLLBACK;`, or the same on `HostIpAssignments`
+  by `IP`) and post that row's Edit form. Row versioning lets the reads through, so the save itself times
+  out after 30 s. Assert the redisplay says "BASTET could not confirm whether this change was applied.
+  Use Cancel, then Edit, to see its current state before retrying." (host IP: "... Use Cancel, then Edit
+  on this host IP, ...") and that nothing was written. These are POST-result pages, where a browser
+  reload re-submits the form, so neither sentence may name a reload; they have no unit seam.
 - **Validation parity across write paths.** Take one field and drive the same value through every path
   that writes it — Create, Edit, and the bulk import commit — asserting they agree. Cover both
   directions in one run: markup (`<script>alert(1)</script>`, `<img src=x onerror=alert(1)>`) refused
@@ -754,6 +777,12 @@ Every non-Azure action driven as a request, not asserted in a unit test:
 - validation as requests: overlap, containment, parent fit, CIDR boundaries, a host IP on the network
   or broadcast address, a host IP on a subnet that has children (refused)
 - every page asserted on **rendered content and title**, never a bare HTTP 200
+- **Expand All / Collapse All on a large tree, in the browser** (round 32). Seed 250 /24 roots with two
+  /25 children each (the bulk-import shape) and time each click until `$('.subnet-children').promise()`
+  resolves: it must stay near the 200 ms animation, not grow with the square of the root count (the
+  per-container repaint took ~6.5 s here). After every click assert the end state too — every container
+  hidden or shown, one `bi-plus-square` or `bi-dash-square` per parent, leaf dashes untouched — and
+  repeat after collapsing one root by hand, so a faster handler that paints the wrong icons fails.
 
 ## H - Authorization, antiforgery, headers, locking
 
@@ -870,6 +899,10 @@ looks exactly like a defect, and three separate ones did:
   `confirmedHostIpCount` (a subtree host-IP count; the old `confirmedMaxHostIpTicks` watermark is
   gone). A hand-built delete POST that sends only `Id` and `confirmation` returns **302 and archives
   nothing**, which reads exactly like a broken delete path. Harvest the form.
+- **The host IP delete form carries the reviewed row's `rowVersion`** as well as `ip` and
+  `confirmation`. A hand-built POST without it, or one whose row was renamed or re-created after the
+  page was loaded, returns **302 back to the Delete page** with "This host IP changed since you
+  reviewed it. Nothing was deleted." and archives nothing. Harvest the form.
 
 Harvest forms with a real HTML parser over `input`/`textarea`/`select`, not a regex: a regex that
 assumes `name` precedes `value` silently drops `RowVersion`, and the POST then redisplays the form as

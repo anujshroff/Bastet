@@ -19,19 +19,12 @@ $(document).ready(function () {
     
     // Expand all subnets
     $('#expand-all').on('click', function () {
-        $('.subnet-children').slideDown(200);
-        updateToggleIcons();
+        $('.subnet-children').slideDown(200).promise().done(updateToggleIcons);
     });
     
     // Collapse all subnets
     $('#collapse-all').on('click', function () {
-        // Keep the first level visible
-        $('.subnet-tree > .subnet-item > .subnet-children').show();
-        // Both calls are needed. The callback corrects the deeper levels once they are actually
-        // hidden; the bare call keeps the first level right even when the tree is only one level
-        // deep, in which case the selector above matches nothing and the callback never fires.
-        $('.subnet-tree .subnet-item .subnet-item > .subnet-children').slideUp(200, updateToggleIcons);
-        updateToggleIcons();
+        $('.subnet-children').slideUp(200).promise().done(updateToggleIcons);
     });
     
     // Function to update toggle icons

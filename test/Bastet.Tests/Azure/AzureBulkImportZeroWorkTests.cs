@@ -267,6 +267,35 @@ public class AzureBulkImportZeroWorkTests
     }
 
     [Fact]
+    public void TheRenameFlagAgreesWithThePlan_ForAnUnlinkedTargetTheVNetWouldAdopt()
+    {
+        BulkImportSelectionDto selection = new()
+        {
+            RenameMatchedBastetSubnets = true,
+            VNetPrefixes =
+            [
+                new BulkImportSelectedVNetPrefixDto
+                {
+                    VNetName = "vnet-a",
+                    VNetResourceId = VNetId("vnet-a"),
+                    AddressPrefix = "10.63.0.0/16",
+                    Subnets = []
+                }
+            ]
+        };
+
+        List<ExistingSubnetSnapshot> existing = [Row(1, "hand-built", "10.63.0.0", 16)];
+
+        BulkAzureVNetViewModel vnet = VNet("vnet-a", ["10.63.0.0/16"]);
+        _planner.AnnotateAvailability([vnet], existing);
+
+        BulkImportPlanItem item = Assert.Single(_planner.BuildPlan(selection, existing).Items);
+
+        Assert.False(vnet.Prefixes[0].WouldRenameTarget);
+        Assert.False(item.WillRename);
+    }
+
+    [Fact]
     public void ARenameAppliesToATargetWithChildrenToo()
     {
         BulkImportSelectionDto selection = new()

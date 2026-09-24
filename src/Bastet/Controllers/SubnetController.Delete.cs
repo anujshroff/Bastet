@@ -20,10 +20,10 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
+            return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
         }
 
-        int descendantCount = await CountAllDescendants(id);
+        List<int> descendantIds = await SubtreeSubnetIdsAsync(id);
 
         DeleteSubnetViewModel viewModel = new()
         {
@@ -32,9 +32,9 @@ public partial class SubnetController : Controller
             NetworkAddress = subnet.NetworkAddress,
             Cidr = subnet.Cidr,
             Description = subnet.Description,
-            ChildSubnetCount = descendantCount,
+            ChildSubnetCount = descendantIds.Count,
             HostIpCount = await SubtreeHostIpCountAsync(id),
-            ConfirmedMaxSubnetId = await MaxDescendantSubnetIdAsync(id),
+            ConfirmedMaxSubnetId = descendantIds.Count == 0 ? 0 : descendantIds.Max(),
             RowVersion = subnet.RowVersion
         };
 
@@ -87,6 +87,10 @@ public partial class SubnetController : Controller
     public async Task<IActionResult> DeleteConfirmed(
         int id, string confirmation, int? confirmedMaxSubnetId, int? confirmedHostIpCount, byte[]? rowVersion = null)
     {
+        if (!SubnetExists(id))
+        {
+            return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
+        }
 
         if (confirmation != "approved")
         {
@@ -109,10 +113,18 @@ public partial class SubnetController : Controller
         }
         catch (TimeoutException)
         {
+            if (!SubnetExists(id))
+            {
+                return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
+            }
+
             TempData["ErrorMessage"] = "The operation timed out because another subnet operation is in progress. Please try again.";
             return RedirectToAction(nameof(Delete), new { id });
         }
     }
+
+    private static string SubnetNotFoundMessage(int id) =>
+        $"The subnet with ID {id} could not be found or may have been deleted.";
 
     private async Task<IActionResult> DeleteConfirmedCore(
         int id, int confirmedMaxSubnetId, int confirmedHostIpCount, byte[]? rowVersion)
@@ -125,7 +137,7 @@ public partial class SubnetController : Controller
 
         if (subnet == null)
         {
-            return this.RedirectToErrorPage(404, $"The subnet with ID {id} could not be found or may have been deleted.");
+            return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
         }
 
         if (subnet.RowVersion is not null

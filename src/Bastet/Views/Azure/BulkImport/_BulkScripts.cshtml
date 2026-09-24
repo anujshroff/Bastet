@@ -28,7 +28,7 @@
 
         function readErrorMessage(xhr) {
             return xhr.status === 0
-                ? "The server could not be reached."
+                ? "The server could not be reached, or your sign-in has expired. Reload this page and try again."
                 : "The server returned status " + xhr.status + ".";
         }
 
@@ -535,6 +535,7 @@
         }
 
         function renderPlan(plan) {
+            $("#bulk-commit-error").addClass("d-none");
 
             const $globalErrorsList = $("#bulk-global-errors-list").empty();
             if (plan.globalErrors && plan.globalErrors.length > 0) {
@@ -619,7 +620,6 @@
             activateTab("step4");
 
             $("#bulk-commit-success").addClass("d-none");
-            $("#bulk-commit-error").addClass("d-none");
 
             $("#bulk-confirm-commit-btn").prop("disabled", committing || committed).toggle(!committed);
         });
@@ -659,18 +659,23 @@
                             setTimeout(function () { window.location.href = result.redirectUrl; }, 2000);
                         }
                     } else {
-                        showCommitError(result);
+                        showCommitError(result, 0);
                     }
                 },
                 error: function (xhr) {
+                    if (selection !== lastSelection) {
+                        $("#bulk-confirm-commit-btn").prop("disabled", false);
+                        return;
+                    }
+
                     let payload = null;
                     try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
                     if (!payload) {
                         payload = xhr.status === 0
-                            ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying." }
+                            ? { error: "The server could not be reached, so it is unknown whether the change was applied. Check the subnet list before retrying; if you are asked to sign in, sign in and run the import again." }
                             : { error: "The server returned status " + xhr.status + "." };
                     }
-                    showCommitError(payload);
+                    showCommitError(payload, xhr.status);
                 },
                 complete: function () {
                     committing = false;
@@ -679,7 +684,7 @@
             });
         }
 
-        function showCommitError(payload) {
+        function showCommitError(payload, status) {
 
             $("#bulk-commit-error-message").text(payload && payload.error ? payload.error : "The import failed.");
             const $list = $("#bulk-commit-error-list").empty();
@@ -700,6 +705,11 @@
                 $.each(payload.differences, function (i, d) { $list.append($('<li></li>').text(d)); });
             }
             $("#bulk-commit-error").removeClass("d-none");
+
+            if (status === 409) {
+                invalidatePlan();
+                return;
+            }
 
             $("#bulk-confirm-commit-btn").prop("disabled", false);
         }

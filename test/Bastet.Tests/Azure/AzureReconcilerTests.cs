@@ -209,6 +209,28 @@ public class AzureReconcilerTests
     }
 
     [Fact]
+    public void AnAbsentResourceAzureCouldNotBeAskedAbout_IsWithheld_WithoutClaimingAnythingAboutIt()
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-a", ["10.19.0.0/16"])),
+            [Linked(1, "app", "10.19.1.0", 24, SubnetId("vnet-a", "sn-a"))]);
+
+        Assert.Single(plan.Items);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [SubnetId("vnet-a", "sn-a")] = AzureResourceConfirmation.Unknown
+        });
+
+        Assert.Empty(plan.Items);
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Equal(
+            "1 Azure-linked subnet(s) were missing from the subscription listing, and Azure could not be asked about them "
+            + "- the read failed rather than answering. Try the scan again. They have been withheld from deletion: 'app' (10.19.1.0/24).",
+            warning);
+    }
+
+    [Fact]
     public void AnAbsentResourceConfirmedDeleted_IsKept()
     {
         AzureReconcilePlanViewModel plan = Build(

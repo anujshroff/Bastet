@@ -60,7 +60,8 @@ public class SubnetDetailsModalScriptTests
         Assert.All(sizeWrites, m => Assert.Matches(
             @"^(usableByCidr\[(activeSuggestion\.recommendedCidr|cidrValue)\]\.toLocaleString\(\)|sizeText)$",
             m.Groups[1].Value));
-        Assert.Contains("No free /${cidrValue} block starts at or after ${activeSuggestion.startIp}.", script);
+        Assert.Matches(@"if \(address === null\)\s*\{\s*refuse\(`No free /\$\{cidrValue\} block starts at or after \$\{activeSuggestion\.startIp\}\.`", script);
+        Assert.Matches(@"if \(address === undefined\)\s*\{", script);
         Assert.DoesNotContain("No compatible network address found", script);
         Assert.Contains("This network address has been adjusted to avoid overlaps.", script);
     }
@@ -129,9 +130,29 @@ public class SubnetDetailsModalScriptTests
     {
         string script = ReadView(ScriptPartial);
 
-        Match refuse = Regex.Match(script, @"function refuse\([^)]*\)\s*\{(?<body>[^}]*)\}");
-        Assert.True(refuse.Success);
-        Assert.Contains("$('#networkAddressDisplay').val(activeSuggestion.startIp);", refuse.Groups["body"].Value);
-        Assert.Contains("makeNetworkAddressReadOnly();", refuse.Groups["body"].Value);
+        Assert.Matches(@"function refuse\([^)]*\)\s*\{\s*\$\('#networkAddressDisplay'\)\.val\(activeSuggestion\.startIp\);\s*makeNetworkAddressReadOnly\(\);", script);
+    }
+
+    [Fact]
+    public void CidrModal_TakesItsLowerBoundFromTheRangesOwnTable_NotFromTheParent()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Assert.Matches(
+            new Regex(
+                @"Object\.keys\(activeSuggestion\.networkAddressByCidr\)\s*\.find\(c\s*=>\s*activeSuggestion\.networkAddressByCidr\[c\]\s*!==\s*null\)",
+                RegexOptions.Singleline),
+            script);
+        Assert.Contains("$('#validCidrRange').text(`${availableCidr} - ${maxCidr}", script);
+        Assert.Contains("$('#cidrInput').attr('min', availableCidr)", script);
+    }
+
+    [Fact]
+    public void CidrModal_NoLongerDerivesABoundFromTheParentCidr()
+    {
+        string script = ReadView(ScriptPartial);
+
+        Assert.DoesNotContain("parentCidr", script);
+        Assert.DoesNotContain("minCidr", script);
     }
 }

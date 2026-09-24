@@ -15,7 +15,6 @@ public class AllDeletedHostIpItemViewModel
     public string OriginalIP { get; set; } = string.Empty;
     public string? Name { get; set; }
 
-    public int OriginalSubnetId { get; set; }
 
     public string SubnetName { get; set; } = string.Empty;
 

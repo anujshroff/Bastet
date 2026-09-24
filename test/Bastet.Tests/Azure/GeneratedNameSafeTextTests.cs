@@ -60,16 +60,89 @@ public class GeneratedNameSafeTextTests
     [Theory]
     [InlineData("sn-multi (10.20.40.0-24)")]
     [InlineData("vnet-a (10.71.0.0-16)")]
-    public void AGeneratedParentNameSurvivesThePrefillIntact(string generatedParentName)
+    [InlineData("R\u00e9seau Z\u00fcrich \"Ost\"")]
+    [InlineData("\u6771\u4eac")]
+    [InlineData("S\u00e3o Paulo/DC1")]
+    public void AParentNameSurvivesThePrefillIntact(string parentName)
     {
-        Assert.True(SafeTextOracle.IsSafe(generatedParentName));
-        Assert.Equal(generatedParentName, SubnetNaming.ToSafeText(generatedParentName));
+        string prefill = SubnetNaming.WithSuffix(parentName, "-10.20.40.0-24", 100);
+
+        Assert.Equal($"{parentName}-10.20.40.0-24", prefill);
+    }
+
+    [Theory]
+    [InlineData("\U0001F431")]
+    [InlineData("\U00020000")]
+    public void APrefillCutNeverSplitsACharacterInTwo(string astral)
+    {
+        const string suffix = "-10.102.20.0-26";
+        string parentName = new string('A', 84) + astral + new string('B', 14);
+
+        Assert.Equal(new string('A', 84) + suffix, SubnetNaming.WithSuffix(parentName, suffix, 100));
+
+        for (int maxLength = suffix.Length; maxLength <= parentName.Length + suffix.Length; maxLength++)
+        {
+            string prefill = SubnetNaming.WithSuffix(parentName, suffix, maxLength);
+
+            Assert.True(HasNoLoneSurrogate(prefill), $"maxLength {maxLength} pre-filled half a character: {prefill}");
+            Assert.StartsWith(prefill[..^suffix.Length], parentName, StringComparison.Ordinal);
+        }
+    }
+
+    private static bool HasNoLoneSurrogate(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(text[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     [Fact]
-    public void TheForwardSlashIsStillForbidden_SoTheSeparatorMayNotGoBack()
+    public void ThePlannerNeverMintsAForwardSlash_SoTheSeparatorMayNotGoBack()
     {
-        Assert.False(SafeTextOracle.IsSafe("sn-multi (10.20.40.0/24)"));
-        Assert.Equal("sn-multi (10.20.40.024)", SubnetNaming.ToSafeText("sn-multi (10.20.40.0/24)"));
+        AzureBulkImportPlanner planner = new(new IpUtilityService(), _sanitizer);
+
+        BulkImportPlanViewModel plan = planner.BuildPlan(
+            new BulkImportSelectionDto
+            {
+                VNetPrefixes =
+                [
+                    new BulkImportSelectedVNetPrefixDto
+                    {
+                        VNetName = "vnet-a",
+                        VNetResourceId = VNetA,
+                        AddressPrefix = "10.71.0.0/16",
+                        VNetIpv4AddressPrefixes = ["10.71.0.0/16", "10.72.0.0/16"],
+                        Subnets = [Sub("sn-multi", "10.71.1.0/24")]
+                    },
+                    new BulkImportSelectedVNetPrefixDto
+                    {
+                        VNetName = "vnet-a",
+                        VNetResourceId = VNetA,
+                        AddressPrefix = "10.72.0.0/16",
+                        VNetIpv4AddressPrefixes = ["10.71.0.0/16", "10.72.0.0/16"],
+                        Subnets = [Sub("sn-other", "10.72.1.0/24")]
+                    }
+                ]
+            },
+            []);
+
+        List<string> minted =
+        [
+            .. plan.Items.Select(i => i.AutoCreateTargetName ?? string.Empty),
+            .. plan.Items.SelectMany(i => i.ChildSubnets).Select(c => c.Name)
+        ];
+
+        Assert.NotEmpty(minted);
+        Assert.All(minted, name => Assert.DoesNotContain("/", name));
     }
 }

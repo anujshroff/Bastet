@@ -51,7 +51,7 @@ public class AzureWizardClientWordingTests
         string view = ReadView(viewPath);
 
         Assert.Matches(
-            @"if \(!payload\)\s*\{\s*payload\s*=\s*xhr\.status\s*===\s*0\s*\?\s*\{\s*error:\s*""The server could not be reached, so it is unknown whether the change was applied\. Check the subnet list before retrying\.""\s*\}\s*:\s*\{\s*error:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*\}\s*;\s*\}",
+            @"if \(!payload\)\s*\{\s*payload\s*=\s*xhr\.status\s*===\s*0\s*\?\s*\{\s*error:\s*""The server could not be reached, so it is unknown whether the change was applied\. Check the subnet list before retrying; if you are asked to sign in, sign in and [^""]+\.""\s*\}\s*:\s*\{\s*error:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*\}\s*;\s*\}",
             view);
         Assert.DoesNotContain("Server error: ", view);
     }
@@ -80,7 +80,7 @@ public class AzureWizardClientWordingTests
         string view = ReadView(viewPath);
 
         Assert.Matches(
-            @"function readErrorMessage\(xhr\)\s*\{\s*return xhr\.status\s*===\s*0\s*\?\s*""The server could not be reached\.""\s*:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*;\s*\}",
+            @"function readErrorMessage\(xhr\)\s*\{\s*return xhr\.status\s*===\s*0\s*\?\s*""The server could not be reached, or your sign-in has expired\. Reload this page and try again\.""\s*:\s*""The server returned status ""\s*\+\s*xhr\.status\s*\+\s*""\.""\s*;\s*\}",
             view);
         Assert.DoesNotContain("Error connecting to server", view);
 
@@ -96,5 +96,180 @@ public class AzureWizardClientWordingTests
         Assert.DoesNotContain("Because Azure could not be read", stepReview);
         Assert.DoesNotContain("Fix the connection", stepReview);
         Assert.Contains("Fix the problem shown", stepReview);
+    }
+
+    public static TheoryData<string> WizardScripts => new()
+    {
+        "src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml",
+        "src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml",
+    };
+
+    [Theory]
+    [MemberData(nameof(WizardScripts))]
+    public void StatusZeroBanner_NamesTheSignInCause_AndARemedyTheReaderCanReach(string script)
+    {
+        string text = ReadView(script);
+
+        Assert.Contains(
+            "\"The server could not be reached, or your sign-in has expired. Reload this page and try again.\"",
+            text);
+        Assert.DoesNotContain("\"The server could not be reached.\"", text);
+    }
+
+    [Theory]
+    [MemberData(nameof(WizardScripts))]
+    public void OutcomeUnknownBanner_KeepsItsHedge_AndAddsTheSignInStep(string script)
+    {
+        string text = ReadView(script);
+
+        Assert.Contains("so it is unknown whether the change was applied", text);
+        Assert.Contains("if you are asked to sign in, sign in and", text);
+        Assert.DoesNotContain("Check the subnet list before retrying.\"", text);
+    }
+
+    [Fact]
+    public void EachWizard_NamesItsOwnNextStep_NeverTheOtherWizards()
+    {
+        string bulk = ReadView("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml");
+        string reconcile = ReadView("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
+
+        Assert.Contains("sign in and run the import again", bulk);
+        Assert.DoesNotContain("sign in and scan again", bulk);
+
+        Assert.Contains("sign in and scan again", reconcile);
+        Assert.DoesNotContain("sign in and run the import again", reconcile);
+    }
+
+    [Theory]
+    [MemberData(nameof(WizardScripts))]
+    public void AStalePlan409_VoidsTheSnapshot_RatherThanReOfferingIt(string script)
+    {
+        string text = ReadView(script);
+
+        Match handler = Regex.Match(
+            text,
+            @"function showCommitError\(payload,\s*status\)\s*\{(?<body>.*?)\n        \}",
+            RegexOptions.Singleline);
+        Assert.True(handler.Success, $"showCommitError must take the status in {script}");
+
+        string body = handler.Groups["body"].Value;
+        Assert.Matches(new Regex(@"if\s*\(status\s*===\s*409\)\s*\{", RegexOptions.Singleline), body);
+
+        int branch = body.IndexOf("status === 409", StringComparison.Ordinal);
+        int reEnable = body.IndexOf("prop(\"disabled\", false)", StringComparison.Ordinal);
+        if (reEnable >= 0)
+        {
+            Assert.True(branch < reEnable, "the 409 branch must return before anything is re-enabled");
+        }
+    }
+
+    [Fact]
+    public void ABulk409_InvalidatesThePlan_SoTheStaleSelectionCannotBeReposted()
+    {
+        string body = ShowCommitErrorBody("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml");
+
+        Assert.Contains("invalidatePlan();", body);
+        Assert.Contains("return;", body);
+    }
+
+    [Fact]
+    public void AReconcile409_VoidsTheConfirmationAndThePlan_WithoutBouncingOffTheBanner()
+    {
+        string body = ShowCommitErrorBody("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
+
+        Assert.Contains("lastPlan = null;", body);
+        Assert.Contains("voidConfirmation();", body);
+        Assert.DoesNotContain("invalidateConfirmation();", body);
+    }
+
+    [Fact]
+    public void VoidConfirmation_IsTheStateHalf_AndInvalidateConfirmationAddsTheBounce()
+    {
+        string text = ReadView("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
+
+        Assert.Matches(
+            new Regex(@"function voidConfirmation\(\)\s*\{(?:(?!activateTab).)*?\n        \}", RegexOptions.Singleline),
+            text);
+        Assert.Matches(
+            new Regex(@"function invalidateConfirmation\(\)\s*\{\s*voidConfirmation\(\);", RegexOptions.Singleline),
+            text);
+    }
+
+    [Theory]
+    [InlineData("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml", "#bulk-go-commit-btn", "#bulk-commit-error")]
+    [InlineData("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml", "#rec-go-confirm-btn", "#rec-commit-error")]
+    public void ReEnteringTheCommitStep_NeverHidesARefusalThatStillStands(
+        string script, string stepButton, string errorPanel)
+    {
+        string text = ReadView(script);
+
+        Match handler = Regex.Match(
+            text,
+            Regex.Escape($"$(\"{stepButton}\").on(\"click\"") + @".*?\n        \}\);",
+            RegexOptions.Singleline);
+        Assert.True(handler.Success, $"the {stepButton} click handler was not found in {script}");
+
+        Assert.DoesNotContain($"$(\"{errorPanel}\").addClass(\"d-none\")", handler.Value);
+    }
+
+    [Theory]
+    [MemberData(nameof(WizardScripts))]
+    public void TheRealStatusReachesTheErrorHandler_OrTheBranchIsInert(string script)
+    {
+        string text = ReadView(script);
+
+        Assert.Contains("showCommitError(payload, xhr.status);", text);
+        Assert.Contains("showCommitError(result, 0);", text);
+        Assert.DoesNotContain("showCommitError(payload, 0)", text);
+        Assert.DoesNotContain("showCommitError(result, 409)", text);
+    }
+
+    [Theory]
+    [InlineData("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml", "#bulk-commit-error")]
+    [InlineData("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml", "#rec-commit-error")]
+    public void AFreshPlan_ClearsARefusalThatNoLongerStands(string script, string errorPanel)
+    {
+        string text = ReadView(script);
+
+        Match render = Regex.Match(
+            text,
+            @"function renderPlan\(plan\)\s*\{(?<body>.{0,400})",
+            RegexOptions.Singleline);
+        Assert.True(render.Success, $"renderPlan was not found in {script}");
+
+        Assert.Contains($"$(\"{errorPanel}\").addClass(\"d-none\")", render.Groups["body"].Value);
+    }
+
+    [Fact]
+    public void AReconcile409_AlsoDisablesTheStepTwoForwardButton_AsBulkDoes()
+    {
+        string body = ShowCommitErrorBody("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
+
+        Assert.Contains("updateGoConfirmBtn();", body);
+
+        Assert.True(
+            body.IndexOf("lastPlan = null;", StringComparison.Ordinal)
+                < body.IndexOf("updateGoConfirmBtn();", StringComparison.Ordinal),
+            "the snapshot must be voided before the forward button is re-evaluated");
+    }
+
+    [Theory]
+    [InlineData("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml",
+        @"error:\s*function\s*\(xhr\)\s*\{\s*if\s*\(selection\s*!==\s*lastSelection\)\s*\{\s*\$\(""#bulk-confirm-commit-btn""\)\.prop\(""disabled"",\s*false\);\s*return;\s*\}")]
+    [InlineData("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml",
+        @"error:\s*function\s*\(xhr\)\s*\{\s*if\s*\(ids\s*!==\s*confirmedIds\)\s*\{\s*return;\s*\}")]
+    public void AnAnswerToASupersededSnapshot_IsDroppedBeforeItCanVoidTheFreshOne(string script, string guard)
+    {
+        Assert.Matches(new Regex(guard, RegexOptions.Singleline), ReadView(script));
+    }
+
+    private static string ShowCommitErrorBody(string script)
+    {
+        Match handler = Regex.Match(
+            ReadView(script),
+            @"function showCommitError\(payload,\s*status\)\s*\{(?<body>.*?)\n        \}",
+            RegexOptions.Singleline);
+        Assert.True(handler.Success, $"showCommitError must take the status in {script}");
+        return handler.Groups["body"].Value;
     }
 }

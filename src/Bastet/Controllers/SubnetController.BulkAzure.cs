@@ -31,6 +31,15 @@ public partial class SubnetController : Controller
             return BadRequest(new { success = false, error = "No selection was provided." });
         }
 
+        if (FirstNameCarryingHtmlTags(selection, sanitizationService) is string refusedName)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                error = $"HTML tags are not allowed in subnet names, so '{refusedName}' cannot be imported. Rename it in Azure, then run the import again."
+            });
+        }
+
         try
         {
 
@@ -41,6 +50,44 @@ public partial class SubnetController : Controller
         {
             return StatusCode(503, new { success = false, error = "The operation timed out because another subnet operation is in progress. Please try again." });
         }
+    }
+
+    private static string? FirstNameCarryingHtmlTags(
+        BulkImportSelectionDto selection,
+        IInputSanitizationService? sanitizationService)
+    {
+        if (sanitizationService is null)
+        {
+            return null;
+        }
+
+        foreach (BulkImportSelectedVNetPrefixDto prefix in selection.VNetPrefixes ?? [])
+        {
+            if (prefix is null)
+            {
+                continue;
+            }
+
+            if (sanitizationService.ContainsHtmlTags(prefix.VNetName))
+            {
+                return prefix.VNetName;
+            }
+
+            if (sanitizationService.ContainsHtmlTags(prefix.Expected?.NewName))
+            {
+                return prefix.Expected!.NewName;
+            }
+
+            foreach (BulkImportSelectedSubnetDto subnet in prefix.Subnets ?? [])
+            {
+                if (subnet is not null && sanitizationService.ContainsHtmlTags(subnet.Name))
+                {
+                    return subnet.Name;
+                }
+            }
+        }
+
+        return null;
     }
 
     private List<string> DescribeApprovedPlanDivergences(BulkImportSelectionDto selection, BulkImportPlanViewModel plan)

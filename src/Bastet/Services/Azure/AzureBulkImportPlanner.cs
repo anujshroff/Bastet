@@ -198,7 +198,7 @@ namespace Bastet.Services.Azure
 
                 bool isTopUp = IsSameVNet(exact, vnet);
 
-                result.WouldRenameTarget = !string.Equals(
+                result.WouldRenameTarget = isTopUp && !string.Equals(
                     exact.Name, ProposedTargetName(vnet.Name, vnet.Ipv4AddressPrefixes.Count, network, cidr), StringComparison.Ordinal);
 
                 if (exact.HasHostIpAssignments)
@@ -237,7 +237,7 @@ namespace Bastet.Services.Azure
 
                 result.Status = BulkImportAvailability.WillUpdateExisting;
 
-                result.Reason = exact.HasChildSubnets
+                result.Reason = isTopUp && exact.HasChildSubnets
                     ? $"Will add any missing subnets to existing Bastet subnet '{exact.Name}'. Subnets already imported are left untouched."
                     : $"Will import into existing Bastet subnet '{exact.Name}'.";
                 result.IsSelectable = true;
@@ -569,7 +569,7 @@ namespace Bastet.Services.Azure
                         + $"and importing '{p.Source.VNetResourceId}' would replace that link.");
                 }
 
-                if (renameMatched)
+                if (renameMatched && IsSameVNet(exact, p.Source.VNetResourceId))
                 {
                     string proposed = ProposedTargetName(p.Source.VNetName, p.Source.VNetIpv4AddressPrefixes.Count, p.PrefixNetwork, p.PrefixCidr);
                     if (!string.Equals(proposed, exact.Name, StringComparison.Ordinal))
@@ -638,21 +638,6 @@ namespace Bastet.Services.Azure
             }
 
             HashSet<string> usedNames = new(StringComparer.OrdinalIgnoreCase);
-            string? targetExistingName = exact?.Name;
-            string? targetAutoCreatedName = item.AutoCreateTargetName;
-
-            if (!string.IsNullOrEmpty(targetExistingName))
-            {
-                usedNames.Add(targetExistingName);
-            }
-            if (item.WillRename && !string.IsNullOrEmpty(item.NewName))
-            {
-                usedNames.Add(item.NewName);
-            }
-            if (!string.IsNullOrEmpty(targetAutoCreatedName))
-            {
-                usedNames.Add(targetAutoCreatedName);
-            }
 
             foreach (ParsedSubnetSelection sub in p.Subnets)
             {

@@ -166,6 +166,12 @@ condition is that the row **already carries the Azure resource id** it is being 
 "Only show what would change" hides exactly the rows that would change nothing, which is only
 correct while those cases are classified correctly.
 
+**A row holding host IP assignments is never a VNet target.** A row with host IPs cannot hold child
+subnets, and a VNet exists to hold subnets, so linking the two asserts a containment the model
+forbids and leaves the next import with nowhere to put the Azure subnets. That refusal is
+deliberate, is not an asymmetry to be repaired against the fully-allocated branch, and is never to
+be re-filed (owner ruling, §8 round 31).
+
 **A row the operator built by hand can be adopted by the VNet it matches.** Linking a not-yet-linked
 target is real work and stays offered **whether or not that row already has children** — the
 operator may well have carved the space by hand first and now want Bastet to track it against Azure.
@@ -210,7 +216,13 @@ status is added. It has already shipped once: "Only show what would change" test
   tree the app itself populated but its own form will not re-enter. Check the attribute sets side by
   side, not the error messages — the divergence that shipped was `[SafeText]` on the Create view
   model and not the Edit one.
-- **A validation rule that refuses ordinary operator text is a defect, not caution.** Output
+- **A validation rule that refuses ordinary operator text is a defect, not caution** — **except the
+  HTML-tag refusal on Name and Description, which the owner has ruled stays (§8, round 31).** That
+  one is settled: `[NoHtml]` and the `ContainsHtmlTags` predicate behind it are deliberate, are not
+  a defect, and are never to be filed, widened or deleted. What §5 still requires of it is
+  **parity**: every write path must answer that question the same way, which is why the bulk import
+  commit refuses the names the form refuses instead of silently stripping them. For every *other*
+  input filter the bullet stands as written. Output
   encoding is what makes the app safe — Razor encodes at every sink and the wizard's client escapes
   before it builds HTML — so an input filter is a usability rule wearing a security badge.
   `<[^>]*>` treated "temp < 5 and load > 3" as a tag. When tightening one, prove the change against
@@ -246,18 +258,21 @@ status is added. It has already shipped once: "Only show what would change" test
   multi-prefix subnets, top-ups and re-carves are in scope. "Feature change, not a bug fix", "the
   data model does not support it" and "out of scope" describe work, not reasons to decline. One
   round used such a verdict and it shipped the bug for four more.
-- **A test gap is closed at fix time, never filed for the next round.** Every fix ships with the
-  test that fails against the unfixed code, wherever existing test infrastructure can reach the
-  behaviour. Where no seam exists (client-JS partials, framework internals, live Azure), the
-  surface is recorded once - in the fix's ledger row, which is durable, and as `/e2e` coverage,
-  which is executable; a FIXED entry is neither, because the findings file is deleted at
-  close-out. A recorded gap is settled and is never re-filed. The audit files a test finding only
-  where this rule was broken: a fix left both unpinned and unrecorded, or a test that stays green
-  with the code it guards broken. When reconcile does its job that class is structurally empty -
-  that, not ignoring tests, is how the loop converges.
+- **Tests serve the product, never the other way around. The audit files product defects only,
+  and no test finding of any kind** - not a missing pin, not a weak pin, not an unrecorded gap.
+  Test quality is reconcile's duty at fix time: every fix ships with the test that fails against
+  the unfixed code, proven the reconcile way (the full revert reds the suite, or the recorded
+  `/e2e` drive where no unit seam exists, and the defect is visibly back in the running build).
+  Where no seam exists (client-JS partials, framework internals, live Azure), the surface is
+  recorded once - in the fix's ledger row, which is durable, and as `/e2e` coverage, which is
+  executable; a FIXED entry is neither, because the findings file is deleted at close-out.
+  Reconcile's independent fix review and its whole-diff gate enforce the proof and repair a fix
+  shipped without it in the same round; the next audit never inherits it as a finding. **For the
+  audit, the absolute rule at the top of `.claude/skills/audit/SKILL.md` — no audit agent reads
+  anything under `test/` — outranks this bullet and every other rule in this file.**
 - **The loop's terminal state is a zero-finding round, and every round must move toward it.** A
-  finding is an operator-visible wrong behaviour reproducible at HEAD, or a broken-rule test
-  finding under the bullet above; nothing else. A fix is the minimal change that makes the wrong
+  finding is an operator-visible wrong behaviour reproducible at HEAD; nothing else. A fix is the
+  minimal change that makes the wrong
   behaviour right, plus its pin or its record - no hardening, no widening, no "while we're here"
   work for later rounds to audit.
 - **Since round 1 there have been no intended product changes.** Everything filed is a defect
@@ -278,7 +293,7 @@ status is added. It has already shipped once: "Only show what would change" test
 
 ## 7. Accepted findings — never re-file
 
-Accepted and still open, deliberately: ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
+Accepted and still open, deliberately: the **import wizard's "Azure has no such subnet" middle-man sentence** (owner ruling §8 round 31 — an edited prefix means the recorded range is gone, so the sentence is true and the delete-and-re-import it names is the operation), the **bulk import wizard refusing a host-IP-holding row as a VNet target** (owner ruling §8 round 31 — it is not an asymmetry against the fully-allocated branch and must never be re-filed as one), the **HTML-tag refusal on subnet and host-IP Name and on Description** (`NoHtmlAttribute`; owner ruling §8 round 31 — keep it, and never re-file its refusal of angle-bracketed operator text as a defect), ForwardedHeaders trust-all with `AllowedHosts: "*"`, the
 Development-only `DevAuthHandler` bypass, `GlobalSanitizationFilter` skipping nested `System.*`
 collections, `CollectDescendants` lacking a cycle guard, the unreachable IP-change branch in
 `ValidateHostIpUpdate`, the blind `catch {}` around the DataProtectionKeys probe, and the bounded
@@ -317,3 +332,68 @@ summary, no reasoning added. Rulings made before this file existed are already f
   seam exists, otherwise record once in the ledger row and `/e2e`; recorded gaps are never
   re-filed; the audit files only broken-rule test findings. Counter-test: untestable (process
   rule, no code seam).
+- **29 (round-wide)** — on test-only findings, after round 29 filed five of them (all round-28 pins)
+  as its entire output. Owner: "i only care about the fucking producti dont care about the tests";
+  "the test serve to make the product betternot the other way around"; "i need this stupid shit to
+  not pop up in the audit itself"; "its a waste of fucking tokens". Folded into §5: the audit files
+  product defects only and no test findings; test quality is reconcile's fix-time duty under its
+  proof rule, enforced by its fix review and whole-diff gate. Counter-test: untestable (process
+  rule); the audit skill's beat list no longer has a regression-tests beat.
+- **29 (round-wide, second ruling)** — after the round's reconcile turned out to be nothing but test
+  work. Owner: "edit the audit skill and add an absolute rule that that skill shall NOT READ
+  ANYTHING IN THE TESTS AT ALL. NO CODE FROM THE FUCKING TESTS SHOULD ENTER THE CONTEXT FOR THE
+  AUDIT SKILL"; "that rule supercedes all other rules"; "all we're doing is fucking around with
+  tests"; "Make it as clear as can be"; "MAKE IT CLEAR IN THE SKILL VERBATIM: DO NOT FUCKING READ
+  A GOD DAMN FUCKING TEST FILE". Written as the first section of `.claude/skills/audit/SKILL.md`,
+  superseding every other rule there and in this file's §5 for the audit. Counter-test: untestable
+  (process rule); a candidate citing `test/` is refuted on sight. In the same round the owner
+  reversed the triage strike of 29-L3 and 29-L5: "lol, you fixed l1 which was just fucking
+  testswhy not just fix l3 l5 then"; "i mean if we're going to obsess with bullshit tests"; "l4
+  was tests too"; both were fixed.
+- **31-L1** — the round proposed deleting the HTML-tag refusal outright (the filter refuses
+  "Contact: NOC <noc@example.com>" on the form while the bulk import silently strips it, and §5 as
+  written called the filter a defect). The deletion was made and then reverted on the owner's
+  ruling. Owner: "why are we removing the html tag restriction ?"; "what was the purpose of deleting
+  the html tag restrictions"; "actually, i think we should leave the html tag restriction on"; "and
+  edit the product model"; "this just feels wrong and problematic removing it". On the remaining
+  parity half, after being told Azure resource names cannot contain angle brackets at all: "and did
+  i see prior to revert some fuckery with description?"; "like if azure cant have < and > then this
+  is basically a bunch of stupid shit"; "but its nothing to actually worry about"; "i mean continue".
+  Folded into §5 (the refusal is exempt from the ordinary-text bullet; only write-path parity is
+  still required) and into §7 (closed list). Implemented as one shared `ContainsHtmlTags` predicate
+  on `IInputSanitizationService`, used by both `NoHtmlAttribute` and a single up-front guard in
+  `BulkCreateFromAzurePlan`. Counter-test: `BulkImportNameParityTests` — a name the form refuses is
+  refused by the bulk commit with nothing written, a name the form accepts still imports, and the
+  predicate and the form agree on every case.
+- **31-L3** — the round proposed offering link-only adoption for an unlinked hand-built row holding
+  host IPs that exactly matches a VNet prefix, mirroring the fully-allocated branch that 18-R4 added
+  in round 20, on the §4 grounds that linking creates nothing inside and that refusing on what a row
+  already holds keys on provenance. It was implemented, driven live, and then reverted on the
+  owner's ruling. The reconciler had offered the wrong reason for the danger (that linking is a
+  one-way door with no unlink control); the owner supplied the real one. Owner: "if the bastet subnet
+  matches an azure vnet and the subnet has host ips, this should be rejected. fixing l3 is
+  dangerous"; "there's a reason its this way"; "thats not the danger, having host IPs on a bastet
+  subnet that then gets linked to an azure vnet that could have subnets under it breaks the bastet
+  model". Folded into §4 (a host-IP row is never a VNet target) and §7 (closed list). The
+  fully-allocated branch is untouched: that flag can be cleared, host IP records cannot. Counter-test:
+  the existing selectability tests pin the Blocked status and its sentence.
+- **31-L2** — the round proposed rewording the wizard's middle-man refusal, on the grounds that for a
+  row carrying the re-carved Azure subnet's own resource id "Azure has no such subnet" is false and
+  "re-carve" is a remedy Edit refuses. The owner struck it: Bastet tracks ranges, and an edited prefix
+  means the recorded range is gone whatever the resource id says. Owner: "THAT SUBNET DOES NOT EXIST
+  ANYMORE. THE FUCKTARD EDITED IT AND NOW ITS SOMETHING ELSE"; "IF A FUCKFACE EDITS THE FUCKING SUBNET
+  ADDRESS, THE BASTET OPERATION SHOULD BE DELETE WHAT WE HAVE AND RE FUCKING IMPORT"; "WE ARENT GETTING
+  INTO COMPLICATED BULLSHIT OF \"FIXING\""; "STOP BEING OPPORTUNISTIC IT LEADS TO FEATURE BLOAT".
+  Standing instruction for both skills, wider than this finding: a proposal that adds, widens or
+  branches a mechanism is presumed wrong; prefer leaving deliberate behaviour alone. Counter-test:
+  untestable (process rule); the sentence is unchanged in AzureBulkImportPlanner.cs.
+- **31-L12** — the round proposed confirming absence-led held rows (rows whose Bastet subtree holds
+  hand-made content) against Azure by resource id before reporting them, so an RBAC-hidden resource
+  is reported as hidden rather than as gone. Reproduced: an operator who follows the held row's
+  "Delete it here first, then run the scan again" destroys their manual records, and the rescan
+  withholds the row anyway. The owner struck it because the fix adds a field and three bucketing
+  changes to AzureReconciler. Owner: "DO NOT BLOAT THE CORE LOGIC"; "NO OVERCOMPLICATED FIXING
+  BULLSHIT"; "STOP BEING OPPORTUNISTIC IT LEADS TO FEATURE BLOAT". The behaviour stands as
+  deliberate: reconcile withholds on manual content without a direct check, and the operator reads
+  the denied-access warning on the same screen to tell hidden from gone. Not to be re-filed.
+  Counter-test: untestable (a declined fix); the existing held-row tests pin current behaviour.

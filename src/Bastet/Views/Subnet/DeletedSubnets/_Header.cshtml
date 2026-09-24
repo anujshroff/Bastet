@@ -1,9 +1,10 @@
+@model DeletedSubnetListViewModel
 @inject Bastet.Services.IUserContextService UserContextService
 
 <div class="mb-4">
     <div class="d-flex justify-content-between align-items-center">
         <h1>Deleted Subnets</h1>
-        @if (UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
+        @if (Model.TotalCount > 0 && UserContextService.UserHasRole(Bastet.Models.ApplicationRoles.Admin))
         {
             <a asp-action="PurgeAllDeletedSubnets" class="btn btn-danger">
                 <i class="bi bi-trash"></i> Purge All

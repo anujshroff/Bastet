@@ -11,39 +11,6 @@ namespace Bastet.Controllers;
 public partial class SubnetController : Controller
 {
 
-    private async Task<int> CountAllDescendants(int subnetId)
-    {
-
-        List<Subnet> allSubnets = await context.Subnets.ToListAsync();
-
-        int descendantCount = 0;
-
-        HashSet<int> processedIds = [];
-
-        Queue<int> queue = new();
-        queue.Enqueue(subnetId);
-        processedIds.Add(subnetId);
-
-        while (queue.Count > 0)
-        {
-            int currentId = queue.Dequeue();
-
-            List<Subnet> childSubnets = [.. allSubnets.Where(s => s.ParentSubnetId == currentId)];
-
-            foreach (Subnet? child in childSubnets)
-            {
-                if (!processedIds.Contains(child.Id))
-                {
-                    descendantCount++;
-                    queue.Enqueue(child.Id);
-                    processedIds.Add(child.Id);
-                }
-            }
-        }
-
-        return descendantCount;
-    }
-
     private async Task<List<Subnet>> GetAllDescendantsOrdered(int subnetId, List<Subnet>? treeCache = null)
     {
 
@@ -165,6 +132,14 @@ public partial class SubnetController : Controller
                 return false;
             }
 
+            if (viewModel.Cidr <= parentSubnet.Cidr)
+            {
+                ModelState.AddModelError("Cidr",
+                    "Child subnet CIDR must be larger than parent subnet CIDR. " +
+                    $"Parent subnet CIDR is {parentSubnet.Cidr}");
+                return false;
+            }
+
             if (!ipUtilityService.IsSubnetContainedInParent(
                 viewModel.NetworkAddress, viewModel.Cidr,
                 parentSubnet.NetworkAddress, parentSubnet.Cidr))
@@ -172,14 +147,6 @@ public partial class SubnetController : Controller
                 ModelState.AddModelError("NetworkAddress",
                     $"Child subnet must be contained within the parent subnet range. " +
                     $"Parent subnet is {parentSubnet.NetworkAddress}/{parentSubnet.Cidr}");
-                return false;
-            }
-
-            if (viewModel.Cidr <= parentSubnet.Cidr)
-            {
-                ModelState.AddModelError("Cidr",
-                    "Child subnet CIDR must be larger than parent subnet CIDR. " +
-                    $"Parent subnet CIDR is {parentSubnet.Cidr}");
                 return false;
             }
         }
