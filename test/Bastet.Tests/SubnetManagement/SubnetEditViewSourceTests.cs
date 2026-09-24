@@ -36,4 +36,15 @@ public class SubnetEditViewSourceTests
         Assert.Equal(1, Occurrences(sidebar, "Only the CIDR value can be modified."));
         Assert.Equal(1, Occurrences(sidebar, "CIDR Modification Rules"));
     }
+
+    [Fact]
+    public void EditForm_TellsAnOperatorOfAnAzureLinkedPrefixToDeleteThenImport_WhenTheImportCanRun()
+    {
+        string form = ReadView("src/Bastet/Views/Subnet/Edit/_EditForm.cshtml");
+
+        Assert.Matches(
+            @"@if \(Bastet\.Controllers\.AzureController\.IsAzureImportEnabled\(\)\)\s*\{\s*<text>Change it in Azure, then ask an administrator to delete this subnet and import it again\.</text>\s*\}",
+            form);
+        Assert.DoesNotContain("re-import", form);
+    }
 }

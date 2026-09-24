@@ -66,4 +66,5 @@ public class DeleteHostIpViewModel
     public int SubnetId { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
+    public byte[]? RowVersion { get; set; }
 }

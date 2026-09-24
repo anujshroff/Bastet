@@ -106,4 +106,32 @@ public class HostIpEditRedisplayTests : IDisposable
         Assert.Equal(_storedCreatedAt, model.CreatedAt);
         Assert.Equal(_storedLastModifiedAt, model.LastModifiedAt);
     }
+
+    [Fact]
+    public async Task Edit_StaleRowVersion_PointsCancelAtTheSubnetTheHostIpIsNowIn()
+    {
+        HostIpController controller = CreateController(ControllerTestHelper.CreateMockSubnetLockingService());
+        EditHostIpViewModel openedUnderAnotherSubnet = PostedForm();
+        openedUnderAnotherSubnet.SubnetId = 7;
+
+        ViewResult view = Assert.IsType<ViewResult>(await controller.Edit("10.0.9.5", openedUnderAnotherSubnet));
+
+        Assert.Equal(1, Assert.IsType<EditHostIpViewModel>(view.Model).SubnetId);
+    }
+
+    [Fact]
+    public async Task Edit_StaleRowVersion_NamesAStepThatLoadsTheCurrentValues()
+    {
+        HostIpController controller = CreateController(ControllerTestHelper.CreateMockSubnetLockingService());
+
+        ViewResult view = Assert.IsType<ViewResult>(await controller.Edit("10.0.9.5", PostedForm()));
+
+        string message = Assert.Single(
+            view.ViewData.ModelState.Values.SelectMany(v => v.Errors),
+            e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
+        Assert.Equal(
+            "This host IP was modified by another user while you were editing it, so it was not saved. "
+            + "Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense.",
+            message);
+    }
 }

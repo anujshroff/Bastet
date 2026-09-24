@@ -182,8 +182,8 @@ namespace Bastet.Services.Azure
             {
                 plan.Warnings.Add(
                     $"{unknown.Count} Azure-linked subnet(s) were missing from the subscription listing, and Azure could not " +
-                    "be asked about them - the read failed rather than answering. Nothing is wrong with the subnet itself; " +
-                    $"try the scan again. They have been withheld from deletion: {NameList(unknown)}.");
+                    "be asked about them - the read failed rather than answering. " +
+                    $"Try the scan again. They have been withheld from deletion: {NameList(unknown)}.");
             }
 
             if (stillLive.Count > 0)

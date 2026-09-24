@@ -212,7 +212,11 @@ public class AzureBulkImportPlannerTests
         BulkImportSelectionDto sel = Sel(true,
             Pref("vnet-prod", "10.0.0.0/16", Sub("web", "10.0.1.0/24")));
 
-        List<ExistingSubnetSnapshot> existing = [Existing(1, "OldName", "10.0.0.0", 16)];
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "OldName", "10.0.0.0", 16,
+                azureResourceId: "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-prod")
+        ];
 
         BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
 
@@ -227,7 +231,11 @@ public class AzureBulkImportPlannerTests
         BulkImportSelectionDto sel = Sel(true,
             Pref("vnet-prod", "10.0.0.0/16", Sub("web", "10.0.1.0/24")));
 
-        List<ExistingSubnetSnapshot> existing = [Existing(1, "vnet-prod", "10.0.0.0", 16)];
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "vnet-prod", "10.0.0.0", 16,
+                azureResourceId: "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-prod")
+        ];
 
         BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
 

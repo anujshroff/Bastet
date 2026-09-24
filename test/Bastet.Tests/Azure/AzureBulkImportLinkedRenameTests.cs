@@ -76,14 +76,79 @@ public class AzureBulkImportLinkedRenameTests
     }
 
     [Fact]
-    public void FullyAllocatedTargetWithNoLink_IsAdoptedAndRenamed()
+    public void FullyAllocatedTargetWithNoLink_IsAdoptedButNeverRenamed()
     {
         BulkImportPlanViewModel plan = Plan(
             [Target("renamed-by-hand", true, null)], true, Prefix("10.80.0.0/16"));
 
         Assert.False(SaysFullyAllocated(plan));
         BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.False(item.WillRename);
+        Assert.Null(item.NewName);
+        Assert.True(plan.CanCommit);
+    }
+
+    [Fact]
+    public void AnUnlinkedHandBuiltTarget_IsAdoptedUnderItsOwnName_WhenRenamesAreOn()
+    {
+        BulkImportPlanViewModel plan = Plan(
+            [Target("Operator block DO NOT RENAME", false, null)], true, Prefix("10.80.0.0/16"));
+
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.Equal(BulkImportTargetType.ExactMatch, item.TargetType);
+        Assert.False(item.WillRename);
+        Assert.Null(item.NewName);
+        Assert.True(plan.CanCommit);
+    }
+
+    [Fact]
+    public void AnUnlinkedHandBuiltTargetWithChildren_IsAdoptedUnderItsOwnName_AndStillGetsTheTickedSubnet()
+    {
+        ExistingSubnetSnapshot handBuilt = Target("lab-simple", false, null);
+        handBuilt.HasChildSubnets = true;
+
+        BulkImportPlanViewModel plan = Plan(
+            [handBuilt], true, Prefix("10.80.0.0/16", Sub("a", "10.80.1.0/24", SubnetA)));
+
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.False(item.WillRename);
+        Assert.Equal("a", Assert.Single(item.ChildSubnets).Name);
+        Assert.True(plan.CanCommit);
+    }
+
+    [Fact]
+    public void ATargetLinkedToADifferentVNet_IsRefusedAndNeverRenamed()
+    {
+        BulkImportPlanViewModel plan = Plan(
+            [Target("renamed-by-hand", false, OtherVNet)], true, Prefix("10.80.0.0/16"));
+
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.Contains(item.Errors, e => e.Contains("already linked to Azure VNet", StringComparison.Ordinal));
+        Assert.False(item.WillRename);
+        Assert.False(plan.CanCommit);
+    }
+
+    [Fact]
+    public void ATargetLinkedToThisVNetUnderADifferentlyCasedId_IsStillRenamed()
+    {
+        BulkImportPlanViewModel plan = Plan(
+            [Target("drifted-by-hand", false, VNet.ToUpperInvariant())], true, Prefix("10.80.0.0/16"));
+
+        BulkImportPlanItem item = Assert.Single(plan.Items);
         Assert.True(item.WillRename);
+        Assert.Equal("vnet-a", item.NewName);
+        Assert.True(plan.CanCommit);
+    }
+
+    [Fact]
+    public void ALinkedTargetWhoseNameDrifted_IsStillRenamed()
+    {
+        BulkImportPlanViewModel plan = Plan(
+            [Target("drifted-by-hand", false, VNet)], true, Prefix("10.80.0.0/16"));
+
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.True(item.WillRename);
+        Assert.Equal("vnet-a", item.NewName);
         Assert.True(plan.CanCommit);
     }
 

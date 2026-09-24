@@ -7,6 +7,7 @@
     <div class="card-body">
         <form asp-action="Delete" method="post">
             <input type="hidden" name="ip" value="@Model.IP" />
+            <input type="hidden" name="rowVersion" value="@(Model.RowVersion is null ? "" : Convert.ToBase64String(Model.RowVersion))" />
 
             <div class="mb-3">
                 <div class="form-text mb-2">This action cannot be undone. Type <strong>approved</strong> to confirm.</div>
