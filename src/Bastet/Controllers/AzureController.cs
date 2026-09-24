@@ -45,7 +45,7 @@ namespace Bastet.Controllers
                 CredentialCheckResult credential = await azureService.CheckCredential();
                 if (credential == CredentialCheckResult.Failed)
                 {
-                    ModelState.AddModelError("", "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, or Azure may have refused, throttled or failed the request. Details have been logged; check them, then reload this page.");
+                    ModelState.AddModelError("", "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, or Azure may have refused, throttled or failed the request. Reload this page once the cause is resolved.");
                 }
                 else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
                 {
@@ -140,7 +140,7 @@ namespace Bastet.Controllers
                 CredentialCheckResult credential = await azureService.CheckCredential();
                 if (credential == CredentialCheckResult.Failed)
                 {
-                    ModelState.AddModelError("", "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, or Azure may have refused, throttled or failed the request. Details have been logged; check them, then reload this page.");
+                    ModelState.AddModelError("", "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, or Azure may have refused, throttled or failed the request. Reload this page once the cause is resolved.");
                 }
                 else if (credential == CredentialCheckResult.NoVisibleSubscriptions)
                 {

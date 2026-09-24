@@ -15,7 +15,7 @@ public class AzureCredentialBannerTests : IDisposable
 {
     private const string FailedMessage =
         "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, "
-        + "or Azure may have refused, throttled or failed the request. Details have been logged; check them, then reload this page.";
+        + "or Azure may have refused, throttled or failed the request. Reload this page once the cause is resolved.";
 
     private const string NoSubscriptionsMessage =
         "Signed in to Azure, but this credential cannot see any subscriptions. Grant it access to a subscription and reload this page.";

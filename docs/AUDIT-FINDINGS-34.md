@@ -54,10 +54,10 @@ _Reviewed: (c) preference; its rationale correction (stale-tab reachability) and
 _Not done: product question for the owner, may an imported child carry the same name as its VNet target row? §4 and the schema read yes and the fix relies on it._
 
 ## L4 — ARM throttling or a server error on the subscription list is shown as 'Could not authenticate with Azure' `[x2]` `strings` — FIXED
-_Fixed in "Audit 34 L1 L4 L6 L8 L9: make five operator messages name only what is true and reachable". The Failed credential banner on both Azure pages now reads "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, or Azure may have refused, throttled or failed the request. Details have been logged; check them, then reload this page."_
-_Swept: both page actions carried the one literal; AzureService, the credential tri-state and the controller branches are unchanged._
-_Verified: AzureCredentialBannerTests pin the new sentence at both actions, red on the old one; live under persistent ARM 500, 429 and 503 (and, by the reviewer, 401 and a transport failure) both pages show it; a transient 500 and no fault show none; suite green._
-_Reviewed: none found; every path to Failed is one of the listed alternatives._
+_Fixed in "Audit 34 L1 L4 L6 L8 L9: make five operator messages name only what is true and reachable", then the gate repair "Audit 34 L4: drop the credential banner's unbacked logging claim". The Failed credential banner on both Azure pages now reads "Could not list subscriptions from Azure. The sign-in may have failed, Azure may be unreachable from this host, or Azure may have refused, throttled or failed the request. Reload this page once the cause is resolved."_
+_Swept: both page actions carried the one literal; AzureService, the credential tri-state and the controller branches are unchanged; every other "Details have been logged" in src/ is LogError-backed, and the client panel below the banner still points at the log truthfully._
+_Verified: AzureCredentialBannerTests pin the sentence at both actions, red on each earlier wording; live under persistent ARM 500, 429 and 503, a 401, a transport failure and a null client, at the default and at the Error log level, both pages show it; a transient failure and no fault show none after a reload; suite green._
+_Reviewed: none at first; the whole-diff gate's correctness lens then showed the first wording's "Details have been logged" unbacked at the documented Error log level (the failure is logged at Warning); repaired once by dropping the claim; repair review: none._
 _Not done: product question for the owner, should the server banner be deleted instead, leaving the client's "Failed to load subscriptions" panel as the only message on the page?_
 
 ## L5 — The bulk import commit marks a subnet that holds host IPs fully allocated when the posted encompassing subnet carries the VNet's own resource id `[x1]` — DEFERRED
