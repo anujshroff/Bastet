@@ -198,7 +198,7 @@ namespace Bastet.Services.Azure
 
                 bool isTopUp = IsSameVNet(exact, vnet);
 
-                result.WouldRenameTarget = !string.Equals(
+                result.WouldRenameTarget = isTopUp && !string.Equals(
                     exact.Name, ProposedTargetName(vnet.Name, vnet.Ipv4AddressPrefixes.Count, network, cidr), StringComparison.Ordinal);
 
                 if (exact.HasHostIpAssignments)
@@ -569,7 +569,7 @@ namespace Bastet.Services.Azure
                         + $"and importing '{p.Source.VNetResourceId}' would replace that link.");
                 }
 
-                if (renameMatched)
+                if (renameMatched && IsSameVNet(exact, p.Source.VNetResourceId))
                 {
                     string proposed = ProposedTargetName(p.Source.VNetName, p.Source.VNetIpv4AddressPrefixes.Count, p.PrefixNetwork, p.PrefixCidr);
                     if (!string.Equals(proposed, exact.Name, StringComparison.Ordinal))
