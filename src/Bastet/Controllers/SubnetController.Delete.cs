@@ -23,7 +23,7 @@ public partial class SubnetController : Controller
             return this.RedirectToErrorPage(404, SubnetNotFoundMessage(id));
         }
 
-        int descendantCount = await CountAllDescendants(id);
+        List<int> descendantIds = await SubtreeSubnetIdsAsync(id);
 
         DeleteSubnetViewModel viewModel = new()
         {
@@ -32,9 +32,9 @@ public partial class SubnetController : Controller
             NetworkAddress = subnet.NetworkAddress,
             Cidr = subnet.Cidr,
             Description = subnet.Description,
-            ChildSubnetCount = descendantCount,
+            ChildSubnetCount = descendantIds.Count,
             HostIpCount = await SubtreeHostIpCountAsync(id),
-            ConfirmedMaxSubnetId = await MaxDescendantSubnetIdAsync(id),
+            ConfirmedMaxSubnetId = descendantIds.Count == 0 ? 0 : descendantIds.Max(),
             RowVersion = subnet.RowVersion
         };
 
