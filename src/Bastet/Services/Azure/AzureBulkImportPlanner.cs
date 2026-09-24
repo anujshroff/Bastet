@@ -638,21 +638,6 @@ namespace Bastet.Services.Azure
             }
 
             HashSet<string> usedNames = new(StringComparer.OrdinalIgnoreCase);
-            string? targetExistingName = exact?.Name;
-            string? targetAutoCreatedName = item.AutoCreateTargetName;
-
-            if (!string.IsNullOrEmpty(targetExistingName))
-            {
-                usedNames.Add(targetExistingName);
-            }
-            if (item.WillRename && !string.IsNullOrEmpty(item.NewName))
-            {
-                usedNames.Add(item.NewName);
-            }
-            if (!string.IsNullOrEmpty(targetAutoCreatedName))
-            {
-                usedNames.Add(targetAutoCreatedName);
-            }
 
             foreach (ParsedSubnetSelection sub in p.Subnets)
             {
