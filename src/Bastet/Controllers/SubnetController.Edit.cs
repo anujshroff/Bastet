@@ -84,7 +84,7 @@ public partial class SubnetController : Controller
                         throw new ValidationException(
                             "This subnet is linked to an Azure resource, so its CIDR cannot be changed here." +
                             (AzureController.IsAzureImportEnabled()
-                                ? " Change the prefix in Azure, then ask an administrator to re-import it."
+                                ? " Change the prefix in Azure, then ask an administrator to delete this subnet and import it again."
                                 : string.Empty));
                     }
 
@@ -183,7 +183,7 @@ public partial class SubnetController : Controller
                 logger.LogError(ex, "Subnet edit outcome unknown for subnet {SubnetId}", id);
                 ModelState.AddModelError("",
                     "BASTET could not confirm whether this change was applied. "
-                    + "Reload the subnet to see its current state before retrying.");
+                    + "Use Cancel, then Edit, to see its current state before retrying.");
             }
             catch (Exception ex)
             {
@@ -263,7 +263,7 @@ public partial class SubnetController : Controller
                 + (differing.Count > 0
                     ? $"Stored values that differ from this form: {string.Join("; ", differing)}. "
                     : string.Empty)
-                + "Reload the page to see the current values, then re-apply the changes that still make sense.");
+                + "Use Cancel, then Edit, to load the current values, then re-apply the changes that still make sense.");
         }
 
         if (origSubnet.ParentSubnet != null)

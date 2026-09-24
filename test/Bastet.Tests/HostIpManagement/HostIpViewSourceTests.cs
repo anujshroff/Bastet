@@ -36,6 +36,18 @@ public class HostIpViewSourceTests
         Assert.Equal(2, ViewsAHostIpPageCanComposeFrom().Sum(view => ModelLevelRenderings(File.ReadAllText(view))));
     }
 
+    [Fact]
+    public void HostIpEditSidebar_NamesAStepThatLoadsTheCurrentValues()
+    {
+        string sidebar = ReadView("src/Bastet/Views/HostIp/Edit/_SubnetInfo.cshtml");
+
+        Assert.Contains(
+            "Concurrent edits to this host IP by other users will be detected. If another user has modified this record, "
+            + "use Cancel, then Edit on this host IP, and try again.",
+            sidebar);
+        Assert.DoesNotContain("reload", sidebar, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("Create/_HostIpForm.cshtml", "<div asp-validation-summary=\"ModelOnly\" class=\"alert alert-danger\" role=\"alert\"></div>")]
     [InlineData("Edit/_Header.cshtml", "<div asp-validation-summary=\"ModelOnly\" class=\"alert alert-danger mb-4\" role=\"alert\"></div>")]

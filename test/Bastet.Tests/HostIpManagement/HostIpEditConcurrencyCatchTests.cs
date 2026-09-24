@@ -101,6 +101,7 @@ public class HostIpEditConcurrencyCatchTests : IDisposable
             _controller.ModelState.Values.SelectMany(v => v.Errors),
             e => e.ErrorMessage.Contains("modified by another user")).ErrorMessage;
         Assert.Contains("so it was not saved", message);
-        Assert.Contains("Reload the page to see the current values, then re-apply the changes that still make sense", message);
+        Assert.Contains("Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense", message);
+        Assert.DoesNotContain("Reload", message);
     }
 }
