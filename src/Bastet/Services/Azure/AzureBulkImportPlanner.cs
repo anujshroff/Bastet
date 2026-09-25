@@ -547,7 +547,7 @@ namespace Bastet.Services.Azure
 
                 if (exact.HasHostIpAssignments
                     && (!IsSameVNet(exact, p.Source.VNetResourceId)
-                        || p.Subnets.Any(s => LinkedRowForSameAzureSubnet(s, existingSubnets) is null)))
+                        || p.Subnets.Any(s => s.FullyEncompasses || LinkedRowForSameAzureSubnet(s, existingSubnets) is null)))
                 {
                     item.Errors.Add(
                         $"Cannot import VNet prefix {p.Source.AddressPrefix}: matched Bastet subnet '{exact.Name}' ({exact.NetworkAddress}/{exact.Cidr}) already has host IP assignments.");
