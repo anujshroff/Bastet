@@ -11,8 +11,10 @@ Rules:
 - **Facts only.** A row carries what happened, never why anyone believed it. Reasoning inherited
   from old rounds is what poisoned the deleted findings files; the ledger structurally must not
   hold an argument.
-- **Append-only.** Rows are added when a verdict is terminal (fixed / refuted / struck / inverted /
-  deferred), never edited. A deferred finding gets a second row when it is later closed.
+- **Append-only.** Rows are added when a verdict is terminal (fixed / refuted / struck / inverted),
+  never edited. The `deferred` verdict was retired after round 34 (owner ruling, PRODUCT-MODEL §8,
+  34-L5): the rows that carry it are history, each closed by a later `fixed` row, and no new row
+  may carry it.
 - Findings still being worked live in `docs/AUDIT-FINDINGS-<N>.md`, not here.
 
 ## Rounds

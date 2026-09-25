@@ -21,17 +21,24 @@ majority residue of those very fixes — residue ran 11/15, 12/21, then 20/23 ac
 The fix process, not the codebase, was the main defect source, and the single biggest cause was
 that **every fix was verified only by its own author**, whose defects surfaced a full round later.
 Hence: independent review of every fix (step 8), a whole-diff gate before the round is declared
-done, a cap on how much churn one round may push into one file, and **a round must leave fewer
-defects than it found — nothing else here overrides that.** The loop's terminal state is a
-zero-finding round (`docs/PRODUCT-MODEL.md` §5): a fix closes its defect without manufacturing the
-next round's audit surface.
+done, and **a round must leave fewer defects than it found — nothing else here overrides that.**
+The loop's terminal state is a zero-finding round (`docs/PRODUCT-MODEL.md` §5): a fix closes its
+defect without manufacturing the next round's audit surface.
+
+**A finding has three exits: fixed, refuted, struck. There is no fourth.** Round 34 parked a real
+parity defect under a per-file commit cap, and the owner retired deferral outright
+(`docs/PRODUCT-MODEL.md` §8, 34-L5): there is no deferred disposition, no `DEFERRED-FINDINGS.md`,
+and no cap that leaves a defect open. A defect this round cannot close stays open in the findings
+file, and the round stays open with it, until a fix passes review or the owner strikes it.
 
 ## Mode
 
 **Default:** one up-front triage approval (below), then run to completion without further pauses.
 **`auto`:** skip the triage pause too — apply the recommended dispositions and run straight
 through, pausing only for something that makes work impossible (a dead credential, a baseline that
-will not build). State which mode is active before triage.
+will not build) or for a finding that has exhausted step 8's protocol or survived the gate's one
+repair — whether that finding is fixed again or struck is the owner's decision, not a how-to-fix
+question. State which mode is active before triage.
 
 **Never ask how to fix something, and never make a product decision.** Implementation is yours:
 which predicate, where the guard goes, what the message says. Where a fix implies a change to what
@@ -68,15 +75,14 @@ Build one table — finding id, severity, one line, and a recommended dispositio
 owner in a single message. Dispositions:
 
 - **fix** — will be fixed this round.
-- **defer** — real, but its correct fix is structural work this round must not do (see the split
-  rule); or it overflows the WIP cap. Deferred findings are transplanted **whole** (all fields,
-  including the repro) into `docs/DEFERRED-FINDINGS.md`, committed, and get a `deferred` ledger row.
-  Deferral is a terminal state for this round, not a euphemism for dropped: the file is the work
-  queue for the effort that closes them.
 - **strike** — invalid per the product model, with the sentence cited. A struck finding gets a
   `struck` ledger row, and **the owner's words go into PRODUCT-MODEL.md §8 verbatim** — never your
   paraphrase; a wrong paraphrase written there becomes canon. Where the ruling is testable, write
   the counter-test as a work item this round.
+
+There is no defer. A real finding whose fix is large is `fix`; its size goes into batching and the
+split rule, never into the disposition. Only the owner takes a real finding off the table, and that
+is `strike`, with their words in §8.
 
 Recommend dispositions from the product model and the ledger — a finding proposing to extend a
 mechanism gets `git log -S` on the identifying string first, and if a previous round added it, the
@@ -84,17 +90,20 @@ recommendation leans **remove**, not extend. The owner edits the table in one re
 mode the recommendations stand, except that striking on your own authority requires a product-model
 citation.
 
-## Batching and the WIP cap
+## Batching
 
 Group approved findings by component and fix a component's batch together — an early fix moves the
 ground under later ones, and interleaving twenty fixes across three files is how fixes stop
 composing. **Order machinery-deletions before string fixes in the same file**, and re-cite line
 numbers after each fix lands.
 
-**Cap: three fix-commits per source file per round.** Overflow → defer, highest severity first
-stays. Two exemptions: a sibling sweep is one fix at N sites, not N fixes; and one commit may close
-several findings when the fix is genuinely shared — list every id in the FIXED entries. Findings
-tagged `strings` are fixed individually but committed as one batch commit listing their ids.
+A sibling sweep is one fix at N sites, not N fixes, and one commit may close several findings when
+the fix is genuinely shared — list every id in the FIXED entries. Findings tagged `strings` are
+fixed individually but committed as one batch commit listing their ids.
+
+**There is no per-file commit cap.** Churn is bounded by the narrow-fix rule and the whole-diff
+gate, not by leaving defects open; a file that takes many fix-commits in one round is a fact for
+the close-out report, not a reason to stop fixing.
 
 ## Per finding
 
@@ -125,12 +134,15 @@ A recorded gap is settled; a fix left both unpinned and unrecorded is a round-en
 would cause harm, do the right thing and record it.
 
 **The split rule.** When the correct fix needs structure — a component reshaped, a duplicate
-implementation collapsed, a mechanism removed — do **both** halves deliberately: extract the
-**narrow safe kernel** that closes the live defect now (often a deletion or a one-site change), and
-**defer the structural remainder** with the repro transplanted. Never leave a live defect open
-wholesale because its full fix is structural, and never smuggle the restructure into the fix — a
-one-finding commit that rewrites a component is an unreviewed refactor with a bug report stapled to
-it, and two such rewrites once produced more than half a round's residue between them.
+implementation collapsed, a mechanism removed — do **both** halves **this round**, as separate
+commits, each through steps 1–10: first the **narrow safe kernel** that closes the live defect
+(often a deletion or a one-site change), then the **structural remainder** with the same repro
+re-run against it. Never smuggle the restructure into the kernel commit — a one-finding commit that
+rewrites a component is an unreviewed refactor with a bug report stapled to it, and two such
+rewrites once produced more than half a round's residue between them. And never leave the
+remainder for a later round: if it is an operator-visible wrong behaviour reproducible at HEAD, it
+is fixed now; if it is not, it is not a finding (`docs/PRODUCT-MODEL.md` §5) and the FIXED entry
+says so in one line.
 
 **A fix that adds a guard, refusal, withhold, status or special case is a design change, not a bug
 fix.** Before writing it, name the product-model sentence it serves; if you cannot, the finding has
@@ -212,10 +224,12 @@ is allowed to make.
 The verdict is typed, and the protocol is decidable:
 
 - **(a) demonstrated failure** — the reviewer ran something and it went wrong. The fix loses.
-  Revise once, re-review; a second demonstrated failure → **revert the fix and defer the finding**.
+  Revise once, re-review; a second demonstrated failure → **revert the fix and stop the run with
+  the finding open**: report both failures to the owner. The finding leaves the file only when a
+  fix passes review or the owner strikes it, and this holds in `auto` mode too.
 - **(b) product-model violation, sentence cited** — decided by the text. If the text is genuinely
-  ambiguous, neither side wins: revert, defer, and record the one-line product question in the
-  findings file for the owner.
+  ambiguous, neither side wins: revert and stop the run with the one-line product question for the
+  owner; their answer goes into §8 verbatim and decides whether the finding is fixed or struck.
 - **(c) "I would have fixed it differently"** — the author wins automatically. Demands for
   hardening or for coverage beyond the §5 proof are this category; **a fix shipping neither
   its pin nor its ledger + `/e2e` record is (b), §5 cited.** The reviewer's schema must force
@@ -224,12 +238,12 @@ The verdict is typed, and the protocol is decidable:
 One rebuttal each, no third round — if you believe a correction is wrong, **reproduce why before
 departing from it**: a past round shipped a defect by "improving" a reviewer's `ModelState.Remove`
 placement into refreshing the concurrency token on every failure path, silently defeating
-optimistic concurrency. Reverting is a first-class, non-shameful outcome; fix-of-fix-of-fix is the
-exact divergence mechanism this skill exists to stop.
+optimistic concurrency. Reverting is a first-class, non-shameful outcome — it ends the attempt,
+not the finding; fix-of-fix-of-fix is the exact divergence mechanism this skill exists to stop.
 
 ### 9. Mark it terminal
 
-Append ` — FIXED` (or REFUTED / DEFERRED / STRUCK) to the heading and replace the body with at most
+Append ` — FIXED` (or REFUTED / STRUCK) to the heading and replace the body with at most
 five lines:
 
 ```
@@ -277,9 +291,13 @@ is requested, and fixes that were each correct alone have failed to compose. In 
    model. Refutation-default: a review finding exists only if it demonstrates a concrete failure or
    cites the violated model sentence — "I'd have done it differently" is not a finding; a fix
    this round left both unpinned and unrecorded is one, citing §5. This is a
-   **gate, not a queue**: at most **one** repair iteration (each repair through steps 1–10,
-   WIP cap still enforced), then anything still standing is resolved by **reverting the offending
-   fix commit and deferring its finding**. No second iteration, ever — the gate must terminate.
+   **gate, not a queue**: at most **one** repair iteration (each repair through steps 1–10), then
+   anything still standing is resolved by **reverting the offending fix commit, removing that
+   finding's FIXED mark, and stopping the run for the owner** — the round cannot close with a
+   non-terminal finding, and only the owner can strike one. No second iteration, ever — the gate
+   must terminate, and it terminates in a revert, never in a parked defect. After the owner's
+   decision, a new fix goes through steps 1–10 and the gate runs again from step 1 under the same
+   one-repair rule.
 8. **`git status` clean**, no scaffolding in any commit.
 
 **Only after the gate passes:** tear down rigs and containers, and remind the user to revoke the
@@ -288,8 +306,8 @@ service principal secrets. The gate needs the rig; a round that tears down first
 ## Close-out
 
 1. **Append to `docs/AUDIT-LEDGER.md`:** one Findings row per finding — id
-   (`<round>-<finding>`), severity, terminal verdict (fixed / refuted / struck / inverted /
-   deferred), one line of what — and the round's row in the Rounds table with the residue rate.
+   (`<round>-<finding>`), severity, terminal verdict (fixed / refuted / struck / inverted), one
+   line of what — and the round's row in the Rounds table with the residue rate.
    **No shas in new rows**: they are written before the squash merge exists, so any sha dies with
    the branch; the round number is the durable key, and the merge commit is always findable via
    `git log main --grep "Audit <N>"`. Instead, **backfill the previous round**: its merge is on
@@ -300,9 +318,9 @@ service principal secrets. The gate needs the rig; a round that tears down first
 3. **Delete the findings file** — `git rm docs/AUDIT-FINDINGS-*.md`, committed. The files poison
    the next round: they hand twenty finders inherited beliefs, and one wrong sentence in one once
    cost four rounds. Everything durable is now actually durable — verdicts in the ledger, rulings
-   in the product model, deferred work in `docs/DEFERRED-FINDINGS.md` — so nothing else survives on
-   purpose. (Commit history is *not* the durable record: main squash-merges.) Do not delete a file
-   that still has non-terminal findings.
+   in the product model — so nothing else survives on purpose. (Commit history is *not* the
+   durable record: main squash-merges.) **Never delete a file that still has a non-terminal
+   finding**: an open finding keeps the round open, and there is no other file to move it to.
 4. **Report the residue rate** from the ledger, and say plainly whether it is falling. If it is not,
    the headline is that this skill needs changing again — not that the codebase is unusually buggy.
 5. Report the clean-up owed: revoke credentials, remove containers, delete cloud test resources.
@@ -311,7 +329,7 @@ service principal secrets. The gate needs the rig; a round that tears down first
 
 Present them **in chat as one fenced markdown block** the user can paste into a GitHub release. Do
 not write them to a file and do not commit them. Derive every line from the commits actually made
-(`git log <base>..HEAD`), never from the findings file; refuted and deferred work must not appear.
+(`git log <base>..HEAD`), never from the findings file; refuted and struck work must not appear.
 
 Three sections, each **omitted entirely when empty**: `### New Features`, `### Improvements`,
 `### Bug Fixes`. Write for someone **running** Bastet — one bullet per user-visible change:

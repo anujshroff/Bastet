@@ -274,7 +274,9 @@ status is added. It has already shipped once: "Only show what would change" test
   finding is an operator-visible wrong behaviour reproducible at HEAD; nothing else. A fix is the
   minimal change that makes the wrong
   behaviour right, plus its pin or its record - no hardening, no widening, no "while we're here"
-  work for later rounds to audit.
+  work for later rounds to audit. A finding leaves its round as fixed, refuted or struck (or
+  inverted by an owner ruling); there is no deferred state, no file that holds parked work, and no
+  round that closes with a finding still open.
 - **Since round 1 there have been no intended product changes.** Everything filed is a defect
   against behaviour the product already promises — from the original implementation or introduced by
   a previous round's fixes. There is no third category.
@@ -397,3 +399,15 @@ summary, no reasoning added. Rulings made before this file existed are already f
   deliberate: reconcile withholds on manual content without a direct check, and the operator reads
   the denied-access warning on the same screen to tell hidden from gone. Not to be re-filed.
   Counter-test: untestable (a declined fix); the existing held-row tests pin current behaviour.
+- **34-L5 (close-out, after round 35)** — on reading `docs/DEFERRED-FINDINGS.md`, which held one
+  finding, 34-L5, parked in round 34 under the reconcile skill's cap of three fix-commits per source
+  file ("what the fuck is in the deferred findings"; "where did this shit come up?"). Owner: "with
+  audit and audit-reconcile, shit either needs to be fixed, or you fuck off"; "after we address the
+  current deferred findings, i want to 100% block any future creation of deferred findings". 34-L5
+  was fixed in the same change. Enforced by: the reconcile skill's `defer` disposition, its per-file
+  commit cap and every revert-and-defer branch removed; the split rule fixes both halves in-round; a
+  fix that fails review twice or survives the gate's one repair is reverted and the run stops for
+  the owner, who fixes again or strikes; the audit skill states the same contract;
+  `docs/DEFERRED-FINDINGS.md` deleted. Folded into §5 (a finding leaves its round only as fixed,
+  refuted or struck). Counter-test: untestable (process rule); `grep -i defer` over both skills
+  finds only the sentences saying it no longer exists.
