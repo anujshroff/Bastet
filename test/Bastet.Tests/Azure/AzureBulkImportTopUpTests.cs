@@ -116,6 +116,17 @@ public class AzureBulkImportTopUpTests
     }
 
     [Fact]
+    public void AnEncompassingSubnetCarryingTheVNetsOwnId_CannotMarkAHostIpTargetFullyAllocated()
+    {
+        BulkImportPlanViewModel plan = _planner.BuildPlan(
+            Selection(false, Sub("snet-all", "10.90.0.0/16", VNetA)),
+            [Target(linkedTo: VNetA, hasChildren: false, hasHostIps: true)]);
+
+        Assert.Contains(plan.Items[0].Errors, e => e.Contains("host IP assignments"));
+        Assert.False(plan.CanCommit);
+    }
+
+    [Fact]
     public void ATopUpNeverRenamesThePopulatedTarget()
     {
         BulkImportPlanItem item = Plan(

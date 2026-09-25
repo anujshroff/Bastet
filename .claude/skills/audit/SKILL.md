@@ -145,6 +145,10 @@ and a round that does not say so in its first sentence has buried the most impor
   verification produces.
 - **A fix proposal must be narrow.** If closing a defect appears to need a component restructured,
   say so explicitly and separately.
+- **Reconcile has no deferred disposition** (`docs/PRODUCT-MODEL.md` §8, 34-L5): every finding
+  filed is fixed in the round that files it or struck by the owner. Size is not a filing criterion
+  either way — file the reproduced defect, name the narrow fix, state a structural remainder
+  separately; reconcile does both in-round as its own reviewed commits.
 
 **Audit the mechanism before proposing to extend it.** A previous round's fix already in the tree
 reads as settled design; it is not. Whenever a candidate proposes extending, widening or adding a
