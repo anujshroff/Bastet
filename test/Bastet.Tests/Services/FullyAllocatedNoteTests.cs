@@ -36,7 +36,7 @@ public class FullyAllocatedNoteTests
     {
         string d = FullyAllocatedNote.Append("Prod DMZ. Owner: netops.", "sn", Max);
 
-        Assert.Equal($"Prod DMZ. Owner: netops.\n{Note("sn")}", d);
+        Assert.Equal($"Prod DMZ. Owner: netops.\r\n{Note("sn")}", d);
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public class FullyAllocatedNoteTests
             d = FullyAllocatedNote.Append(d, "sn", Max);
         }
 
-        Assert.Equal($"Prod DMZ. Owner: netops.\n{Note("sn")}", d);
+        Assert.Equal($"Prod DMZ. Owner: netops.\r\n{Note("sn")}", d);
     }
 
     [Theory]
@@ -154,4 +154,55 @@ public class FullyAllocatedNoteTests
     [Fact]
     public void TheNameSurvivesWithItsLineBreakCollapsedToASpace()
         => Assert.Equal(Note("sn-A sn-B"), FullyAllocatedNote.For("sn-A\nsn-B"));
+
+    private static string FormWrittenText(int length) =>
+        ("Owner: netops.\r\nTicket 42.\r\n" + new string('x', 1100))[..length];
+
+    private static string AsABrowserRePostsIt(string stored) =>
+        System.Text.RegularExpressions.Regex.Replace(stored, @"(?<!\r)\n", "\r\n");
+
+    [Theory]
+    [InlineData(-3)]
+    [InlineData(-2)]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void AnAppendedNote_RePostedByABrowser_NeverExceedsTheCap(int offsetFromTheLfBoundary)
+    {
+        string existing = FormWrittenText(Max - Note("sn").Length - 1 + offsetFromTheLfBoundary);
+
+        string stored = FullyAllocatedNote.Append(existing, "sn", Max);
+
+        Assert.True(stored.Length <= Max);
+        Assert.True(AsABrowserRePostsIt(stored).Length <= Max,
+            $"a description the import stored at {stored.Length} is re-posted by the Edit form at {AsABrowserRePostsIt(stored).Length}");
+    }
+
+    [Fact]
+    public void AnAppendedNote_JoinsWithTheLineBreakFormWrittenDescriptionsStore()
+    {
+        string stored = FullyAllocatedNote.Append("Line one\r\nLine two", "sn", Max);
+
+        Assert.Equal($"Line one\r\nLine two\r\n{Note("sn")}", stored);
+        Assert.Equal(stored, AsABrowserRePostsIt(stored));
+    }
+
+    [Fact]
+    public void Strip_AfterACrlfJoinedNote_LeavesNoTrailingCarriageReturn()
+        => Assert.Equal("Owner: netops.", FullyAllocatedNote.Strip($"Owner: netops.\r\n{Note("sn")}"));
+
+    [Fact]
+    public void MarkingAndUnmarking_OverAFormWrittenDescription_IsStable()
+    {
+        string original = "Line one\r\nLine two";
+        string d = original;
+        for (int i = 0; i < 4; i++)
+        {
+            string marked = FullyAllocatedNote.Append(d, "sn", Max);
+            Assert.Equal(marked, AsABrowserRePostsIt(marked));
+            d = FullyAllocatedNote.Strip(marked);
+        }
+
+        Assert.Equal(original, d);
+    }
 }
