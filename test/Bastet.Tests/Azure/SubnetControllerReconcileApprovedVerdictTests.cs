@@ -187,8 +187,8 @@ public class SubnetControllerReconcileApprovedVerdictTests : IDisposable
         AzureReconcileDeleteDto request = Request();
         request.Statuses = await AzureReconcileApproval.ForAsync(azure, _snapshotService, SubId, [1]);
 
-        Assert.Single(request.Statuses);
-        Assert.Equal(nameof(AzureReconcileStatus.VNetPrefixRemoved), request.Statuses[0].StatusName);
+        AzureReconcileApprovedVerdict status = Assert.Single(request.Statuses);
+        Assert.Equal(nameof(AzureReconcileStatus.VNetPrefixRemoved), status.StatusName);
 
         IActionResult result = await Delete(request, azure);
 
