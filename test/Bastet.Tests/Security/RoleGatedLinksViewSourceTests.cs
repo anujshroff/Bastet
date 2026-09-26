@@ -2,11 +2,23 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.Security;
 
-public class RoleGatedLinksViewSourceTests
+public partial class RoleGatedLinksViewSourceTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
     private const string Gate = @"@if \(!UserContextService\.IsSignedInWithoutRole\(ApplicationRoles\.View\)\)\s*\{";
+
+    [GeneratedRegex(Gate)]
+    private static partial Regex GatePattern();
+
+    [GeneratedRegex(Gate + @"\s*<a href=""/"" class=""btn btn-primary"">Return to Home</a>\s*\}")]
+    private static partial Regex GatedReturnToHomePattern();
+
+    [GeneratedRegex("Return to Home")]
+    private static partial Regex ReturnToHomeTextPattern();
+
+    [GeneratedRegex(@"href=""/""")]
+    private static partial Regex RootHrefPattern();
 
     private static string FindRepoRoot()
     {
@@ -22,18 +34,15 @@ public class RoleGatedLinksViewSourceTests
     private static string ReadView(string relativePath) =>
         File.ReadAllText(Path.Combine(RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-    private static Match GatedReturnToHome(string view) =>
-        Regex.Match(view, Gate + @"\s*<a href=""/"" class=""btn btn-primary"">Return to Home</a>\s*\}");
-
     [Fact]
     public void AccessDenied_OffersReturnToHome_OnlyToAReaderWhoCanOpenHome()
     {
         string view = ReadView("src/Bastet/Views/Account/AccessDenied.cshtml");
 
         Assert.Contains("@inject IUserContextService UserContextService", view);
-        Match gated = GatedReturnToHome(view);
+        Match gated = GatedReturnToHomePattern().Match(view);
         Assert.True(gated.Success, "Return to Home must sit inside the View-role gate");
-        Assert.Single(Regex.Matches(view, "Return to Home"));
+        Assert.Single(ReturnToHomeTextPattern().Matches(view));
         Assert.True(view.IndexOf("asp-action=\"Logout\"", StringComparison.Ordinal) > gated.Index + gated.Length,
             "Logout must stay outside the gate: it is the one link a role-less reader can use");
         Assert.Contains("Please contact your administrator", view);
@@ -45,9 +54,9 @@ public class RoleGatedLinksViewSourceTests
         string view = ReadView("src/Bastet/Views/Shared/_ErrorLayout.cshtml");
 
         Assert.Contains("@inject IUserContextService UserContextService", view);
-        Match gated = GatedReturnToHome(view);
+        Match gated = GatedReturnToHomePattern().Match(view);
         Assert.True(gated.Success, "Return to Home must sit inside the View-role gate");
-        Assert.Single(Regex.Matches(view, "Return to Home"));
+        Assert.Single(ReturnToHomeTextPattern().Matches(view));
         Assert.True(view.IndexOf("history.back()", StringComparison.Ordinal) > gated.Index + gated.Length,
             "Go Back must stay outside the gate");
     }
@@ -60,9 +69,9 @@ public class RoleGatedLinksViewSourceTests
         Assert.Matches(
             @"@if \(UserContextService\.IsSignedInWithoutRole\(ApplicationRoles\.View\)\)\s*\{\s*<span class=""navbar-brand"">BASTET</span>\s*\}\s*else\s*\{\s*<a class=""navbar-brand"" href=""/"">BASTET</a>\s*\}",
             view);
-        Assert.Single(Regex.Matches(view, @"href=""/"""));
+        Assert.Single(RootHrefPattern().Matches(view));
 
-        Match menuGate = Regex.Match(view, Gate);
+        Match menuGate = GatePattern().Match(view);
         Assert.True(menuGate.Success, "the Subnets and Host IPs menus must sit inside the View-role gate");
         int azureBlock = view.IndexOf("bulkAzureImportEnabled", StringComparison.Ordinal);
         foreach (string action in new[] { "asp-action=\"Index\"", "asp-action=\"DeletedSubnets\"", "asp-action=\"AllHostIps\"", "asp-action=\"AllDeletedHostIps\"" })

@@ -1,6 +1,3 @@
-using System.ComponentModel.DataAnnotations;
-using System.Text.RegularExpressions;
-using ValidationContext = System.ComponentModel.DataAnnotations.ValidationContext;
 using Bastet.Controllers;
 using Bastet.Data;
 using Bastet.Models;
@@ -14,11 +11,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.ComponentModel.DataAnnotations;
+using System.Text.RegularExpressions;
+using ValidationContext = System.ComponentModel.DataAnnotations.ValidationContext;
 
 namespace Bastet.Tests.Azure;
 
 [Collection(AzureFeatureFlagCollection.Name)]
-public class BulkImportDescriptionParityTests : IDisposable
+public partial class BulkImportDescriptionParityTests : IDisposable
 {
     private const string SubId = "44444444-4444-4444-4444-444444444444";
     private const string VNetId =
@@ -26,6 +26,9 @@ public class BulkImportDescriptionParityTests : IDisposable
     private const string Prefix = "10.15.0.0/24";
     private const string AzureSubnetName = "snet-all";
     private const int Cap = 1000;
+
+    [GeneratedRegex(@"(?<!\r)\n")]
+    private static partial Regex BareLineFeedPattern();
 
     private readonly BastetDbContext _context;
     private readonly SubnetController _controller;
@@ -74,7 +77,7 @@ public class BulkImportDescriptionParityTests : IDisposable
     private static string FormWrittenDescription(int length) =>
         ("Prod DMZ.\r\nOwner: netops.\r\n" + new string('x', 1100))[..length];
 
-    private static string AsABrowserRePostsIt(string stored) => Regex.Replace(stored, @"(?<!\r)\n", "\r\n");
+    private static string AsABrowserRePostsIt(string stored) => BareLineFeedPattern().Replace(stored, "\r\n");
 
     private static bool EditFormAccepts(string description)
     {

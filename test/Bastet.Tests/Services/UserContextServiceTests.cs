@@ -1,7 +1,7 @@
-using System.Security.Claims;
 using Bastet.Models;
 using Bastet.Services;
 using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 
 namespace Bastet.Tests.Services;
 

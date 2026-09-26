@@ -1,5 +1,3 @@
-using System.ComponentModel.DataAnnotations;
-using ValidationContext = System.ComponentModel.DataAnnotations.ValidationContext;
 using Bastet.Controllers;
 using Bastet.Data;
 using Bastet.Models;
@@ -13,6 +11,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.ComponentModel.DataAnnotations;
+using ValidationContext = System.ComponentModel.DataAnnotations.ValidationContext;
 
 namespace Bastet.Tests.Azure;
 
@@ -27,7 +27,7 @@ public class BulkImportNameParityTests : IDisposable
     private readonly SubnetController _controller;
     private readonly IAzureBulkImportPlanner _planner;
     private readonly IAzureSubnetSnapshotService _snapshotService;
-    private readonly IInputSanitizationService _sanitization = new InputSanitizationService();
+    private readonly InputSanitizationService _sanitization = new();
 
     public BulkImportNameParityTests()
     {

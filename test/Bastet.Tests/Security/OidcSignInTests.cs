@@ -1,8 +1,8 @@
-using System.Security.Claims;
 using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 
 namespace Bastet.Tests.Security;
 

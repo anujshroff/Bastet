@@ -2,9 +2,27 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.Azure;
 
-public class AzureWizardClientWordingTests
+public partial class AzureWizardClientWordingTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
+
+    [GeneratedRegex(@"(?<!function )readErrorMessage\(xhr\)")]
+    private static partial Regex ReadErrorMessageCallPattern();
+
+    [GeneratedRegex(@"function showCommitError\(payload,\s*status\)\s*\{(?<body>.*?)\n        \}", RegexOptions.Singleline)]
+    private static partial Regex ShowCommitErrorPattern();
+
+    [GeneratedRegex(@"if\s*\(status\s*===\s*409\)\s*\{", RegexOptions.Singleline)]
+    private static partial Regex Status409BranchPattern();
+
+    [GeneratedRegex(@"function voidConfirmation\(\)\s*\{(?:(?!activateTab).)*?\n        \}", RegexOptions.Singleline)]
+    private static partial Regex VoidConfirmationWithoutTabSwitchPattern();
+
+    [GeneratedRegex(@"function invalidateConfirmation\(\)\s*\{\s*voidConfirmation\(\);", RegexOptions.Singleline)]
+    private static partial Regex InvalidateConfirmationDelegatesPattern();
+
+    [GeneratedRegex(@"function renderPlan\(plan\)\s*\{(?<body>.{0,400})", RegexOptions.Singleline)]
+    private static partial Regex RenderPlanHeadPattern();
 
     private static string FindRepoRoot()
     {
@@ -20,17 +38,17 @@ public class AzureWizardClientWordingTests
     private static string ReadView(string relativePath) =>
         File.ReadAllText(Path.Combine(RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-    public static TheoryData<string> StepSubscriptionPartials => new()
-    {
+    public static TheoryData<string> StepSubscriptionPartials =>
+    [
         "src/Bastet/Views/Azure/BulkImport/_StepSubscription.cshtml",
         "src/Bastet/Views/Azure/Reconcile/_StepSubscription.cshtml",
-    };
+    ];
 
-    public static TheoryData<string> WizardScriptPartials => new()
-    {
+    public static TheoryData<string> WizardScriptPartials =>
+    [
         "src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml",
         "src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml",
-    };
+    ];
 
     [Theory]
     [MemberData(nameof(StepSubscriptionPartials))]
@@ -85,7 +103,7 @@ public class AzureWizardClientWordingTests
         Assert.DoesNotContain("Error connecting to server", view);
 
         int readHandlers = viewPath.Contains("BulkImport") ? 3 : 2;
-        Assert.Equal(readHandlers, Regex.Matches(view, @"(?<!function )readErrorMessage\(xhr\)").Count);
+        Assert.Equal(readHandlers, ReadErrorMessageCallPattern().Count(view));
     }
 
     [Fact]
@@ -98,11 +116,11 @@ public class AzureWizardClientWordingTests
         Assert.Contains("Fix the problem shown", stepReview);
     }
 
-    public static TheoryData<string> WizardScripts => new()
-    {
+    public static TheoryData<string> WizardScripts =>
+    [
         "src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml",
         "src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml",
-    };
+    ];
 
     [Theory]
     [MemberData(nameof(WizardScripts))]
@@ -144,16 +162,8 @@ public class AzureWizardClientWordingTests
     [MemberData(nameof(WizardScripts))]
     public void AStalePlan409_VoidsTheSnapshot_RatherThanReOfferingIt(string script)
     {
-        string text = ReadView(script);
-
-        Match handler = Regex.Match(
-            text,
-            @"function showCommitError\(payload,\s*status\)\s*\{(?<body>.*?)\n        \}",
-            RegexOptions.Singleline);
-        Assert.True(handler.Success, $"showCommitError must take the status in {script}");
-
-        string body = handler.Groups["body"].Value;
-        Assert.Matches(new Regex(@"if\s*\(status\s*===\s*409\)\s*\{", RegexOptions.Singleline), body);
+        string body = ShowCommitErrorBody(script);
+        Assert.Matches(Status409BranchPattern(), body);
 
         int branch = body.IndexOf("status === 409", StringComparison.Ordinal);
         int reEnable = body.IndexOf("prop(\"disabled\", false)", StringComparison.Ordinal);
@@ -187,12 +197,8 @@ public class AzureWizardClientWordingTests
     {
         string text = ReadView("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
 
-        Assert.Matches(
-            new Regex(@"function voidConfirmation\(\)\s*\{(?:(?!activateTab).)*?\n        \}", RegexOptions.Singleline),
-            text);
-        Assert.Matches(
-            new Regex(@"function invalidateConfirmation\(\)\s*\{\s*voidConfirmation\(\);", RegexOptions.Singleline),
-            text);
+        Assert.Matches(VoidConfirmationWithoutTabSwitchPattern(), text);
+        Assert.Matches(InvalidateConfirmationDelegatesPattern(), text);
     }
 
     [Theory]
@@ -231,10 +237,7 @@ public class AzureWizardClientWordingTests
     {
         string text = ReadView(script);
 
-        Match render = Regex.Match(
-            text,
-            @"function renderPlan\(plan\)\s*\{(?<body>.{0,400})",
-            RegexOptions.Singleline);
+        Match render = RenderPlanHeadPattern().Match(text);
         Assert.True(render.Success, $"renderPlan was not found in {script}");
 
         Assert.Contains($"$(\"{errorPanel}\").addClass(\"d-none\")", render.Groups["body"].Value);
@@ -265,10 +268,7 @@ public class AzureWizardClientWordingTests
 
     private static string ShowCommitErrorBody(string script)
     {
-        Match handler = Regex.Match(
-            ReadView(script),
-            @"function showCommitError\(payload,\s*status\)\s*\{(?<body>.*?)\n        \}",
-            RegexOptions.Singleline);
+        Match handler = ShowCommitErrorPattern().Match(ReadView(script));
         Assert.True(handler.Success, $"showCommitError must take the status in {script}");
         return handler.Groups["body"].Value;
     }

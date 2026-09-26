@@ -2,9 +2,18 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.HostIpManagement;
 
-public class HostIpViewSourceTests
+public partial class HostIpViewSourceTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
+
+    [GeneratedRegex(@"asp-validation-summary=|Html\.ValidationSummary\(|ModelState")]
+    private static partial Regex ModelLevelRenderingPattern();
+
+    [GeneratedRegex("alert-danger")]
+    private static partial Regex AlertDangerPattern();
+
+    [GeneratedRegex("<form[^>]*>")]
+    private static partial Regex FormOpeningTagPattern();
 
     private static string FindRepoRoot()
     {
@@ -23,7 +32,7 @@ public class HostIpViewSourceTests
     private static string ReadView(string relativePath) => File.ReadAllText(ViewPath(relativePath));
 
     private static int ModelLevelRenderings(string view) =>
-        Regex.Matches(view, @"asp-validation-summary=|Html\.ValidationSummary\(|ModelState").Count;
+        ModelLevelRenderingPattern().Count(view);
 
     private static IEnumerable<string> ViewsAHostIpPageCanComposeFrom() =>
         Directory.GetFiles(ViewPath("src/Bastet/Views"), "*.cshtml", SearchOption.TopDirectoryOnly)
@@ -55,7 +64,7 @@ public class HostIpViewSourceTests
     {
         string ownerView = ReadView("src/Bastet/Views/HostIp/" + owner);
         Assert.Contains(summaryLine, ownerView);
-        Assert.Single(Regex.Matches(ownerView, "alert-danger"));
+        Assert.Single(AlertDangerPattern().Matches(ownerView));
     }
 
     [Theory]
@@ -66,7 +75,7 @@ public class HostIpViewSourceTests
     {
         string form = ReadView("src/Bastet/Views/HostIp/" + view);
 
-        MatchCollection forms = Regex.Matches(form, "<form[^>]*>");
+        MatchCollection forms = FormOpeningTagPattern().Matches(form);
         Match postForm = Assert.Single(forms, m => m.Value.Contains("method=\"post\""));
         Assert.Contains($"asp-action=\"{action}\"", postForm.Value);
         Assert.Contains(routeAttribute, postForm.Value);

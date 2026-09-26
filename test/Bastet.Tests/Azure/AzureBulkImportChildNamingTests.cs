@@ -46,7 +46,7 @@ public class AzureBulkImportChildNamingTests
             AzureResourceId = link
         };
 
-    private ExistingSubnetSnapshot[] ImportedMultiPrefixRows(string firstName = "snet-mp (10.81.1.0-24)") =>
+    private static ExistingSubnetSnapshot[] ImportedMultiPrefixRows(string firstName = "snet-mp (10.81.1.0-24)") =>
     [
         Row(1, "multi-vnet", "10.81.0.0", 16, VNetId("multi-vnet")),
         Row(2, firstName, "10.81.1.0", 24, SubnetId("multi-vnet", "snet-mp")),

@@ -2,9 +2,12 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.Security;
 
-public class SignInFailedViewSourceTests
+public partial class SignInFailedViewSourceTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
+
+    [GeneratedRegex("contact your administrator")]
+    private static partial Regex ContactAdministratorPattern();
 
     private static string FindRepoRoot()
     {
@@ -28,7 +31,7 @@ public class SignInFailedViewSourceTests
         Assert.Matches(
             @"Nothing is wrong with your account, and nothing was changed\.</p>\s*<p>If this happens every time you try, contact your administrator\.</p>",
             view);
-        Assert.Single(Regex.Matches(view, "contact your administrator"));
+        Assert.Single(ContactAdministratorPattern().Matches(view));
         Assert.Contains("Try signing in again", view);
         Assert.DoesNotContain("log", view, StringComparison.OrdinalIgnoreCase);
     }
