@@ -204,6 +204,25 @@ status is added. It has already shipped once: "Only show what would change" test
 
 ## 5. Invariants that decide findings and fixes
 
+- **This file decides, and only this file** (owner ruling, §8 round 36). A candidate is a finding
+  only when a sentence of this file makes the current behaviour wrong, and the finding quotes that
+  sentence. No agent's sense of worth, likelihood or taste, the operator's included, decides
+  anything in either direction: not what is filed, not its severity, not what is struck. A
+  candidate is refuted, never filed, when any of these holds:
+  - making it a defect needs a reading this file does not state, a convention this file does not
+    choose, or a product question: the file has not decided it;
+  - two sentences of this file pull in opposite directions on it: the file has not decided it;
+  - it reads behaviour a previous round chose on purpose, or behaviour this file describes, in a
+    new way: a settled choice stands unless a sentence here contradicts it;
+  - its fix adds, widens or branches a guard, refusal, withhold, status, endpoint, special case or
+    setting that no sentence here requires in exactly that form. Serving a sentence in general is
+    not requiring it, and §8 31-L2's presumption is applied, not argued. Making a sibling path
+    answer a question the way the product already answers it on the other path, with the same
+    code, is what the duplication and write-path bullets below require, and is not an addition.
+- **The owner is not the filter.** Nothing is refuted or struck because the owner said so. The
+  round refutes on the sentence it quotes, and a candidate this file does not make a defect is
+  refuted by the round that found it, never passed to the owner to decline. The owner's words
+  change this file through §8; they are not a verdict on a finding.
 - **When one decision has two implementations they drift**, and the drift is invisible until the two
   are compared. A finding that two code paths answer one question differently is a finding about the
   duplication, not about which answer is right. Fix it by deleting an implementation, and prefer the
@@ -411,3 +430,18 @@ summary, no reasoning added. Rulings made before this file existed are already f
   `docs/DEFERRED-FINDINGS.md` deleted. Folded into §5 (a finding leaves its round only as fixed,
   refuted or struck). Counter-test: untestable (process rule); `grep -i defer` over both skills
   finds only the sentences saying it no longer exists.
+- **36 (round-wide)** — during round 36's verification, after the operator had described candidates
+  by its own sense of their worth, reversed itself, and offered the owner strikes. Owner: "flag any
+  issue that seems to be that you failed to grasp the spirit of the application"; "often times you
+  flag shit thats not a bug or you dont understand how the app should work or whats allowed or not
+  allowed"; "lets be absolutely clear, nothing gets marked as refuted "because I said so". if you
+  cant figure out how this product works and do it properly the way i want, then you are useless.
+  and i might as well cancel my claude subscription"; "you need to codify the fucking rulesso every
+  iteration of this fucking shit works properlyand doesnt do bad/dumb/bloaty shit"; "read all of my
+  text" (repeated); "THE PRODUCT MODEL IS ABSOLUTE KINGYOUR OPINIONS ARE SHIT AND I DONT NEED THEM";
+  "REREAD ALL OF THE FINDINGS ONCE THIS BULLSHIT IS DONESTRIKE ANYTHING THAT IS CRAP"; "next time
+  read my fucking texts". Folded into §5 (this file decides, and only this file; the owner is not
+  the filter) and into both skills: every finding quotes the sentence that makes it wrong, the
+  verifiers and a model gate before the audit commit apply §5's refutation list, findings carry no
+  product questions, the operator gives no opinions, and reconcile triage refutes on the quoted
+  sentence. Counter-test: untestable (process rule).

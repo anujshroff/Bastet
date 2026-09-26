@@ -41,10 +41,10 @@ repair — whether that finding is fixed again or struck is the owner's decision
 question. State which mode is active before triage.
 
 **Never ask how to fix something, and never make a product decision.** Implementation is yours:
-which predicate, where the guard goes, what the message says. Where a fix implies a change to what
-the product does, take the option that closes the reproduced defect with the smallest behaviour
-change that is actually correct, and record the one-line product question in the findings file for
-the owner to read afterwards. Do not block.
+which predicate, where the guard goes, what the message says. A finding whose fix would need a
+product decision is one the model has not decided: refute it at triage on the quoted sentence
+(`docs/PRODUCT-MODEL.md` §5, owner ruling §8 round 36). Where only the fix shape is open, take the
+smallest change the model allows. No product question is recorded for the owner. Do not block.
 
 ## Start of run
 
@@ -75,20 +75,24 @@ Build one table — finding id, severity, one line, and a recommended dispositio
 owner in a single message. Dispositions:
 
 - **fix** — will be fixed this round.
-- **strike** — invalid per the product model, with the sentence cited. A struck finding gets a
-  `struck` ledger row, and **the owner's words go into PRODUCT-MODEL.md §8 verbatim** — never your
-  paraphrase; a wrong paraphrase written there becomes canon. Where the ruling is testable, write
-  the counter-test as a work item this round.
+- **refute** — a sentence of the product model rules it out under §5's refutation list; the
+  sentence is quoted in the table and in the ledger row. This is the round's call, made on the text:
+  nothing is refuted because the owner said so, and nothing the model rules out is left for the
+  owner to decline (`docs/PRODUCT-MODEL.md` §5, §8 round 36).
+- **strike** — the owner's ruling only, volunteered by the owner. It changes the model: **the
+  owner's words go into PRODUCT-MODEL.md §8 verbatim** — never your paraphrase; a wrong paraphrase
+  written there becomes canon — and the finding gets a `struck` ledger row. Where the ruling is
+  testable, write the counter-test as a work item this round.
 
 There is no defer. A real finding whose fix is large is `fix`; its size goes into batching and the
-split rule, never into the disposition. Only the owner takes a real finding off the table, and that
-is `strike`, with their words in §8.
+split rule, never into the disposition. Only the owner takes a finding the model makes a defect off
+the table, and that is `strike`, with their words in §8.
 
 Recommend dispositions from the product model and the ledger — a finding proposing to extend a
 mechanism gets `git log -S` on the identifying string first, and if a previous round added it, the
-recommendation leans **remove**, not extend. The owner edits the table in one reply; in `auto`
-mode the recommendations stand, except that striking on your own authority requires a product-model
-citation.
+recommendation leans **remove**, not extend. No disposition rests on a sense of a finding's worth:
+every `refute` quotes its sentence, and a finding the model makes a defect is `fix`. The owner edits
+the table in one reply; in `auto` mode the recommendations stand.
 
 ## Batching
 
@@ -112,8 +116,9 @@ the close-out report, not a reason to stop fixing.
 They are frequently wrong in detail, and earlier fixes move the ground. Check references in **all
 forms**, including fully-qualified; for anything being deleted, require **zero references and zero
 coverage**; check a same-named symbol elsewhere is not live. **A `[x1]` warrants more scepticism
-than a `[x2]`** — one full pass missed it. If the finding is wrong, mark it REFUTED with the
-evidence and move on; do not invent a fix for a defect that is not there.
+than a `[x2]`** — one full pass missed it. If the finding is wrong, or a sentence of the product
+model rules it out under §5's refutation list, mark it REFUTED with the evidence or the quoted
+sentence and move on; do not invent a fix for a defect that is not there.
 
 ### 2. Reproduce the defect before fixing it
 
@@ -145,8 +150,9 @@ is fixed now; if it is not, it is not a finding (`docs/PRODUCT-MODEL.md` §5) an
 says so in one line.
 
 **A fix that adds a guard, refusal, withhold, status or special case is a design change, not a bug
-fix.** Before writing it, name the product-model sentence it serves; if you cannot, the finding has
-misdiagnosed the defect — record that instead of implementing it. Prefer the fix that deletes
+fix.** Before writing it, name the product-model sentence that requires it in exactly that form;
+serving a sentence in general is not requiring it (`docs/PRODUCT-MODEL.md` §5). If you cannot, the
+finding has misdiagnosed the defect — refute it on §5 instead of implementing it. Prefer the fix that deletes
 machinery, and check `docs/PRODUCT-MODEL.md` §3's deleted-machinery list before building anything
 that resembles it.
 
@@ -227,9 +233,11 @@ The verdict is typed, and the protocol is decidable:
   Revise once, re-review; a second demonstrated failure → **revert the fix and stop the run with
   the finding open**: report both failures to the owner. The finding leaves the file only when a
   fix passes review or the owner strikes it, and this holds in `auto` mode too.
-- **(b) product-model violation, sentence cited** — decided by the text. If the text is genuinely
-  ambiguous, neither side wins: revert and stop the run with the one-line product question for the
-  owner; their answer goes into §8 verbatim and decides whether the finding is fixed or struck.
+- **(b) product-model violation, sentence cited** — decided by the text. A fix that adds, widens or
+  branches a guard, refusal, withhold, status, endpoint, special case or setting that no model
+  sentence requires in exactly that form is (b), §5 cited. If the text is genuinely ambiguous,
+  neither side wins: revert, and re-triage the finding under §5's refutation list — refuted if the
+  model has not decided it. No product question goes to the owner (§8 round 36).
 - **(c) "I would have fixed it differently"** — the author wins automatically. Demands for
   hardening or for coverage beyond the §5 proof are this category; **a fix shipping neither
   its pin nor its ledger + `/e2e` record is (b), §5 cited.** The reviewer's schema must force
