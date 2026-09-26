@@ -65,8 +65,15 @@ public class AzureBulkImportAdoptionReasonTests
         BulkAzurePrefixViewModel prefix = AnnotatedPrefix(targetLink: VNetId, targetHasChildren: true);
 
         Assert.Equal(BulkImportAvailability.WillUpdateExisting, prefix.Status);
-        Assert.Equal(
-            "Will add any missing subnets to existing Bastet subnet 'hand-a'. Subnets already imported are left untouched.",
-            prefix.Reason);
+        Assert.Equal("Will add any missing subnets to existing Bastet subnet 'hand-a'.", prefix.Reason);
+    }
+
+    [Fact]
+    public void ATopUpReason_NeverClaimsImportedSubnetsAreLeftUntouched_BecauseTheRenameSwitchCanRenameThem()
+    {
+        BulkAzurePrefixViewModel prefix = AnnotatedPrefix(targetLink: VNetId, targetHasChildren: true);
+
+        Assert.DoesNotContain("untouched", prefix.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("unchanged", prefix.Reason, StringComparison.OrdinalIgnoreCase);
     }
 }

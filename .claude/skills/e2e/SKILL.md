@@ -849,6 +849,16 @@ answer 200 with their own titles - none of them the 404 page - and the database 
 changed or created. The host-IP forms carry their identifier in the form URL (`asp-route-ip`,
 `asp-route-subnetId`) for exactly this replay; the typed input is lost either way.
 
+**A signed-in user with no Bastet role is offered no link that answers Access Denied** (round 36).
+Sign in through the mock IdP with an empty roles claim (`/Account/Roles` says no roles are assigned):
+`/` lands on Access Denied, whose only buttons are Logout and the user menu's My Roles; the navbar
+shows the BASTET brand as plain text and no Subnets or Host IPs menus; `/Error/404` offers Go Back
+only. Controls in the same run: a View user (roles `["View"]`) sees the brand link, both menus and
+Return to Home on Access Denied and on `/Error/404`, and every one of those links opens; an anonymous
+visitor still sees the brand link, both menus and Return to Home on `/Account/AccessDenied`,
+`/Error/404` and `/Account/SignInFailed` (each starts sign-in), so nothing changed for a reader who is
+not signed in.
+
 ---
 
 # Rules that decide whether the report is true

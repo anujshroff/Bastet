@@ -52,6 +52,9 @@ public class UserContextService(IHttpContextAccessor httpContextAccessor) : IUse
         };
     }
 
+    public bool IsSignedInWithoutRole(string role) =>
+        httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated == true && !UserHasRole(role);
+
     public IEnumerable<string> GetUserBastetRoles()
     {
         if (httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated != true)
