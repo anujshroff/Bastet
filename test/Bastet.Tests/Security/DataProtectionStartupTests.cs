@@ -85,7 +85,7 @@ public class DataProtectionStartupTests
     {
         string block = WarmUpBlock();
 
-        Assert.Contains("Bastet:DataProtection:", block);
+        Assert.Contains("\"Bastet:DataProtection\"", block);
         Assert.DoesNotContain("Bastet:Migration", block);
         Assert.DoesNotContain("migrationLockResource", block);
         Assert.DoesNotContain("OpenMigrationLockConnection", block);
@@ -95,6 +95,20 @@ public class DataProtectionStartupTests
         Assert.DoesNotContain("Guid", resource);
         Assert.DoesNotContain("ProcessId", resource);
         Assert.DoesNotContain("Environment.", resource);
+    }
+
+    [Fact]
+    public void TheLockResource_DoesNotSpellTheCatalog_SoReplicasWhoseConnectionStringsDifferOnlyInCaseStillMeet()
+    {
+        string block = WarmUpBlock();
+        string resource = block[..IndexOfOrFail(block, "try", "the warm-up try block")];
+
+        Assert.Matches(@"string keyRingLockResource = ""Bastet:DataProtection"";", resource);
+        Assert.DoesNotContain("InitialCatalog", resource);
+        Assert.DoesNotContain("connectionString", resource);
+        Assert.DoesNotContain("$\"", resource);
+        Assert.Equal(2, Regex.Matches(block, @"AddWithValue\(""@Resource"", keyRingLockResource\)").Count);
+        Assert.Equal(2, Regex.Matches(block, @"""@Resource""").Count);
     }
 
     [Fact]

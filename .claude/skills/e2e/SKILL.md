@@ -867,6 +867,21 @@ applied this rule to `returnUrl`; both transitions now decide it with `ReturnUrl
 drive (a forged callback that re-sends the correlation and nonce cookies) works over plain HTTP; a
 browser needs HTTPS, because the OIDC cookies are `Secure; SameSite=None`.
 
+**Two replicas whose connection strings spell the catalog in different case share one key ring**
+(round 36). With the catalog and its tables in place, empty `DataProtectionKeys`, then cold-start two
+replicas 50 ms apart with `BASTET_AUTO_MIGRATE=false`, one with `Database=Bastet_x` and one with
+`Database=bastet_x`. When both answer, `SELECT COUNT(*) FROM DataProtectionKeys` must be **1**: the
+round-31 key-ring lock serialised them, its resource being the constant `Bastet:DataProtection`, which
+`sp_getapplock` scopes to the database it is taken in (two deployments in different catalogs never
+block each other; a connection string that omits the catalog still meets). Repeat three times. The
+unfixed shape minted 2 keys in 3 of 3 rounds. The operator-visible consequence needs two things: the
+two first loads landing about 80-100 ms apart (hold one replica's lock name from a third session and
+release the two names 85 ms apart), and a wait past the ~2-minute post-startup key-ring refresh, after
+which a form rendered by one replica and posted to the other answers 400 and a banner written by one is
+dropped by the other; a cross-replica POST made right after startup refreshes the ring and heals the
+pair, so it proves nothing. On the fixed shape the same POST is accepted (302 or a validation
+redisplay) and the banner shows.
+
 ---
 
 # Rules that decide whether the report is true

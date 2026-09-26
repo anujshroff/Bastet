@@ -374,7 +374,7 @@ if (!dataProtectionTableExists)
 
 if (dataProtectionTableExists)
 {
-    string keyRingLockResource = $"Bastet:DataProtection:{new SqlConnectionStringBuilder(connectionString).InitialCatalog}";
+    string keyRingLockResource = "Bastet:DataProtection";
 
     try
     {
