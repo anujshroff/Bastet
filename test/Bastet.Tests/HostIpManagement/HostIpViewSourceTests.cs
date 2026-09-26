@@ -57,4 +57,18 @@ public class HostIpViewSourceTests
         Assert.Contains(summaryLine, ownerView);
         Assert.Single(Regex.Matches(ownerView, "alert-danger"));
     }
+
+    [Theory]
+    [InlineData("Delete/_DeleteConfirmationForm.cshtml", "Delete", "asp-route-ip=\"@Model.IP\"")]
+    [InlineData("Edit/_EditForm.cshtml", "Edit", "asp-route-ip=\"@Model.IP\"")]
+    [InlineData("Create/_HostIpForm.cshtml", "Create", "asp-route-subnetId=\"@Model.SubnetId\"")]
+    public void HostIpForm_CarriesItsIdentifierInTheUrl_SoARepeatedGetAfterSignInLandsOnTheForm(string view, string action, string routeAttribute)
+    {
+        string form = ReadView("src/Bastet/Views/HostIp/" + view);
+
+        MatchCollection forms = Regex.Matches(form, "<form[^>]*>");
+        Match postForm = Assert.Single(forms, m => m.Value.Contains("method=\"post\""));
+        Assert.Contains($"asp-action=\"{action}\"", postForm.Value);
+        Assert.Contains(routeAttribute, postForm.Value);
+    }
 }

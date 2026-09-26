@@ -5,7 +5,7 @@
         <h5 class="mb-0">Host IP Details</h5>
     </div>
     <div class="card-body">
-        <form asp-action="Edit" method="post">
+        <form asp-action="Edit" asp-route-ip="@Model.IP" method="post">
             <div class="mb-3">
                 <label asp-for="IP" class="form-label">IP Address</label>
                 <input asp-for="IP" class="form-control" readonly />

@@ -22,7 +22,7 @@ public static class FullyAllocatedNote
             .Split('\n')
             .Where(line => !IsNote(line));
 
-        return string.Join('\n', kept).Trim('\n');
+        return string.Join('\n', kept).Trim('\r', '\n');
     }
 
     public static string Append(string? existingDescription, string? azureSubnetName, int maxLength)
@@ -35,7 +35,7 @@ public static class FullyAllocatedNote
             return note.Length > maxLength ? note[..maxLength] : note;
         }
 
-        string combined = $"{existing}\n{note}";
+        string combined = $"{existing}\r\n{note}";
         return combined.Length <= maxLength
             ? combined
             : existing.Length > maxLength ? existing[..maxLength] : existing;

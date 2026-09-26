@@ -21,10 +21,8 @@ public class AccountController(
     public async Task<IActionResult> Logout(string? returnUrl = null)
     {
 
-        string target = !string.IsNullOrEmpty(returnUrl)
-                && Url.IsLocalUrl(returnUrl)
-                && HttpHeaderValue.IsValid(returnUrl)
-            ? returnUrl
+        string target = ReturnUrl.IsLocal(returnUrl)
+            ? returnUrl!
             : Url.Action(nameof(SignedOut), "Account") ?? "/Account/SignedOut";
 
         TempData.Clear();

@@ -238,7 +238,7 @@ namespace Bastet.Services.Azure
                 result.Status = BulkImportAvailability.WillUpdateExisting;
 
                 result.Reason = isTopUp && exact.HasChildSubnets
-                    ? $"Will add any missing subnets to existing Bastet subnet '{exact.Name}'. Subnets already imported are left untouched."
+                    ? $"Will add any missing subnets to existing Bastet subnet '{exact.Name}'."
                     : $"Will import into existing Bastet subnet '{exact.Name}'.";
                 result.IsSelectable = true;
                 return result;

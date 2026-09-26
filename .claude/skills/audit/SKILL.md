@@ -121,6 +121,7 @@ skill returns without a findings file.
 |---|---|
 | Verification | 2 adversarial verifiers per candidate, `[x2]` included (truth lens + reachability lens); a 3rd only to break a tie; two surviving votes to file |
 | Rig | Always live: database, application, browser, Azure fixtures in both resource groups |
+| Model gate | 1 agent after the citation check, before the commit: every filed finding re-read against `docs/PRODUCT-MODEL.md` §5 |
 | Branch | `audit/round-<N>`, created in Phase 1 **before any work runs**. **`main` is never touched** |
 | Output | `docs/AUDIT-FINDINGS-<N>.md`, committed, never pushed |
 
@@ -154,8 +155,9 @@ and a round that does not say so in its first sentence has buried the most impor
 reads as settled design; it is not. Whenever a candidate proposes extending, widening or adding a
 guard, withhold, refusal, special case or status:
 
-- **Name the contract it serves**, from `docs/PRODUCT-MODEL.md`. If you cannot point at the
-  sentence, the finding is that the mechanism exists, not that it is incomplete.
+- **Name the sentence that requires it**, from `docs/PRODUCT-MODEL.md`, in exactly the form
+  proposed. Serving a sentence in general is not requiring it (§5). If no sentence requires it, the
+  candidate is refuted, or the finding is that the mechanism exists, not that it is incomplete.
 - **Check who introduced it.** `git log -S` the identifying string. A previous round's commit is an
   opinion, not a requirement.
 - **Prefer the finding that removes it.** Only "this mechanism is on the wrong axis" can end the
@@ -168,21 +170,43 @@ rounds while the product's requirements did not change is being driven by the au
 belongs in the round's headline.
 
 **The owner's product model outranks the finding's reasoning, and outranks yours.** When they
-contradict, the finding is wrong by definition — record it struck or inverted, do not argue it
+contradict, the finding is wrong by definition — refute it on the quoted sentence, do not argue it
 through. Owner rulings land verbatim in PRODUCT-MODEL.md §8.
+
+**The model decides, and only the model** (`docs/PRODUCT-MODEL.md` §5, owner ruling in §8, round
+36). A finding is filed only on a quoted sentence of the model that makes the current behaviour
+wrong. §5's refutation list applies to every finder, every verifier and the model gate, whatever
+the reproduction shows: the model has not decided it, two of its sentences pull apart on it, it
+re-reads a settled choice, or its fix adds a mechanism no sentence requires in that form. Nothing
+is filed or refuted on any agent's sense of worth, and nothing is left for the owner to strike: the
+owner is not the filter.
 
 # No questions, ever
 
 The round asks for inputs it cannot infer — credentials, scale, git identity — once, up front.
 Nothing else. **Never ask how to fix something, and never ask the owner to choose between fixes.**
-Where a fix implies a product change, file the finding with the narrowest correct fix and state the
-product question *inside the finding*. Do not block.
+**Findings carry no product questions.** A candidate that needs one to be a defect is one the model
+has not decided, and it is refuted (`docs/PRODUCT-MODEL.md` §5). Where only the fix has a choice,
+file the narrowest fix the model allows and say nothing about the alternatives. Do not block.
 
 # You are the operator, not a spectator
 
 Launch the workflow, then **watch it and intervene**. Do not launch and look away, and do not answer
 status questions by pointing at `/workflows` — it does not exist in the VSCode extension. Merge
 agents have stalled dead mid-run; the round only finishes because someone is watching.
+
+**The operator has no opinions** (`docs/PRODUCT-MODEL.md` §8, round 36). Never call a candidate or
+finding low-value, contrived, noise or likely to be struck, and never offer the owner a strike.
+Asked for an assessment, answer from the product model alone: for each finding, the sentence that
+makes it a defect or the sentence that refutes it, quoted, and nothing else.
+
+**Owner messages come first.** Read every owner message in full before acting on any monitor event,
+and answer it before anything else. The watch loop reports stalls, phase results and completion,
+never one line per agent result: in round 36 a stream of result events buried the owner's messages.
+
+**Escape stops the run.** An Escape in the chat stops every agent the workflow is running, and the
+run with them. Resume replays only the unbroken prefix of finished `agent()` calls in call order, so
+every call after the first killed one re-runs, finished or not. Say so in the launch line.
 
 ## Your tool budget
 
@@ -238,9 +262,10 @@ arithmetic — check each in-flight id's transcript age before believing the cou
 | static **≥ 8 min** | stalled. `TaskStop` the run, relaunch with `resumeFromRunId` |
 | **2nd stall at the same step** | structural. Stop, fix the script, resume — no third retry |
 
-Resume replays every completed agent from cache and re-runs only what did not finish; an
-intervention costs one agent, not sixty. **Editing the script is free for any step that has not
-completed. Resume is same-session only** — if the session ends, every banked result is lost. That
+Resume replays the unbroken prefix of completed `agent()` calls, in call order, from cache, and
+re-runs everything from the first unfinished call on, finished or not; in round 36 one killed
+tie-break early in the verification pipeline re-ran ten finished verifiers after it. **Editing the
+script is free for any step that has not completed. Resume is same-session only** — if the session ends, every banked result is lost. That
 is the reason to intervene rather than wait something out.
 
 ## Reporting
@@ -399,7 +424,10 @@ ended (PRODUCT-MODEL §8, round 29).
 files, no logs, no scratch; everything under the rig directory. "Do not modify the working tree" is
 not enough: beats have read it as "do not edit source" and left `.pid` files in the root, and one
 untracked file makes Phase 5 refuse the commit. Also: own port, own catalog, kill only by captured
-PID — never `pkill -f "Bastet.dll"`, which has killed other agents' applications mid-run.
+PID — never `pkill -f "Bastet.dll"`, which has killed other agents' applications mid-run. And
+§5's refutation list from `docs/PRODUCT-MODEL.md`, with the rule that every candidate quotes the
+model sentence that makes the behaviour wrong: a finder does not return a candidate the list
+refutes.
 
 Tag `[x2]` (both passes, independently) or `[x1]`. **Absence is weak evidence** — a `[x1]` deserves
 *more* scrutiny, not less. The deep sweep is a third population and does not make anything `[x2]`.
@@ -423,6 +451,15 @@ own failure scenario opens with "not a runtime defect", it is refuted.**
 **A test-only candidate is refuted on sight**, citing `docs/PRODUCT-MODEL.md` §5: the audit files
 product defects only. A verifier does not run its mutation, judge its pin or propose a better one.
 
+**The model decides, whatever the reproduction shows** (`docs/PRODUCT-MODEL.md` §5, round 36). A
+reproduced candidate is still refuted when making it a defect needs a reading the model does not
+state, a convention it does not choose or a product question; when two model sentences pull in
+opposite directions on it; when it re-reads behaviour a previous round chose on purpose; or when its
+fix adds, widens or branches a guard, refusal, withhold, status, endpoint, special case or setting
+that no model sentence requires in exactly that form. A surviving vote quotes the sentence that
+makes the behaviour wrong; "serves", "is consistent with" or "rebuts the presumption" is not a
+quote. A verifier may keep a finding and strike the part of its fix the model forbids.
+
 ## Phase 4 — the scribe (2 agents, sequential)
 
 One writes `docs/AUDIT-FINDINGS-<N>.md`. A second re-checks **every** citation against the working
@@ -430,6 +467,18 @@ tree and **fixes** what is wrong — stale line numbers are routine. The scribe 
 attributions and opens the header with the rate:
 
 > Round `<N>` filed `<F>` findings, of which `<R>` are residue of round `<N-1>`'s own fixes.
+
+## Phase 4b — the model gate (1 agent)
+
+After the citation check and before the commit, one agent re-reads every filed finding against
+`docs/PRODUCT-MODEL.md`, read whole, and applies §5's refutation list. A finding the model rules out
+moves to the Refuted table with the killing sentence quoted. A part of a surviving finding the model
+forbids, such as a structural remainder that adds an endpoint or a product question, is struck from
+it. Every surviving finding's **Wrong by:** line is checked to quote a sentence that actually makes
+the behaviour wrong. The gate never adds a finding, never rewords a surviving defect, and never uses
+a sense of worth: every change it makes quotes the sentence that forces it. The header totals and
+the commit subject count what survives the gate. The owner's round-36 instruction, verbatim in §8:
+"REREAD ALL OF THE FINDINGS ONCE THIS BULLSHIT IS DONESTRIKE ANYTHING THAT IS CRAP".
 
 ## Phase 5 — commit, then teardown (1 agent)
 
@@ -466,6 +515,8 @@ tree is clean. A round once satisfied none of these and reported success anyway.
 
 ## What every finding must carry
 
+- **Wrong by: the sentence of `docs/PRODUCT-MODEL.md` that makes the current behaviour wrong,
+  quoted, with its section.** A candidate without one is not a finding (§5).
 - **File and line citation under `src/`**, re-checked against the working tree. A citation under `test/` is refuted, not filed.
 - **Confidence: confirmed or plausible.** *Plausible* names the load-bearing step that could not be
   established. It is not a hedge.
@@ -496,6 +547,7 @@ Each finding is a heading and these fields, nothing else:
 ```
 ## <letter><n> — <one-line title> `[x2]` `strings`?
 **Where:** src/Bastet/Services/Azure/AzureReconciler.cs:757
+**Wrong by:** §<n>: "<the PRODUCT-MODEL.md sentence that makes this behaviour wrong>"
 **Breaks:** <real inputs, the wrong output, one short paragraph>
 **Repro:** <what was run, what came back>
 **Fix:** <the narrow change; note if a verifier judged the filed fix unsound>
@@ -518,8 +570,9 @@ limit"; "set that limit to 200kb"; "waiting on it is a waste of fucking time".
 - **A reproduced defect is filed at the severity its consequence warrants.** Fix cost belongs in the
   Fix field, never in the severity or the decision to file. **Rarity does not reduce severity** —
   for an IPAM tool, *silently asserting an allocated range is free* is top-severity however narrow
-  the path. **File it and rate it:** a finding the owner declines costs one line; a defect a round
-  declines on their behalf has cost four rounds.
+  the path. **File it and rate it:** a defect the model makes wrong is filed however rare or narrow.
+  **But the owner is not a filter** (`docs/PRODUCT-MODEL.md` §5, §8 round 36): a candidate the model
+  does not make a defect is refuted by the round, never filed for the owner to decline.
 - **But grade honestly, and stop stacking.** Grade the defect you can reproduce, not the worst thing
   downstream of it. **If the fix is one string, the severity is Low. No exceptions.** A
   contradiction the operator can see on the same screen is Low. Same defect class, same severity.
