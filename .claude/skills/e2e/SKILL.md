@@ -783,6 +783,15 @@ Every non-Azure action driven as a request, not asserted in a unit test:
   per-container repaint took ~6.5 s here). After every click assert the end state too — every container
   hidden or shown, one `bi-plus-square` or `bi-dash-square` per parent, leaf dashes untouched — and
   repeat after collapsing one root by hand, so a faster handler that paints the wrong icons fails.
+- **A description the import fills to the cap is re-saved by the Edit form** (round 36). Give a
+  hand-built subnet a description typed through the form with at least one line break (the browser
+  stores CRLF), sized so that the description plus the fully-allocated note reaches the 1000-character
+  cap, then import an Azure VNet whose single subnet covers the whole prefix so the wizard marks the
+  row fully allocated. Open the row's Edit page, change only the Name, and save: the save must succeed
+  and `LEN(Description)` in `Subnets` must equal what the form re-posts (the note joins with CRLF,
+  never a bare LF). Repeat with the note one character too long for the cap: the note is dropped, the
+  flag still set, the typed description untouched. Then clear the flag through `SetAllocationStatus`
+  and confirm the description ends with no trailing CR.
 
 ## H - Authorization, antiforgery, headers, locking
 
@@ -829,6 +838,16 @@ cannot reach - including that a second replica's write is refused honestly rathe
 > the kill measures the tail of the old lock and fails against correct behaviour. Poll
 > `SELECT APPLOCK_TEST('public','Bastet:SubnetOperations','Exclusive','Session')` until it returns `1`,
 > then start timing.
+
+**A form submitted after the session has lapsed lands back on its own page** (round 36). Run the app
+in Production against a mock OIDC IdP whose `id_token` lifetime is shorter than the idle wait
+(`UseTokenLifetime` ends the cookie with it). Sign in, open the host-IP Delete, Edit and Create forms
+and a subnet Edit form as the control, fill each, wait past the lifetime, then submit. Every POST is
+challenged, re-signed-in through the IdP and replayed as a GET of the form's own URL:
+`/HostIp/Delete?ip=…`, `/HostIp/Edit?ip=…`, `/HostIp/Create?subnetId=…` and `/Subnet/Edit/{id}` all
+answer 200 with their own titles - none of them the 404 page - and the database shows nothing deleted,
+changed or created. The host-IP forms carry their identifier in the form URL (`asp-route-ip`,
+`asp-route-subnetId`) for exactly this replay; the typed input is lost either way.
 
 ---
 

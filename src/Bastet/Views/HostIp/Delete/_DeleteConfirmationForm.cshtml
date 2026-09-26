@@ -5,7 +5,7 @@
         <h5 class="mb-0">Confirm Deletion</h5>
     </div>
     <div class="card-body">
-        <form asp-action="Delete" method="post">
+        <form asp-action="Delete" asp-route-ip="@Model.IP" method="post">
             <input type="hidden" name="ip" value="@Model.IP" />
             <input type="hidden" name="rowVersion" value="@(Model.RowVersion is null ? "" : Convert.ToBase64String(Model.RowVersion))" />
 
