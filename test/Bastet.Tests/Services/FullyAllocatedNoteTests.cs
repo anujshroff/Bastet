@@ -1,10 +1,14 @@
 using Bastet.Services;
+using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.Services;
 
-public class FullyAllocatedNoteTests
+public partial class FullyAllocatedNoteTests
 {
     private const int Max = 1000;
+
+    [GeneratedRegex(@"(?<!\r)\n")]
+    private static partial Regex BareLineFeedPattern();
 
     private static string Note(string name) => FullyAllocatedNote.For(name);
 
@@ -159,7 +163,7 @@ public class FullyAllocatedNoteTests
         ("Owner: netops.\r\nTicket 42.\r\n" + new string('x', 1100))[..length];
 
     private static string AsABrowserRePostsIt(string stored) =>
-        System.Text.RegularExpressions.Regex.Replace(stored, @"(?<!\r)\n", "\r\n");
+        BareLineFeedPattern().Replace(stored, "\r\n");
 
     [Theory]
     [InlineData(-3)]
