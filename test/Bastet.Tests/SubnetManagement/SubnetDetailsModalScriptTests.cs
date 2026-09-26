@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-public class SubnetDetailsModalScriptTests
+public partial class SubnetDetailsModalScriptTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
@@ -10,6 +10,14 @@ public class SubnetDetailsModalScriptTests
     private const string ModalPartial = "src/Bastet/Views/Subnet/Details/_CidrInputModal.cshtml";
     private const string RangesPartial = "src/Bastet/Views/Subnet/Details/_UnallocatedRanges.cshtml";
     private const string ChildrenPartial = "src/Bastet/Views/Subnet/Details/_ChildSubnets.cshtml";
+
+    [GeneratedRegex(@"#subnetSizeDisplay[""']\)\.text\(([^;]*)\);")]
+    private static partial Regex SubnetSizeDisplayWritePattern();
+
+    [GeneratedRegex(
+        @"Object\.keys\(activeSuggestion\.networkAddressByCidr\)\s*\.find\(c\s*=>\s*activeSuggestion\.networkAddressByCidr\[c\]\s*!==\s*null\)",
+        RegexOptions.Singleline)]
+    private static partial Regex LowerBoundCidrLookupPattern();
 
     private static string FindRepoRoot()
     {
@@ -25,8 +33,8 @@ public class SubnetDetailsModalScriptTests
     private static string ReadView(string relativePath) =>
         File.ReadAllText(Path.Combine(RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-    public static TheoryData<string> ClientArithmeticIdentifiers => new()
-    {
+    public static TheoryData<string> ClientArithmeticIdentifiers =>
+    [
         "ipAddressToNumber",
         "numberToIpAddress",
         "normalizeIpToSubnetBoundary",
@@ -37,7 +45,7 @@ public class SubnetDetailsModalScriptTests
         "const childSubnets =",
         "SUBNET DEBUG",
         "Would overlap",
-    };
+    ];
 
     [Theory]
     [MemberData(nameof(ClientArithmeticIdentifiers))]
@@ -55,7 +63,7 @@ public class SubnetDetailsModalScriptTests
         Assert.Contains("Model.ChildSubnetSuggestions", script);
         Assert.Contains("IpUtility.CalculateUsableIpAddresses", script);
 
-        MatchCollection sizeWrites = Regex.Matches(script, @"#subnetSizeDisplay[""']\)\.text\(([^;]*)\);");
+        MatchCollection sizeWrites = SubnetSizeDisplayWritePattern().Matches(script);
         Assert.Equal(3, sizeWrites.Count);
         Assert.All(sizeWrites, m => Assert.Matches(
             @"^(usableByCidr\[(activeSuggestion\.recommendedCidr|cidrValue)\]\.toLocaleString\(\)|sizeText)$",
@@ -138,11 +146,7 @@ public class SubnetDetailsModalScriptTests
     {
         string script = ReadView(ScriptPartial);
 
-        Assert.Matches(
-            new Regex(
-                @"Object\.keys\(activeSuggestion\.networkAddressByCidr\)\s*\.find\(c\s*=>\s*activeSuggestion\.networkAddressByCidr\[c\]\s*!==\s*null\)",
-                RegexOptions.Singleline),
-            script);
+        Assert.Matches(LowerBoundCidrLookupPattern(), script);
         Assert.Contains("$('#validCidrRange').text(`${availableCidr} - ${maxCidr}", script);
         Assert.Contains("$('#cidrInput').attr('min', availableCidr)", script);
     }

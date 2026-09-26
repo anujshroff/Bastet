@@ -2,13 +2,16 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-public class ArchivePurgeControlGateTests
+public partial class ArchivePurgeControlGateTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
     private const string SubnetArchiveHeader = "src/Bastet/Views/Subnet/DeletedSubnets/_Header.cshtml";
     private const string HostIpArchiveView = "src/Bastet/Views/HostIp/AllDeletedHostIps.cshtml";
     private const string EditSidebar = "src/Bastet/Views/HostIp/Edit/_SubnetInfo.cshtml";
+
+    [GeneratedRegex(@"asp-action=""PurgeAll\w+""")]
+    private static partial Regex PurgeAllActionPattern();
 
     private static string FindRepoRoot()
     {
@@ -74,7 +77,7 @@ public class ArchivePurgeControlGateTests
                 .Where(path =>
                 {
                     string text = File.ReadAllText(path);
-                    return Regex.IsMatch(text, @"asp-action=""PurgeAll\w+""")
+                    return PurgeAllActionPattern().IsMatch(text)
                         && !GuardAbove(text, "asp-action=\"PurgeAll").Contains("TotalCount > 0");
                 })
                 .Select(path => Path.GetRelativePath(RepoRoot, path))
