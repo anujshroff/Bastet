@@ -170,13 +170,7 @@ else
          options.Scope.Add("email");
          options.Scope.Add("roles");
 
-         options.Events.OnTicketReceived = context =>
-         {
-             AuthenticationProperties? properties = context.Properties;
-             properties?.StoreTokens(
-                 [.. properties.GetTokens().Where(token => token.Name == "id_token")]);
-             return Task.CompletedTask;
-         };
+         options.Events.OnTicketReceived = OidcSignIn.OnTicketReceived;
 
          options.Events.OnRemoteFailure = context =>
          {

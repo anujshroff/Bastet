@@ -858,6 +858,14 @@ Return to Home on Access Denied and on `/Error/404`, and every one of those link
 visitor still sees the brand link, both menus and Return to Home on `/Account/AccessDenied`,
 `/Error/404` and `/Account/SignInFailed` (each starts sign-in), so nothing changed for a reader who is
 not signed in.
+**Sign-in returns the browser only to one of Bastet's own pages** (round 36). Against the mock OIDC
+IdP in Production, request `//evil.example/phish` (a path that matches no endpoint, so the fallback
+policy challenges it), complete the sign-in, and read the `Location` of the `/signin-oidc` answer:
+it must be `/`, never `//evil.example/phish`. Controls in the same run: `/Subnet` returns to
+`/Subnet`, and `/%2F%2Fevil.example/phish` stays local (it is one path segment). Sign-out already
+applied this rule to `returnUrl`; both transitions now decide it with `ReturnUrl.IsLocal`. The raw
+drive (a forged callback that re-sends the correlation and nonce cookies) works over plain HTTP; a
+browser needs HTTPS, because the OIDC cookies are `Secure; SameSite=None`.
 
 ---
 
