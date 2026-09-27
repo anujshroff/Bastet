@@ -369,7 +369,7 @@ Mutate Azure to produce all of them at once, then scan and assert each:
 > reports a missing verdict as though the application had failed to emit it. Assert the mutation
 > landed (`az network vnet show`) before scanning.
 
-**Four counter-assertions, each guarding against a regression that has actually shipped:**
+**Five counter-assertions, each guarding against a regression that has actually shipped:**
 
 - **Delete-and-recreate under a new name, same prefix** (Azure has no rename). The old row **must
   still be deletable** — the range turning up under another Azure subnet is not a reason to withhold.
@@ -380,6 +380,17 @@ Mutate Azure to produce all of them at once, then scan and assert each:
   must report **nothing**: no item, no review row, no warning. Finding it is the import wizard's job.
 - **An Azure-imported descendant with no manual content.** The parent is still deletable and takes the
   descendant with it. Only *manual* content holds.
+- **An ancestor Azure confirmed gone whose Azure-linked descendants could not be confirmed** (round 38).
+  Import a VNet from the *other* resource group with the other credential so the wizard nests it under
+  an imported target (the overlapping-prefix layout), delete the outer VNet in Azure, and scan with the
+  credential that cannot see the inner one. The outer row is **still offered** as `VNetDeleted` with its
+  descendant count, the inner rows are withheld and named in the denied-access warning, the delete
+  archives the whole subtree, and the other credential then re-imports the inner VNet as a top-level
+  row. The same holds when the descendants' per-resource reads fail (`Unknown`) while the VNet's own
+  read answers 404: produce that mixed verdict with a transport fault that answers 503 only to the
+  per-subnet GETs (`…/virtualNetworks/{v}/subnets/{n}`), because the fault tree's stock `get` target
+  and its `confirm-unknown` mode fault the VNet's own read too. Round 38 found the ancestor withheld
+  behind its descendants' verdicts.
 
 Plus: a resource the credential cannot see is withheld **and named in a warning**, while a genuinely
 deleted one is **still offered and deletable**. Checking only the first lets an over-blocking
