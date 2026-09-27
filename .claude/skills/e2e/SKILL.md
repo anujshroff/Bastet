@@ -381,9 +381,10 @@ Mutate Azure to produce all of them at once, then scan and assert each:
 - **An Azure-imported descendant with no manual content.** The parent is still deletable and takes the
   descendant with it. Only *manual* content holds.
 - **An ancestor Azure confirmed gone whose Azure-linked descendants could not be confirmed** (round 38).
-  Import a VNet from the *other* resource group with the other credential so the wizard nests it under
-  an imported target (the overlapping-prefix layout), delete the outer VNet in Azure, and scan with the
-  credential that cannot see the inner one. The outer row is **still offered** as `VNetDeleted` with its
+  Import a VNet from the *other* resource group with the other credential, with a prefix strictly inside
+  an imported target's prefix so the wizard nests it there as `AutoCreateChild` (an identical prefix is
+  refused as a re-link, not nested), delete the outer VNet in Azure, and scan with the credential that
+  cannot see the inner one. The outer row is **still offered** as `VNetDeleted` with its
   descendant count, the inner rows are withheld and named in the denied-access warning, the delete
   archives the whole subtree, and the other credential then re-imports the inner VNet as a top-level
   row. The same holds when the descendants' per-resource reads fail (`Unknown`) while the VNet's own
