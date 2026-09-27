@@ -2,11 +2,14 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.SubnetManagement;
 
-public class SubnetTreeScriptTests
+public partial class SubnetTreeScriptTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
     private const string SiteScript = "src/Bastet/wwwroot/js/site.js";
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRunPattern();
 
     private static string FindRepoRoot()
     {
@@ -39,7 +42,7 @@ public class SubnetTreeScriptTests
     [Fact]
     public void CollapseAll_IsOneStatement_SlidingUpEveryChildContainerAtEveryDepth()
     {
-        string body = Regex.Replace(CollapseAllHandler(), @"\s+", " ").Trim();
+        string body = WhitespaceRunPattern().Replace(CollapseAllHandler(), " ").Trim();
 
         Assert.Equal("$('.subnet-children').slideUp(200).promise().done(updateToggleIcons);", body);
     }
@@ -47,7 +50,7 @@ public class SubnetTreeScriptTests
     [Fact]
     public void ExpandAll_RepaintsTheIconsOnce_AfterEveryContainerHasFinished()
     {
-        string body = Regex.Replace(ClickHandlerBody("expand-all"), @"\s+", " ").Trim();
+        string body = WhitespaceRunPattern().Replace(ClickHandlerBody("expand-all"), " ").Trim();
 
         Assert.Equal("$('.subnet-children').slideDown(200).promise().done(updateToggleIcons);", body);
     }
@@ -76,15 +79,7 @@ public class SubnetTreeScriptTests
     [Fact]
     public void CollapseAll_MirrorsExpandAll_OverTheSameUnqualifiedSelector()
     {
-        string script = ReadScript();
-
-        Match expand = Regex.Match(
-            script,
-            @"\$\('#expand-all'\)\.on\('click',\s*function\s*\(\)\s*\{(?<body>.*?)\n\s*\}\);",
-            RegexOptions.Singleline);
-        Assert.True(expand.Success, "The #expand-all click handler was not found in site.js");
-
-        Assert.Contains("$('.subnet-children').slideDown(200", expand.Groups["body"].Value);
+        Assert.Contains("$('.subnet-children').slideDown(200", ClickHandlerBody("expand-all"));
         Assert.Contains("$('.subnet-children').slideUp(200", CollapseAllHandler());
     }
 }

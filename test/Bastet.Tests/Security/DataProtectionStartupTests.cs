@@ -2,11 +2,28 @@ using System.Text.RegularExpressions;
 
 namespace Bastet.Tests.Security;
 
-public class DataProtectionStartupTests
+public partial class DataProtectionStartupTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
 
     private const string ProgramFile = "src/Bastet/Program.cs";
+
+    [GeneratedRegex(
+        @"GetRequiredService<IDataProtectionProvider>\(\)\s*\.CreateProtector\(""Bastet\.KeyRingStartup""\)\s*\.Protect\(",
+        RegexOptions.Singleline)]
+    private static partial Regex KeyRingForcePattern();
+
+    [GeneratedRegex(@"""@LockTimeout"",\s*(?<ms>\d+)")]
+    private static partial Regex LockTimeoutPattern();
+
+    [GeneratedRegex(@"AddWithValue\(""@Resource"", keyRingLockResource\)")]
+    private static partial Regex ResourceBindingPattern();
+
+    [GeneratedRegex(@"""@Resource""")]
+    private static partial Regex ResourceParameterPattern();
+
+    [GeneratedRegex(@"catch\s*\(Exception[^)]*\)\s*\{[^}]*LogWarning", RegexOptions.Singleline)]
+    private static partial Regex LoggedCatchPattern();
 
     private static string FindRepoRoot()
     {
@@ -49,10 +66,7 @@ public class DataProtectionStartupTests
         int acquire = IndexOfOrFail(block, "acquireKeyRingLock.ExecuteNonQuery();", "the lock acquisition");
         int release = IndexOfOrFail(block, "new(\"sp_releaseapplock\"", "the lock release");
 
-        Match force = Regex.Match(
-            block,
-            @"GetRequiredService<IDataProtectionProvider>\(\)\s*\.CreateProtector\(""Bastet\.KeyRingStartup""\)\s*\.Protect\(",
-            RegexOptions.Singleline);
+        Match force = KeyRingForcePattern().Match(block);
         Assert.True(force.Success, "the key ring is never forced");
 
         Assert.True(
@@ -73,7 +87,7 @@ public class DataProtectionStartupTests
         Assert.Contains("\"Session\"", block);
         Assert.Contains("sp_releaseapplock", block);
 
-        Match timeout = Regex.Match(block, @"""@LockTimeout"",\s*(?<ms>\d+)");
+        Match timeout = LockTimeoutPattern().Match(block);
         Assert.True(timeout.Success, "the lock must carry an explicit timeout");
         Assert.True(
             int.Parse(timeout.Groups["ms"].Value) >= 1000,
@@ -85,7 +99,7 @@ public class DataProtectionStartupTests
     {
         string block = WarmUpBlock();
 
-        Assert.Contains("Bastet:DataProtection:", block);
+        Assert.Contains("\"Bastet:DataProtection\"", block);
         Assert.DoesNotContain("Bastet:Migration", block);
         Assert.DoesNotContain("migrationLockResource", block);
         Assert.DoesNotContain("OpenMigrationLockConnection", block);
@@ -98,11 +112,25 @@ public class DataProtectionStartupTests
     }
 
     [Fact]
+    public void TheLockResource_DoesNotSpellTheCatalog_SoReplicasWhoseConnectionStringsDifferOnlyInCaseStillMeet()
+    {
+        string block = WarmUpBlock();
+        string resource = block[..IndexOfOrFail(block, "try", "the warm-up try block")];
+
+        Assert.Matches(@"string keyRingLockResource = ""Bastet:DataProtection"";", resource);
+        Assert.DoesNotContain("InitialCatalog", resource);
+        Assert.DoesNotContain("connectionString", resource);
+        Assert.DoesNotContain("$\"", resource);
+        Assert.Equal(2, ResourceBindingPattern().Count(block));
+        Assert.Equal(2, ResourceParameterPattern().Count(block));
+    }
+
+    [Fact]
     public void TheWarmUp_IsBestEffort_SoADatabaseProblemStillLetsTheAppStart()
     {
         string block = WarmUpBlock();
 
-        Assert.Matches(new Regex(@"catch\s*\(Exception[^)]*\)\s*\{[^}]*LogWarning", RegexOptions.Singleline), block);
+        Assert.Matches(LoggedCatchPattern(), block);
         Assert.DoesNotContain("throw", block);
         Assert.DoesNotContain("Startup was aborted", block);
     }

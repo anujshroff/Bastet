@@ -3,7 +3,6 @@ using Bastet.Filters;
 using Bastet.Services;
 using Bastet.Services.Data;
 using Bastet.Services.Security;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
@@ -170,13 +169,7 @@ else
          options.Scope.Add("email");
          options.Scope.Add("roles");
 
-         options.Events.OnTicketReceived = context =>
-         {
-             AuthenticationProperties? properties = context.Properties;
-             properties?.StoreTokens(
-                 [.. properties.GetTokens().Where(token => token.Name == "id_token")]);
-             return Task.CompletedTask;
-         };
+         options.Events.OnTicketReceived = OidcSignIn.OnTicketReceived;
 
          options.Events.OnRemoteFailure = context =>
          {
@@ -380,7 +373,7 @@ if (!dataProtectionTableExists)
 
 if (dataProtectionTableExists)
 {
-    string keyRingLockResource = $"Bastet:DataProtection:{new SqlConnectionStringBuilder(connectionString).InitialCatalog}";
+    string keyRingLockResource = "Bastet:DataProtection";
 
     try
     {

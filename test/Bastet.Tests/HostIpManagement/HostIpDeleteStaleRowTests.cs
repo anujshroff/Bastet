@@ -182,7 +182,7 @@ public class HostIpDeleteStaleRowTests : IDisposable
             dir?.FullName ?? throw new InvalidOperationException("Bastet.sln not found above test base directory"),
             "src", "Bastet", "Views", "HostIp", "Delete", "_DeleteConfirmationForm.cshtml"));
 
-        int open = form.IndexOf("<form asp-action=\"Delete\" method=\"post\">", StringComparison.Ordinal);
+        int open = form.IndexOf("<form asp-action=\"Delete\" asp-route-ip=\"@Model.IP\" method=\"post\">", StringComparison.Ordinal);
         int close = form.IndexOf("</form>", StringComparison.Ordinal);
         int input = form.IndexOf(
             "<input type=\"hidden\" name=\"rowVersion\" value=\"@(Model.RowVersion is null ? \"\" : Convert.ToBase64String(Model.RowVersion))\" />",

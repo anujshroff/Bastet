@@ -274,6 +274,28 @@ public class AzureControllerTests : IDisposable
         Assert.Null(resultObj.error);
     }
 
+    [Fact]
+    public async Task BulkGetVNets_WhenBastetsOwnSubnetReadFails_DoesNotBlameAzure()
+    {
+        Mock<IAzureSubnetSnapshotService> failingSnapshot = new();
+        failingSnapshot.Setup(s => s.GetExistingSubnetsAsync()).ThrowsAsync(new InvalidOperationException("Cannot open database"));
+        AzureController controller = new(_mockAzureService, failingSnapshot.Object, NullLogger<AzureController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        AzureBulkImportPlanner planner = new(new IpUtilityService(), new InputSanitizationService());
+
+        IActionResult result = await controller.BulkGetVNets("sub-1", planner);
+
+        JsonResult jsonResult = Assert.IsType<JsonResult>(result);
+        JsonResponse? resultObj = JsonSerializer.Deserialize<JsonResponse>(JsonSerializer.Serialize(jsonResult.Value));
+
+        Assert.NotNull(resultObj);
+        Assert.False(resultObj.success);
+        Assert.Equal("Failed to compare the Azure VNets with BASTET's subnets. Details have been logged.", resultObj.error);
+        Assert.DoesNotContain("from Azure", resultObj.error);
+    }
+
 #pragma warning disable IDE1006
 
     private class JsonResponse

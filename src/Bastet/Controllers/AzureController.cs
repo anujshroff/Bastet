@@ -95,7 +95,7 @@ namespace Bastet.Controllers
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to load the subscription's VNets for bulk import");
-                return Json(new { success = false, error = "Failed to load VNets from Azure. Details have been logged." });
+                return Json(new { success = false, error = "Failed to compare the Azure VNets with BASTET's subnets. Details have been logged." });
             }
         }
 

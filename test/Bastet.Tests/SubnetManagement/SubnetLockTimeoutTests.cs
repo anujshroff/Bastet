@@ -46,16 +46,14 @@ public class SubnetLockTimeoutTests : IDisposable
 
 
     [Fact]
-    public async Task HostIpCreate_LockTimesOut_ReturnsViewWithFriendlyError()
+    public async Task HostIpCreate_TheLockTimesOutOnALiveSubnet_StillAsksForARetryOnTheForm()
     {
-        HostIpController controller = new(_context, new HostIpValidationService(_ipUtilityService, _context),
-            _ipUtilityService, ControllerTestHelper.CreateMockUserContextService(),
-            new AlwaysTimingOutLockService(), NullLogger<HostIpController>.Instance);
-        ControllerTestHelper.SetupController(controller);
+        AddSubnetWithHostIp();
+        HostIpController controller = HostIpControllerWith(new AlwaysTimingOutLockService());
 
         IActionResult result = await controller.Create(new CreateHostIpViewModel
         {
-            IP = "10.0.0.5",
+            IP = "10.0.0.6",
             Name = "host",
             SubnetId = 1
         });
@@ -63,6 +61,30 @@ public class SubnetLockTimeoutTests : IDisposable
         ViewResult view = Assert.IsType<ViewResult>(result);
         Assert.False(view.ViewData.ModelState.IsValid);
         Assert.Contains(view.ViewData.ModelState[""]!.Errors, e => e.ErrorMessage.Contains("timed out"));
+        Assert.Equal("root (10.0.0.0/24)", Assert.IsType<CreateHostIpViewModel>(view.Model).SubnetInfo);
+    }
+
+    [Fact]
+    public async Task HostIpCreate_TheSubnetIsDeletedWhileWaitingForTheLock_Answers404AndStashesNothing()
+    {
+        AddSubnetWithHostIp();
+        HostIpController controller = HostIpControllerWith(new TimesOutAfterAnotherOperation(() =>
+        {
+            _context.HostIpAssignments.RemoveRange(_context.HostIpAssignments);
+            _context.Subnets.RemoveRange(_context.Subnets);
+            _context.SaveChanges();
+        }));
+
+        IActionResult result = await controller.Create(new CreateHostIpViewModel
+        {
+            IP = "10.0.0.6",
+            Name = "host",
+            SubnetId = 1
+        });
+
+        _ = Assert.IsType<NotFoundResult>(result);
+        Assert.True(controller.ModelState.IsValid);
+        Assert.False(controller.TempData.ContainsKey("ErrorMessage"));
     }
 
     [Fact]

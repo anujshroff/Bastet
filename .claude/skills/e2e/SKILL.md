@@ -369,7 +369,7 @@ Mutate Azure to produce all of them at once, then scan and assert each:
 > reports a missing verdict as though the application had failed to emit it. Assert the mutation
 > landed (`az network vnet show`) before scanning.
 
-**Four counter-assertions, each guarding against a regression that has actually shipped:**
+**Five counter-assertions, each guarding against a regression that has actually shipped:**
 
 - **Delete-and-recreate under a new name, same prefix** (Azure has no rename). The old row **must
   still be deletable** — the range turning up under another Azure subnet is not a reason to withhold.
@@ -380,6 +380,18 @@ Mutate Azure to produce all of them at once, then scan and assert each:
   must report **nothing**: no item, no review row, no warning. Finding it is the import wizard's job.
 - **An Azure-imported descendant with no manual content.** The parent is still deletable and takes the
   descendant with it. Only *manual* content holds.
+- **An ancestor Azure confirmed gone whose Azure-linked descendants could not be confirmed** (round 38).
+  Import a VNet from the *other* resource group with the other credential, with a prefix strictly inside
+  an imported target's prefix so the wizard nests it there as `AutoCreateChild` (an identical prefix is
+  refused as a re-link, not nested), delete the outer VNet in Azure, and scan with the credential that
+  cannot see the inner one. The outer row is **still offered** as `VNetDeleted` with its
+  descendant count, the inner rows are withheld and named in the denied-access warning, the delete
+  archives the whole subtree, and the other credential then re-imports the inner VNet as a top-level
+  row. The same holds when the descendants' per-resource reads fail (`Unknown`) while the VNet's own
+  read answers 404: produce that mixed verdict with a transport fault that answers 503 only to the
+  per-subnet GETs (`…/virtualNetworks/{v}/subnets/{n}`), because the fault tree's stock `get` target
+  and its `confirm-unknown` mode fault the VNet's own read too. Round 38 found the ancestor withheld
+  behind its descendants' verdicts.
 
 Plus: a resource the credential cannot see is withheld **and named in a warning**, while a genuinely
 deleted one is **still offered and deletable**. Checking only the first lets an over-blocking
@@ -783,6 +795,15 @@ Every non-Azure action driven as a request, not asserted in a unit test:
   per-container repaint took ~6.5 s here). After every click assert the end state too — every container
   hidden or shown, one `bi-plus-square` or `bi-dash-square` per parent, leaf dashes untouched — and
   repeat after collapsing one root by hand, so a faster handler that paints the wrong icons fails.
+- **A description the import fills to the cap is re-saved by the Edit form** (round 36). Give a
+  hand-built subnet a description typed through the form with at least one line break (the browser
+  stores CRLF), sized so that the description plus the fully-allocated note reaches the 1000-character
+  cap, then import an Azure VNet whose single subnet covers the whole prefix so the wizard marks the
+  row fully allocated. Open the row's Edit page, change only the Name, and save: the save must succeed
+  and `LEN(Description)` in `Subnets` must equal what the form re-posts (the note joins with CRLF,
+  never a bare LF). Repeat with the note one character too long for the cap: the note is dropped, the
+  flag still set, the typed description untouched. Then clear the flag through `SetAllocationStatus`
+  and confirm the description ends with no trailing CR.
 
 ## H - Authorization, antiforgery, headers, locking
 
@@ -829,6 +850,49 @@ cannot reach - including that a second replica's write is refused honestly rathe
 > the kill measures the tail of the old lock and fails against correct behaviour. Poll
 > `SELECT APPLOCK_TEST('public','Bastet:SubnetOperations','Exclusive','Session')` until it returns `1`,
 > then start timing.
+
+**A form submitted after the session has lapsed lands back on its own page** (round 36). Run the app
+in Production against a mock OIDC IdP whose `id_token` lifetime is shorter than the idle wait
+(`UseTokenLifetime` ends the cookie with it). Sign in, open the host-IP Delete, Edit and Create forms
+and a subnet Edit form as the control, fill each, wait past the lifetime, then submit. Every POST is
+challenged, re-signed-in through the IdP and replayed as a GET of the form's own URL:
+`/HostIp/Delete?ip=…`, `/HostIp/Edit?ip=…`, `/HostIp/Create?subnetId=…` and `/Subnet/Edit/{id}` all
+answer 200 with their own titles - none of them the 404 page - and the database shows nothing deleted,
+changed or created. The host-IP forms carry their identifier in the form URL (`asp-route-ip`,
+`asp-route-subnetId`) for exactly this replay; the typed input is lost either way.
+
+**A signed-in user with no Bastet role is offered no link that answers Access Denied** (round 36).
+Sign in through the mock IdP with an empty roles claim (`/Account/Roles` says no roles are assigned):
+`/` lands on Access Denied, whose only buttons are Logout and the user menu's My Roles; the navbar
+shows the BASTET brand as plain text and no Subnets or Host IPs menus; `/Error/404` offers Go Back
+only. Controls in the same run: a View user (roles `["View"]`) sees the brand link, both menus and
+Return to Home on Access Denied and on `/Error/404`, and every one of those links opens; an anonymous
+visitor still sees the brand link, both menus and Return to Home on `/Account/AccessDenied`,
+`/Error/404` and `/Account/SignInFailed` (each starts sign-in), so nothing changed for a reader who is
+not signed in.
+**Sign-in returns the browser only to one of Bastet's own pages** (round 36). Against the mock OIDC
+IdP in Production, request `//evil.example/phish` (a path that matches no endpoint, so the fallback
+policy challenges it), complete the sign-in, and read the `Location` of the `/signin-oidc` answer:
+it must be `/`, never `//evil.example/phish`. Controls in the same run: `/Subnet` returns to
+`/Subnet`, and `/%2F%2Fevil.example/phish` stays local (it is one path segment). Sign-out already
+applied this rule to `returnUrl`; both transitions now decide it with `ReturnUrl.IsLocal`. The raw
+drive (a forged callback that re-sends the correlation and nonce cookies) works over plain HTTP; a
+browser needs HTTPS, because the OIDC cookies are `Secure; SameSite=None`.
+
+**Two replicas whose connection strings spell the catalog in different case share one key ring**
+(round 36). With the catalog and its tables in place, empty `DataProtectionKeys`, then cold-start two
+replicas 50 ms apart with `BASTET_AUTO_MIGRATE=false`, one with `Database=Bastet_x` and one with
+`Database=bastet_x`. When both answer, `SELECT COUNT(*) FROM DataProtectionKeys` must be **1**: the
+round-31 key-ring lock serialised them, its resource being the constant `Bastet:DataProtection`, which
+`sp_getapplock` scopes to the database it is taken in (two deployments in different catalogs never
+block each other; a connection string that omits the catalog still meets). Repeat three times. The
+unfixed shape minted 2 keys in 3 of 3 rounds. The operator-visible consequence needs two things: the
+two first loads landing about 80-100 ms apart (hold one replica's lock name from a third session and
+release the two names 85 ms apart), and a wait past the ~2-minute post-startup key-ring refresh, after
+which a form rendered by one replica and posted to the other answers 400 and a banner written by one is
+dropped by the other; a cross-replica POST made right after startup refreshes the ring and heals the
+pair, so it proves nothing. On the fixed shape the same POST is accepted (302 or a validation
+redisplay) and the banner shows.
 
 ---
 

@@ -5,7 +5,7 @@
         <h5 class="mb-0">Host IP Details</h5>
     </div>
     <div class="card-body">
-        <form asp-action="Create" method="post">
+        <form asp-action="Create" asp-route-subnetId="@Model.SubnetId" method="post">
             <input type="hidden" asp-for="SubnetId" />
             <input type="hidden" asp-for="NetworkAddress" />
             <input type="hidden" asp-for="Cidr" />

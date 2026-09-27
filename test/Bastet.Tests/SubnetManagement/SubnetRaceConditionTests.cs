@@ -4,7 +4,6 @@ using Bastet.Models;
 using Bastet.Models.ViewModels;
 using Bastet.Services;
 using Bastet.Services.Locking;
-using Bastet.Services.Security;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
@@ -135,9 +134,7 @@ public class SubnetRaceConditionTests : IDisposable
 
         Assert.Equal(2, results.Count);
         Assert.Single(results.OfType<RedirectToActionResult>());
-        Assert.Single(results.OfType<ViewResult>());
-
-        ViewResult viewResult = results.OfType<ViewResult>().First();
+        ViewResult viewResult = Assert.Single(results.OfType<ViewResult>());
         Assert.False(viewResult.ViewData.ModelState.IsValid);
     }
 

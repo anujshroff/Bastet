@@ -1,5 +1,5 @@
-using System.ComponentModel.DataAnnotations;
 using Bastet.Services.Security;
+using System.ComponentModel.DataAnnotations;
 
 namespace Bastet.Tests.Security;
 

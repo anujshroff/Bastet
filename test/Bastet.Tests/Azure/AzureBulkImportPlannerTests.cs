@@ -134,8 +134,7 @@ public class AzureBulkImportPlannerTests
         BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
 
         Assert.True(plan.CanCommit);
-        Assert.Single(plan.Items);
-        BulkImportPlanItem item = plan.Items[0];
+        BulkImportPlanItem item = Assert.Single(plan.Items);
         Assert.Equal(BulkImportTargetType.ExactMatch, item.TargetType);
         Assert.Equal(1, item.ExistingTargetSubnetId);
         Assert.False(item.WillRename);
