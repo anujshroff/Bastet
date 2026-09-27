@@ -115,7 +115,7 @@ public partial class BulkImportDescriptionParityTests : IDisposable
         return target;
     }
 
-    private static BulkImportSelectionDto EncompassingSelection(int targetId) => new()
+    private static BulkImportSelectionDto EncompassingSelection(int targetId, string azureSubnetName = AzureSubnetName) => new()
     {
         VNetPrefixes =
         [
@@ -129,9 +129,9 @@ public partial class BulkImportDescriptionParityTests : IDisposable
                 [
                     new BulkImportSelectedSubnetDto
                     {
-                        Name = AzureSubnetName,
+                        Name = azureSubnetName,
                         AddressPrefix = Prefix,
-                        AzureResourceId = $"{VNetId}/subnets/{AzureSubnetName}",
+                        AzureResourceId = $"{VNetId}/subnets/{azureSubnetName}",
                         Ipv4AddressPrefixes = [Prefix]
                     }
                 ],
@@ -186,6 +186,43 @@ public partial class BulkImportDescriptionParityTests : IDisposable
         Assert.Equal($"{typed}\r\n{FullyAllocatedNote.For(AzureSubnetName)}", stored.Description);
         Assert.Equal(Cap, stored.Description!.Length);
         Assert.Equal(stored.Description, AsABrowserRePostsIt(stored.Description));
+    }
+
+    private static string ErrorOf(ObjectResult result) =>
+        result.Value?.GetType().GetProperty("error")?.GetValue(result.Value) as string ?? string.Empty;
+
+    [Fact]
+    public async Task ADescriptionTheNoteWouldMakeTheFormRefuse_IsRefusedByTheBulkCommit_AndTheRowIsUntouched()
+    {
+        const string typed = "temp <a threshold";
+        Assert.True(EditFormAccepts(typed), "precondition: the operator's own description is accepted by the form");
+        Assert.False(EditFormAccepts($"{typed}\r\n{FullyAllocatedNote.For("load>3")}"), "precondition: the form refuses the description the import would store");
+        Subnet target = await SeedHandMadeTarget(typed);
+
+        IActionResult result = await Commit(EncompassingSelection(target.Id, "load>3"));
+
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("enc-hand", ErrorOf(bad), StringComparison.Ordinal);
+        Assert.Contains("load>3", ErrorOf(bad), StringComparison.Ordinal);
+        Subnet stored = await _context.Subnets.AsNoTracking().SingleAsync(s => s.Id == target.Id, TestContext.Current.CancellationToken);
+        Assert.False(stored.IsFullyAllocated);
+        Assert.Null(stored.AzureResourceId);
+        Assert.Equal(typed, stored.Description);
+    }
+
+    [Fact]
+    public async Task ADescriptionWithABareAngleBracket_StillTakesANoteThatCompletesNoTag()
+    {
+        const string typed = "temp <a threshold";
+        Subnet target = await SeedHandMadeTarget(typed);
+
+        _ = Assert.IsType<OkObjectResult>(await Commit(EncompassingSelection(target.Id)));
+
+        Subnet stored = await _context.Subnets.AsNoTracking().SingleAsync(s => s.Id == target.Id, TestContext.Current.CancellationToken);
+        Assert.True(stored.IsFullyAllocated);
+        Assert.NotNull(stored.Description);
+        Assert.Equal($"{typed}\r\n{FullyAllocatedNote.For(AzureSubnetName)}", stored.Description);
+        Assert.True(EditFormAccepts(stored.Description));
     }
 
     private sealed class SanitizationProvider : IServiceProvider

@@ -221,6 +221,37 @@ public partial class SubnetController : Controller
             });
         }
 
+        if (sanitizationService is not null)
+        {
+            foreach (BulkImportPlanItem item in plan.Items)
+            {
+                if (item.ChildSubnets.Find(c => sanitizationService.ContainsHtmlTags(c.Name)) is BulkImportPlannedChildSubnet taggedChild)
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        error = $"HTML tags are not allowed in subnet names, so Azure subnet '{taggedChild.OriginalAzureName}' cannot be imported: "
+                            + $"to tell it apart within VNet '{item.VNetName}' it would be named '{taggedChild.Name}', which contains one. "
+                            + "Rename the subnet or the VNet in Azure, then run the import again."
+                    });
+                }
+
+                if (item.WillMarkFullyAllocated
+                    && item.ExistingTargetSubnetId is int targetId
+                    && await context.Subnets.FindAsync(targetId) is Subnet target
+                    && sanitizationService.ContainsHtmlTags(AppendFullyAllocatedNote(target.Description, item.FullyAllocatingAzureSubnetName)))
+                {
+                    return BadRequest(new
+                    {
+                        success = false,
+                        error = $"HTML tags are not allowed in descriptions, so BASTET subnet '{target.Name}' cannot be marked fully allocated by "
+                            + $"Azure subnet '{item.FullyAllocatingAzureSubnetName}': its description and the note naming that subnet would contain one together. "
+                            + "Remove the angle bracket from its description here, or rename the Azure subnet, then run the import again."
+                    });
+                }
+            }
+        }
+
         using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
             await context.Database.BeginTransactionAsync();
 
