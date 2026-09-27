@@ -194,12 +194,7 @@ namespace Bastet.Services.Azure
                     $"in Azure, so they have been withheld from deletion: {NameList(stillLive)}.");
             }
 
-            HashSet<int> withheld =
-            [
-                .. notVisible.Select(i => i.SubnetId),
-                .. unknown.Select(i => i.SubnetId),
-                .. plan.ReviewItems.Select(i => i.SubnetId)
-            ];
+            HashSet<int> withheld = [.. plan.ReviewItems.Select(i => i.SubnetId)];
 
             WithholdTargetsWhoseCascadeIsBlocked(
                 plan, withheld,

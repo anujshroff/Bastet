@@ -298,6 +298,33 @@ public class AzureReconcilerTests
         Assert.Equal(1, item.SubnetId);
     }
 
+    [Theory]
+    [InlineData(AzureResourceConfirmation.NotVisible, "denied access")]
+    [InlineData(AzureResourceConfirmation.Unknown, "could not be asked about")]
+    public void AnAncestorConfirmedGone_WhoseAzureLinkedDescendantCouldNotBeConfirmed_IsStillOffered(
+        AzureResourceConfirmation descendantVerdict, string descendantWarning)
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [
+                Linked(1, "parent", "10.42.0.0", 16, VNetId("vnet-a"), descendantIds: [2]),
+                Linked(2, "child", "10.42.1.0", 24, SubnetId("vnet-a", "sn-a"))
+            ]);
+
+        Assert.Equal(2, plan.Items.Count);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-a")] = AzureResourceConfirmation.Deleted,
+            [SubnetId("vnet-a", "sn-a")] = descendantVerdict
+        });
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(1, item.SubnetId);
+        Assert.Contains(plan.Warnings, w => w.Contains(descendantWarning) && w.Contains("'child'"));
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("would also archive"));
+    }
+
     [Fact]
     public void AnAncestorOfAManuallyCreatedDescendant_IsStillWithheld()
     {

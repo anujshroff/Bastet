@@ -183,6 +183,72 @@ public class BulkImportNameParityTests : IDisposable
         Assert.DoesNotContain(written, s => s.Name == "s1 web");
     }
 
+    private static BulkImportSelectionDto SelectionWithTwoSameNamedChildren(string vnetName, string childName) => new()
+    {
+        VNetPrefixes =
+        [
+            new BulkImportSelectedVNetPrefixDto
+            {
+                VNetName = vnetName,
+                VNetResourceId = VNetId,
+                AddressPrefix = "10.151.0.0/16",
+                Subnets =
+                [
+                    new BulkImportSelectedSubnetDto
+                    {
+                        Name = childName,
+                        AddressPrefix = "10.151.1.0/24",
+                        AzureResourceId = $"{VNetId}/subnets/s1"
+                    },
+                    new BulkImportSelectedSubnetDto
+                    {
+                        Name = childName,
+                        AddressPrefix = "10.151.2.0/24",
+                        AzureResourceId = $"{VNetId}/subnets/s2"
+                    }
+                ],
+                Expected = new BulkImportExpectedTargetDto
+                {
+                    TargetType = nameof(BulkImportTargetType.AutoCreateTopLevel),
+                    ExistingTargetSubnetId = null,
+                    AutoCreateParentSubnetId = null,
+                    WillRename = false,
+                    NewName = null,
+                    WillMarkFullyAllocated = false
+                }
+            }
+        ],
+        RenameMatchedBastetSubnets = false
+    };
+
+    private static string ErrorOf(ObjectResult result) =>
+        result.Value?.GetType().GetProperty("error")?.GetValue(result.Value) as string ?? string.Empty;
+
+    [Fact]
+    public async Task AChildNameTheImportComposes_ThatTheFormRefuses_IsRefusedByTheBulkCommit_AndNothingIsWritten()
+    {
+        Assert.False(FormRefuses("p<<q"), "precondition: the posted subnet name passes the form");
+        Assert.False(FormRefuses("r>s>"), "precondition: the posted VNet name passes the form");
+        Assert.True(FormRefuses("p<<q (r>s>)"), "precondition: the form refuses the name the import would compose");
+
+        IActionResult result = await Commit(SelectionWithTwoSameNamedChildren("r>s>", "p<<q"));
+
+        BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("p<<q (r>s>)", ErrorOf(bad), StringComparison.Ordinal);
+        Assert.Empty(await _context.Subnets.ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AChildNameTheImportComposes_ThatTheFormAccepts_IsStillImported()
+    {
+        IActionResult result = await Commit(SelectionWithTwoSameNamedChildren("ctl", "web"));
+
+        _ = Assert.IsType<OkObjectResult>(result);
+        List<string> names = [.. (await _context.Subnets.ToListAsync(TestContext.Current.CancellationToken)).Select(s => s.Name)];
+        Assert.Contains("web", names);
+        Assert.Contains("web (ctl)", names);
+    }
+
     [Theory]
     [InlineData("<b>s1</b>", true)]
     [InlineData("Owner <jane@example.com>", true)]

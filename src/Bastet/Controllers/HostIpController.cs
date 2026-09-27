@@ -146,6 +146,11 @@ public class HostIpController(
             }
             catch (TimeoutException)
             {
+                if (!context.Subnets.Any(s => s.Id == viewModel.SubnetId))
+                {
+                    return NotFound();
+                }
+
                 ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
             }
             catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
