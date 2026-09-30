@@ -244,6 +244,17 @@ public partial class AzureWizardClientWordingTests
     }
 
     [Fact]
+    public void APreviewCardWithNoChildEntries_SaysWhatWillHappen_NotWhatWasSelected()
+    {
+        string bulk = ReadView("src/Bastet/Views/Azure/BulkImport/_BulkScripts.cshtml");
+
+        Assert.Matches(
+            @"else if \(!item\.willMarkFullyAllocated\)\s*\{\s*\$body\.append\('<div class=""text-muted small""><em>No child subnets will be created or renamed\.</em></div>'\);\s*\}",
+            bulk);
+        Assert.DoesNotContain("No child subnets selected.", bulk);
+    }
+
+    [Fact]
     public void AReconcile409_AlsoDisablesTheStepTwoForwardButton_AsBulkDoes()
     {
         string body = ShowCommitErrorBody("src/Bastet/Views/Azure/Reconcile/_ReconcileScripts.cshtml");
