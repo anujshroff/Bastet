@@ -325,6 +325,60 @@ public class AzureReconcilerTests
         Assert.DoesNotContain(plan.Warnings, w => w.Contains("would also archive"));
     }
 
+    [Theory]
+    [InlineData("not-an-arm-id")]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm")]
+    public void AnAncestorConfirmedGone_WhoseDescendantCarriesAnUnrecognisableResourceId_IsStillOffered(
+        string descendantResourceId)
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [
+                Linked(1, "parent", "10.43.0.0", 16, VNetId("vnet-a"), descendantIds: [2]),
+                Linked(2, "child", "10.43.1.0", 24, descendantResourceId)
+            ]);
+
+        Assert.Equal(1, Assert.Single(plan.Items).SubnetId);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-a")] = AzureResourceConfirmation.Deleted
+        });
+
+        AzureReconcileItem item = Assert.Single(plan.Items);
+        Assert.Equal(1, item.SubnetId);
+        Assert.Equal(AzureReconcileStatus.VNetDeleted, item.Status);
+        AzureReconcileItem reviewed = Assert.Single(plan.ReviewItems);
+        Assert.Equal(2, reviewed.SubnetId);
+        Assert.Equal(AzureReconcileStatus.UnrecognisedResourceId, reviewed.Status);
+        Assert.DoesNotContain(plan.Warnings, w => w.Contains("would also archive"));
+    }
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(0, 1)]
+    public void AnAncestorConfirmedGone_WhoseUnrecognisableDescendantHoldsManualContent_IsStillWithheld(
+        int manualDescendants, int hostIps)
+    {
+        AzureReconcilePlanViewModel plan = Build(
+            Live(VNet("vnet-other", ["192.168.0.0/16"])),
+            [
+                Linked(1, "parent", "10.44.0.0", 16, VNetId("vnet-a"),
+                    manualDescendants: manualDescendants, hostIps: hostIps, descendantIds: [2]),
+                Linked(2, "child", "10.44.1.0", 24, "not-an-arm-id",
+                    manualDescendants: manualDescendants, hostIps: hostIps)
+            ]);
+
+        _reconciler.ApplyConfirmations(plan, new Dictionary<string, AzureResourceConfirmation>
+        {
+            [VNetId("vnet-a")] = AzureResourceConfirmation.Deleted
+        });
+
+        Assert.Empty(plan.Items);
+        Assert.Contains(plan.ReviewItems, i => i.SubnetId == 1 && i.Status == AzureReconcileStatus.HeldByManualContent);
+        Assert.Contains(plan.Warnings, w => w.Contains("created here rather than imported from Azure") && w.Contains("'parent'"));
+    }
+
     [Fact]
     public void AnAncestorOfAManuallyCreatedDescendant_IsStillWithheld()
     {

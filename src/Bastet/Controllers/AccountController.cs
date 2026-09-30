@@ -1,5 +1,4 @@
 using Bastet.Services;
-using Bastet.Services.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -18,26 +17,25 @@ public class AccountController(
     public IActionResult AccessDenied() => View();
 
     [AllowAnonymous]
-    public async Task<IActionResult> Logout(string? returnUrl = null)
+    public async Task<IActionResult> Logout()
     {
-
-        string target = ReturnUrl.IsLocal(returnUrl)
-            ? returnUrl!
-            : Url.Action(nameof(SignedOut), "Account") ?? "/Account/SignedOut";
 
         TempData.Clear();
 
         if (!environment.IsDevelopment())
         {
 
-            AuthenticationProperties properties = new() { RedirectUri = target };
+            AuthenticationProperties properties = new()
+            {
+                RedirectUri = Url.Action(nameof(SignedOut), "Account")
+            };
 
             await HttpContext.SignOutAsync(
                 CookieAuthenticationDefaults.AuthenticationScheme, properties);
 
             if (User.Identity?.IsAuthenticated != true)
             {
-                return Redirect(target);
+                return RedirectToAction(nameof(SignedOut));
             }
 
             try
@@ -51,11 +49,11 @@ public class AccountController(
 
                 logger.LogWarning(ex,
                     "Signing out of the identity provider failed; the local session was still ended.");
-                return Redirect(target);
+                return RedirectToAction(nameof(SignedOut));
             }
         }
 
-        return Redirect(target);
+        return RedirectToAction(nameof(SignedOut));
     }
 
     [AllowAnonymous]

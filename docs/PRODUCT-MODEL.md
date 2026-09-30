@@ -311,6 +311,10 @@ status is added. It has already shipped once: "Only show what would change" test
 - **No literal control characters in source** — write `(char)0x1B`. Literals are invisible in diffs
   and get mangled through tool round-trips.
 - **Migration `.Designer.cs` snapshots are frozen history.** Never report them as stale.
+- **No caller-chosen redirect target.** `/Account/Logout` takes no `returnUrl` and always lands on
+  `/Account/SignedOut`; sign-in's return target is decided by `ReturnUrl.IsLocal` in
+  `OidcSignIn.OnTicketReceived` and nowhere else. A fix that adds a caller-chosen destination to any
+  redirect is a bad fix, whatever it validates (owner ruling, §8 CodeQL alerts 16–18).
 
 ## 7. Accepted findings — never re-file
 
@@ -445,3 +449,13 @@ summary, no reasoning added. Rulings made before this file existed are already f
   verifiers and a model gate before the audit commit apply §5's refutation list, findings carry no
   product questions, the operator gives no opinions, and reconcile triage refutes on the quoted
   sentence. Counter-test: untestable (process rule).
+- **CodeQL alerts 16–18 (after round 39, outside the audit loop)** — GitHub code scanning reported the
+  three `Redirect(target)` calls in `AccountController.Logout` as `cs/web/unvalidated-url-redirection`
+  once 36-M1 had replaced `Url.IsLocalUrl` with `ReturnUrl.IsLocal`, which CodeQL does not recognise as
+  a sanitizer. No link in the application ever passed a `returnUrl` to Logout. Owner: "Why dont we just
+  fucking go to /Account/SignedOut ?"; "why the fucking variable and shit"; "i want this to fucking go
+  away and never come back as an issue. its stupid af". The `returnUrl` parameter and the `target`
+  variable were deleted: Logout always answers `RedirectToAction(nameof(SignedOut))`, and the sign-out
+  `RedirectUri` handed to the cookie and OIDC handlers is `Url.Action(nameof(SignedOut), "Account")`.
+  Folded into §6. Counter-test: `Logout_TakesNoReturnTarget` (the action has no parameters) and the
+  redirect assertions in `AccountControllerLogoutTests`.
