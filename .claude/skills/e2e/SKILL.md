@@ -574,6 +574,14 @@ the browser actually sent against what was persisted.**
   would be renaming the Bastet subnet to match the VNet name." Assert the prefix reason with rename on
   and off differ only by that appended sentence; the client must never substitute "Everything in this
   prefix is already imported", which once sat directly above a row badged `Cannot import`.
+- **A preview card with no child entries says what will happen, never what was selected** (round 39).
+  Load the selection tree in one tab, import a VNet and one of its subnets from a second tab, then in
+  the first tab tick that same subnet and preview: the planner skips the now-linked child and the card
+  renders `Exact match Bastet subnet ...` with "No child subnets will be created or renamed." — never
+  "No child subnets selected.", which was false there because the subnet was selected and posted. The
+  same sentence appears when the prefix is ticked with no subnets; assert both, and that the old sentence
+  appears nowhere in the rendered plan. The 409 path (preview, lose the race, Confirm, Back to Selection,
+  preview again) reaches the same card and is the natural drive for it.
 - **The rename toggle re-renders the tree whether or not the filter is on.** It changes the badge and
   the checkbox, not just visibility. Assert `Rename only` appears with the filter **off** too, or a
   regression that gates the re-render on the filter passes unnoticed.
