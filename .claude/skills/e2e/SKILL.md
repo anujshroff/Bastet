@@ -890,10 +890,11 @@ not signed in.
 IdP in Production, request `//evil.example/phish` (a path that matches no endpoint, so the fallback
 policy challenges it), complete the sign-in, and read the `Location` of the `/signin-oidc` answer:
 it must be `/`, never `//evil.example/phish`. Controls in the same run: `/Subnet` returns to
-`/Subnet`, and `/%2F%2Fevil.example/phish` stays local (it is one path segment). Sign-out already
-applied this rule to `returnUrl`; both transitions now decide it with `ReturnUrl.IsLocal`. The raw
-drive (a forged callback that re-sends the correlation and nonce cookies) works over plain HTTP; a
-browser needs HTTPS, because the OIDC cookies are `Secure; SameSite=None`.
+`/Subnet`, and `/%2F%2Fevil.example/phish` stays local (it is one path segment). Sign-out has no
+return target: `/Account/Logout` takes no `returnUrl` and always lands on `/Account/SignedOut`, so
+sign-in is the only transition that decides one, with `ReturnUrl.IsLocal`. The raw drive (a forged
+callback that re-sends the correlation and nonce cookies) works over plain HTTP; a browser needs
+HTTPS, because the OIDC cookies are `Secure; SameSite=None`.
 
 **Two replicas whose connection strings spell the catalog in different case share one key ring**
 (round 36). With the catalog and its tables in place, empty `DataProtectionKeys`, then cold-start two

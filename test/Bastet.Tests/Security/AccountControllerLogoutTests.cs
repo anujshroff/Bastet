@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Reflection;
 using System.Security.Claims;
 
 namespace Bastet.Tests.Security;
@@ -98,55 +99,46 @@ public class AccountControllerLogoutTests
             : new ClaimsPrincipal(new ClaimsIdentity());
 
         Mock<IUrlHelper> urlHelper = new();
-        urlHelper.Setup(u => u.IsLocalUrl(It.IsAny<string?>()))
-            .Returns((string? u) => !string.IsNullOrEmpty(u)
-                && u[0] == '/'
-                && (u.Length == 1 || (u[1] != '/' && u[1] != '\\')));
         urlHelper.Setup(u => u.Action(It.IsAny<UrlActionContext>())).Returns(SignedOutPath);
         controller.Url = urlHelper.Object;
 
         return harness;
     }
 
-    [Theory]
-    [InlineData("https://evil.example")]
-    [InlineData("//evil.example")]
-    [InlineData(@"/\evil.example")]
-    [InlineData(null)]
-    public async Task Logout_Production_NonLocalOrMissingReturnUrl_RedirectsToSignedOutPage(string? returnUrl)
+    private static void AssertRedirectsToTheSignedOutPage(IActionResult result)
+    {
+        RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
+        Assert.Equal(nameof(AccountController.SignedOut), redirect.ActionName);
+        Assert.Null(redirect.ControllerName);
+    }
+
+    [Fact]
+    public void Logout_TakesNoReturnTarget()
+    {
+        MethodInfo logout = typeof(AccountController).GetMethod(nameof(AccountController.Logout))!;
+
+        Assert.Empty(logout.GetParameters());
+    }
+
+    [Fact]
+    public async Task Logout_Production_AuthenticatedCaller_EndsTheIdentityProviderSession_ReturningToTheSignedOutPage()
     {
         LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
 
-        IActionResult result = await harness.Controller.Logout(returnUrl);
+        IActionResult result = await harness.Controller.Logout();
 
         _ = Assert.IsType<EmptyResult>(result);
         Assert.Equal(SignedOutPath, harness.OidcProperties?.RedirectUri);
     }
 
     [Fact]
-    public async Task Logout_Production_LocalReturnUrl_IsPreserved()
+    public async Task Logout_Production_CookieSignOut_ReturnsToTheSignedOutPage()
     {
         LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
 
-        IActionResult result = await harness.Controller.Logout("/Subnet/Details/5");
+        _ = await harness.Controller.Logout();
 
-        _ = Assert.IsType<EmptyResult>(result);
-        Assert.Equal("/Subnet/Details/5", harness.OidcProperties?.RedirectUri);
-    }
-
-    [Theory]
-    [InlineData("/caf\u00E9")]
-    [InlineData("/Subnet/Details/3?name=\u00DCbersicht")]
-    [InlineData("/price\u20AC")]
-    [InlineData("/\u2028next")]
-    public async Task Logout_Production_ReturnUrlKestrelCannotWrite_RedirectsToSignedOutPage(string returnUrl)
-    {
-        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
-
-        IActionResult result = await harness.Controller.Logout(returnUrl);
-
-        _ = Assert.IsType<EmptyResult>(result);
-        Assert.Equal(SignedOutPath, harness.OidcProperties?.RedirectUri);
+        Assert.Equal(SignedOutPath, harness.CookieProperties?.RedirectUri);
     }
 
     [Fact]
@@ -154,59 +146,38 @@ public class AccountControllerLogoutTests
     {
         LogoutHarness harness = CreateHarness(
             isDevelopment: false,
+            authenticated: true,
             oidcSignOutThrows: new InvalidOperationException(
                 "IDX20803: Unable to obtain configuration from: '[PII is hidden]'."));
 
-        IActionResult result = await harness.Controller.Logout(returnUrl: null);
+        IActionResult result = await harness.Controller.Logout();
 
-        RedirectResult redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal(SignedOutPath, redirect.Url);
-
+        AssertRedirectsToTheSignedOutPage(result);
+        Assert.NotNull(harness.OidcProperties);
         Assert.True(harness.CookieSignOutRan);
         Assert.Equal(SignedOutPath, harness.CookieProperties?.RedirectUri);
     }
 
     [Fact]
-    public async Task Logout_Production_CookieSignOut_CarriesTheRedirectTarget()
+    public async Task Logout_Production_AnonymousCaller_DoesNotEndTheIdentityProviderSession()
     {
-        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
+        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: false);
 
-        _ = await harness.Controller.Logout("/Subnet/Details/5");
+        IActionResult result = await harness.Controller.Logout();
 
-        Assert.Equal("/Subnet/Details/5", harness.CookieProperties?.RedirectUri);
+        AssertRedirectsToTheSignedOutPage(result);
+        Assert.True(harness.CookieSignOutRan);
+        Assert.Null(harness.OidcProperties);
     }
 
     [Fact]
-    public async Task Logout_Development_ReturnUrlKestrelCannotWrite_RedirectsToSignedOutPage()
+    public async Task Logout_Development_RedirectsToTheSignedOutPage_WithoutSigningOut()
     {
         AccountController controller = CreateController(isDevelopment: true, signOutRegistered: false);
 
-        IActionResult result = await controller.Logout("/caf\u00E9");
+        IActionResult result = await controller.Logout();
 
-        RedirectResult redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal(SignedOutPath, redirect.Url);
-    }
-
-    [Fact]
-    public async Task Logout_Development_NonLocalReturnUrl_RedirectsToSignedOutPage()
-    {
-        AccountController controller = CreateController(isDevelopment: true, signOutRegistered: false);
-
-        IActionResult result = await controller.Logout("https://evil.example");
-
-        RedirectResult redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal(SignedOutPath, redirect.Url);
-    }
-
-    [Fact]
-    public async Task Logout_Development_LocalReturnUrl_IsPreserved()
-    {
-        AccountController controller = CreateController(isDevelopment: true, signOutRegistered: false);
-
-        IActionResult result = await controller.Logout("/Subnet/Details/5");
-
-        RedirectResult redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal("/Subnet/Details/5", redirect.Url);
+        AssertRedirectsToTheSignedOutPage(result);
     }
 
     [Fact]
@@ -229,36 +200,13 @@ public class AccountControllerLogoutTests
     }
 
     [Fact]
-    public async Task Logout_Production_AnonymousCaller_DoesNotEndTheIdentityProviderSession()
-    {
-        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: false);
-
-        IActionResult result = await harness.Controller.Logout(null);
-
-        RedirectResult redirect = Assert.IsType<RedirectResult>(result);
-        Assert.Equal(SignedOutPath, redirect.Url);
-        Assert.Null(harness.OidcProperties);
-    }
-
-    [Fact]
-    public async Task Logout_Production_AuthenticatedCaller_StillEndsTheIdentityProviderSession()
-    {
-        LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
-
-        IActionResult result = await harness.Controller.Logout(null);
-
-        _ = Assert.IsType<EmptyResult>(result);
-        Assert.NotNull(harness.OidcProperties);
-    }
-
-    [Fact]
     public async Task Logout_DoesNotExpireCookiesBastetDidNotIssue()
     {
         LogoutHarness harness = CreateHarness(isDevelopment: false, authenticated: true);
         harness.Controller.HttpContext.Request.Headers.Cookie =
             "coapp_session=abc; grafana_session=def";
 
-        _ = await harness.Controller.Logout(null);
+        _ = await harness.Controller.Logout();
 
         string setCookie = string.Join("\n", harness.Controller.HttpContext.Response.Headers.SetCookie!);
         Assert.DoesNotContain("coapp_session", setCookie);

@@ -71,14 +71,11 @@ public class OidcSignInTests
     }
 
     [Fact]
-    public void SignInAndSignOut_DecideWhereTheBrowserMayGo_WithTheSameRule()
+    public void SignIn_DecidesWhereTheBrowserMayGo_WithReturnUrlIsLocal()
     {
-        string logout = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Bastet", "Controllers", "AccountController.cs"));
         string signIn = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Bastet", "Services", "Security", "OidcSignIn.cs"));
         string program = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Bastet", "Program.cs"));
 
-        Assert.Contains("ReturnUrl.IsLocal(returnUrl)", logout);
-        Assert.DoesNotContain("IsLocalUrl", logout);
         Assert.Contains("ReturnUrl.IsLocal(context.ReturnUri)", signIn);
         Assert.Contains("options.Events.OnTicketReceived = OidcSignIn.OnTicketReceived;", program);
     }
