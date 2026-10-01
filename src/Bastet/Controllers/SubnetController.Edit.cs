@@ -60,6 +60,7 @@ public partial class SubnetController : Controller
         byte[]? postedRowVersion = viewModel.RowVersion;
         bool ownWriteMayHaveLanded = false;
         bool concurrencyConflict = false;
+        bool lockTimedOut = false;
 
         if (ModelState.IsValid)
         {
@@ -174,7 +175,7 @@ public partial class SubnetController : Controller
             }
             catch (TimeoutException)
             {
-                ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
+                lockTimedOut = true;
             }
             catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
             {
@@ -230,6 +231,11 @@ public partial class SubnetController : Controller
             || (postedRowVersion is not null
                 && origSubnet.RowVersion is not null
                 && !postedRowVersion.SequenceEqual(origSubnet.RowVersion));
+
+        if (lockTimedOut && !rowMovedUnderneath)
+        {
+            ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
+        }
 
         if (rowMovedUnderneath && !ownWriteMayHaveLanded)
         {

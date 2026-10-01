@@ -22,6 +22,9 @@ public class HostIpController(
     ISubnetLockingService subnetLockingService,
     ILogger<HostIpController> logger) : Controller
 {
+    private const string HostIpModifiedByAnotherUser =
+        "This host IP was modified by another user while you were editing it, so it was not saved. " +
+        "Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense.";
 
     [Authorize(Policy = "RequireViewRole")]
     public async Task<IActionResult> Index(int subnetId)
@@ -240,9 +243,7 @@ public class HostIpController(
 
                         if (isConcurrencyConflict)
                         {
-                            ModelState.AddModelError("",
-                                "This host IP was modified by another user while you were editing it, so it was not saved. " +
-                                "Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense.");
+                            ModelState.AddModelError("", HostIpModifiedByAnotherUser);
                         }
                         else
                         {
@@ -275,7 +276,19 @@ public class HostIpController(
             }
             catch (TimeoutException)
             {
-                ModelState.AddModelError("", "The operation timed out due to high concurrency. Please try again.");
+                bool rowMovedUnderneath = hostIpValidationService.ValidateHostIpUpdate(
+                    ip,
+                    new UpdateHostIpDto
+                    {
+                        IP = viewModel.IP,
+                        Name = viewModel.Name,
+                        RowVersion = viewModel.RowVersion
+                    },
+                    viewModel.RowVersion).Errors.Any(e => e.Code == "CONCURRENCY_CONFLICT");
+
+                ModelState.AddModelError("", rowMovedUnderneath
+                    ? HostIpModifiedByAnotherUser
+                    : "The operation timed out due to high concurrency. Please try again.");
                 return await RedisplayEditAsync(ip, viewModel);
             }
             catch (DbUpdateConcurrencyException)
@@ -286,9 +299,7 @@ public class HostIpController(
                     return NotFound();
                 }
 
-                ModelState.AddModelError("",
-                    "This host IP was modified by another user while you were editing it, so it was not saved. " +
-                    "Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense.");
+                ModelState.AddModelError("", HostIpModifiedByAnotherUser);
                 return await RedisplayEditAsync(ip, viewModel);
             }
             catch (Exception ex) when (SqlSaveOutcome.IsIndeterminate(ex))
