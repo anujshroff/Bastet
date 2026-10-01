@@ -7,6 +7,7 @@ using Bastet.Services.Locking;
 using Bastet.Services.Validation;
 using Bastet.Tests.TestHelpers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Bastet.Tests.SubnetManagement;
@@ -145,6 +146,109 @@ public class SubnetLockTimeoutTests : IDisposable
         RedirectToActionResult redirect = Assert.IsType<RedirectToActionResult>(result);
         Assert.Equal("Delete", redirect.ActionName);
         Assert.Contains("timed out", controller.TempData["ErrorMessage"] as string);
+    }
+
+    [Fact]
+    public async Task SubnetEdit_TheLockTimesOutAfterTheRowMoved_NamesCancelThenEditAndDropsTheRetry()
+    {
+        AddSubnetWithHostIp();
+        await StoreRowVersionsAsync([1, 1, 1, 1, 1, 1, 1, 1], [1, 2, 3]);
+        SubnetController controller = SubnetControllerWith(new AlwaysTimingOutLockService());
+
+        ViewResult view = Assert.IsType<ViewResult>(await controller.Edit(1, SubnetEditForm([9, 9, 9, 9, 9, 9, 9, 9])));
+
+        List<string> messages = Messages(view);
+        Assert.Single(messages, m => m.Contains("modified by another user") && m.Contains("Use Cancel, then Edit"));
+        Assert.DoesNotContain(messages, m => m.Contains("timed out"));
+        Assert.Equal(new byte[] { 9, 9, 9, 9, 9, 9, 9, 9 }, Assert.IsType<EditSubnetViewModel>(view.Model).RowVersion);
+    }
+
+    [Fact]
+    public async Task SubnetEdit_TheLockTimesOutOnAnUnmovedRow_StillAsksForARetry()
+    {
+        AddSubnetWithHostIp();
+        await StoreRowVersionsAsync([1, 1, 1, 1, 1, 1, 1, 1], [1, 2, 3]);
+        SubnetController controller = SubnetControllerWith(new AlwaysTimingOutLockService());
+
+        ViewResult view = Assert.IsType<ViewResult>(await controller.Edit(1, SubnetEditForm([1, 1, 1, 1, 1, 1, 1, 1])));
+
+        List<string> messages = Messages(view);
+        Assert.Single(messages, m => m.Contains("timed out") && m.Contains("try again"));
+        Assert.DoesNotContain(messages, m => m.Contains("modified by another user"));
+    }
+
+    [Fact]
+    public async Task HostIpEdit_TheLockTimesOutAfterTheRowMoved_NamesCancelThenEditAndDropsTheRetry()
+    {
+        AddSubnetWithHostIp();
+        await StoreRowVersionsAsync([1, 1, 1, 1, 1, 1, 1, 1], [1, 2, 3]);
+        HostIpController controller = HostIpControllerWith(new AlwaysTimingOutLockService());
+
+        ViewResult view = Assert.IsType<ViewResult>(await controller.Edit("10.0.0.5", HostIpEditForm([9, 9, 9])));
+
+        List<string> messages = Messages(view);
+        Assert.Single(messages, m => m ==
+            "This host IP was modified by another user while you were editing it, so it was not saved. "
+            + "Use Cancel, then Edit on this host IP, to load the current values, then re-apply the changes that still make sense.");
+        Assert.DoesNotContain(messages, m => m.Contains("timed out"));
+        Assert.Equal("root (10.0.0.0/24)", Assert.IsType<EditHostIpViewModel>(view.Model).SubnetInfo);
+    }
+
+    [Fact]
+    public async Task HostIpEdit_TheLockTimesOutOnAnUnmovedRow_StillAsksForARetry()
+    {
+        AddSubnetWithHostIp();
+        await StoreRowVersionsAsync([1, 1, 1, 1, 1, 1, 1, 1], [1, 2, 3]);
+        HostIpController controller = HostIpControllerWith(new AlwaysTimingOutLockService());
+
+        ViewResult view = Assert.IsType<ViewResult>(await controller.Edit("10.0.0.5", HostIpEditForm([1, 2, 3])));
+
+        List<string> messages = Messages(view);
+        Assert.Single(messages, m => m.Contains("timed out") && m.Contains("try again"));
+        Assert.DoesNotContain(messages, m => m.Contains("modified by another user"));
+    }
+
+    [Fact]
+    public async Task HostIpEdit_TheRowIsDeletedWhileWaitingForTheLock_Answers404()
+    {
+        AddSubnetWithHostIp();
+        HostIpController controller = HostIpControllerWith(new TimesOutAfterAnotherOperation(() =>
+        {
+            _context.HostIpAssignments.RemoveRange(_context.HostIpAssignments);
+            _context.SaveChanges();
+        }));
+
+        IActionResult result = await controller.Edit("10.0.0.5", HostIpEditForm([1, 2, 3]));
+
+        _ = Assert.IsType<NotFoundResult>(result);
+    }
+
+    private static List<string> Messages(ViewResult view) =>
+        [.. view.ViewData.ModelState.Values.SelectMany(v => v.Errors).Select(e => e.ErrorMessage)];
+
+    private static EditSubnetViewModel SubnetEditForm(byte[] rowVersion) => new()
+    {
+        Id = 1,
+        Name = "root-renamed",
+        NetworkAddress = "10.0.0.0",
+        Cidr = 24,
+        OriginalCidr = 24,
+        RowVersion = rowVersion
+    };
+
+    private static EditHostIpViewModel HostIpEditForm(byte[] rowVersion) => new()
+    {
+        IP = "10.0.0.5",
+        Name = "box-renamed",
+        SubnetId = 1,
+        RowVersion = rowVersion
+    };
+
+    private async Task StoreRowVersionsAsync(byte[] subnetToken, byte[] hostIpToken)
+    {
+        _ = await _context.Database.ExecuteSqlRawAsync("UPDATE Subnets SET RowVersion = {0} WHERE Id = 1", subnetToken);
+        _ = await _context.Database.ExecuteSqlRawAsync("UPDATE HostIpAssignments SET RowVersion = {0} WHERE IP = '10.0.0.5'", hostIpToken);
+        _context.ChangeTracker.Clear();
     }
 
     private void AddSubnetWithHostIp()
