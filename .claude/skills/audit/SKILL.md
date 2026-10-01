@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Run a fresh multi-agent security and correctness audit of the Bastet codebase, producing a numbered findings file in docs/. Use when asked to "run an audit", "start a new audit round", "audit the codebase", or "find bugs across the whole app". For reviewing a single PR or working diff use the built-in /code-review instead; to fix findings from an audit that already exists use /audit-reconcile.
+description: Run a fresh multi-agent security and correctness audit of the Bastet codebase, producing a numbered findings file in docs/. Use when asked to "run an audit", "start a new audit round", "audit the codebase", or "find bugs across the whole app". Stops once, after Phase 1, so the owner can set the Claude model and effort in the UI before the beats run. For reviewing a single PR or working diff use the built-in /code-review instead; to fix findings from an audit that already exists use /audit-reconcile.
 ---
 
 # THE ABSOLUTE RULE. READ THIS FIRST. IT SUPERSEDES EVERY OTHER RULE IN THIS FILE.
@@ -47,8 +47,12 @@ DAMN FUCKING TEST FILE".
 
 # Run an audit round
 
-A round is **one `Workflow` call** that you launch and then actively operate. It always runs the
-same shape against the same rig and commits the same way.
+A round is **one `Workflow` script, launched twice**: once through Phase 1, where it stops at the
+tier checkpoint, and once more, resumed from that run, through Phase 5. You launch it and then
+actively operate it. It always runs the same shape against the same rig and commits the same way.
+Phase 1 is mechanical and runs on whatever Claude model and effort the owner set before `/audit`;
+the checkpoint is where the owner sets the tier the beats and verifiers run on — see *The
+checkpoint* under Phase 1.
 
 **What Bastet is, what counts as a finding, and what must never be filed live in
 `docs/PRODUCT-MODEL.md` — the single copy, shared with `/audit-reconcile`. Read it before doing
@@ -113,7 +117,11 @@ working one — they rotate and get revoked.
 
 **Ask nothing else. Ever.** Not rig, not verification depth, not "shall I proceed". If a required
 input is missing at run time, the rig agent stops the round naming it — that is the only way this
-skill returns without a findings file.
+skill ends a round without a findings file.
+
+The tier checkpoint after Phase 1 is the round's one other stop, and it asks nothing: the script
+returns, the operator reports Phase 1, and the owner sets the Claude model and effort in the UI, or
+does not, and replies `go`. The owner put it there — see *The checkpoint* under Phase 1.
 
 ## Fixed configuration
 
@@ -123,6 +131,7 @@ skill returns without a findings file.
 | Rig | Always live: database, application, browser, Azure fixtures in both resource groups |
 | Model gate | 1 agent after the citation check, before the commit: every filed finding re-read against `docs/PRODUCT-MODEL.md` §5 |
 | Branch | `audit/round-<N>`, created in Phase 1 **before any work runs**. **`main` is never touched** |
+| Tier checkpoint | After Phase 1, before any beat: the script returns, the owner sets the Claude model and effort in the UI and replies `go`, the operator resumes the same run with `go: true` in `args`. No `auto` — every round stops |
 | Output | `docs/AUDIT-FINDINGS-<N>.md`, committed, never pushed |
 
 # The round exists to reduce defects, not to produce findings
@@ -189,6 +198,9 @@ Nothing else. **Never ask how to fix something, and never ask the owner to choos
 has not decided, and it is refuted (`docs/PRODUCT-MODEL.md` §5). Where only the fix has a choice,
 file the narrowest fix the model allows and say nothing about the alternatives. Do not block.
 
+The tier checkpoint is a stop, not a question. The operator never asks which Claude model or effort
+to use and never recommends one; the owner changes the UI, or does not, and says `go`.
+
 # You are the operator, not a spectator
 
 Launch the workflow, then **watch it and intervene**. Do not launch and look away, and do not answer
@@ -212,15 +224,16 @@ every call after the first killed one re-runs, finished or not. Say so in the la
 
 | Tool | For |
 |---|---|
-| `Workflow` | The round. Launch, and resume after an intervention. |
+| `Workflow` | The round. Launch, resume at the tier checkpoint with `go: true`, and resume after an intervention. |
 | `Bash` | **Read-only** run inspection and git state. Never build, test, or touch the app. |
 | `Write` / `Edit` | The workflow script, in scratchpad. **Never a repo file while a round is running** |
 | `Read` | Scratchpad files and the run journal. |
 | `TaskStop` | Killing a stalled run before resuming it. |
-| `TodoWrite` | The phase list. |
+| `TodoWrite` | The phase list, with the tier checkpoint as its own item between Phase 1 and Phase 2. |
 
 **Never `Agent` — during an audit round.** Spawning workers directly puts every one of their tool
-calls in the user's conversation, sixty workers deep. One `Workflow` call, or nothing. (This ban is
+calls in the user's conversation, sixty workers deep. One `Workflow` script — launched, then resumed
+at the tier checkpoint — or nothing. (This ban is
 scoped to the audit round; `/audit-reconcile` legitimately uses single reviewer subagents.)
 Everything that *does* audit work — build, tests, git archaeology, containers, cloud fixtures,
 reading source, verifying, writing, committing — happens **inside the script**.
@@ -268,6 +281,13 @@ tie-break early in the verification pipeline re-ran ten finished verifiers after
 script is free for any step that has not completed. Resume is same-session only** — if the session ends, every banked result is lost. That
 is the reason to intervene rather than wait something out.
 
+A resume carries the `args` of the launch it resumes: before the tier checkpoint, the launch args;
+after it, the same plus `go: true`. The cache is keyed on each `agent()` call's prompt and options,
+not on `args`, so a changed flag replays the unchanged prefix (checked 2026-10-01). The checkpoint
+pause itself is not a stall: the run has returned and nothing is in flight. Resume by passing the
+script again, with `resumeFromRunId`; if the tool refuses the path it printed under
+`.claude/projects` as a `scriptPath` (it did on the owner's Windows machine), pass the script inline.
+
 ## Reporting
 
 **Status questions get a markdown table and nothing else** — same rows every time (time, started/
@@ -275,9 +295,15 @@ results, in flight, active agent + age, candidates with the x2/x1 split, judged/
 reproduced/failed/not-runnable, findings file bytes, dirty-tree count, HEAD). No narrative, no
 reassurance. If something is broken, one short sentence of data.
 
-At launch: one line. At completion: the funnel, the severities, the headline finding, **the residue
-rate**, the commit sha, anything teardown failed to clean, and — **always** — a reminder to revoke
-the service principal secrets. **If the residue rate is high, it is the headline, not a footnote.**
+At launch: one line — Phase 1 runs on the current Claude model and effort, the round stops after it
+for the owner to set them for the beats, and Escape stops the run. At the tier checkpoint: the Phase
+1 table — same rows every time (round, from both derivations; branch; HEAD; tests; build warnings;
+cores and concurrency; the Claude model the Phase 1 agents reported; brief path and bytes;
+unreconciled findings file yes/no; rig: containers, app port, fixtures per resource group; preflight
+notes) — and the one line *The checkpoint* prescribes. At completion: the funnel, the severities,
+the headline finding, **the residue rate**, the commit sha, anything teardown failed to clean, and —
+**always** — a reminder to revoke the service principal secrets. **If the residue rate is high, it
+is the headline, not a footnote.**
 
 ---
 
@@ -288,6 +314,21 @@ UI before the round; every agent inherits them. **No `agent()` call ever passes 
 `model`**, at any phase, for any reason — not "low for the mechanical stages", not "max for the
 verifiers". A script carrying either option is wrong and is fixed before launch. The same holds for
 the operator: never change the session's effort, and never choose a tier on the owner's behalf.
+
+**The script stops itself at the tier checkpoint.** After Phase 1's barrier, the baseline gate and
+the round-number assertion:
+
+```js
+if (!args.go) return { checkpoint: true, ...phase1 }
+```
+
+`phase1` is the summary the checkpoint table needs — round from both derivations, branch, HEAD, test
+count, build warnings, cores and concurrency, the model ID each Phase 1 agent names from its own
+system prompt, brief path and bytes, whether an unreconciled findings file exists, rig inventory
+counts — so both Phase 1 schemas carry those fields. The `checkpoint` field is what tells this return
+from the baseline gate's stop. **No Phase 1 prompt or option embeds `args.go`**, so the resume
+replays both Phase 1 agents from cache and the first live call is Phase 2's, spawned on the Claude
+model and effort the owner set.
 
 `meta.phases` must match the `phase()` calls. `pipeline()` by default. Only two genuine barriers:
 Phase 1 (nothing starts until the baseline is known good) and the merge (telling `[x2]` from `[x1]`
@@ -399,7 +440,45 @@ means auditing state you did not create. Then: database, application, browser, a
 teardown once reported success while removing nothing, because nothing forced it to enumerate. The
 inventory is what Phase 5 deletes.
 
+### The checkpoint — the owner sets the tier for everything after Phase 1
+
+Phase 1 is mechanical and runs on whatever Claude model and effort the owner selected before
+`/audit`. Every finder, verifier, the merge, the scribe and the gate run on whatever the owner
+selects here. Owner, after round 40, verbatim: "add a step after phase 1 where I (the user in front
+of vscode) have a chance to adjust the claude model, effort before phase 2 begins"; "Ideally we use a
+cheaper model from start to phase 1 (inclusive of phase 1) and i get a chance to decide each time if
+i want to change models/effort before continuing with phase 2 to end". Every round stops here; there
+is no `auto`. "Ask nothing else. Ever." does not remove this stop — it is not a question, and the
+owner put it here.
+
+When the script returns with `checkpoint: true`:
+
+1. Post the Phase 1 table (rows under *Reporting*) and this line, nothing more: "Phase 1 ran on
+   <the model ID the Phase 1 agents reported — never guess the effort>. Set the Claude model and
+   effort now if Phases 2–5 should run on something else, then reply `go`. The rig stays up. The run
+   resumes in this session only — a closed session or the daily revert loses it."
+2. **End the turn.** The owner's change takes effect on the next turn, and the agents the resumed
+   run spawns inherit the model and effort the UI shows at that moment. Never recommend a tier and
+   never change the session's effort yourself; asked which to use, say the choice is the owner's and
+   this skill forbids the operator from making it.
+3. On `go`, resume the same run with the same script, the launch args and the flag:
+
+   ```
+   Workflow({ script, resumeFromRunId, args: { ...launchArgs, go: true } })
+   ```
+
+   Both Phase 1 agents come back from cache within seconds and Phase 2 starts. **If the journal
+   shows a Phase 1 agent `started` again, `TaskStop` at once**: the branch exists and the rig is up,
+   so a re-run fails on `git checkout -b` and rebuilds the rig on top of itself. Something in a Phase
+   1 prompt or option changed between the launches — fix the script and resume again.
+
+Anything other than `go` is answered as usual (a status question gets the table) and the round stays
+at the checkpoint. Every later resume in the round — after a stall, after an edit — carries
+`go: true` too.
+
 ## Phase 2 — the beats, twice (+ 1 merge)
+
+Runs only after the tier checkpoint, on the Claude model and effort the owner set there.
 
 **Beats 1–5 and 7 audit the WHOLE APPLICATION. Only beat 6 is scoped to the delta since the last
 audit, and that is the only reason it exists.** Do not point the other beats at what changed
