@@ -68,6 +68,9 @@ public class HostIpEditRedisplayTests : IDisposable
     [Fact]
     public async Task Edit_LockTimesOut_RedisplaysTheStoredSubnetAndDates()
     {
+        _ = await _context.Database.ExecuteSqlRawAsync(
+            "UPDATE HostIpAssignments SET RowVersion = {0} WHERE IP = '10.0.9.5'", new byte[] { 1, 2, 3 });
+        _context.ChangeTracker.Clear();
         HostIpController controller = CreateController(new AlwaysTimingOutLockService());
 
         ViewResult view = Assert.IsType<ViewResult>(await controller.Edit("10.0.9.5", PostedForm()));
