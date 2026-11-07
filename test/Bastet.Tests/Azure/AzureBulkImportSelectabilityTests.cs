@@ -78,14 +78,15 @@ public class AzureBulkImportSelectabilityTests
     }
 
     [Fact]
-    public void AnUnlinkedFullyAllocatedExactMatch_AcceptsItsEncompassingAzureSubnet()
+    public void AnUnlinkedFullyAllocatedExactMatch_AcceptsItsEncompassingAzureSubnet_WithoutMarkingItAgain()
     {
         BulkImportPlanItem item = Plan(
             Selection(false, Sub("sn-whole", "10.90.0.0/16")),
             Target(linkedTo: null, fullyAllocated: true));
 
         Assert.Empty(item.Errors);
-        Assert.True(item.WillMarkFullyAllocated);
+        Assert.False(item.WillMarkFullyAllocated);
+        Assert.Null(item.FullyAllocatingAzureSubnetName);
     }
 
     [Fact]
