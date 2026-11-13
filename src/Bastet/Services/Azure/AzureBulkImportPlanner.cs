@@ -632,9 +632,11 @@ namespace Bastet.Services.Azure
                     return item;
                 }
 
-                item.WillMarkFullyAllocated = true;
-
-                item.FullyAllocatingAzureSubnetName = TruncateAndSanitizeName(fullyEncompassing.Source.Name);
+                if (exact is null || !exact.IsFullyAllocated)
+                {
+                    item.WillMarkFullyAllocated = true;
+                    item.FullyAllocatingAzureSubnetName = TruncateAndSanitizeName(fullyEncompassing.Source.Name);
+                }
             }
 
             HashSet<string> usedNames = new(StringComparer.OrdinalIgnoreCase);

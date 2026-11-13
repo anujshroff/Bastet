@@ -523,6 +523,30 @@ public class AzureBulkImportPlannerTests
     }
 
     [Fact]
+    public void AzureSubnetEqualsVNetPrefix_OnTargetThisVNetAlreadyMarkedFullyAllocated_DoesNotOfferTheMarkAgain()
+    {
+        BulkImportSelectionDto sel = Sel(false,
+            Pref("vnet-full", "10.0.0.0/16",
+                Sub("everything", "10.0.0.0/16")));
+
+        List<ExistingSubnetSnapshot> existing =
+        [
+            Existing(1, "vnet-full", "10.0.0.0", 16, fullyAllocated: true,
+                azureResourceId: "/subscriptions/test/providers/Microsoft.Network/virtualNetworks/vnet-full")
+        ];
+
+        BulkImportPlanViewModel plan = _planner.BuildPlan(sel, existing);
+
+        Assert.True(plan.CanCommit);
+        BulkImportPlanItem item = Assert.Single(plan.Items);
+        Assert.Equal(BulkImportTargetType.ExactMatch, item.TargetType);
+        Assert.Empty(item.Errors);
+        Assert.False(item.WillMarkFullyAllocated);
+        Assert.Null(item.FullyAllocatingAzureSubnetName);
+        Assert.Empty(item.ChildSubnets);
+    }
+
+    [Fact]
     public void IdenticalChildNamesInDifferentTargets_AreNotDisambiguated()
     {
 

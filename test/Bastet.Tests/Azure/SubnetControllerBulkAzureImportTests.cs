@@ -238,6 +238,58 @@ public class SubnetControllerBulkAzureImportTests : IDisposable
     }
 
     [Fact]
+    public async Task BulkCreateFromAzurePlan_TargetAlreadyMarkedFullyAllocatedByThisVNet_WritesNothingAndReportsNoMark()
+    {
+        DateTime stamp = new(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        const string note = "Fully allocated by Azure subnet 'all' which encompasses the entire address space.";
+        _context.Subnets.Add(new Subnet
+        {
+            Name = "rig-div",
+            NetworkAddress = "10.151.0.0",
+            Cidr = 16,
+            AzureResourceId = VNetId,
+            IsFullyAllocated = true,
+            Description = note,
+            CreatedAt = stamp,
+            LastModifiedAt = stamp,
+            ModifiedBy = "earlier-import"
+        });
+        await _context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        int existingId = (await _context.Subnets.SingleAsync(TestContext.Current.CancellationToken)).Id;
+
+        BulkImportSelectionDto selection = Selection(new BulkImportExpectedTargetDto
+        {
+            TargetType = nameof(BulkImportTargetType.ExactMatch),
+            ExistingTargetSubnetId = existingId,
+            WillRename = false,
+            WillMarkFullyAllocated = false,
+            ChildNames = []
+        });
+        selection.VNetPrefixes[0].Subnets =
+        [
+            new BulkImportSelectedSubnetDto
+            {
+                Name = "all",
+                AddressPrefix = "10.151.0.0/16",
+                AzureResourceId = VNetId + "/subnets/all"
+            }
+        ];
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(await Commit(selection));
+
+        using System.Text.Json.JsonDocument body = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(ok.Value));
+        Assert.Contains("marked 0 target(s) as fully allocated",
+            body.RootElement.GetProperty("summary").GetString(), StringComparison.Ordinal);
+
+        Subnet target = await _context.Subnets.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.True(target.IsFullyAllocated);
+        Assert.Equal(note, target.Description);
+        Assert.Equal<DateTime?>(stamp, target.LastModifiedAt);
+        Assert.Equal("earlier-import", target.ModifiedBy);
+    }
+
+    [Fact]
     public async Task BulkCreateFromAzurePlan_NoChildNamesSupplied_IsNotRefused()
     {
         BulkImportSelectionDto selection = Selection(ApprovedNewTopLevel());
