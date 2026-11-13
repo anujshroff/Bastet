@@ -6,7 +6,7 @@ inputs:
     default: 'Release'
   DOTNET_CORE_VERSION: 
     required: false
-    default: '10.x'
+    default: '11.x'
   CODEQL_LANGUAGES:
     required: false
     default: 'csharp,javascript'
